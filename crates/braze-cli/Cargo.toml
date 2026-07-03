@@ -1,0 +1,21 @@
+[package]
+name = "braze-cli"
+description = "braze terminal binary: chat (interactive) and run <prompt> (one-shot)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "braze"
+path = "src/main.rs"
+
+[dependencies]
+braze-engine = { workspace = true }
+braze-config = { workspace = true }
+braze-session = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

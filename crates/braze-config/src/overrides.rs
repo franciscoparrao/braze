@@ -1,0 +1,131 @@
+//! [`ConfigOverrides`]: a sparse (all-`Option`) view of [`crate::Config`]
+//! used as the common currency for every layer above the hardcoded
+//! defaults — the on-disk file, `BRAZE_*` env vars, and (from `braze-cli`
+//! in Fase 5) parsed CLI flags all produce a `ConfigOverrides` and apply it
+//! the same way via [`crate::Config::apply_overrides`].
+
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use crate::config::McpServerConfigStub;
+use crate::error::ConfigError;
+
+/// Prefix recognized when scanning environment variables for overrides.
+const ENV_PREFIX: &str = "BRAZE_";
+
+/// Sparse overrides for [`crate::Config`]: every field is optional, and
+/// only fields present (`Some`) are applied on top of an already-loaded
+/// `Config`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ConfigOverrides {
+    #[serde(default)]
+    pub default_backend: Option<String>,
+    #[serde(default)]
+    pub anthropic_api_key: Option<String>,
+    #[serde(default)]
+    pub ollama_base_url: Option<String>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub session_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub mcp_servers: Option<Vec<McpServerConfigStub>>,
+}
+
+impl ConfigOverrides {
+    /// Build overrides from an iterator of environment-like key/value
+    /// pairs. Only keys with the `BRAZE_` prefix are considered; anything
+    /// else (e.g. `PATH`, `HOME`) is ignored. Unrecognized `BRAZE_*`
+    /// suffixes are also ignored rather than rejected, so future fields
+    /// don't require every embedder to update in lockstep.
+    ///
+    /// Takes an injectable iterator (rather than reading `std::env`
+    /// directly) so it can be exercised in tests without touching real
+    /// process environment state; [`crate::Config::load`] calls this with
+    /// `std::env::vars()`.
+    pub fn from_env<I, K, V>(vars: I) -> Result<Self, ConfigError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let mut overrides = ConfigOverrides::default();
+
+        for (key, value) in vars {
+            let key = key.as_ref();
+            let value = value.as_ref();
+
+            let Some(field) = key.strip_prefix(ENV_PREFIX) else {
+                continue;
+            };
+
+            match field {
+                "DEFAULT_BACKEND" => overrides.default_backend = Some(value.to_string()),
+                "ANTHROPIC_API_KEY" => overrides.anthropic_api_key = Some(value.to_string()),
+                "OLLAMA_BASE_URL" => overrides.ollama_base_url = Some(value.to_string()),
+                "MAX_TOKENS" => {
+                    let parsed = value.parse::<u32>().map_err(|e| ConfigError::InvalidEnvValue {
+                        var: key.to_string(),
+                        value: value.to_string(),
+                        reason: e.to_string(),
+                    })?;
+                    overrides.max_tokens = Some(parsed);
+                }
+                "SESSION_DIR" => overrides.session_dir = Some(PathBuf::from(value)),
+                _ => {} // unrecognized BRAZE_* var: ignore, forward-compatible
+            }
+        }
+
+        Ok(overrides)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_env_ignores_non_braze_vars() {
+        let vars = [("PATH", "/usr/bin"), ("HOME", "/home/someone")];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(overrides, ConfigOverrides::default());
+    }
+
+    #[test]
+    fn from_env_parses_known_fields() {
+        let vars = [
+            ("BRAZE_DEFAULT_BACKEND", "anthropic"),
+            ("BRAZE_ANTHROPIC_API_KEY", "sk-test-123"),
+            ("BRAZE_OLLAMA_BASE_URL", "http://example:1234"),
+            ("BRAZE_MAX_TOKENS", "8192"),
+            ("BRAZE_SESSION_DIR", "/tmp/sessions"),
+        ];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(overrides.default_backend.as_deref(), Some("anthropic"));
+        assert_eq!(
+            overrides.anthropic_api_key.as_deref(),
+            Some("sk-test-123")
+        );
+        assert_eq!(
+            overrides.ollama_base_url.as_deref(),
+            Some("http://example:1234")
+        );
+        assert_eq!(overrides.max_tokens, Some(8192));
+        assert_eq!(overrides.session_dir, Some(PathBuf::from("/tmp/sessions")));
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_max_tokens() {
+        let vars = [("BRAZE_MAX_TOKENS", "not-a-number")];
+        let err = ConfigOverrides::from_env(vars).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
+    }
+
+    #[test]
+    fn from_env_ignores_unknown_braze_suffix() {
+        let vars = [("BRAZE_SOME_FUTURE_FIELD", "value")];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(overrides, ConfigOverrides::default());
+    }
+}

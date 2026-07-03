@@ -1,0 +1,22 @@
+[package]
+name = "braze-engine"
+description = "The agentic loop: orchestrates model calls, tool dispatch, background tasks, compaction, permissions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+braze-types = { workspace = true }
+braze-events = { workspace = true }
+braze-config = { workspace = true }
+braze-permissions = { workspace = true }
+braze-session = { workspace = true }
+braze-tools-core = { workspace = true }
+braze-tools-local = { workspace = true }
+braze-mcp-client = { workspace = true }
+braze-model = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

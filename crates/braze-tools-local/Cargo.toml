@@ -1,0 +1,17 @@
+[package]
+name = "braze-tools-local"
+description = "Built-in local tools (file read/write/edit, shell exec, grep/glob) implementing ToolProvider"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+braze-types = { workspace = true }
+braze-tools-core = { workspace = true }
+braze-permissions = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,58 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/braze-types",
+    "crates/braze-events",
+    "crates/braze-config",
+    "crates/braze-permissions",
+    "crates/braze-session",
+    "crates/braze-tools-core",
+    "crates/braze-model",
+    "crates/braze-tools-local",
+    "crates/braze-mcp-client",
+    "crates/braze-engine",
+    "crates/braze-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/franciscoparrao/braze"
+authors = ["Francisco Parra <francisco.parra.o@usach.cl>"]
+
+[workspace.dependencies]
+braze-types = { path = "crates/braze-types" }
+braze-events = { path = "crates/braze-events" }
+braze-config = { path = "crates/braze-config" }
+braze-permissions = { path = "crates/braze-permissions" }
+braze-session = { path = "crates/braze-session" }
+braze-tools-core = { path = "crates/braze-tools-core" }
+braze-model = { path = "crates/braze-model" }
+braze-tools-local = { path = "crates/braze-tools-local" }
+braze-mcp-client = { path = "crates/braze-mcp-client" }
+braze-engine = { path = "crates/braze-engine" }
+
+# Async runtime — deviation from the owner's sync-first convention,
+# adopted workspace-wide per PLAN.md (I/O-concurrent domain: model
+# streaming, MCP client, background tasks).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+async-trait = "0.1"
+futures = "0.3"
+
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+rmcp = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1

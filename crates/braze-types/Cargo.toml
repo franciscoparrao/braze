@@ -1,0 +1,13 @@
+[package]
+name = "braze-types"
+description = "Shared plain-data vocabulary for braze: messages, tool calls, sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }

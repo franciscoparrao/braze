@@ -1,0 +1,21 @@
+[package]
+name = "braze-session"
+description = "On-disk session persistence and differential context compaction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+braze-types = { workspace = true }
+braze-events = { workspace = true }
+async-trait = { workspace = true }
+# Workspace tokio doesn't enable "fs" (see workspace Cargo.toml); this
+# crate needs it for the async rollout-log read/write in FileSessionStore.
+# Added locally per PLAN.md Fase 3 instructions, doesn't touch the root
+# manifest.
+tokio = { workspace = true, features = ["fs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

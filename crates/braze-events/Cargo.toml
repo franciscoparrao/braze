@@ -1,0 +1,15 @@
+[package]
+name = "braze-events"
+description = "AgentEvent stream and background-task notification (push, not polling)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+braze-types = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

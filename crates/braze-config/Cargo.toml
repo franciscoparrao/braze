@@ -1,0 +1,13 @@
+[package]
+name = "braze-config"
+description = "Load/merge braze configuration from env vars, config file and CLI overrides"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
