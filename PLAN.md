@@ -216,6 +216,13 @@ pub trait TaskNotifier: Send + Sync {
 - [ ] Agente de review de código
 - [ ] Verificación manual end-to-end (ver sección siguiente)
 
+### Fase 4: Implementación paralela — Nivel 2 (2 subagentes) — COMPLETA (2026-07-03)
+- [x] `braze-tools-local` → `LocalToolsProvider`, un único `ToolProvider` que fronta 6 tools (read_file, write_file, edit_file, shell_exec, grep, glob). Escrituras/shell pasan por `PermissionGuard`; lecturas no. grep/glob implementados shelleando a `grep`/`find` del sistema (sin dependencias nuevas). 33 tests.
+- [x] `braze-mcp-client` → `McpToolProvider` sobre `rmcp` real (API verificada contra el source vendored, no inventada: `TokioChildProcess`, `ServiceExt::serve()`, `Peer<RoleClient>::{list_all_tools, call_tool}`). Probado con un servidor MCP de juguete real (`src/bin/toy_mcp_server.rs`) spawneado como subproceso — 11 tests de integración + 8 unitarios de truncado de summary.
+- [x] Verificación independiente del orquestador: `cargo build/test --workspace` (162 tests + 2 doctests, verdes), `cargo clippy --workspace --all-targets -- -D warnings` (limpio).
+
+**Deuda técnica menor aceptada (no bloqueante)**: en `braze-mcp-client/Cargo.toml`, `rmcp` con features de servidor (`server`, `transport-io`) quedó en `[dependencies]` normales, no en `[dev-dependencies]`, porque el `[[bin]]` `toy_mcp_server` (usado solo por los tests de integración) no puede ver dev-dependencies en un `cargo build` plano — limitación conocida de Cargo. Esto infla la superficie de dependencia pública del crate con código server-side de MCP que nunca se usa en runtime. Arreglo correcto (diferido, no urgente): mover `toy_mcp_server` a un crate nuevo dedicado, agregado como dev-dependency de path — evaluar si vale la pena antes de publicar el crate o solo si el tamaño del binario final importa.
+
 ## Verificación end-to-end (tras Fase 5)
 
 1. `cargo build --workspace` compila sin warnings.

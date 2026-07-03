@@ -11,8 +11,32 @@ authors.workspace = true
 braze-types = { workspace = true }
 braze-tools-core = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true }
-rmcp = { workspace = true }
+# "io-std" on top of the workspace-wide tokio features (process, io-util,
+# ...): only needed by `src/bin/toy_mcp_server.rs` (`rmcp::transport::stdio`
+# reads real process stdin/stdout), not by the library itself.
+tokio = { workspace = true, features = ["io-std"] }
+# "client" + "transport-child-process": the library's real surface — pulls
+# in `RoleClient`/`ServiceExt`/`ClientHandler`/`TokioChildProcess`, i.e. the
+# client side of MCP talking to a stdio subprocess. Neither is on by default
+# (rmcp defaults to ["base64", "macros", "server"], the server-side surface
+# a *client* crate doesn't need).
+#
+# "server" + "transport-io": pulled in only for `src/bin/toy_mcp_server.rs`,
+# a minimal MCP server used exclusively by this crate's own integration
+# tests (see tests/mcp_toy_server.rs) so they can spawn a real, protocol-
+# correct MCP server over stdio without depending on an external server
+# binary. It is not reachable from the crate's public API. Declared as a
+# normal (non-dev) dependency feature because Cargo test/bin targets cannot
+# see `[dev-dependencies]` feature additions when *just* `cargo build` runs
+# — putting it here keeps `cargo build -p braze-mcp-client` (which also
+# builds `src/bin/*`) working without relying on dev-dependency feature
+# unification.
+rmcp = { workspace = true, features = [
+    "client",
+    "transport-child-process",
+    "server",
+    "transport-io",
+] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

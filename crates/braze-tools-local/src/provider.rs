@@ -1,0 +1,433 @@
+//! [`LocalToolsProvider`]: the single [`ToolProvider`] this crate exposes,
+//! fronting all six built-in local tools. Owns a caller-supplied
+//! [`PermissionGuard`] and checks it before every write/edit/shell action;
+//! reads (`read_file`, `grep`, `glob`) skip the guard entirely.
+
+use std::path::PathBuf;
+
+use async_trait::async_trait;
+use braze_permissions::{ActionDescriptor, PermissionGuard};
+use braze_tools_core::{ToolError, ToolProvider, ToolSchema};
+use braze_types::{ToolCall, ToolResult, ToolStub};
+use serde::de::DeserializeOwned;
+
+use crate::edit_file::{self, EditFileArgs};
+use crate::glob::{self, GlobArgs};
+use crate::grep::{self, GrepArgs};
+use crate::read_file::{self, ReadFileArgs};
+use crate::schema;
+use crate::shell_exec::{self, ShellExecArgs};
+use crate::write_file::{self, WriteFileArgs};
+
+/// Stable provider id this crate advertises to `ToolRegistry` — see
+/// `ToolProvider::provider_id`'s doc comment for the "local"/"mcp:..."
+/// convention.
+const PROVIDER_ID: &str = "local";
+
+/// Implements [`ToolProvider`] for the six built-in local tools
+/// (`read_file`, `write_file`, `edit_file`, `shell_exec`, `grep`,
+/// `glob`). Does not construct its own [`PermissionGuard`] — whoever
+/// instantiates this (`braze-engine` in Fase 5) decides the real
+/// confirmation policy and hands a ready guard to
+/// [`LocalToolsProvider::new`].
+pub struct LocalToolsProvider {
+    guard: PermissionGuard,
+}
+
+impl LocalToolsProvider {
+    pub fn new(guard: PermissionGuard) -> Self {
+        Self { guard }
+    }
+
+    async fn invoke_read_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let args: ReadFileArgs = parse_args(call)?;
+        Ok(wrap(call, read_file::read_file(args).await))
+    }
+
+    async fn invoke_write_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let args: WriteFileArgs = parse_args(call)?;
+        self.check_write(call, &args.path).await?;
+        Ok(wrap(call, write_file::write_file(args).await))
+    }
+
+    async fn invoke_edit_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let args: EditFileArgs = parse_args(call)?;
+        self.check_write(call, &args.path).await?;
+        Ok(wrap(call, edit_file::edit_file(args).await))
+    }
+
+    async fn invoke_shell_exec(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let args: ShellExecArgs = parse_args(call)?;
+        let action = ActionDescriptor::ShellCommand {
+            command: args.command.clone(),
+        };
+        self.guard
+            .check(&action)
+            .await
+            .map_err(|err| ToolError::InvocationFailed {
+                name: call.name.clone(),
+                message: err.to_string(),
+            })?;
+        Ok(wrap(call, shell_exec::shell_exec(args).await))
+    }
+
+    async fn invoke_grep(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let args: GrepArgs = parse_args(call)?;
+        Ok(wrap(call, grep::grep(args).await))
+    }
+
+    async fn invoke_glob(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let args: GlobArgs = parse_args(call)?;
+        Ok(wrap(call, glob::glob(args).await))
+    }
+
+    /// Shared by `write_file` and `edit_file`: both are writes for
+    /// permission purposes (there is no separate `ActionDescriptor` for
+    /// "edit").
+    async fn check_write(&self, call: &ToolCall, path: &str) -> Result<(), ToolError> {
+        let action = ActionDescriptor::WriteFile {
+            path: PathBuf::from(path),
+        };
+        self.guard
+            .check(&action)
+            .await
+            .map_err(|err| ToolError::InvocationFailed {
+                name: call.name.clone(),
+                message: err.to_string(),
+            })
+    }
+}
+
+#[async_trait]
+impl ToolProvider for LocalToolsProvider {
+    fn provider_id(&self) -> &str {
+        PROVIDER_ID
+    }
+
+    async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+        Ok(schema::all_stubs(PROVIDER_ID))
+    }
+
+    async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+        Ok(schema::schema_for(name))
+    }
+
+    async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        match call.name.as_str() {
+            "read_file" => self.invoke_read_file(call).await,
+            "write_file" => self.invoke_write_file(call).await,
+            "edit_file" => self.invoke_edit_file(call).await,
+            "shell_exec" => self.invoke_shell_exec(call).await,
+            "grep" => self.invoke_grep(call).await,
+            "glob" => self.invoke_glob(call).await,
+            other => Err(ToolError::NotFound(other.to_string())),
+        }
+    }
+}
+
+/// Deserializes `call.arguments` into `T`. A malformed payload is an
+/// invocation-level failure (hard `Err(ToolError::InvocationFailed)`), not
+/// a recoverable `ToolResult { is_error: true }` — the model asked for a
+/// tool call shape this provider can't even parse.
+fn parse_args<T: DeserializeOwned>(call: &ToolCall) -> Result<T, ToolError> {
+    serde_json::from_value(call.arguments.clone()).map_err(|err| ToolError::InvocationFailed {
+        name: call.name.clone(),
+        message: format!("invalid arguments: {err}"),
+    })
+}
+
+/// Turns a tool-fn's `Result<String, String>` into a [`ToolResult`]:
+/// `Ok` -> `is_error: false`, `Err` -> `is_error: true`. Both are
+/// surfaced back to the model as a normal tool result, not a hard
+/// provider error — only permission denials and malformed arguments
+/// short-circuit `invoke` with `Err(ToolError)`.
+fn wrap(call: &ToolCall, outcome: Result<String, String>) -> ToolResult {
+    match outcome {
+        Ok(content) => ToolResult {
+            tool_call_id: call.id.clone(),
+            content,
+            is_error: false,
+        },
+        Err(content) => ToolResult {
+            tool_call_id: call.id.clone(),
+            content,
+            is_error: true,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{allow_guard, deny_guard, unique_temp_dir};
+
+    fn call(name: &str, arguments: serde_json::Value) -> ToolCall {
+        ToolCall {
+            id: "call-1".to_string(),
+            name: name.to_string(),
+            arguments,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_stubs_returns_all_six_tools() {
+        let provider = LocalToolsProvider::new(allow_guard(std::env::temp_dir()));
+        let stubs = provider
+            .list_stubs()
+            .await
+            .expect("list_stubs should succeed");
+        let names: Vec<&str> = stubs.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "read_file",
+                "write_file",
+                "edit_file",
+                "shell_exec",
+                "grep",
+                "glob"
+            ]
+        );
+        assert!(stubs.iter().all(|s| s.source == "local"));
+    }
+
+    #[tokio::test]
+    async fn resolve_schema_for_unknown_tool_is_ok_none() {
+        let provider = LocalToolsProvider::new(allow_guard(std::env::temp_dir()));
+        let schema = provider
+            .resolve_schema("does_not_exist")
+            .await
+            .expect("resolve_schema must not error on an unknown name");
+        assert!(schema.is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_schema_for_known_tool_is_some() {
+        let provider = LocalToolsProvider::new(allow_guard(std::env::temp_dir()));
+        let schema = provider
+            .resolve_schema("read_file")
+            .await
+            .expect("resolve_schema should succeed")
+            .expect("read_file is a known tool");
+        assert_eq!(schema.name, "read_file");
+    }
+
+    #[tokio::test]
+    async fn invoke_read_file_happy_path() {
+        let dir = unique_temp_dir("provider-read-file");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let file_path = dir.join("hello.txt");
+        tokio::fs::write(&file_path, "hi")
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::new(allow_guard(&dir));
+        let result = provider
+            .invoke(&call(
+                "read_file",
+                serde_json::json!({ "path": file_path.to_string_lossy() }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        assert_eq!(result.content, "hi");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn invoke_write_file_happy_path_inside_allowlist() {
+        let dir = unique_temp_dir("provider-write-file-happy");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let file_path = dir.join("out.txt");
+
+        let provider = LocalToolsProvider::new(allow_guard(&dir));
+        let result = provider
+            .invoke(&call(
+                "write_file",
+                serde_json::json!({ "path": file_path.to_string_lossy(), "content": "payload" }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        let contents = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read back");
+        assert_eq!(contents, "payload");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn invoke_write_file_denied_does_not_touch_disk() {
+        // deny_guard's allowlist root doesn't cover `outside`, so this
+        // write is classified Irreversible by DefaultClassifier; the
+        // guard's prompt always answers "no".
+        let allow_root = unique_temp_dir("provider-write-file-denied-root");
+        let outside = unique_temp_dir("provider-write-file-denied-target").join("out.txt");
+        let provider = LocalToolsProvider::new(deny_guard(&allow_root));
+
+        let result = provider
+            .invoke(&call(
+                "write_file",
+                serde_json::json!({ "path": outside.to_string_lossy(), "content": "payload" }),
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert!(!outside.exists(), "denied write must not touch disk");
+    }
+
+    #[tokio::test]
+    async fn invoke_edit_file_happy_path() {
+        let dir = unique_temp_dir("provider-edit-file-happy");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let file_path = dir.join("fixture.txt");
+        tokio::fs::write(&file_path, "hello world")
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::new(allow_guard(&dir));
+        let result = provider
+            .invoke(&call(
+                "edit_file",
+                serde_json::json!({
+                    "path": file_path.to_string_lossy(),
+                    "old_string": "world",
+                    "new_string": "braze"
+                }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        let contents = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read back");
+        assert_eq!(contents, "hello braze");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn invoke_shell_exec_happy_path() {
+        let provider = LocalToolsProvider::new(allow_guard(std::env::temp_dir()));
+        let result = provider
+            .invoke(&call(
+                "shell_exec",
+                serde_json::json!({ "command": ["echo", "hello"] }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        assert!(result.content.contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn invoke_shell_exec_denied_does_not_run_the_command() {
+        let dir = unique_temp_dir("provider-shell-exec-denied");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let target = dir.join("keep-me.txt");
+        tokio::fs::write(&target, "still here")
+            .await
+            .expect("write fixture");
+
+        // "rm -rf" is Irreversible under DefaultClassifier regardless of
+        // the allowlist; deny_guard's prompt always says no.
+        let provider = LocalToolsProvider::new(deny_guard(&dir));
+        let result = provider
+            .invoke(&call(
+                "shell_exec",
+                serde_json::json!({ "command": ["rm", "-rf", target.to_string_lossy()] }),
+            ))
+            .await;
+
+        assert!(result.is_err());
+        assert!(target.exists(), "denied shell command must not run");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn invoke_grep_happy_path() {
+        let dir = unique_temp_dir("provider-grep-happy");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        tokio::fs::write(dir.join("a.txt"), "needle here")
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::new(allow_guard(&dir));
+        let result = provider
+            .invoke(&call(
+                "grep",
+                serde_json::json!({ "pattern": "needle", "path": dir.to_string_lossy() }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        assert!(result.content.contains("needle here"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn invoke_glob_happy_path() {
+        let dir = unique_temp_dir("provider-glob-happy");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        tokio::fs::write(dir.join("keep.rs"), "// rust")
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::new(allow_guard(&dir));
+        let result = provider
+            .invoke(&call(
+                "glob",
+                serde_json::json!({ "pattern": "*.rs", "path": dir.to_string_lossy() }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        assert!(result.content.contains("keep.rs"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn invoke_unknown_tool_name_is_not_found() {
+        let provider = LocalToolsProvider::new(allow_guard(std::env::temp_dir()));
+        let err = provider
+            .invoke(&call("does_not_exist", serde_json::json!({})))
+            .await
+            .expect_err("unknown tool name must error");
+
+        assert!(matches!(err, ToolError::NotFound(name) if name == "does_not_exist"));
+    }
+
+    #[tokio::test]
+    async fn invoke_malformed_arguments_is_invocation_failed() {
+        let provider = LocalToolsProvider::new(allow_guard(std::env::temp_dir()));
+        let err = provider
+            .invoke(&call("read_file", serde_json::json!({ "wrong_field": 1 })))
+            .await
+            .expect_err("malformed arguments must error");
+
+        assert!(matches!(err, ToolError::InvocationFailed { .. }));
+    }
+}

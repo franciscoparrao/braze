@@ -12,6 +12,10 @@ braze-types = { workspace = true }
 braze-tools-core = { workspace = true }
 braze-permissions = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true }
+# Workspace tokio doesn't enable "fs" (see workspace Cargo.toml); this
+# crate's unit tests create/read/write throwaway fixture files via
+# tokio::fs. Added locally, same precedent as braze-session's Cargo.toml.
+tokio = { workspace = true, features = ["fs"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
