@@ -28,6 +28,25 @@ pub(crate) struct OllamaRequest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<OllamaTool>,
     pub stream: bool,
+    pub options: OllamaOptions,
+}
+
+/// Without an explicit `num_ctx`, Ollama falls back to its Modelfile
+/// default (commonly 2048-4096 tokens) and **silently truncates** any
+/// prompt that exceeds it from the front — the system prompt and tool
+/// definitions are the first things to disappear, with no error surfaced
+/// anywhere. `num_predict` is the native equivalent of
+/// [`CompletionRequest::max_tokens`], which this backend previously
+/// dropped on the floor entirely (Anthropic honored it, Ollama didn't) —
+/// without it, a model stuck in a repetition loop generates unbounded
+/// output. `temperature` low-but-not-zero balances deterministic
+/// tool-call formatting against still allowing the model to recover from
+/// a bad first attempt rather than repeating it verbatim.
+#[derive(Debug, Serialize, Clone, Copy)]
+pub(crate) struct OllamaOptions {
+    pub num_ctx: u32,
+    pub num_predict: i32,
+    pub temperature: f32,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -69,7 +88,16 @@ pub(crate) struct OllamaFunctionDef {
 /// Ollama's native chat API has no separate top-level "system" field like
 /// Anthropic's — the system prompt is just the first message in the array,
 /// with `role: "system"`.
-pub(crate) fn build_request(req: &CompletionRequest, model: &str) -> OllamaRequest {
+///
+/// `num_ctx`/`temperature` are backend-level configuration (not part of
+/// [`CompletionRequest`], which is provider-agnostic) — see
+/// [`OllamaBackend`](crate::ollama::OllamaBackend)'s fields.
+pub(crate) fn build_request(
+    req: &CompletionRequest,
+    model: &str,
+    num_ctx: u32,
+    temperature: f32,
+) -> OllamaRequest {
     let mut messages = Vec::new();
 
     if !req.system_prompt.is_empty() {
@@ -89,6 +117,15 @@ pub(crate) fn build_request(req: &CompletionRequest, model: &str) -> OllamaReque
         messages,
         tools: build_tools(&req.tool_stubs),
         stream: true,
+        options: OllamaOptions {
+            num_ctx,
+            // Ollama's own `num_predict` is `i32` with `-1` meaning
+            // unbounded; `max_tokens` is realistically always small enough
+            // to fit, but saturate defensively rather than panic/wrap on
+            // an adversarial value.
+            num_predict: req.max_tokens.min(i32::MAX as u32) as i32,
+            temperature,
+        },
     }
 }
 
@@ -309,13 +346,28 @@ mod tests {
             system_prompt: "be terse".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "llama3");
+        let wire = build_request(&req, "llama3", 8192, 0.2);
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
         assert_eq!(wire.messages[0].content, "be terse");
         assert_eq!(wire.messages[1].role, "user");
         assert_eq!(wire.messages[1].content, "hi");
         assert!(wire.stream);
+        assert_eq!(wire.options.num_ctx, 8192);
+        assert_eq!(wire.options.num_predict, 100);
+        assert_eq!(wire.options.temperature, 0.2);
+    }
+
+    #[test]
+    fn build_request_saturates_num_predict_instead_of_overflowing() {
+        let req = CompletionRequest {
+            messages: vec![],
+            tool_stubs: vec![],
+            system_prompt: String::new(),
+            max_tokens: u32::MAX,
+        };
+        let wire = build_request(&req, "llama3", 8192, 0.2);
+        assert_eq!(wire.options.num_predict, i32::MAX);
     }
 
     #[test]

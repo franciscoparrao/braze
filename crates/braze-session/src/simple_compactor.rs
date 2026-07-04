@@ -36,16 +36,18 @@ pub const DEFAULT_TACTICAL_WINDOW: usize = 20;
 /// this happens if the engine hasn't run `compact_tactical` recently
 /// enough, or is calling `split` on a log for the first time). Rather
 /// than invent a bespoke fallback summarizer for that edge case, this
-/// implementation keeps the invariant simple and absolute: **every event
-/// in the input ends up in exactly one of `durable_events` or the
-/// returned tactical vector, never neither**. Concretely, such
-/// "orphaned" older non-durable-typed events are kept raw in the tactical
-/// vector (prepended, in original order, ahead of the true last-N raw
-/// window) instead of being dropped or force-fit into `durable_events`
-/// under a type they don't have. In steady state, once the engine
-/// regularly calls `compact_tactical` and appends the resulting
-/// `CompactionOccurred` event, this case does not arise — this is purely
-/// a defensive fallback for out-of-band or first-time splits.
+/// implementation keeps the invariant simple: **every event in the input
+/// ends up in exactly one of `durable_events`, the returned tactical
+/// vector, or is already represented in `durable.summary` by a
+/// compaction it chronologically precedes** — never silently
+/// unaccounted for. Concretely, an "orphaned" older non-durable-typed
+/// event is kept raw in the tactical vector (in original order, ahead of
+/// the true last-N raw window) *unless* a later `CompactionOccurred`
+/// exists in the log, in which case its content is already folded into
+/// that summary and it is dropped rather than re-surfaced (see
+/// `last_compaction_index` in [`SimpleContextCompactor::split`]) — this
+/// is what keeps repeated compaction differential instead of
+/// re-summarizing an ever-growing, mostly-redundant backlog every round.
 #[derive(Debug, Clone, Copy)]
 pub struct SimpleContextCompactor {
     tactical_window: usize,
@@ -82,33 +84,79 @@ fn is_settled_durable(event: &AgentEvent) -> bool {
     )
 }
 
-/// Rough char length of an event's textual payload, used only as an input
-/// to the token-count heuristic in `compact_tactical` — not persisted.
-fn approx_char_len(event: &AgentEvent) -> usize {
-    match event {
-        AgentEvent::UserMessage { text } | AgentEvent::AssistantText { text } => text.len(),
-        AgentEvent::ToolCallStarted { id, name, .. } => id.len() + name.len(),
-        // Added in Fase 5 (braze-engine history reconstruction, see
-        // AgentEvent::AssistantToolCall's doc comment). This heuristic
-        // only feeds `compact_tactical`'s size estimate over the raw
-        // tactical window — it is unrelated to whether the event also
-        // counts as `is_settled_durable` (which it now does, see above).
-        AgentEvent::AssistantToolCall {
-            id,
-            name,
-            arguments,
-        } => id.len() + name.len() + arguments.to_string().len(),
-        AgentEvent::ToolCallCompleted { id, result } => id.len() + result.content.len(),
-        AgentEvent::CompactionOccurred { summary, .. } => summary.len(),
-        AgentEvent::PermissionRequested { action, .. }
-        | AgentEvent::PermissionDecided { action, .. } => action.len(),
+/// Caps on how many items of each kind [`compact_tactical`]'s digest keeps
+/// (always the most recent ones) — bounds the digest's own size
+/// regardless of how large the folded backlog is, since a session that ran
+/// a long time before its first compaction can hand `compact_tactical` an
+/// arbitrarily large `tactical` slice.
+const DIGEST_MAX_USER_REQUESTS: usize = 8;
+const DIGEST_MAX_TOOL_CALLS: usize = 15;
+const DIGEST_MAX_TOOL_ERRORS: usize = 8;
+
+/// Truncates `text` to its first `max_words` whitespace-separated words,
+/// appending an ellipsis if anything was cut. Operates on
+/// [`str::split_whitespace`], which is UTF-8-safe (never splits inside a
+/// multi-byte character) unlike a raw byte-length truncation.
+fn truncate_words(text: &str, max_words: usize) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() <= max_words {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    } else {
+        format!("{}...", words[..max_words].join(" "))
     }
+}
+
+/// Best-effort one-line description of a tool call's arguments for the
+/// digest: prefers a handful of common parameter names that tend to be the
+/// single most identifying value (a path, a pattern, a shell command),
+/// falling back to a truncated raw JSON dump so no argument shape ever
+/// panics or produces an empty description.
+fn summarize_tool_arguments(arguments: &serde_json::Value) -> String {
+    for key in ["path", "pattern", "command", "text"] {
+        if let Some(value) = arguments.get(key) {
+            match value {
+                serde_json::Value::String(s) => return truncate_words(s, 8),
+                serde_json::Value::Array(items) => {
+                    let joined = items
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !joined.is_empty() {
+                        return truncate_words(&joined, 8);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    truncate_words(&arguments.to_string(), 8)
 }
 
 impl ContextCompactor for SimpleContextCompactor {
     fn split(&self, events: &[AgentEvent]) -> (DurableState, Vec<AgentEvent>) {
         let window_len = self.tactical_window.min(events.len());
         let window_start = events.len() - window_len;
+
+        // Position of the most recent `CompactionOccurred` in the log, if
+        // any. `Engine::load_messages` always folds the *entire* current
+        // orphan backlog when it compacts (see its doc comment), so any
+        // non-durable-typed ("orphan": `UserMessage`, `AssistantText`,
+        // `ToolCallStarted`, `Usage`, `PermissionRequested`) event at an
+        // earlier log position is already represented in that (or an even
+        // earlier) compaction's summary text. Without this check, orphan
+        // events never satisfy `is_settled_durable` and would keep
+        // reappearing in `tactical` forever once they age out of the
+        // window — pushing `tactical.len()` past the compaction threshold
+        // on every subsequent call and re-triggering compaction every
+        // round on an ever-growing, mostly-redundant backlog (see
+        // docs/AUDITORIA-2026-07.md, hallazgos A2/C2).
+        let last_compaction_index = events
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| matches!(e, AgentEvent::CompactionOccurred { .. }))
+            .map(|(i, _)| i)
+            .next_back();
 
         let mut durable_events = Vec::new();
         let mut summary_parts = Vec::new();
@@ -127,9 +175,17 @@ impl ContextCompactor for SimpleContextCompactor {
                     summary_parts.push(summary.clone());
                 }
                 durable_events.push(event.clone());
+            } else if last_compaction_index.is_some_and(|lc| i < lc) {
+                // Already folded into an earlier compaction's summary —
+                // its content lives in `durable.summary` now, so it is
+                // deliberately dropped here rather than re-surfaced as
+                // tactical again (see the comment on
+                // `last_compaction_index` above).
+                continue;
             } else {
-                // Orphaned older non-durable-typed event — see the
-                // "no-silent-loss invariant" doc comment above.
+                // Orphaned older non-durable-typed event that no
+                // compaction has covered yet — see the "no-silent-loss
+                // invariant" doc comment above.
                 tactical.push(event.clone());
             }
         }
@@ -141,64 +197,109 @@ impl ContextCompactor for SimpleContextCompactor {
         (durable, tactical)
     }
 
+    /// Extractive, deterministic digest (no LLM call — see PLAN.md /
+    /// docs/SOTA-2026-07.md for why the compactor stays LLM-free) of what
+    /// `tactical` is about to lose in raw form. Earlier versions of this
+    /// method reported *only* event-type counts ("3 user message(s), 2
+    /// tool call(s)...") with zero actual content — after compaction the
+    /// model had no way to recover what the user asked for, which files
+    /// were touched, or what failed, only how many of each. This instead
+    /// pulls out short, concrete fragments (see `docs/AUDITORIA-2026-07.md`
+    /// hallazgo C6): truncated user requests, `tool(args)` call sites,
+    /// tool errors, and the most recent assistant reply — capped (see
+    /// `DIGEST_MAX_*`) so the digest itself stays small regardless of how
+    /// much backlog is being folded.
     fn compact_tactical(&self, tactical: &[AgentEvent]) -> Result<String, SessionError> {
         if tactical.is_empty() {
             return Ok("No tactical events to compact.".to_string());
         }
 
-        let mut user_messages = 0u32;
-        let mut assistant_texts = 0u32;
-        let mut assistant_tool_calls = 0u32;
-        let mut tool_calls_started = 0u32;
-        let mut tool_calls_completed = 0u32;
-        let mut tool_errors = 0u32;
-        let mut permission_events = 0u32;
-        let mut prior_compactions = 0u32;
-        let mut char_count = 0usize;
+        let mut user_requests = Vec::new();
+        let mut tool_calls = Vec::new();
+        let mut tool_errors = Vec::new();
+        let mut last_assistant_reply = None;
+        let mut tool_names_by_id: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
 
         for event in tactical {
-            char_count += approx_char_len(event);
             match event {
-                AgentEvent::UserMessage { .. } => user_messages += 1,
-                AgentEvent::AssistantText { .. } => assistant_texts += 1,
-                AgentEvent::AssistantToolCall { .. } => assistant_tool_calls += 1,
-                AgentEvent::ToolCallStarted { .. } => tool_calls_started += 1,
-                AgentEvent::ToolCallCompleted { result, .. } => {
-                    tool_calls_completed += 1;
-                    if result.is_error {
-                        tool_errors += 1;
-                    }
+                AgentEvent::UserMessage { text } => {
+                    user_requests.push(truncate_words(text, 15));
                 }
-                AgentEvent::PermissionRequested { .. } | AgentEvent::PermissionDecided { .. } => {
-                    permission_events += 1;
+                AgentEvent::AssistantText { text } => {
+                    last_assistant_reply = Some(truncate_words(text, 30));
                 }
-                AgentEvent::CompactionOccurred { .. } => prior_compactions += 1,
+                AgentEvent::AssistantToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => {
+                    tool_names_by_id.insert(id.as_str(), name.as_str());
+                    tool_calls.push(format!("{name}({})", summarize_tool_arguments(arguments)));
+                }
+                AgentEvent::ToolCallCompleted { id, result } if result.is_error => {
+                    let name = tool_names_by_id
+                        .get(id.as_str())
+                        .copied()
+                        .unwrap_or("unknown_tool");
+                    tool_errors.push(format!("{name} -> {}", truncate_words(&result.content, 12)));
+                }
+                AgentEvent::ToolCallCompleted { .. }
+                | AgentEvent::ToolCallStarted { .. }
+                | AgentEvent::CompactionOccurred { .. }
+                | AgentEvent::PermissionRequested { .. }
+                | AgentEvent::PermissionDecided { .. }
+                | AgentEvent::Usage { .. } => {}
             }
         }
 
-        // Rough token estimate (~4 chars/token), consistent in spirit
-        // with `AgentEvent::CompactionOccurred::dropped_tokens_estimate` —
-        // this is what that field is meant to approximate, not an exact
-        // count from the model's own tokenizer.
-        let dropped_tokens_estimate = (char_count / 4) as u32;
+        let mut out = String::from("Previous context (compacted):\n");
 
-        Ok(format!(
-            "Compacted {total} tactical event(s): {um} user message(s), {at} assistant \
-             message(s), {atc} assistant tool call(s) requested, {tcs} tool call(s) started, \
-             {tcc} tool call(s) completed ({err} error(s)), {pe} permission event(s), {co} \
-             prior compaction(s) folded in. Estimated dropped tokens: ~{tok}.",
-            total = tactical.len(),
-            um = user_messages,
-            at = assistant_texts,
-            atc = assistant_tool_calls,
-            tcs = tool_calls_started,
-            tcc = tool_calls_completed,
-            err = tool_errors,
-            pe = permission_events,
-            co = prior_compactions,
-            tok = dropped_tokens_estimate,
-        ))
+        if !user_requests.is_empty() {
+            let tail = tail_capped(&user_requests, DIGEST_MAX_USER_REQUESTS);
+            out.push_str("- User requests: ");
+            out.push_str(
+                &tail
+                    .iter()
+                    .map(|s| format!("\"{s}\""))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
+            out.push('\n');
+        }
+
+        if !tool_calls.is_empty() {
+            let tail = tail_capped(&tool_calls, DIGEST_MAX_TOOL_CALLS);
+            out.push_str("- Tools used: ");
+            out.push_str(&tail.join(", "));
+            out.push('\n');
+        }
+
+        if !tool_errors.is_empty() {
+            let tail = tail_capped(&tool_errors, DIGEST_MAX_TOOL_ERRORS);
+            out.push_str("- Tool errors: ");
+            out.push_str(&tail.join("; "));
+            out.push('\n');
+        }
+
+        if let Some(reply) = last_assistant_reply {
+            out.push_str(&format!("- Last assistant reply: \"{reply}\"\n"));
+        }
+
+        out.push_str(
+            "Continue the task using this context. Do not repeat a tool call \
+             you already made with the same arguments unless its result changed.",
+        );
+
+        Ok(out)
     }
+}
+
+/// Returns the last (most recent) `max` items of `items`, preserving
+/// order — used to cap each section of `compact_tactical`'s digest.
+fn tail_capped<T>(items: &[T], max: usize) -> &[T] {
+    let start = items.len().saturating_sub(max);
+    &items[start..]
 }
 
 #[cfg(test)]
@@ -228,6 +329,13 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             arguments: serde_json::json!({}),
+        }
+    }
+
+    fn compaction(summary: &str) -> AgentEvent {
+        AgentEvent::CompactionOccurred {
+            summary: summary.to_string(),
+            dropped_tokens_estimate: 0,
         }
     }
 
@@ -314,6 +422,66 @@ mod tests {
         assert_eq!(durable.durable_events.len() + tactical.len(), events.len());
     }
 
+    /// Regression test for A2/C2: an orphan (non-durable-typed) event that
+    /// precedes a `CompactionOccurred` in the log must NOT keep
+    /// reappearing in `tactical` on every subsequent `split` — it is
+    /// already represented in that compaction's summary. Without this,
+    /// `tactical.len()` never shrinks back down after a compaction runs,
+    /// so the engine's threshold check stays permanently tripped.
+    #[test]
+    fn orphan_events_covered_by_a_later_compaction_are_dropped_not_resurfaced() {
+        // window of 0 forces every event to be classified as "older", so
+        // only the covering logic (not window membership) is under test.
+        let compactor = SimpleContextCompactor::new(0);
+        let events = vec![
+            user("old message, already summarized"),
+            compaction("summary of the above"),
+        ];
+
+        let (durable, tactical) = compactor.split(&events);
+
+        // The orphan preceding the compaction is gone from tactical (its
+        // content lives in `durable.summary` now) — NOT re-added, unlike
+        // the no-compaction-yet case above.
+        assert!(tactical.is_empty());
+        assert_eq!(durable.durable_events.len(), 1);
+        assert!(matches!(
+            durable.durable_events[0],
+            AgentEvent::CompactionOccurred { .. }
+        ));
+        assert_eq!(durable.summary, "summary of the above");
+    }
+
+    /// End-to-end idempotency: calling `split` repeatedly on a log that
+    /// never grows must produce a stable, non-growing `tactical.len()`
+    /// once a compaction has run — the exact scenario that used to
+    /// re-trigger compaction forever (see A2/C2 in
+    /// docs/AUDITORIA-2026-07.md).
+    #[test]
+    fn repeated_split_after_a_compaction_does_not_regrow_tactical() {
+        let compactor = SimpleContextCompactor::new(0);
+        let mut events = vec![user("a"), user("b"), user("c")];
+
+        let (_, tactical_before) = compactor.split(&events);
+        assert_eq!(tactical_before.len(), 3, "sanity: all three are orphans");
+
+        // Simulate the engine folding the current backlog and appending
+        // the resulting summary — exactly what `Engine::load_messages`
+        // does when the threshold is crossed.
+        events.push(compaction("folded a, b, c"));
+
+        // Calling split() again and again (as load_messages does once per
+        // round) must NOT keep re-surfacing a, b, c as tactical.
+        for _ in 0..5 {
+            let (durable, tactical) = compactor.split(&events);
+            assert!(
+                tactical.is_empty(),
+                "covered orphans must not resurrect across repeated splits"
+            );
+            assert_eq!(durable.summary, "folded a, b, c");
+        }
+    }
+
     #[test]
     fn split_never_drops_events_across_a_range_of_window_sizes() {
         let events: Vec<AgentEvent> = (0..50)
@@ -338,16 +506,13 @@ mod tests {
     }
 
     #[test]
-    fn compact_tactical_reports_counts_and_is_deterministic() {
+    fn compact_tactical_is_deterministic() {
         let compactor = SimpleContextCompactor::default();
         let events = vec![user("hi"), tool_completed("1"), user("bye")];
 
         let summary_a = compactor.compact_tactical(&events).unwrap();
         let summary_b = compactor.compact_tactical(&events).unwrap();
         assert_eq!(summary_a, summary_b);
-        assert!(summary_a.contains("3 tactical event"));
-        assert!(summary_a.contains("2 user message"));
-        assert!(summary_a.contains("1 tool call(s) completed"));
     }
 
     #[test]
@@ -355,6 +520,95 @@ mod tests {
         let compactor = SimpleContextCompactor::default();
         let summary = compactor.compact_tactical(&[]).unwrap();
         assert_eq!(summary, "No tactical events to compact.");
+    }
+
+    #[test]
+    fn compact_tactical_extracts_user_requests_verbatim_not_just_a_count() {
+        let compactor = SimpleContextCompactor::default();
+        let events = vec![
+            user("por favor lee el archivo de configuracion y dime que dice"),
+            user("ahora borra ese archivo"),
+        ];
+
+        let summary = compactor.compact_tactical(&events).unwrap();
+
+        assert!(summary.contains("User requests:"));
+        assert!(summary.contains("por favor lee el archivo"));
+        assert!(summary.contains("ahora borra ese archivo"));
+    }
+
+    #[test]
+    fn compact_tactical_extracts_tool_calls_with_their_key_argument() {
+        let compactor = SimpleContextCompactor::default();
+        let events = vec![AgentEvent::AssistantToolCall {
+            id: "call-1".to_string(),
+            name: "read_file".to_string(),
+            arguments: serde_json::json!({"path": "Cargo.toml"}),
+        }];
+
+        let summary = compactor.compact_tactical(&events).unwrap();
+
+        assert!(summary.contains("Tools used:"));
+        assert!(summary.contains("read_file(Cargo.toml)"));
+    }
+
+    #[test]
+    fn compact_tactical_extracts_tool_errors_with_the_tool_name() {
+        let compactor = SimpleContextCompactor::default();
+        let events = vec![
+            AgentEvent::AssistantToolCall {
+                id: "call-1".to_string(),
+                name: "shell_exec".to_string(),
+                arguments: serde_json::json!({"command": ["rm", "x"]}),
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "call-1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "call-1".to_string(),
+                    content: "permission denied".to_string(),
+                    is_error: true,
+                },
+            },
+        ];
+
+        let summary = compactor.compact_tactical(&events).unwrap();
+
+        assert!(summary.contains("Tool errors:"));
+        assert!(summary.contains("shell_exec -> permission denied"));
+    }
+
+    #[test]
+    fn compact_tactical_keeps_only_the_most_recent_assistant_reply() {
+        let compactor = SimpleContextCompactor::default();
+        let events = vec![
+            AgentEvent::AssistantText {
+                text: "primera respuesta".to_string(),
+            },
+            AgentEvent::AssistantText {
+                text: "segunda y ultima respuesta".to_string(),
+            },
+        ];
+
+        let summary = compactor.compact_tactical(&events).unwrap();
+
+        assert!(summary.contains("segunda y ultima respuesta"));
+        assert!(!summary.contains("primera respuesta"));
+    }
+
+    #[test]
+    fn compact_tactical_caps_each_section_to_the_most_recent_items() {
+        let compactor = SimpleContextCompactor::default();
+        let events: Vec<AgentEvent> = (0..(DIGEST_MAX_USER_REQUESTS + 5))
+            .map(|i| user(&format!("pedido numero {i}")))
+            .collect();
+
+        let summary = compactor.compact_tactical(&events).unwrap();
+
+        // The oldest requests are dropped in favor of the most recent
+        // DIGEST_MAX_USER_REQUESTS ones — the digest stays bounded no
+        // matter how large the folded backlog is.
+        assert!(!summary.contains("pedido numero 0"));
+        assert!(summary.contains(&format!("pedido numero {}", DIGEST_MAX_USER_REQUESTS + 4)));
     }
 
     #[test]

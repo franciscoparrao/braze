@@ -33,6 +33,14 @@ const MAX_TURN_ITERATIONS: usize = 20;
 /// [`Engine::run_turn`] for the documented MVP limitation this implies.
 const TOOL_COMPLETION_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Minimum number of raw tactical events always rendered verbatim to the
+/// model, even in the same round a compaction just ran — see
+/// [`Engine::load_messages`]. Without this, a compaction discarded the
+/// *entire* tactical window (including the user's message for the current
+/// turn, just appended in `run_turn`), so the model's next request
+/// contained no trace of what was actually being asked.
+const KEEP_RAW_TAIL: usize = 6;
+
 /// The agentic loop. Orchestrates model calls, tool dispatch (via
 /// background tasks + push notification), differential context
 /// compaction, and session persistence.
@@ -45,6 +53,16 @@ pub struct Engine {
     system_prompt: String,
     max_tokens: u32,
     tactical_compaction_threshold: usize,
+    /// Approximate token budget for the durable+tactical portion of the
+    /// prompt (i.e. excluding `system_prompt`/tool schemas, which the
+    /// caller should already have reserved headroom for when computing
+    /// this). `None` (the default) means compaction is triggered purely
+    /// by `tactical_compaction_threshold`'s raw event count, as before —
+    /// set via [`Engine::with_context_budget`] for backends with a small,
+    /// known context window (e.g. Ollama's `num_ctx`), where a single
+    /// large tool result can blow the budget long before the event count
+    /// does. See [`Engine::load_messages`].
+    context_budget_tokens: Option<u32>,
 }
 
 impl Engine {
@@ -73,7 +91,18 @@ impl Engine {
             system_prompt,
             max_tokens,
             tactical_compaction_threshold: DEFAULT_TACTICAL_COMPACTION_THRESHOLD,
+            context_budget_tokens: None,
         }
+    }
+
+    /// Sets an approximate token budget for the durable+tactical portion
+    /// of the prompt, above which a compaction triggers regardless of raw
+    /// event count — see the field's doc comment and
+    /// [`Engine::load_messages`]. Chainable, e.g.
+    /// `Engine::new(...).with_context_budget(6000)`.
+    pub fn with_context_budget(mut self, tokens: u32) -> Self {
+        self.context_budget_tokens = Some(tokens);
+        self
     }
 
     /// Runs one complete turn: append the user's message, then loop
@@ -117,6 +146,7 @@ impl Engine {
 
             let mut text_buffer = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
+            let mut usage: Option<(u32, u32)> = None;
 
             while let Some(event) = stream.next().await {
                 match event {
@@ -140,9 +170,28 @@ impl Engine {
                         output_tokens,
                     } => {
                         tracing::debug!(input_tokens, output_tokens, "model usage this round");
+                        usage = Some((input_tokens, output_tokens));
                     }
                     CompletionEvent::Done => break,
                 }
+            }
+
+            // Persisted once per round (if the backend reported it) so
+            // tooling like `braze-bench` can read per-round token usage
+            // back out of the rollout log — see `AgentEvent::Usage`'s doc
+            // comment. Order relative to the round's other events doesn't
+            // matter: it's audit-only and never rendered into a `Message`
+            // (see `history::event_to_message`).
+            if let Some((input_tokens, output_tokens)) = usage {
+                self.store
+                    .append(
+                        session,
+                        &AgentEvent::Usage {
+                            input_tokens,
+                            output_tokens,
+                        },
+                    )
+                    .await?;
             }
 
             if tool_calls.is_empty() {
@@ -362,11 +411,28 @@ impl Engine {
 
     /// Loads the full event log, splits it into durable/tactical via the
     /// compactor, and — if the tactical window has grown past
-    /// `tactical_compaction_threshold` — folds it into a fresh
-    /// `CompactionOccurred` summary (persisted) and builds messages from
-    /// durable summary + that fresh summary only, discarding the raw
-    /// tactical detail for this round's context. Otherwise builds messages
-    /// from durable summary + the raw tactical window, unchanged.
+    /// `tactical_compaction_threshold` **or** the estimated prompt size has
+    /// grown past `context_budget_tokens` (whichever is configured; see
+    /// that field's doc comment) — folds *all* of it into a fresh
+    /// `CompactionOccurred` summary (persisted; see
+    /// [`SimpleContextCompactor`](braze_session::SimpleContextCompactor)'s
+    /// `last_compaction_index` logic for why folding the complete backlog,
+    /// not a partial prefix, is what keeps repeated compaction
+    /// differential instead of re-summarizing overlapping content every
+    /// round) and builds messages from durable summary + that fresh
+    /// summary, **plus the last [`KEEP_RAW_TAIL`] tactical events kept
+    /// verbatim** — never the empty slice. Discarding the raw tail
+    /// entirely would drop the user's just-appended message for the
+    /// current turn (and any tool result from the round in progress) from
+    /// the very request meant to act on it. Otherwise (below both
+    /// thresholds) builds messages from durable summary + the full raw
+    /// tactical window, unchanged.
+    ///
+    /// The event-count threshold alone is a poor proxy for prompt size —
+    /// a single `read_file` of a large file counts the same as a
+    /// two-word "ok" — so a caller targeting a small, fixed context
+    /// window (e.g. Ollama's `num_ctx`) should also set
+    /// `context_budget_tokens` via [`Engine::with_context_budget`].
     async fn load_messages(&self, session: &SessionId) -> Result<Vec<Message>, EngineError> {
         let events = match self.store.load(session).await {
             Ok(events) => events,
@@ -376,7 +442,12 @@ impl Engine {
 
         let (durable, tactical) = self.compactor.split(&events);
 
-        if tactical.len() > self.tactical_compaction_threshold {
+        let over_event_count_threshold = tactical.len() > self.tactical_compaction_threshold;
+        let over_token_budget = self
+            .context_budget_tokens
+            .is_some_and(|budget| estimate_prompt_tokens(&durable, &tactical) > budget);
+
+        if over_event_count_threshold || over_token_budget {
             let summary = self.compactor.compact_tactical(&tactical)?;
             let dropped_tokens_estimate = estimate_dropped_tokens(&tactical);
 
@@ -391,7 +462,9 @@ impl Engine {
                 .await?;
 
             let effective_durable = merge_summary(durable, summary);
-            Ok(build_messages(&effective_durable, &[]))
+            let keep = KEEP_RAW_TAIL.min(tactical.len());
+            let live_tail = &tactical[tactical.len() - keep..];
+            Ok(build_messages(&effective_durable, live_tail))
         } else {
             Ok(build_messages(&durable, &tactical))
         }
@@ -420,6 +493,20 @@ fn estimate_dropped_tokens(events: &[AgentEvent]) -> u32 {
     (chars / 4) as u32
 }
 
+/// Rough token estimate for the *entire* durable+tactical portion of the
+/// next model request — everything [`crate::history::build_messages`]
+/// would turn into `Message`s, not just the tactical slice about to be
+/// (maybe) compacted. Used by [`Engine::load_messages`] to decide whether
+/// the prompt is approaching `context_budget_tokens`, since a raw event
+/// *count* alone can't tell a two-word `AssistantText` apart from a
+/// `ToolCallCompleted` carrying a 200KB file dump.
+fn estimate_prompt_tokens(durable: &DurableState, tactical: &[AgentEvent]) -> u32 {
+    let summary_tokens = (durable.summary.len() / 4) as u32;
+    summary_tokens
+        + estimate_dropped_tokens(&durable.durable_events)
+        + estimate_dropped_tokens(tactical)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,7 +517,7 @@ mod tests {
     use braze_model::ModelError;
     use braze_session::{FileSessionStore, SimpleContextCompactor};
     use braze_tools_core::{ToolError, ToolProvider, ToolSchema};
-    use braze_types::ToolStub;
+    use braze_types::{ContentBlock, ToolStub};
     use futures::Stream;
     use tokio::sync::Mutex as AsyncMutex;
     use tokio::sync::mpsc;
@@ -618,6 +705,54 @@ mod tests {
         let events = verify_store.load(&session).await.expect("load events");
         assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
         assert!(matches!(events[1], AgentEvent::AssistantText { .. }));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn run_turn_persists_usage_reported_by_the_backend() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Usage {
+                input_tokens: 42,
+                output_tokens: 7,
+            },
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "hola", &mut |_| {})
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
+        match &events[1] {
+            AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+            } => {
+                assert_eq!(*input_tokens, 42);
+                assert_eq!(*output_tokens, 7);
+            }
+            other => panic!("expected Usage, got {other:?}"),
+        }
+        assert!(matches!(events[2], AgentEvent::AssistantText { .. }));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -848,6 +983,183 @@ mod tests {
 
         // Both calls were rejected before dispatch — `invoke` never ran.
         assert_eq!(invocations.load(Ordering::SeqCst), 0);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for A1/C1: when a compaction triggers,
+    /// `load_messages` must never discard the live tail entirely — the
+    /// user's just-appended message for the current turn (the newest
+    /// event in the log) has to survive as a raw message, not be
+    /// swallowed into the compaction summary with nothing concrete left
+    /// for the model to act on.
+    #[tokio::test]
+    async fn load_messages_keeps_a_live_raw_tail_when_compaction_triggers() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Seed a backlog well past the default compaction threshold with
+        // plain, non-durable-typed events (the orphan types that never
+        // leave `tactical` on their own).
+        for i in 0..(DEFAULT_TACTICAL_COMPACTION_THRESHOLD + 10) {
+            store
+                .append(
+                    &session,
+                    &AgentEvent::UserMessage {
+                        text: format!("turno {i}"),
+                    },
+                )
+                .await
+                .expect("seed backlog event");
+        }
+        // The newest event — exactly what `run_turn` appends right before
+        // calling `load_messages` for the current turn.
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "pregunta actual del usuario".to_string(),
+                },
+            )
+            .await
+            .expect("seed current turn's message");
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let messages = engine
+            .load_messages(&session)
+            .await
+            .expect("load_messages should succeed");
+
+        assert!(
+            messages.iter().any(|m| matches!(
+                &m.content[0],
+                ContentBlock::Text { text } if text == "pregunta actual del usuario"
+            )),
+            "expected the live tail to include the just-appended user message, got: {messages:?}"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "sanity check: a compaction should actually have been triggered"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for C3: a single oversized event (e.g. a large
+    /// `read_file` result) must trigger compaction via the token budget
+    /// even when the raw event *count* is nowhere near
+    /// `tactical_compaction_threshold` — the count alone can't tell a
+    /// 200KB tool result apart from a two-word reply.
+    #[tokio::test]
+    async fn a_single_oversized_event_triggers_compaction_via_the_token_budget() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Just 2 events — nowhere near the default threshold of 40 — but
+        // one of them is enormous.
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "resume este archivo".to_string(),
+                },
+            )
+            .await
+            .expect("seed user message");
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantText {
+                    text: "x".repeat(20_000),
+                },
+            )
+            .await
+            .expect("seed oversized event");
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_context_budget(1000); // ~4000 chars — the 20K-char event alone blows this.
+
+        engine
+            .load_messages(&session)
+            .await
+            .expect("load_messages should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "expected the token budget to trigger compaction despite the low event count"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Without a configured budget, a large event does NOT trigger
+    /// compaction below the event-count threshold — confirms
+    /// `context_budget_tokens: None` preserves the pre-C3 behavior
+    /// exactly (event count is the only trigger).
+    #[tokio::test]
+    async fn without_a_configured_budget_only_event_count_triggers_compaction() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantText {
+                    text: "x".repeat(20_000),
+                },
+            )
+            .await
+            .expect("seed oversized event");
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .load_messages(&session)
+            .await
+            .expect("load_messages should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "no budget configured: a single large event below the count threshold must not compact"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

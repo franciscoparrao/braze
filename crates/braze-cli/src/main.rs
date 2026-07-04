@@ -21,6 +21,12 @@ use cli_args::{Cli, Command};
 use error::CliError;
 use terminal_prompt::TerminalConfirmationPrompt;
 
+/// Headroom reserved out of `ollama_num_ctx` for the system prompt + tool
+/// schemas when computing `Engine::with_context_budget` — neither is part
+/// of what `Engine::load_messages`'s token estimate measures (durable
+/// summary + durable/tactical events only).
+const CONTEXT_BUDGET_MARGIN_TOKENS: u32 = 1024;
+
 #[tokio::main]
 async fn main() -> ExitCode {
     // Installed exactly once, here, never in any library crate — respects
@@ -132,10 +138,13 @@ async fn run() -> Result<(), CliError> {
             })?;
             Box::new(braze_model::AnthropicBackend::new(api_key, model_name))
         }
-        "ollama" => Box::new(braze_model::OllamaBackend::with_base_url(
-            config.ollama_model.clone(),
-            config.ollama_base_url.clone(),
-        )),
+        "ollama" => Box::new(
+            braze_model::OllamaBackend::with_base_url(
+                config.ollama_model.clone(),
+                config.ollama_base_url.clone(),
+            )
+            .with_num_ctx(config.ollama_num_ctx),
+        ),
         other => {
             return Err(CliError::Startup(format!(
                 "unknown backend '{other}' (expected 'anthropic' or 'ollama')"
@@ -220,7 +229,7 @@ async fn run() -> Result<(), CliError> {
 
     let system_prompt = "You are braze, an experimental agentic CLI assistant.".to_string();
 
-    let engine = braze_engine::Engine::new(
+    let mut engine = braze_engine::Engine::new(
         model,
         tools,
         std::sync::Arc::clone(&store),
@@ -229,6 +238,19 @@ async fn run() -> Result<(), CliError> {
         system_prompt,
         config.max_tokens,
     );
+
+    // Only Ollama has a small, fixed context window worth budgeting for
+    // (Anthropic's is large enough that raw event count remains a fine
+    // proxy) — reserve `CONTEXT_BUDGET_MARGIN_TOKENS` out of `num_ctx` for
+    // the system prompt + tool schemas, which aren't part of what
+    // `Engine::load_messages` measures (see `estimate_prompt_tokens`).
+    if config.default_backend == "ollama" {
+        let budget = config
+            .ollama_num_ctx
+            .saturating_sub(config.max_tokens)
+            .saturating_sub(CONTEXT_BUDGET_MARGIN_TOKENS);
+        engine = engine.with_context_budget(budget);
+    }
 
     match cli.command {
         Command::Run { prompt, .. } => {

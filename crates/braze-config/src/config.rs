@@ -44,6 +44,12 @@ pub struct Config {
     pub ollama_base_url: String,
     /// Ollama model name.
     pub ollama_model: String,
+    /// Context window requested from Ollama via `options.num_ctx`. Without
+    /// an explicit value, Ollama falls back to its Modelfile default
+    /// (commonly 2048-4096) and silently truncates an over-budget prompt
+    /// from the front — no error, just a model that "forgot" its system
+    /// prompt and tools mid-turn. See `braze-model::OllamaBackend`.
+    pub ollama_num_ctx: u32,
     /// Default max tokens for a model completion request.
     pub max_tokens: u32,
     /// Directory where `braze-session` writes its rollout logs.
@@ -63,6 +69,7 @@ impl Default for Config {
             anthropic_model: None,
             ollama_base_url: "http://localhost:11434".to_string(),
             ollama_model: "llama3.1".to_string(),
+            ollama_num_ctx: 8192,
             max_tokens: 4096,
             session_dir: paths::default_session_dir(),
             mcp_servers: Vec::new(),
@@ -128,6 +135,9 @@ impl Config {
         if let Some(v) = overrides.ollama_model {
             self.ollama_model = v;
         }
+        if let Some(v) = overrides.ollama_num_ctx {
+            self.ollama_num_ctx = v;
+        }
         if let Some(v) = overrides.max_tokens {
             self.max_tokens = v;
         }
@@ -166,6 +176,7 @@ mod tests {
         assert_eq!(config.anthropic_model, None);
         assert_eq!(config.ollama_base_url, "http://localhost:11434");
         assert_eq!(config.ollama_model, "llama3.1");
+        assert_eq!(config.ollama_num_ctx, 8192);
         assert_eq!(config.max_tokens, 4096);
         assert!(config.mcp_servers.is_empty());
     }
@@ -244,6 +255,13 @@ mod tests {
         assert_eq!(config.max_tokens, 1000);
         // Fields not present in the overrides are untouched.
         assert_eq!(config.ollama_base_url, "http://localhost:11434");
+    }
+
+    #[test]
+    fn ollama_num_ctx_is_overridable_via_env() {
+        let env = vec![("BRAZE_OLLAMA_NUM_CTX".to_string(), "4096".to_string())];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(config.ollama_num_ctx, 4096);
     }
 
     #[test]

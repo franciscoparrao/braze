@@ -17,6 +17,21 @@ use crate::ollama_wire::{
 
 const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 
+/// Default context window requested via `options.num_ctx`. Deliberately
+/// well above Ollama's own Modelfile default (commonly 2048-4096) — an
+/// agentic turn (system prompt + tool stubs + growing history) can exceed
+/// that within a few tool-calling rounds, and Ollama truncates an
+/// over-budget prompt from the front *silently*, with no error. 8192 is a
+/// floor most locally-run 1B-8B models handle on CPU; callers can override
+/// via [`OllamaBackend::with_num_ctx`].
+const DEFAULT_NUM_CTX: u32 = 8192;
+
+/// Low-but-not-zero: favors well-formed, repeatable tool calls (the
+/// dominant failure mode for small local models is malformed JSON, not
+/// insufficient creativity) while still letting the model recover from a
+/// bad first attempt instead of repeating it identically forever.
+const DEFAULT_TEMPERATURE: f32 = 0.2;
+
 /// Streams completions from a local (or remote) Ollama server's native
 /// chat API.
 ///
@@ -29,6 +44,8 @@ pub struct OllamaBackend {
     base_url: String,
     model: String,
     client: reqwest::Client,
+    num_ctx: u32,
+    temperature: f32,
 }
 
 impl OllamaBackend {
@@ -38,6 +55,8 @@ impl OllamaBackend {
             base_url: DEFAULT_BASE_URL.to_string(),
             model,
             client: reqwest::Client::new(),
+            num_ctx: DEFAULT_NUM_CTX,
+            temperature: DEFAULT_TEMPERATURE,
         }
     }
 
@@ -48,7 +67,24 @@ impl OllamaBackend {
             base_url,
             model,
             client: reqwest::Client::new(),
+            num_ctx: DEFAULT_NUM_CTX,
+            temperature: DEFAULT_TEMPERATURE,
         }
+    }
+
+    /// Overrides the context window requested via `options.num_ctx` (see
+    /// [`DEFAULT_NUM_CTX`] for why this matters). Chainable, e.g.
+    /// `OllamaBackend::with_base_url(model, url).with_num_ctx(4096)`.
+    pub fn with_num_ctx(mut self, num_ctx: u32) -> Self {
+        self.num_ctx = num_ctx;
+        self
+    }
+
+    /// Overrides the sampling temperature requested via
+    /// `options.temperature` (see [`DEFAULT_TEMPERATURE`]).
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = temperature;
+        self
     }
 }
 
@@ -66,9 +102,11 @@ impl ModelBackend for OllamaBackend {
         &self,
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = CompletionEvent> + Send>>, ModelError> {
-        let body = build_request(&req, &self.model);
+        let body = build_request(&req, &self.model, self.num_ctx, self.temperature);
         tracing::info!(
             tool_count = body.tools.len(),
+            num_ctx = self.num_ctx,
+            num_predict = body.options.num_predict,
             "starting ollama completion turn"
         );
 

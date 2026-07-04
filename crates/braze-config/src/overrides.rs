@@ -30,6 +30,8 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub ollama_model: Option<String>,
     #[serde(default)]
+    pub ollama_num_ctx: Option<u32>,
+    #[serde(default)]
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub session_dir: Option<PathBuf>,
@@ -70,6 +72,17 @@ impl ConfigOverrides {
                 "ANTHROPIC_MODEL" => overrides.anthropic_model = Some(value.to_string()),
                 "OLLAMA_BASE_URL" => overrides.ollama_base_url = Some(value.to_string()),
                 "OLLAMA_MODEL" => overrides.ollama_model = Some(value.to_string()),
+                "OLLAMA_NUM_CTX" => {
+                    let parsed =
+                        value
+                            .parse::<u32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.ollama_num_ctx = Some(parsed);
+                }
                 "MAX_TOKENS" => {
                     let parsed =
                         value
@@ -109,6 +122,7 @@ mod tests {
             ("BRAZE_ANTHROPIC_MODEL", "claude-test-model"),
             ("BRAZE_OLLAMA_BASE_URL", "http://example:1234"),
             ("BRAZE_OLLAMA_MODEL", "llama3.1-test"),
+            ("BRAZE_OLLAMA_NUM_CTX", "4096"),
             ("BRAZE_MAX_TOKENS", "8192"),
             ("BRAZE_SESSION_DIR", "/tmp/sessions"),
         ];
@@ -124,6 +138,7 @@ mod tests {
             Some("http://example:1234")
         );
         assert_eq!(overrides.ollama_model.as_deref(), Some("llama3.1-test"));
+        assert_eq!(overrides.ollama_num_ctx, Some(4096));
         assert_eq!(overrides.max_tokens, Some(8192));
         assert_eq!(overrides.session_dir, Some(PathBuf::from("/tmp/sessions")));
     }
