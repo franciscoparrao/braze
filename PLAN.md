@@ -42,7 +42,7 @@ Es explícitamente un **ejercicio de experimentación**, no un compromiso de pro
 | `braze-tools-core` | Trait `ToolProvider` + `ToolRegistry` + mecanismo de **carga diferida de herramientas** (índice de nombres, resolución de schema bajo demanda) | 1 | types |
 | `braze-model` | Trait `ModelBackend` async + implementaciones `AnthropicBackend` y `OllamaBackend` (streaming SSE/NDJSON) | 1 | types |
 | `braze-tools-local` | Herramientas locales built-in implementando `ToolProvider`: leer/escribir/editar archivo, shell exec, grep/glob | 2 | tools-core, types, permissions |
-| `braze-mcp-client` | Cliente MCP sobre `rmcp` (SDK oficial), implementa `ToolProvider`, expone nombres primero y schemas bajo demanda | 2 | tools-core, types |
+| `braze-mcp-client` | Cliente MCP sobre `rmcp` (SDK oficial), implementa `ToolProvider`, expone nombres primero y schemas bajo demanda | 2 | tools-core, types, permissions |
 | `braze-engine` | Loop agéntico: orquesta llamadas al modelo, dispatch de tools, tareas en background + notificación, trigger de compactación, checks de permisos. Raíz de composición. | 3 | permissions, session, tools-core, tools-local, mcp-client, model, events, config |
 | `braze-cli` | Binario `clap` v4: `braze chat` (interactivo), `braze run <prompt>` (one-shot), subcomandos de sesión/config | 4 | engine, config, session |
 
@@ -62,7 +62,7 @@ Nivel 3 (composición):    braze-engine
 Nivel 4 (binario):        braze-cli
 ```
 
-Sin ciclos: `braze-engine` es el único crate que conoce simultáneamente `tools-local` y `mcp-client` (hermanos, nunca dependen entre sí — eso es lo que mantiene `ToolProvider` como un seam válido). `braze-model` y `braze-tools-core` nunca dependen entre sí.
+Sin ciclos: `braze-engine` es el único crate que conoce simultáneamente `tools-local` y `mcp-client` (hermanos, nunca dependen entre sí — eso es lo que mantiene `ToolProvider` como un seam válido). `braze-model` y `braze-tools-core` nunca dependen entre sí. Desde el trabajo de gating de permisos en MCP (ver entrada "Grupo 2 del roadmap SOTA" más abajo), `braze-mcp-client` (Nivel 2) también depende de `braze-permissions` (Nivel 1) — igual que `braze-tools-local` ya hacía desde Fase 4 — sin introducir ningún ciclo ni acoplar `tools-local`/`mcp-client` entre sí.
 
 ### Contratos entre módulos (async, dado tokio workspace-wide)
 
@@ -254,6 +254,26 @@ pub trait TaskNotifier: Send + Sync {
 **Próximo incremento más claro si se retoma el proyecto**: validación real de tool schema en `braze-engine` antes del dispatch final (hoy solo hace un `resolve()` best-effort sin validar) — es la deuda con más evidencia empírica detrás, confirmada en vivo múltiples veces durante esta sesión de validación manual (modelos chicos arman argumentos inventados contra el schema genérico permisivo que usa `braze-model`). Ver también la lista de items diferidos a "Fase 2" en la sección de Arquitectura (sandboxing SO, multi-agente, TUI, otel, skills-packs, hooks plugueables).
 
 **Investigación de estado del arte (2026-07-04)**: ver `docs/SOTA-2026-07.md` — dos estudios profundos (práctica de industria + literatura académica) con roadmap priorizado combinado. Resumen: (1) validación real de schema + reintento acotado, (2) `PermissionGuard` por niveles de riesgo + patrón de dos pasadas cobertura-luego-auditoría (evidencia de AuthBench, mayo 2026), (3) compactor con limpieza quirúrgica de `tool_result` antes de una arquitectura de memoria de 3 capas, (4) TTL/caché de catálogo MCP. La literatura confirma que el compactor 100% determinístico de `braze-session` (sin LLM/RL) es una decisión de diseño defendible, no una simplificación pobre.
+
+## Grupo 2 del roadmap SOTA — PermissionGuard por niveles de riesgo (2026-07-04)
+
+Implementa el punto 2 de `docs/SOTA-2026-07.md` § "Roadmap priorizado" tal como fue diseñado: reemplazo del clasificador de shell (allow-por-defecto, dos patrones prohibidos) por un allowlist explícito default-deny, mecanismo de "recordar por sesión" en memoria, y extensión del gating de `PermissionGuard` a las tool calls de `braze-mcp-client` (que hasta ahora no tenía ningún control de permisos).
+
+**Qué se hizo**:
+- `braze-permissions::classifier`: `ShellCommand` pasó de "Reversible salvo `git push`/`rm -rf`" a "Irreversible salvo que coincida con `is_safe_shell_command`" — un allowlist explícito de utilitarios de solo lectura (`ls`, `cat`, `pwd`, `echo`, `wc`, `diff`, `whoami`, `date`, `env`, `which`, `true`, `false`, `head`, `tail`, `file`, `grep`) más un subconjunto no-mutante de `find` (rechaza `-delete`/`-exec`/`-execdir`/`-ok`/`-okdir`/`-fprint*`) y `git` (`status`/`diff`/`log`/`show`, o `branch` sin argumentos). `mv`, `dd`, `curl`, `chmod -R`, y un `rm` sin flags — que antes pasaban sin confirmar — ahora son `Irreversible`.
+- `braze-permissions::action`: nueva variante `ActionDescriptor::McpToolCall { server, tool }`, siempre clasificada `Irreversible` (un servidor MCP es código arbitrario sin subconjunto seguro por construcción).
+- `braze-permissions::allowlist`: extraído `WorkdirAllowlist::resolve` (antes lógica inline duplicada en `is_allowed`) para que `guard.rs` pueda resolver rutas a la misma forma canónica al construir su clave de sesión.
+- `braze-permissions::guard`: `PermissionGuard` gana una caché en memoria (`Mutex<HashSet<RememberKey>>`, nunca persistida a disco) de acciones irreversibles ya confirmadas en la sesión — una repetición de la misma clave (programa+subcomando de shell, ruta resuelta de write/delete, servidor+tool de MCP) no vuelve a preguntar; una denegación nunca se recuerda.
+- `braze-mcp-client`: `McpToolProvider` gana un campo `guard: PermissionGuard` (cuarto parámetro nuevo de `connect`) y chequea `ActionDescriptor::McpToolCall` antes de despachar cualquier `invoke` — cierra el gap de que cualquier servidor MCP conectado ejecutaba sin restricción alguna.
+- `braze-cli`: la construcción del guard se extrajo a `build_permission_guard(cwd)`, reusada para el `LocalToolsProvider` y para un guard nuevo e independiente por cada servidor MCP conectado en el loop existente.
+
+**Tests agregados/cambiados**: `braze-permissions` pasó de 35 a 49 tests (clasificador: comandos seguros nuevos, `find`/`git` con y sin flags mutantes, regresión explícita de `mv`/`curl`/`chmod -R`/`dd`, `McpToolCall` siempre irreversible, `Display` de `McpToolCall`; guard: recordar-por-sesión con claves repetidas/distintas, denegación nunca recordada). `braze-mcp-client` ganó un test de integración (`invoke_is_denied_by_a_guard_that_always_refuses`) y su helper `connect()` de test ahora construye y pasa un guard.
+
+**Verificación**: `cargo build --workspace`, `cargo test --workspace` (187 tests + 1 doctest, todos verdes), `cargo clippy --workspace --all-targets -- -D warnings` (limpio), `cargo fmt --all --check` (limpio).
+
+**Decisión de diseño no completamente especificada de antemano**: `McpToolProvider` guarda el nombre "pelado" del servidor en un campo nuevo `server_name` (en vez de derivarlo quitando el prefijo `"mcp:"` de `provider_id`) — más simple y no depende de que el formato de `provider_id` no cambie nunca.
+
+**Diferido a propósito**: persistencia de la sesión de "recordar" entre corridas (`--resume`) — ver `docs/SOTA-2026-07.md` § 2 para la razón.
 
 ## Archivos críticos
 

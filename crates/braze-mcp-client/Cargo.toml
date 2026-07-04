@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 braze-types = { workspace = true }
 braze-tools-core = { workspace = true }
+braze-permissions = { workspace = true }
 async-trait = { workspace = true }
 # "io-std" on top of the workspace-wide tokio features (process, io-util,
 # ...): only needed by `src/bin/toy_mcp_server.rs` (`rmcp::transport::stdio`

@@ -11,6 +11,9 @@
 //! mock of the transport.
 
 use braze_mcp_client::McpToolProvider;
+use braze_permissions::{
+    ActionDescriptor, ConfirmationPrompt, DefaultClassifier, PermissionGuard, WorkdirAllowlist,
+};
 use braze_tools_core::{ToolError, ToolProvider};
 use braze_types::ToolCall;
 
@@ -18,10 +21,57 @@ fn toy_server_path() -> String {
     env!("CARGO_BIN_EXE_toy_mcp_server").to_string()
 }
 
+/// Always answers "yes" — every `McpToolProvider::connect` call in this
+/// file needs a guard now that `braze-mcp-client` gates every `invoke`
+/// through `PermissionGuard`, and `McpToolCall` is always classified
+/// Irreversible (see `braze-permissions::classifier`), so a guard that
+/// denies everything would break every non-permission-focused test here.
+struct AlwaysAllow;
+
+#[async_trait::async_trait]
+impl ConfirmationPrompt for AlwaysAllow {
+    async fn confirm(&self, _action: &ActionDescriptor) -> bool {
+        true
+    }
+}
+
+/// Always answers "no" — used by the dedicated denial test below.
+struct AlwaysDeny;
+
+#[async_trait::async_trait]
+impl ConfirmationPrompt for AlwaysDeny {
+    async fn confirm(&self, _action: &ActionDescriptor) -> bool {
+        false
+    }
+}
+
+fn allow_guard() -> PermissionGuard {
+    let cwd = std::env::temp_dir();
+    PermissionGuard::new(
+        WorkdirAllowlist::new(cwd.clone()),
+        Box::new(DefaultClassifier::new(WorkdirAllowlist::new(cwd))),
+        Box::new(AlwaysAllow),
+    )
+}
+
+fn deny_guard() -> PermissionGuard {
+    let cwd = std::env::temp_dir();
+    PermissionGuard::new(
+        WorkdirAllowlist::new(cwd.clone()),
+        Box::new(DefaultClassifier::new(WorkdirAllowlist::new(cwd))),
+        Box::new(AlwaysDeny),
+    )
+}
+
 async fn connect() -> McpToolProvider {
-    McpToolProvider::connect("toy".to_string(), toy_server_path(), Vec::new())
-        .await
-        .expect("toy MCP server should spawn and complete the handshake")
+    McpToolProvider::connect(
+        "toy".to_string(),
+        toy_server_path(),
+        Vec::new(),
+        allow_guard(),
+    )
+    .await
+    .expect("toy MCP server should spawn and complete the handshake")
 }
 
 fn tool_call(id: &str, name: &str, arguments: serde_json::Value) -> ToolCall {
@@ -172,9 +222,42 @@ async fn connect_to_a_nonexistent_command_fails_with_provider_unavailable() {
         "broken".to_string(),
         "this-binary-does-not-exist-12345".to_string(),
         Vec::new(),
+        allow_guard(),
     )
     .await
     .expect_err("spawning a nonexistent binary must fail, not hang");
 
     assert!(matches!(err, ToolError::ProviderUnavailable(_)));
+}
+
+#[tokio::test]
+async fn invoke_is_denied_by_a_guard_that_always_refuses() {
+    // McpToolCall is always classified Irreversible, so a guard whose
+    // prompt always answers "no" must block every invoke before the
+    // request ever reaches the toy server.
+    let provider = McpToolProvider::connect(
+        "toy".to_string(),
+        toy_server_path(),
+        Vec::new(),
+        deny_guard(),
+    )
+    .await
+    .expect("toy MCP server should spawn and complete the handshake");
+
+    let call = tool_call("call-denied", "add", serde_json::json!({"a": 2, "b": 3}));
+    let err = provider
+        .invoke(&call)
+        .await
+        .expect_err("a denying guard must block the call");
+
+    match err {
+        ToolError::InvocationFailed { name, message } => {
+            assert_eq!(name, "add");
+            assert!(
+                message.contains("denied"),
+                "expected a permission-denial message, got: {message}"
+            );
+        }
+        other => panic!("expected InvocationFailed, got {other:?}"),
+    }
 }

@@ -54,13 +54,22 @@ impl WorkdirAllowlist {
         self
     }
 
-    /// Relative `path` is resolved against roots[0] (cwd) before comparison.
-    pub fn is_allowed(&self, path: &Path) -> bool {
-        let resolved = if path.is_absolute() {
+    /// Resolves `path` to an absolute, lexically-normalized `PathBuf`: a
+    /// relative path is joined against `roots[0]` (cwd) first. Shared by
+    /// [`WorkdirAllowlist::is_allowed`] and by `braze-permissions::guard`'s
+    /// session-remember key, which needs the same canonical form so that
+    /// e.g. `"src/main.rs"` and `"./src/main.rs"` hash to the same key.
+    pub(crate) fn resolve(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
             normalize_lexically(path)
         } else {
             normalize_lexically(&self.roots[0].join(path))
-        };
+        }
+    }
+
+    /// Relative `path` is resolved against roots[0] (cwd) before comparison.
+    pub fn is_allowed(&self, path: &Path) -> bool {
+        let resolved = self.resolve(path);
         self.roots.iter().any(|root| resolved.starts_with(root))
     }
 }

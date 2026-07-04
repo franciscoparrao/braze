@@ -17,8 +17,16 @@ pub enum ActionDescriptor {
     ShellCommand {
         command: Vec<String>,
     },
-    /// Anything not classifiable by the fixed MVP table (e.g. an MCP tool
-    /// call). Always treated as Reversible by DefaultClassifier.
+    /// An invocation of a tool exposed by an external MCP server. Always
+    /// classified `Irreversible` by `DefaultClassifier` — an MCP server is
+    /// arbitrary, unaudited code chosen by whoever wired it up, so there is
+    /// no safe-by-construction subset analogous to `is_safe_shell_command`.
+    McpToolCall {
+        server: String,
+        tool: String,
+    },
+    /// Anything not classifiable by the fixed MVP table. Always treated as
+    /// Reversible by DefaultClassifier.
     Other {
         label: String,
     },
@@ -33,6 +41,9 @@ impl fmt::Display for ActionDescriptor {
             Self::WriteFile { path } => write!(f, "write file {}", path.display()),
             Self::DeleteFile { path } => write!(f, "delete file {}", path.display()),
             Self::ShellCommand { command } => write!(f, "run `{}`", command.join(" ")),
+            Self::McpToolCall { server, tool } => {
+                write!(f, "call MCP tool `{tool}` on server `{server}`")
+            }
             Self::Other { label } => write!(f, "{label}"),
         }
     }
@@ -64,6 +75,18 @@ mod tests {
             command: vec!["git".to_string(), "push".to_string()],
         };
         assert_eq!(action.to_string(), "run `git push`");
+    }
+
+    #[test]
+    fn display_mcp_tool_call() {
+        let action = ActionDescriptor::McpToolCall {
+            server: "filesystem".to_string(),
+            tool: "read_file".to_string(),
+        };
+        assert_eq!(
+            action.to_string(),
+            "call MCP tool `read_file` on server `filesystem`"
+        );
     }
 
     #[test]

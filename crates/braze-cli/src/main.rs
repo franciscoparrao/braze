@@ -40,6 +40,23 @@ async fn main() -> ExitCode {
     }
 }
 
+/// Builds a fresh `PermissionGuard` scoped to `cwd`: a `WorkdirAllowlist` +
+/// `DefaultClassifier` pair (each needs its own `WorkdirAllowlist` instance
+/// since it isn't `Clone`) plus a `TerminalConfirmationPrompt`. Every
+/// `ToolProvider` this binary constructs (the local tools provider, and one
+/// per connected MCP server) gets its own guard from this same helper, each
+/// with an independent in-memory "remembered" session cache.
+fn build_permission_guard(cwd: &std::path::Path) -> braze_permissions::PermissionGuard {
+    let allowlist_for_classifier = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
+    let allowlist_for_guard = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
+    let classifier = braze_permissions::DefaultClassifier::new(allowlist_for_classifier);
+    braze_permissions::PermissionGuard::new(
+        allowlist_for_guard,
+        Box::new(classifier),
+        Box::new(TerminalConfirmationPrompt),
+    )
+}
+
 async fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
@@ -101,31 +118,27 @@ async fn run() -> Result<(), CliError> {
     };
 
     // Two-layer permission setup: a soft working-dir allowlist plus a
-    // fixed-table classifier + terminal y/n confirmation for irreversible
-    // actions. `WorkdirAllowlist` isn't `Clone`, so the classifier and the
-    // guard each get their own instance built from the same cwd rather
-    // than sharing one.
+    // default-deny shell classifier + terminal y/n confirmation for
+    // irreversible actions. Every `ToolProvider` (local tools, and now each
+    // MCP server) gets its own freshly built `PermissionGuard` — see
+    // `build_permission_guard` below — since `PermissionGuard` isn't
+    // shared/`Clone` across providers.
     let cwd = std::env::current_dir()?;
-    let allowlist_for_classifier = braze_permissions::WorkdirAllowlist::new(cwd.clone());
-    let allowlist_for_guard = braze_permissions::WorkdirAllowlist::new(cwd);
-    let classifier = braze_permissions::DefaultClassifier::new(allowlist_for_classifier);
-    let guard = braze_permissions::PermissionGuard::new(
-        allowlist_for_guard,
-        Box::new(classifier),
-        Box::new(TerminalConfirmationPrompt),
-    );
+    let local_guard = build_permission_guard(&cwd);
 
-    let local_provider = braze_tools_local::LocalToolsProvider::new(guard);
+    let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard);
     let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
         vec![Box::new(local_provider)];
 
     // Best-effort: a dead/misconfigured MCP server never aborts startup,
     // it's just unavailable for this run (logged as a warning).
     for server in &config.mcp_servers {
+        let mcp_guard = build_permission_guard(&cwd);
         match braze_mcp_client::McpToolProvider::connect(
             server.name.clone(),
             server.command.clone(),
             server.args.clone(),
+            mcp_guard,
         )
         .await
         {

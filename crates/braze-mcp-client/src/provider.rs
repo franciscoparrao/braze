@@ -26,10 +26,18 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// [`ToolProvider`](braze_tools_core::ToolProvider) so it composes into a
 /// `ToolRegistry` as a sibling of `braze-tools-local`'s built-ins — see
 /// PLAN.md, dependency graph ("neither implementer depends on the other").
-#[derive(Debug)]
 pub struct McpToolProvider {
     /// `format!("mcp:{name}")`, computed once at connect time.
     provider_id: String,
+    /// The bare server name (`name` passed to `connect`, before the
+    /// `"mcp:"` prefix), kept around separately so `invoke` can populate
+    /// `braze_permissions::ActionDescriptor::McpToolCall { server, .. }`
+    /// with a plain name rather than re-deriving it from `provider_id`.
+    server_name: String,
+    /// Every tool call this provider dispatches is gated through this
+    /// guard — see PLAN.md's SOTA-2026-07 roadmap ("Grupo 2"): before this
+    /// crate had no permission gating at all, unlike `braze-tools-local`.
+    guard: braze_permissions::PermissionGuard,
     service: RunningService<RoleClient, ()>,
     /// Last full `tools/list` result. `None` until the first successful
     /// fetch.
@@ -59,6 +67,7 @@ impl McpToolProvider {
         name: String,
         command: String,
         args: Vec<String>,
+        guard: braze_permissions::PermissionGuard,
     ) -> Result<Self, ToolError> {
         let provider_id = format!("mcp:{name}");
         tracing::info!(
@@ -82,6 +91,8 @@ impl McpToolProvider {
 
         Ok(Self {
             provider_id,
+            server_name: name,
+            guard,
             service,
             tool_cache: RwLock::new(None),
         })
@@ -107,6 +118,18 @@ impl McpToolProvider {
             .await
             .as_ref()
             .and_then(|tools| tools.iter().find(|t| t.name.as_ref() == name).cloned())
+    }
+}
+
+// `PermissionGuard` doesn't implement `Debug`, so this can no longer be
+// `#[derive(Debug)]`. `finish_non_exhaustive` signals that some fields
+// (`guard`, `service`, `tool_cache`) are intentionally omitted rather than
+// silently dropped by an oversight.
+impl std::fmt::Debug for McpToolProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpToolProvider")
+            .field("provider_id", &self.provider_id)
+            .finish_non_exhaustive()
     }
 }
 
@@ -165,6 +188,18 @@ impl ToolProvider for McpToolProvider {
     }
 
     async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let action = braze_permissions::ActionDescriptor::McpToolCall {
+            server: self.server_name.clone(),
+            tool: call.name.clone(),
+        };
+        self.guard
+            .check(&action)
+            .await
+            .map_err(|err| ToolError::InvocationFailed {
+                name: call.name.clone(),
+                message: err.to_string(),
+            })?;
+
         let arguments = match &call.arguments {
             serde_json::Value::Null => None,
             serde_json::Value::Object(map) => Some(map.clone()),

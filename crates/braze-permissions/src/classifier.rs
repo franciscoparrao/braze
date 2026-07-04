@@ -18,11 +18,22 @@ pub trait ActionClassifier: Send + Sync {
     fn classify(&self, action: &ActionDescriptor) -> Reversibility;
 }
 
-/// MVP fixed "always confirm" table: git push/--force, rm -rf (and flag-
-/// order variants), and any WriteFile/DeleteFile whose path escapes the
-/// WorkdirAllowlist. A DeleteFile INSIDE the allowlist is Reversible for
-/// MVP (PLAN.md's table only names "escrituras fuera del cwd", not
-/// deletes in scope — do not silently expand beyond spec).
+/// WriteFile/DeleteFile: Reversible inside the WorkdirAllowlist, else
+/// Irreversible. A DeleteFile INSIDE the allowlist is Reversible for MVP
+/// (PLAN.md's table only names "escrituras fuera del cwd", not deletes in
+/// scope — do not silently expand beyond spec).
+///
+/// ShellCommand: default-deny. `git push`/`rm -rf` (and flag-order
+/// variants) are always Irreversible; otherwise a command is Reversible
+/// only if it matches the explicit `is_safe_shell_command` allowlist
+/// (read-only/introspection commands, plus a narrow, non-mutating subset of
+/// `find`/`git`). Everything else — `mv`, `dd`, `curl`, `chmod -R`, a bare
+/// `rm` with no flags, any unrecognized program — is Irreversible. This
+/// replaced an earlier "allow by default, deny two patterns" table that
+/// left most destructive/networked commands unconfirmed.
+///
+/// McpToolCall: always Irreversible — an MCP server is arbitrary code the
+/// user chose to wire up, with no safe-by-construction subset to allowlist.
 pub struct DefaultClassifier {
     allowlist: WorkdirAllowlist,
 }
@@ -46,10 +57,18 @@ impl ActionClassifier for DefaultClassifier {
             ActionDescriptor::ShellCommand { command } => {
                 if is_git_push(command) || is_rm_rf(command) {
                     Reversibility::Irreversible
-                } else {
+                } else if is_safe_shell_command(command) {
                     Reversibility::Reversible
+                } else {
+                    // Default-deny: anything not on the explicit safe
+                    // allowlist above (mv, dd, curl, chmod, a bare `rm`
+                    // with no flags, ...) is treated as irreversible.
+                    Reversibility::Irreversible
                 }
             }
+            // An MCP server is arbitrary, unaudited code — there is no
+            // safe-by-construction subset to allowlist, unlike shell.
+            ActionDescriptor::McpToolCall { .. } => Reversibility::Irreversible,
             ActionDescriptor::Other { .. } => Reversibility::Reversible,
         }
     }
@@ -92,6 +111,53 @@ fn is_rm_rf(command: &[String]) -> bool {
         }
     }
     has_recursive && has_force
+}
+
+/// Explicit allowlist of shell commands considered safe regardless of
+/// their arguments (read-only/introspection utilities), plus a narrow set
+/// of non-mutating `find`/`git` invocations. Anything not matched here
+/// falls through to `Irreversible` in `DefaultClassifier::classify` —
+/// this function is the *only* way a `ShellCommand` becomes Reversible
+/// (other than the `is_git_push`/`is_rm_rf` check, which runs first and
+/// always wins the other way).
+fn is_safe_shell_command(command: &[String]) -> bool {
+    let Some(program) = command.first().map(String::as_str) else {
+        return false;
+    };
+    match program {
+        "ls" | "pwd" | "cat" | "echo" | "wc" | "diff" | "whoami" | "date" | "env" | "which"
+        | "true" | "false" | "head" | "tail" | "file" | "grep" => true,
+        "find" => is_safe_find(command),
+        "git" => is_safe_git(command),
+        _ => false,
+    }
+}
+
+/// `find` is safe unless any argument requests a mutating/side-effecting
+/// action: `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`,
+/// `-fprint0`, `-fprintf`. Same flag-scanning technique as `is_rm_rf`:
+/// walk every argument and look for the dangerous ones by exact match
+/// (these are all long-form `find` primaries, never combined into short
+/// clusters the way `rm -rf` is).
+fn is_safe_find(command: &[String]) -> bool {
+    const MUTATING_PRIMARIES: &[&str] = &[
+        "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf",
+    ];
+    !command[1..]
+        .iter()
+        .any(|arg| MUTATING_PRIMARIES.contains(&arg.as_str()))
+}
+
+/// `git` is safe only for a narrow set of read-only subcommands:
+/// `status`, `diff`, `log`, `show` (any further arguments allowed), or a
+/// bare `git branch` with no arguments at all (`git branch -D foo`/
+/// `git branch -m foo` mutate/delete branches and must NOT match).
+fn is_safe_git(command: &[String]) -> bool {
+    match command.get(1).map(String::as_str) {
+        Some("status") | Some("diff") | Some("log") | Some("show") => true,
+        Some("branch") => command.len() == 2,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -142,7 +208,7 @@ mod tests {
     #[test]
     fn other_is_always_reversible() {
         let action = ActionDescriptor::Other {
-            label: "mcp tool call".to_string(),
+            label: "custom action".to_string(),
         };
         assert_eq!(classifier().classify(&action), Reversibility::Reversible);
     }
@@ -214,11 +280,13 @@ mod tests {
     }
 
     #[test]
-    fn shell_command_rm_plain_is_reversible_via_classifier() {
+    fn shell_command_rm_plain_is_irreversible_via_classifier() {
+        // `rm` (no flags) is NOT on the safe allowlist anymore — default-deny
+        // means any shell command not explicitly known-safe is Irreversible.
         let action = ActionDescriptor::ShellCommand {
             command: cmd(&["rm", "archivo.txt"]),
         };
-        assert_eq!(classifier().classify(&action), Reversibility::Reversible);
+        assert_eq!(classifier().classify(&action), Reversibility::Irreversible);
     }
 
     #[test]
@@ -227,5 +295,122 @@ mod tests {
             command: cmd(&["git", "status"]),
         };
         assert_eq!(classifier().classify(&action), Reversibility::Reversible);
+    }
+
+    fn shell(parts: &[&str]) -> ActionDescriptor {
+        ActionDescriptor::ShellCommand {
+            command: cmd(parts),
+        }
+    }
+
+    #[test]
+    fn safe_readonly_commands_are_reversible() {
+        for parts in [
+            &["ls", "-la"][..],
+            &["pwd"][..],
+            &["cat", "file.txt"][..],
+            &["echo", "hi"][..],
+            &["wc", "-l", "file.txt"][..],
+            &["diff", "a", "b"][..],
+            &["whoami"][..],
+            &["date"][..],
+            &["env"][..],
+            &["which", "cargo"][..],
+            &["true"][..],
+            &["false"][..],
+            &["head", "-n", "5", "file.txt"][..],
+            &["tail", "-f", "file.txt"][..],
+            &["file", "file.txt"][..],
+            &["grep", "-r", "needle", "."][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Reversible,
+                "expected {parts:?} to be Reversible"
+            );
+        }
+    }
+
+    #[test]
+    fn find_without_mutating_flags_is_reversible() {
+        assert_eq!(
+            classifier().classify(&shell(&["find", ".", "-name", "*.rs"])),
+            Reversibility::Reversible
+        );
+    }
+
+    #[test]
+    fn find_delete_is_irreversible() {
+        assert_eq!(
+            classifier().classify(&shell(&["find", ".", "-delete"])),
+            Reversibility::Irreversible
+        );
+    }
+
+    #[test]
+    fn find_exec_is_irreversible() {
+        assert_eq!(
+            classifier().classify(&shell(&["find", ".", "-exec", "rm", "{}", ";"])),
+            Reversibility::Irreversible
+        );
+    }
+
+    #[test]
+    fn git_diff_log_show_are_reversible() {
+        for parts in [
+            &["git", "diff"][..],
+            &["git", "log"][..],
+            &["git", "show"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Reversible,
+                "expected {parts:?} to be Reversible"
+            );
+        }
+    }
+
+    #[test]
+    fn git_branch_with_no_args_is_reversible() {
+        assert_eq!(
+            classifier().classify(&shell(&["git", "branch"])),
+            Reversibility::Reversible
+        );
+    }
+
+    #[test]
+    fn git_branch_delete_is_irreversible() {
+        assert_eq!(
+            classifier().classify(&shell(&["git", "branch", "-D", "foo"])),
+            Reversibility::Irreversible
+        );
+    }
+
+    #[test]
+    fn previously_unclassified_dangerous_commands_are_now_irreversible() {
+        // The regression-proof for the gap this work closes: these all
+        // used to slip through as Reversible under the old "allow by
+        // default, deny two patterns" table.
+        for parts in [
+            &["mv", "a", "b"][..],
+            &["curl", "http://x"][..],
+            &["chmod", "-R", "777", "/"][..],
+            &["dd", "if=/dev/zero", "of=/dev/sda"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Irreversible,
+                "expected {parts:?} to be Irreversible"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_tool_call_is_always_irreversible() {
+        let action = ActionDescriptor::McpToolCall {
+            server: "x".to_string(),
+            tool: "y".to_string(),
+        };
+        assert_eq!(classifier().classify(&action), Reversibility::Irreversible);
     }
 }
