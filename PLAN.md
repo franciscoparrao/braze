@@ -253,6 +253,8 @@ pub trait TaskNotifier: Send + Sync {
 
 **Próximo incremento más claro si se retoma el proyecto**: validación real de tool schema en `braze-engine` antes del dispatch final (hoy solo hace un `resolve()` best-effort sin validar) — es la deuda con más evidencia empírica detrás, confirmada en vivo múltiples veces durante esta sesión de validación manual (modelos chicos arman argumentos inventados contra el schema genérico permisivo que usa `braze-model`). Ver también la lista de items diferidos a "Fase 2" en la sección de Arquitectura (sandboxing SO, multi-agente, TUI, otel, skills-packs, hooks plugueables).
 
+**Investigación de estado del arte (2026-07-04)**: ver `docs/SOTA-2026-07.md` — dos estudios profundos (práctica de industria + literatura académica) con roadmap priorizado combinado. Resumen: (1) validación real de schema + reintento acotado, (2) `PermissionGuard` por niveles de riesgo + patrón de dos pasadas cobertura-luego-auditoría (evidencia de AuthBench, mayo 2026), (3) compactor con limpieza quirúrgica de `tool_result` antes de una arquitectura de memoria de 3 capas, (4) TTL/caché de catálogo MCP. La literatura confirma que el compactor 100% determinístico de `braze-session` (sin LLM/RL) es una decisión de diseño defendible, no una simplificación pobre.
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace
