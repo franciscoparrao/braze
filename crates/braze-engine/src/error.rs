@@ -26,4 +26,13 @@ pub enum EngineError {
     /// rather than looping forever.
     #[error("turn exceeded the maximum of {0} model/tool-call round trips without converging")]
     TurnDidNotConverge(usize),
+
+    /// A `ModelBackend`'s completion stream ended without ever yielding
+    /// `CompletionEvent::Done` and without reporting an `Err` first — an
+    /// invariant every implementation must uphold (see
+    /// `braze_model::ModelBackend::complete`'s doc comment). Surfacing
+    /// this instead of silently treating whatever partial text/tool-calls
+    /// arrived as a complete, converged response.
+    #[error("model backend's completion stream ended without a terminal event")]
+    IncompleteStream,
 }

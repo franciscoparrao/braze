@@ -147,33 +147,60 @@ impl Engine {
             let mut text_buffer = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
             let mut usage: Option<(u32, u32)> = None;
+            let mut saw_done = false;
 
             while let Some(event) = stream.next().await {
                 match event {
-                    CompletionEvent::TextDelta(delta) => {
+                    Ok(CompletionEvent::TextDelta(delta)) => {
                         on_text(&delta);
                         text_buffer.push_str(&delta);
                     }
-                    CompletionEvent::ToolCallRequested {
+                    Ok(CompletionEvent::ToolCallRequested {
                         id,
                         name,
                         arguments,
-                    } => {
+                    }) => {
                         tool_calls.push(ToolCall {
                             id,
                             name,
                             arguments,
                         });
                     }
-                    CompletionEvent::Usage {
+                    Ok(CompletionEvent::Usage {
                         input_tokens,
                         output_tokens,
-                    } => {
+                    }) => {
                         tracing::debug!(input_tokens, output_tokens, "model usage this round");
                         usage = Some((input_tokens, output_tokens));
                     }
-                    CompletionEvent::Done => break,
+                    Ok(CompletionEvent::Done) => {
+                        saw_done = true;
+                        break;
+                    }
+                    Err(err) => {
+                        // Whatever text/tool-calls arrived before the
+                        // stream failed must NOT be treated as a complete,
+                        // converged response — nothing from this round has
+                        // been persisted yet (the loop below only appends
+                        // after this point), so propagating here silently
+                        // discards the partial round instead of
+                        // persisting it as if it were real. See
+                        // `ModelError::StreamError`'s doc comment /
+                        // docs/AUDITORIA-2026-07.md hallazgo A3/B4.
+                        return Err(err.into());
+                    }
                 }
+            }
+
+            // A `ModelBackend` must uphold the invariant that its stream
+            // either yields an `Err` or ends with `Ok(Done)` as its last
+            // item (see the trait's doc comment) — this only trips if a
+            // backend implementation violates that, but the same
+            // reasoning as the `Err` arm above applies: an unconverged,
+            // possibly-truncated round must not be persisted as if it
+            // were complete.
+            if !saw_done {
+                return Err(EngineError::IncompleteStream);
             }
 
             // Persisted once per round (if the backend reported it) so
@@ -371,7 +398,26 @@ impl Engine {
         while !pending.is_empty() {
             match self.notifier.next_completed(TOOL_COMPLETION_TIMEOUT).await {
                 Some((handle, result)) => {
-                    pending.remove(&handle);
+                    if !pending.remove(&handle) {
+                        // Stale completion from a task that already timed
+                        // out in a previous round: the MVP limitation
+                        // above means a timed-out task is never cancelled,
+                        // it keeps running unobserved and can eventually
+                        // deliver its real result here, long after that
+                        // earlier round already persisted a synthetic
+                        // timeout `ToolCallCompleted` for the same
+                        // `tool_call_id`. Persisting this one too would
+                        // append a *second* `tool_result` for the same
+                        // `tool_use_id` — Anthropic rejects that with a
+                        // permanent 400 on every subsequent turn, since the
+                        // rollout log is append-only. Discard it instead.
+                        tracing::warn!(
+                            ?handle,
+                            tool_call_id = %result.tool_call_id,
+                            "discarding a stale tool completion from a previous round"
+                        );
+                        continue;
+                    }
                     let id = handle_to_id
                         .remove(&handle)
                         .unwrap_or_else(|| result.tool_call_id.clone());
@@ -434,11 +480,14 @@ impl Engine {
     /// window (e.g. Ollama's `num_ctx`) should also set
     /// `context_budget_tokens` via [`Engine::with_context_budget`].
     async fn load_messages(&self, session: &SessionId) -> Result<Vec<Message>, EngineError> {
-        let events = match self.store.load(session).await {
+        let mut events = match self.store.load(session).await {
             Ok(events) => events,
             Err(SessionError::NotFound(_)) => Vec::new(),
             Err(err) => return Err(err.into()),
         };
+
+        self.repair_orphaned_tool_calls(session, &mut events)
+            .await?;
 
         let (durable, tactical) = self.compactor.split(&events);
 
@@ -468,6 +517,68 @@ impl Engine {
         } else {
             Ok(build_messages(&durable, &tactical))
         }
+    }
+
+    /// Repairs `AssistantToolCall`s left without a matching
+    /// `ToolCallCompleted` (correlated by id) anywhere in the log — the
+    /// process crashed, was killed, or lost power between `run_turn`
+    /// persisting the tool_use (`dispatch_tool_calls` appends it *before*
+    /// dispatch) and receiving the tool's result. Left unrepaired, every
+    /// future request against this session is rejected by Anthropic with
+    /// a permanent 400 (a `tool_use` block with no matching
+    /// `tool_result`) — the session becomes permanently unresumable.
+    ///
+    /// Synthesizes and persists an error `ToolCallCompleted` for each
+    /// orphan found, and also appends it to `events` in place so this same
+    /// `load_messages` call already reflects the repair without a second
+    /// round-trip to the store. Idempotent and append-only: a session with
+    /// no orphans is a no-op, and a session already repaired has none left
+    /// to find on a later call.
+    async fn repair_orphaned_tool_calls(
+        &self,
+        session: &SessionId,
+        events: &mut Vec<AgentEvent>,
+    ) -> Result<(), EngineError> {
+        let completed_ids: HashSet<String> = events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::ToolCallCompleted { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+
+        let orphan_ids: Vec<String> = events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::AssistantToolCall { id, .. } if !completed_ids.contains(id) => {
+                    Some(id.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
+        for id in orphan_ids {
+            tracing::warn!(
+                tool_call_id = %id,
+                "repairing an orphaned tool_use with no matching result \
+                 (likely an interrupted process); synthesizing an error ToolCallCompleted"
+            );
+            let repair = AgentEvent::ToolCallCompleted {
+                id: id.clone(),
+                result: ToolResult {
+                    tool_call_id: id,
+                    content: "tool call interrupted: the process ended before a result \
+                              was received for it (crash, kill, or power loss). Retry it \
+                              if it is still needed."
+                        .to_string(),
+                    is_error: true,
+                },
+            };
+            self.store.append(session, &repair).await?;
+            events.push(repair);
+        }
+
+        Ok(())
     }
 }
 
@@ -547,12 +658,43 @@ mod tests {
         async fn complete(
             &self,
             _req: CompletionRequest,
-        ) -> Result<Pin<Box<dyn Stream<Item = CompletionEvent> + Send>>, ModelError> {
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
             let mut rounds = self.rounds.lock().await;
             let round = rounds
                 .pop_front()
                 .unwrap_or_else(|| vec![CompletionEvent::Done]);
-            Ok(Box::pin(futures::stream::iter(round)))
+            Ok(Box::pin(futures::stream::iter(round.into_iter().map(Ok))))
+        }
+    }
+
+    /// A `ModelBackend` whose stream yields some text then fails mid-round
+    /// with a `StreamError` — used to verify `run_turn` never persists the
+    /// partial text as if it were a complete response (see A3/B4).
+    struct ErroringModel;
+
+    #[async_trait]
+    impl ModelBackend for ErroringModel {
+        fn name(&self) -> &str {
+            "erroring"
+        }
+
+        async fn complete(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
+            let items = vec![
+                Ok(CompletionEvent::TextDelta(
+                    "Voy a leer el archi".to_string(),
+                )),
+                Err(ModelError::StreamError("connection reset".to_string())),
+            ];
+            Ok(Box::pin(futures::stream::iter(items)))
         }
     }
 
@@ -575,6 +717,21 @@ mod tests {
                 rx: AsyncMutex::new(rx),
                 next: AtomicU64::new(0),
             }
+        }
+
+        /// Queues a completion for a handle that was never returned by
+        /// `spawn` — simulating a task from an earlier round that finally
+        /// finished after that round already gave up on it (timeout), so
+        /// its handle is no longer in the current round's `pending` set.
+        /// `TaskHandle(u64::MAX)` is guaranteed never to collide with a
+        /// real handle from `spawn`'s monotonic counter, which starts at 0.
+        fn inject_stale_completion(&self, tool_call_id: &str) {
+            let stale = ToolResult {
+                tool_call_id: tool_call_id.to_string(),
+                content: "stale result that must never be persisted".to_string(),
+                is_error: false,
+            };
+            let _ = self.tx.send((TaskHandle(u64::MAX), stale));
         }
     }
 
@@ -669,6 +826,43 @@ mod tests {
             SessionId::new()
         ));
         (FileSessionStore::new(dir.clone()), dir)
+    }
+
+    /// Regression test for A3/B4: a stream that fails mid-round (after
+    /// delivering partial text) must propagate as an error from
+    /// `run_turn`, and the partial text must never be persisted as if it
+    /// were a complete `AssistantText` response.
+    #[tokio::test]
+    async fn a_mid_stream_error_propagates_and_does_not_persist_partial_text() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let engine = Engine::new(
+            Box::new(ErroringModel),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut |_| {}).await;
+        assert!(
+            matches!(result, Err(EngineError::Model(_))),
+            "expected the stream error to propagate as EngineError::Model, got {result:?}"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { .. })),
+            "the partial text from the failed round must never be persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     #[tokio::test]
@@ -818,6 +1012,78 @@ mod tests {
             other => panic!("expected ToolCallCompleted, got {other:?}"),
         }
         assert!(matches!(events[4], AgentEvent::AssistantText { .. }));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for A4: a completion delivered for a handle that
+    /// isn't part of the current round's `pending` set (simulating a task
+    /// that finally finished after an earlier round already gave up on it
+    /// via timeout) must be discarded, not persisted as a second
+    /// `ToolCallCompleted` — which would otherwise corrupt the session
+    /// with two `tool_result`s for a single `tool_use_id`.
+    #[tokio::test]
+    async fn stale_completion_from_an_earlier_round_is_discarded_not_persisted() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let notifier = TestNotifier::new();
+        // Queued before dispatch even starts, so it is guaranteed to be
+        // the first completion `next_completed` yields — exactly the
+        // ordering a stale, previously-timed-out task's late delivery
+        // would produce.
+        notifier.inject_stale_completion("call-1");
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(notifier),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut |_| {})
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        let completions: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolCallCompleted { .. }))
+            .collect();
+        // Exactly one `ToolCallCompleted` for call-1 — the real one — not
+        // two.
+        assert_eq!(completions.len(), 1);
+        match completions[0] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-1");
+                assert_eq!(result.content, "echoed: hi");
+            }
+            other => panic!("expected ToolCallCompleted, got {other:?}"),
+        }
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -983,6 +1249,132 @@ mod tests {
 
         // Both calls were rejected before dispatch — `invoke` never ran.
         assert_eq!(invocations.load(Ordering::SeqCst), 0);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for C4: an `AssistantToolCall` with no matching
+    /// `ToolCallCompleted` anywhere in the log (what an interrupted
+    /// process leaves behind — see `dispatch_tool_calls`, which persists
+    /// the `tool_use` before dispatch) must be repaired with a synthetic
+    /// error result on the next `load_messages`, not left dangling —
+    /// otherwise Anthropic rejects every future request against this
+    /// session with a permanent 400.
+    #[tokio::test]
+    async fn load_messages_repairs_an_orphaned_tool_use_with_no_result() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "lee el archivo".to_string(),
+                },
+            )
+            .await
+            .expect("seed user message");
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantToolCall {
+                    id: "call-orphan".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({"path": "x.txt"}),
+                },
+            )
+            .await
+            .expect("seed orphaned tool_use — process 'crashed' right here");
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let messages = engine
+            .load_messages(&session)
+            .await
+            .expect("load_messages should succeed");
+
+        // The reconstructed history must be a valid tool_use/tool_result
+        // pair, not a dangling tool_use — otherwise Anthropic's API
+        // rejects the request outright.
+        assert!(messages.iter().any(|m| matches!(
+            &m.content[0],
+            ContentBlock::ToolResult { tool_use_id, is_error, .. }
+                if tool_use_id == "call-orphan" && *is_error
+        )));
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let completions: Vec<_> = events
+            .iter()
+            .filter(
+                |e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-orphan"),
+            )
+            .collect();
+        assert_eq!(
+            completions.len(),
+            1,
+            "expected exactly one synthetic repair to be persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The repair must be idempotent: calling `load_messages` again after
+    /// the first repair must not persist a second `ToolCallCompleted` for
+    /// the same id (it now has one, so it's no longer an orphan).
+    #[tokio::test]
+    async fn repairing_an_orphaned_tool_use_twice_only_persists_one_completion() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantToolCall {
+                    id: "call-orphan".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({"path": "x.txt"}),
+                },
+            )
+            .await
+            .expect("seed orphaned tool_use");
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .load_messages(&session)
+            .await
+            .expect("first load_messages should repair the orphan");
+        engine
+            .load_messages(&session)
+            .await
+            .expect("second load_messages should be a no-op repair-wise");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let completions = events
+            .iter()
+            .filter(
+                |e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-orphan"),
+            )
+            .count();
+        assert_eq!(completions, 1, "the second call must not repair again");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

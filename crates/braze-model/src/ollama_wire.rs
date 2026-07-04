@@ -259,16 +259,33 @@ static TOOL_CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// the Anthropic backend.
 pub(crate) struct OllamaStreamState {
     pub done: bool,
+    /// Set when a line carries a top-level `"error"` field — Ollama emits
+    /// this for a failed generation (e.g. the model crashed, ran out of
+    /// memory), often without `"done": true` alongside it. The caller
+    /// (`drive_stream` in `ollama.rs`) checks this after every
+    /// `handle_line` call and yields it as
+    /// `Err(ModelError::StreamError)` instead of silently ending the
+    /// stream — see [`crate::ModelError::StreamError`]'s doc comment.
+    pub stream_error: Option<String>,
 }
 
 impl OllamaStreamState {
     pub fn new() -> Self {
-        Self { done: false }
+        Self {
+            done: false,
+            stream_error: None,
+        }
     }
 
     /// Processes one parsed NDJSON line, returning zero or more
     /// [`CompletionEvent`]s. Never panics.
     pub fn handle_line(&mut self, json: &Value) -> Vec<CompletionEvent> {
+        if let Some(message) = json.get("error").and_then(Value::as_str) {
+            self.stream_error = Some(message.to_string());
+            self.done = true;
+            return Vec::new();
+        }
+
         let mut events = Vec::new();
 
         if let Some(message) = json.get("message") {

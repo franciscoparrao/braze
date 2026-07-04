@@ -103,18 +103,38 @@ impl SessionStore for FileSessionStore {
             }
         })?;
 
+        let lines: Vec<&str> = content.lines().collect();
         let mut events = Vec::new();
-        for (line_no, line) in content.lines().enumerate() {
+        for (line_no, line) in lines.iter().enumerate() {
             if line.trim().is_empty() {
                 continue;
             }
-            let event: AgentEvent = serde_json::from_str(line).map_err(|e| {
-                SessionError::Read(format!(
-                    "{path:?}:{line}: malformed event: {e}",
-                    line = line_no + 1
-                ))
-            })?;
-            events.push(event);
+            match serde_json::from_str::<AgentEvent>(line) {
+                Ok(event) => events.push(event),
+                Err(e) => {
+                    // A process kill/crash mid-`append` can leave the
+                    // *last* line of the file partially written (the
+                    // in-process write completed, but the bytes never
+                    // made it to disk in full) — see
+                    // docs/AUDITORIA-2026-07.md, hallazgo C5. Only the
+                    // final line gets this tolerance: a malformed line
+                    // anywhere else in the file is real corruption, not a
+                    // truncated write, and must still fail loudly.
+                    if line_no == lines.len() - 1 {
+                        tracing::warn!(
+                            path = ?path,
+                            line = line_no + 1,
+                            error = %e,
+                            "discarding malformed final line in rollout log (likely a truncated write from a crash mid-append); session recovered up to this point"
+                        );
+                        break;
+                    }
+                    return Err(SessionError::Read(format!(
+                        "{path:?}:{line}: malformed event: {e}",
+                        line = line_no + 1
+                    )));
+                }
+            }
         }
         Ok(events)
     }
@@ -214,6 +234,72 @@ mod tests {
             }
             _ => panic!("unexpected event ordering/shape"),
         }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for C5: a partially-written final line (what a
+    /// crash mid-`write_all` would leave behind) must not fail the whole
+    /// load — the events written before it are still recoverable.
+    #[tokio::test]
+    async fn load_tolerates_a_truncated_final_line() {
+        let (store, dir) = temp_store("truncated-final-line");
+        let session = SessionId::new();
+
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "hola".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantText {
+                    text: "hola de vuelta".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Simulate a crash mid-write: append a truncated JSON fragment
+        // with no closing brace/newline, exactly what an interrupted
+        // `write_all` of a third event could leave on disk.
+        let path = store.path_for(&session);
+        let mut raw = tokio::fs::read_to_string(&path).await.unwrap();
+        raw.push_str(r#"{"type":"user_message","text":"cor"#);
+        tokio::fs::write(&path, raw).await.unwrap();
+
+        let events = store.load(&session).await.expect("load should not fail");
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
+        assert!(matches!(events[1], AgentEvent::AssistantText { .. }));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A malformed line that is NOT the last one in the file is real
+    /// corruption (not a truncated write) and must still fail loudly —
+    /// the C5 tolerance is deliberately narrow.
+    #[tokio::test]
+    async fn load_still_fails_on_a_malformed_line_that_is_not_the_last_one() {
+        let (store, dir) = temp_store("corrupt-middle-line");
+        let session = SessionId::new();
+
+        let path = store.path_for(&session);
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let content = concat!(
+            "{\"type\":\"user_message\",\"text\":\"hola\"}\n",
+            "this is not valid json at all\n",
+            "{\"type\":\"user_message\",\"text\":\"despues\"}\n",
+        );
+        tokio::fs::write(&path, content).await.unwrap();
+
+        let err = store.load(&session).await.unwrap_err();
+        assert!(matches!(err, SessionError::Read(_)));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

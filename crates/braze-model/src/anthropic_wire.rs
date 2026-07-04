@@ -242,6 +242,13 @@ pub(crate) struct AnthropicStreamState {
     input_tokens: u32,
     output_tokens: u32,
     pub done: bool,
+    /// Set by a mid-stream `"error"` SSE event (e.g. `overloaded_error`).
+    /// The caller (`drive_stream` in `anthropic.rs`) checks this after
+    /// every `handle_event` call and, if set, yields it as
+    /// `Err(ModelError::StreamError)` instead of silently ending the
+    /// stream — see [`ModelError::StreamError`]'s doc comment for why
+    /// this used to be indistinguishable from a normal completion.
+    pub stream_error: Option<String>,
 }
 
 impl AnthropicStreamState {
@@ -251,6 +258,7 @@ impl AnthropicStreamState {
             input_tokens: 0,
             output_tokens: 0,
             done: false,
+            stream_error: None,
         }
     }
 
@@ -294,13 +302,20 @@ impl AnthropicStreamState {
                 ]
             }
             Some("error") => {
-                // Mid-stream server error (e.g. overloaded_error). The
-                // Stream::Item type is CompletionEvent (no error variant —
-                // frozen contract), so we can't propagate this as a
-                // ModelError; the caller logs it via tracing and this just
-                // ends the stream cleanly.
+                // Mid-stream server error (e.g. overloaded_error). Record
+                // it in `stream_error` — `drive_stream` checks that after
+                // this call and yields it as `Err(ModelError::StreamError)`
+                // instead of a fabricated `Done`, so the caller can tell
+                // this apart from a real, successful completion.
+                let message = json
+                    .get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown error")
+                    .to_string();
+                self.stream_error = Some(message);
                 self.done = true;
-                vec![CompletionEvent::Done]
+                Vec::new()
             }
             // "ping" and any future/unknown event types are ignored.
             _ => Vec::new(),
@@ -614,15 +629,18 @@ mod tests {
     }
 
     #[test]
-    fn stream_state_error_event_terminates_without_panicking() {
+    fn stream_state_error_event_sets_stream_error_not_a_fabricated_done() {
         let mut state = AnthropicStreamState::new();
         let events = state.handle_event(&serde_json::json!({
             "type": "error",
             "error": {"type": "overloaded_error", "message": "Overloaded"}
         }));
         assert!(state.done);
-        assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], CompletionEvent::Done));
+        // No events (in particular, no `Done`) — the caller must see this
+        // as a stream error via `state.stream_error`, not as a successful
+        // completion.
+        assert!(events.is_empty());
+        assert_eq!(state.stream_error.as_deref(), Some("Overloaded"));
     }
 
     #[test]

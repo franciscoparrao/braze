@@ -66,7 +66,8 @@ impl ModelBackend for AnthropicBackend {
     async fn complete(
         &self,
         req: CompletionRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = CompletionEvent> + Send>>, ModelError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
         let body = build_request(&req, &self.model);
         tracing::info!(
             tool_count = body.tools.len(),
@@ -115,10 +116,12 @@ struct StreamCtx {
     finished: bool,
 }
 
-async fn drive_stream(mut ctx: StreamCtx) -> Option<(CompletionEvent, StreamCtx)> {
+async fn drive_stream(
+    mut ctx: StreamCtx,
+) -> Option<(Result<CompletionEvent, ModelError>, StreamCtx)> {
     loop {
         if let Some(event) = ctx.pending.pop_front() {
-            return Some((event, ctx));
+            return Some((Ok(event), ctx));
         }
         if ctx.finished {
             return None;
@@ -130,6 +133,14 @@ async fn drive_stream(mut ctx: StreamCtx) -> Option<(CompletionEvent, StreamCtx)
                     tracing::debug!(event_type = ?json.get("type"), "anthropic sse event");
                     let events = ctx.state.handle_event(&json);
                     ctx.pending.extend(events);
+                    // A mid-stream provider error (e.g. overloaded_error)
+                    // must be surfaced to the caller, not swallowed —
+                    // yield it now instead of whatever (empty) events
+                    // `handle_event` produced for it.
+                    if let Some(message) = ctx.state.stream_error.take() {
+                        ctx.finished = true;
+                        return Some((Err(ModelError::StreamError(message)), ctx));
+                    }
                     if ctx.state.done {
                         ctx.finished = true;
                     }
@@ -141,7 +152,12 @@ async fn drive_stream(mut ctx: StreamCtx) -> Option<(CompletionEvent, StreamCtx)
                         "anthropic stream: invalid JSON in SSE data, terminating stream"
                     );
                     ctx.finished = true;
-                    return None;
+                    return Some((
+                        Err(ModelError::Decode(format!(
+                            "anthropic stream: invalid JSON in SSE data: {err}"
+                        ))),
+                        ctx,
+                    ));
                 }
             },
             None => match ctx.byte_stream.next().await {
@@ -150,12 +166,29 @@ async fn drive_stream(mut ctx: StreamCtx) -> Option<(CompletionEvent, StreamCtx)
                 }
                 Some(Err(err)) => {
                     tracing::error!(error = %err, "anthropic stream: transport error, terminating stream");
-                    return None;
+                    ctx.finished = true;
+                    return Some((
+                        Err(ModelError::StreamError(format!("transport error: {err}"))),
+                        ctx,
+                    ));
                 }
                 None => {
-                    // Connection closed. If we never saw message_stop, there's
-                    // nothing more to yield — just end the stream.
-                    return None;
+                    ctx.finished = true;
+                    if ctx.state.done {
+                        // Connection closed cleanly right after a proper
+                        // message_stop — nothing more to yield.
+                        return None;
+                    }
+                    // Connection closed before a terminal event ever
+                    // arrived: an incomplete stream must not be treated
+                    // as a successful completion (see
+                    // `ModelError::StreamError`'s doc comment).
+                    return Some((
+                        Err(ModelError::StreamError(
+                            "connection closed before a terminal event was received".to_string(),
+                        )),
+                        ctx,
+                    ));
                 }
             },
         }
@@ -217,7 +250,7 @@ mod tests {
         let mut saw_usage = false;
         let mut saw_done = false;
         while let Some(event) = stream.next().await {
-            match event {
+            match event.expect("no stream error expected") {
                 CompletionEvent::TextDelta(t) => text.push_str(&t),
                 CompletionEvent::Usage {
                     input_tokens,
@@ -274,7 +307,7 @@ mod tests {
 
         let tool_calls: Vec<_> = events
             .iter()
-            .filter_map(|e| match e {
+            .filter_map(|e| match e.as_ref().expect("no stream error expected") {
                 CompletionEvent::ToolCallRequested {
                     id,
                     name,
@@ -289,6 +322,99 @@ mod tests {
         assert_eq!(id, "toolu_1");
         assert_eq!(name, "get_weather");
         assert_eq!(arguments, &serde_json::json!({"location": "Santiago"}));
+    }
+
+    /// Regression test for A3/B4: a mid-stream provider error (e.g.
+    /// Anthropic's `overloaded_error`) must end the stream with an
+    /// explicit `Err`, never a fabricated `Done` — otherwise a caller like
+    /// `Engine::run_turn` would persist whatever partial text arrived
+    /// ("Voy a") as if it were the model's complete, converged response.
+    #[tokio::test]
+    async fn a_mid_stream_error_event_ends_the_stream_with_an_error_not_a_fake_done() {
+        let sse_body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Voy a\"}}\n\n",
+            "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n",
+        );
+
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "text/event-stream",
+            sse_body.as_bytes().to_vec(),
+        )
+        .await;
+
+        let backend = AnthropicBackend::with_base_url(
+            "test-key".to_string(),
+            "claude-opus-4-8".to_string(),
+            format!("http://{addr}/v1/messages"),
+        );
+
+        let events: Vec<_> = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed")
+            .collect()
+            .await;
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Ok(CompletionEvent::Done))),
+            "must never see a Done after a mid-stream provider error"
+        );
+        let last = events.last().expect("expected at least the error item");
+        assert!(
+            matches!(last, Err(ModelError::StreamError(_))),
+            "expected the stream to end with a StreamError, got {last:?}"
+        );
+    }
+
+    /// Regression test for A3/B4: the connection closing before any
+    /// terminal event (`message_stop` or `error`) ever arrived — e.g. the
+    /// server process dying mid-response — must also be a stream error,
+    /// not a silent, clean end treated as a successful completion.
+    #[tokio::test]
+    async fn connection_closed_before_a_terminal_event_is_a_stream_error() {
+        let sse_body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Voy a leer el archi\"}}\n\n",
+            // No content_block_stop/message_delta/message_stop — the
+            // connection simply ends here.
+        );
+
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "text/event-stream",
+            sse_body.as_bytes().to_vec(),
+        )
+        .await;
+
+        let backend = AnthropicBackend::with_base_url(
+            "test-key".to_string(),
+            "claude-opus-4-8".to_string(),
+            format!("http://{addr}/v1/messages"),
+        );
+
+        let events: Vec<_> = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed")
+            .collect()
+            .await;
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Ok(CompletionEvent::Done)))
+        );
+        let last = events.last().expect("expected at least the error item");
+        assert!(
+            matches!(last, Err(ModelError::StreamError(_))),
+            "expected the stream to end with a StreamError, got {last:?}"
+        );
     }
 
     #[tokio::test]

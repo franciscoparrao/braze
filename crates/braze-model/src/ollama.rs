@@ -101,7 +101,8 @@ impl ModelBackend for OllamaBackend {
     async fn complete(
         &self,
         req: CompletionRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = CompletionEvent> + Send>>, ModelError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
         let body = build_request(&req, &self.model, self.num_ctx, self.temperature);
         tracing::info!(
             tool_count = body.tools.len(),
@@ -149,10 +150,12 @@ struct StreamCtx {
     finished: bool,
 }
 
-async fn drive_stream(mut ctx: StreamCtx) -> Option<(CompletionEvent, StreamCtx)> {
+async fn drive_stream(
+    mut ctx: StreamCtx,
+) -> Option<(Result<CompletionEvent, ModelError>, StreamCtx)> {
     loop {
         if let Some(event) = ctx.pending.pop_front() {
-            return Some((event, ctx));
+            return Some((Ok(event), ctx));
         }
         if ctx.finished {
             return None;
@@ -164,6 +167,12 @@ async fn drive_stream(mut ctx: StreamCtx) -> Option<(CompletionEvent, StreamCtx)
                     tracing::debug!(done = ?json.get("done"), "ollama ndjson line");
                     let events = ctx.state.handle_line(&json);
                     ctx.pending.extend(events);
+                    // A line carrying a top-level "error" field must be
+                    // surfaced to the caller, not swallowed.
+                    if let Some(message) = ctx.state.stream_error.take() {
+                        ctx.finished = true;
+                        return Some((Err(ModelError::StreamError(message)), ctx));
+                    }
                     if ctx.state.done {
                         ctx.finished = true;
                     }
@@ -174,7 +183,12 @@ async fn drive_stream(mut ctx: StreamCtx) -> Option<(CompletionEvent, StreamCtx)
                         "ollama stream: invalid JSON in NDJSON line, terminating stream"
                     );
                     ctx.finished = true;
-                    return None;
+                    return Some((
+                        Err(ModelError::Decode(format!(
+                            "ollama stream: invalid JSON in NDJSON line: {err}"
+                        ))),
+                        ctx,
+                    ));
                 }
             },
             None => match ctx.byte_stream.next().await {
@@ -183,10 +197,23 @@ async fn drive_stream(mut ctx: StreamCtx) -> Option<(CompletionEvent, StreamCtx)
                 }
                 Some(Err(err)) => {
                     tracing::error!(error = %err, "ollama stream: transport error, terminating stream");
-                    return None;
+                    ctx.finished = true;
+                    return Some((
+                        Err(ModelError::StreamError(format!("transport error: {err}"))),
+                        ctx,
+                    ));
                 }
                 None => {
-                    return None;
+                    ctx.finished = true;
+                    if ctx.state.done {
+                        return None;
+                    }
+                    return Some((
+                        Err(ModelError::StreamError(
+                            "connection closed before a terminal event was received".to_string(),
+                        )),
+                        ctx,
+                    ));
                 }
             },
         }
@@ -232,7 +259,7 @@ mod tests {
         let mut saw_usage = false;
         let mut saw_done = false;
         while let Some(event) = stream.next().await {
-            match event {
+            match event.expect("no stream error expected") {
                 CompletionEvent::TextDelta(t) => text.push_str(&t),
                 CompletionEvent::Usage {
                     input_tokens,
@@ -277,7 +304,7 @@ mod tests {
 
         let tool_calls: Vec<_> = events
             .iter()
-            .filter_map(|e| match e {
+            .filter_map(|e| match e.as_ref().expect("no stream error expected") {
                 CompletionEvent::ToolCallRequested {
                     name, arguments, ..
                 } => Some((name.clone(), arguments.clone())),
@@ -287,6 +314,79 @@ mod tests {
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].0, "get_weather");
         assert_eq!(tool_calls[0].1, serde_json::json!({"city": "Santiago"}));
+    }
+
+    /// Regression test for A3/B4: a line carrying a top-level `"error"`
+    /// field (Ollama's shape for a failed generation, often without
+    /// `"done": true`) must end the stream with an explicit `Err`, never
+    /// silently — otherwise partial text delivered before the failure
+    /// would be persisted as if it were a complete response.
+    #[tokio::test]
+    async fn a_mid_stream_error_line_ends_the_stream_with_an_error_not_silently() {
+        let ndjson_body = concat!(
+            "{\"model\":\"llama3\",\"message\":{\"role\":\"assistant\",\"content\":\"Voy a\"},\"done\":false}\n",
+            "{\"error\":\"model runner has crashed\"}\n",
+        );
+
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "application/x-ndjson",
+            ndjson_body.as_bytes().to_vec(),
+        )
+        .await;
+
+        let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
+        let events: Vec<_> = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed")
+            .collect()
+            .await;
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Ok(CompletionEvent::Done)))
+        );
+        let last = events.last().expect("expected at least the error item");
+        assert!(
+            matches!(last, Err(ModelError::StreamError(_))),
+            "expected the stream to end with a StreamError, got {last:?}"
+        );
+    }
+
+    /// Regression test for A3/B4: the connection closing before any line
+    /// with `"done": true` ever arrived must also be a stream error, not a
+    /// silent, clean end treated as a successful completion.
+    #[tokio::test]
+    async fn connection_closed_before_done_is_a_stream_error() {
+        let ndjson_body = "{\"model\":\"llama3\",\"message\":{\"role\":\"assistant\",\"content\":\"Voy a leer\"},\"done\":false}\n";
+
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "application/x-ndjson",
+            ndjson_body.as_bytes().to_vec(),
+        )
+        .await;
+
+        let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
+        let events: Vec<_> = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed")
+            .collect()
+            .await;
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Ok(CompletionEvent::Done)))
+        );
+        let last = events.last().expect("expected at least the error item");
+        assert!(
+            matches!(last, Err(ModelError::StreamError(_))),
+            "expected the stream to end with a StreamError, got {last:?}"
+        );
     }
 
     #[tokio::test]

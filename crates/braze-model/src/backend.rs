@@ -39,9 +39,17 @@ pub enum CompletionEvent {
 pub trait ModelBackend: Send + Sync {
     fn name(&self) -> &str;
 
-    /// Streams the completion as a sequence of [`CompletionEvent`]s.
+    /// Streams the completion as a sequence of [`CompletionEvent`]s. Each
+    /// item is a `Result`, not a bare `CompletionEvent`: a transport
+    /// error, a mid-stream provider error, or the connection closing
+    /// before a terminal event must surface as `Err(ModelError)` so the
+    /// caller can tell that apart from a normal completion — see
+    /// [`ModelError::StreamError`]. Implementations must uphold the
+    /// invariant that the stream either ends with `Ok(CompletionEvent::Done)`
+    /// as its last item, or yields an `Err` before ending; ending silently
+    /// with neither is a bug in the implementation, not a valid outcome.
     async fn complete(
         &self,
         req: CompletionRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = CompletionEvent> + Send>>, ModelError>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>;
 }
