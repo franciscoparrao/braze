@@ -186,7 +186,10 @@ mod tests {
             Box::new(MockProvider::new("mcp:filesystem", vec!["list_dir"])),
         ]);
 
-        let stubs = registry.all_stubs().await.expect("all_stubs should succeed");
+        let stubs = registry
+            .all_stubs()
+            .await
+            .expect("all_stubs should succeed");
         let names: Vec<&str> = stubs.iter().map(|s| s.name.as_str()).collect();
 
         assert_eq!(names, vec!["read_file", "write_file", "list_dir"]);

@@ -11,7 +11,9 @@ use futures::{Stream, StreamExt, stream};
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
 use crate::http_error::http_error_to_model_error;
-use crate::ollama_wire::{OllamaStreamState, build_request, extract_next_ndjson_line, parse_ndjson_line};
+use crate::ollama_wire::{
+    OllamaStreamState, build_request, extract_next_ndjson_line, parse_ndjson_line,
+};
 
 const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 
@@ -65,7 +67,10 @@ impl ModelBackend for OllamaBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = CompletionEvent> + Send>>, ModelError> {
         let body = build_request(&req, &self.model);
-        tracing::info!(tool_count = body.tools.len(), "starting ollama completion turn");
+        tracing::info!(
+            tool_count = body.tools.len(),
+            "starting ollama completion turn"
+        );
 
         let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
 
@@ -172,10 +177,18 @@ mod tests {
             "{\"model\":\"llama3\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":7,\"eval_count\":2}\n",
         );
 
-        let addr = crate::test_support::spawn_canned_http_server(200, "application/x-ndjson", ndjson_body.as_bytes().to_vec()).await;
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "application/x-ndjson",
+            ndjson_body.as_bytes().to_vec(),
+        )
+        .await;
 
         let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
-        let mut stream = backend.complete(sample_request()).await.expect("request should succeed");
+        let mut stream = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed");
 
         let mut text = String::new();
         let mut saw_usage = false;
@@ -183,7 +196,10 @@ mod tests {
         while let Some(event) = stream.next().await {
             match event {
                 CompletionEvent::TextDelta(t) => text.push_str(&t),
-                CompletionEvent::Usage { input_tokens, output_tokens } => {
+                CompletionEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                } => {
                     assert_eq!(input_tokens, 7);
                     assert_eq!(output_tokens, 2);
                     saw_usage = true;
@@ -206,7 +222,12 @@ mod tests {
             "\"done\":true,\"prompt_eval_count\":9,\"eval_count\":3}\n",
         );
 
-        let addr = crate::test_support::spawn_canned_http_server(200, "application/x-ndjson", ndjson_body.as_bytes().to_vec()).await;
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "application/x-ndjson",
+            ndjson_body.as_bytes().to_vec(),
+        )
+        .await;
 
         let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
         let events: Vec<_> = backend
@@ -219,9 +240,9 @@ mod tests {
         let tool_calls: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                CompletionEvent::ToolCallRequested { name, arguments, .. } => {
-                    Some((name.clone(), arguments.clone()))
-                }
+                CompletionEvent::ToolCallRequested {
+                    name, arguments, ..
+                } => Some((name.clone(), arguments.clone())),
                 _ => None,
             })
             .collect();
@@ -233,26 +254,34 @@ mod tests {
     #[tokio::test]
     async fn complete_maps_429_to_rate_limited() {
         let body = br#"{"error":"too many requests"}"#.to_vec();
-        let addr = crate::test_support::spawn_canned_http_server(429, "application/json", body).await;
+        let addr =
+            crate::test_support::spawn_canned_http_server(429, "application/json", body).await;
 
         let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
         let err = match backend.complete(sample_request()).await {
             Ok(_) => panic!("expected an error"),
             Err(e) => e,
         };
-        assert!(matches!(err, ModelError::RateLimited(_)), "expected RateLimited, got {err:?}");
+        assert!(
+            matches!(err, ModelError::RateLimited(_)),
+            "expected RateLimited, got {err:?}"
+        );
     }
 
     #[tokio::test]
     async fn complete_maps_500_to_request_error() {
         let body = br#"{"error":"internal error"}"#.to_vec();
-        let addr = crate::test_support::spawn_canned_http_server(500, "application/json", body).await;
+        let addr =
+            crate::test_support::spawn_canned_http_server(500, "application/json", body).await;
 
         let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
         let err = match backend.complete(sample_request()).await {
             Ok(_) => panic!("expected an error"),
             Err(e) => e,
         };
-        assert!(matches!(err, ModelError::Request(_)), "expected Request, got {err:?}");
+        assert!(
+            matches!(err, ModelError::Request(_)),
+            "expected Request, got {err:?}"
+        );
     }
 }

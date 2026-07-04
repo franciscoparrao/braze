@@ -15,5 +15,5 @@ mod store;
 pub use compactor::{ContextCompactor, DurableState};
 pub use error::SessionError;
 pub use file_store::FileSessionStore;
-pub use simple_compactor::{SimpleContextCompactor, DEFAULT_TACTICAL_WINDOW};
+pub use simple_compactor::{DEFAULT_TACTICAL_WINDOW, SimpleContextCompactor};
 pub use store::SessionStore;

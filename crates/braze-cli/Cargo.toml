@@ -15,7 +15,19 @@ path = "src/main.rs"
 braze-engine = { workspace = true }
 braze-config = { workspace = true }
 braze-session = { workspace = true }
-tokio = { workspace = true }
+braze-permissions = { workspace = true }
+braze-tools-local = { workspace = true }
+braze-mcp-client = { workspace = true }
+braze-tools-core = { workspace = true }
+braze-events = { workspace = true }
+braze-types = { workspace = true }
+braze-model = { workspace = true }
+# "io-std" on top of the workspace-wide tokio features: needed for
+# `tokio::io::stdin()` (the interactive `chat` loop and the terminal y/n
+# confirmation prompt both read real process stdin).
+tokio = { workspace = true, features = ["io-std"] }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }

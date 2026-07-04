@@ -24,7 +24,11 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub anthropic_api_key: Option<String>,
     #[serde(default)]
+    pub anthropic_model: Option<String>,
+    #[serde(default)]
     pub ollama_base_url: Option<String>,
+    #[serde(default)]
+    pub ollama_model: Option<String>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
     #[serde(default)]
@@ -63,13 +67,18 @@ impl ConfigOverrides {
             match field {
                 "DEFAULT_BACKEND" => overrides.default_backend = Some(value.to_string()),
                 "ANTHROPIC_API_KEY" => overrides.anthropic_api_key = Some(value.to_string()),
+                "ANTHROPIC_MODEL" => overrides.anthropic_model = Some(value.to_string()),
                 "OLLAMA_BASE_URL" => overrides.ollama_base_url = Some(value.to_string()),
+                "OLLAMA_MODEL" => overrides.ollama_model = Some(value.to_string()),
                 "MAX_TOKENS" => {
-                    let parsed = value.parse::<u32>().map_err(|e| ConfigError::InvalidEnvValue {
-                        var: key.to_string(),
-                        value: value.to_string(),
-                        reason: e.to_string(),
-                    })?;
+                    let parsed =
+                        value
+                            .parse::<u32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.max_tokens = Some(parsed);
                 }
                 "SESSION_DIR" => overrides.session_dir = Some(PathBuf::from(value)),
@@ -97,20 +106,24 @@ mod tests {
         let vars = [
             ("BRAZE_DEFAULT_BACKEND", "anthropic"),
             ("BRAZE_ANTHROPIC_API_KEY", "sk-test-123"),
+            ("BRAZE_ANTHROPIC_MODEL", "claude-test-model"),
             ("BRAZE_OLLAMA_BASE_URL", "http://example:1234"),
+            ("BRAZE_OLLAMA_MODEL", "llama3.1-test"),
             ("BRAZE_MAX_TOKENS", "8192"),
             ("BRAZE_SESSION_DIR", "/tmp/sessions"),
         ];
         let overrides = ConfigOverrides::from_env(vars).unwrap();
         assert_eq!(overrides.default_backend.as_deref(), Some("anthropic"));
+        assert_eq!(overrides.anthropic_api_key.as_deref(), Some("sk-test-123"));
         assert_eq!(
-            overrides.anthropic_api_key.as_deref(),
-            Some("sk-test-123")
+            overrides.anthropic_model.as_deref(),
+            Some("claude-test-model")
         );
         assert_eq!(
             overrides.ollama_base_url.as_deref(),
             Some("http://example:1234")
         );
+        assert_eq!(overrides.ollama_model.as_deref(), Some("llama3.1-test"));
         assert_eq!(overrides.max_tokens, Some(8192));
         assert_eq!(overrides.session_dir, Some(PathBuf::from("/tmp/sessions")));
     }

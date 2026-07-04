@@ -101,15 +101,13 @@ mod tests {
 
     #[test]
     fn path_inside_extra_root_is_allowed() {
-        let allowlist =
-            WorkdirAllowlist::new("/home/user/project").with_extra_root("/opt/shared");
+        let allowlist = WorkdirAllowlist::new("/home/user/project").with_extra_root("/opt/shared");
         assert!(allowlist.is_allowed(Path::new("/opt/shared/data.csv")));
     }
 
     #[test]
     fn path_outside_all_roots_is_not_allowed() {
-        let allowlist =
-            WorkdirAllowlist::new("/home/user/project").with_extra_root("/opt/shared");
+        let allowlist = WorkdirAllowlist::new("/home/user/project").with_extra_root("/opt/shared");
         assert!(!allowlist.is_allowed(Path::new("/var/log/syslog")));
     }
 

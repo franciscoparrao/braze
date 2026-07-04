@@ -8,12 +8,20 @@ use std::path::PathBuf;
 /// shell string.
 #[derive(Debug, Clone)]
 pub enum ActionDescriptor {
-    WriteFile { path: PathBuf },
-    DeleteFile { path: PathBuf },
-    ShellCommand { command: Vec<String> },
+    WriteFile {
+        path: PathBuf,
+    },
+    DeleteFile {
+        path: PathBuf,
+    },
+    ShellCommand {
+        command: Vec<String>,
+    },
     /// Anything not classifiable by the fixed MVP table (e.g. an MCP tool
     /// call). Always treated as Reversible by DefaultClassifier.
-    Other { label: String },
+    Other {
+        label: String,
+    },
 }
 
 /// Human-readable one-liner — this is exactly the string that ends up in

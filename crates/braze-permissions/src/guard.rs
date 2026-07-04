@@ -48,8 +48,8 @@ mod tests {
     use super::*;
     use crate::classifier::DefaultClassifier;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Confirmation prompt with a fixed answer that also counts how many
     /// times it was invoked, so tests can assert Reversible actions never

@@ -52,7 +52,11 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.json");
-        std::fs::write(&path, r#"{"default_backend": "anthropic", "max_tokens": 8192}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"default_backend": "anthropic", "max_tokens": 8192}"#,
+        )
+        .unwrap();
 
         let overrides = load_file(&path).unwrap().unwrap();
         assert_eq!(overrides.default_backend.as_deref(), Some("anthropic"));

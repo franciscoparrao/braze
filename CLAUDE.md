@@ -1,7 +1,11 @@
 # braze — motor agéntico genérico en Rust (experimento)
 
-> **Estado:** SCAFFOLD (Fase 1 completa: workspace + contratos congelados,
-> sin lógica implementada aún). Creado 2026-07-03.
+> **Estado:** Fase 5 completa (integración: `braze-engine` + `braze-cli`
+> implementados y compuestos sobre los 7 crates de Fases 1-4). El binario
+> `braze` (subcomandos `chat`/`run`) compila y compone el loop agéntico
+> completo. Pendiente: Fase 6 (verificación adicional/review) y
+> verificación manual end-to-end contra Anthropic/Ollama reales. Creado
+> 2026-07-03.
 > Ver `PLAN.md` para la arquitectura completa, el grafo de dependencias y el
 > plan de implementación por oleadas.
 
@@ -59,18 +63,19 @@ Todo lo demás sigue la convención habitual: `thiserror` v2, `clap` v4,
 
 ## Estado del código (2026-07-03)
 
-Scaffold inicial: `Cargo.toml` de workspace + 11 manifiestos de crate,
-tipos compartidos completos (`braze-types`), `AgentEvent`+`TaskNotifier`
-completos (`braze-events`), y las firmas congeladas de `ToolProvider`
-(`braze-tools-core`), `ModelBackend` (`braze-model`) y
-`SessionStore`/`ContextCompactor` (`braze-session`). El resto de los crates
-(`braze-config`, `braze-permissions`, `braze-tools-local`,
-`braze-mcp-client`, `braze-engine`, `braze-cli`) son placeholders vacíos —
-implementación por oleadas de subagentes, ver `PLAN.md` Fases 2-5.
+Los 11 crates del workspace tienen lógica real (no placeholders):
+`braze-types`, `braze-events` (con `AgentEvent::AssistantToolCall`,
+agregado en Fase 5), `braze-config` (con `anthropic_model`/`ollama_model`,
+agregados en Fase 5), `braze-permissions`, `braze-session`,
+`braze-tools-core`, `braze-model`, `braze-tools-local`, `braze-mcp-client`,
+`braze-engine` (el loop agéntico: `Engine::run_turn`) y `braze-cli` (el
+binario `braze`, subcomandos `chat`/`run`). `cargo build --workspace` y
+`cargo test --workspace` verdes (170 tests + 1 doctest), `cargo clippy
+--workspace --all-targets -- -D warnings` limpio.
 
 ## Próximos pasos al retomar
 
-Ver `PLAN.md` § "Fases de Implementación" — Fase 2 (Nivel 0:
-`braze-config`), Fase 3 (Nivel 1: `braze-permissions`, `braze-session`,
-`braze-tools-core`, `braze-model`), Fase 4 (Nivel 2: `braze-tools-local`,
-`braze-mcp-client`), Fase 5 (integración: `braze-engine` + `braze-cli`).
+Ver `PLAN.md` § "Fases de Implementación" — Fase 6 (verificación adicional:
+agente de tests, agente de review de código) y la verificación manual
+end-to-end contra Anthropic/Ollama reales (PLAN.md § "Verificación
+end-to-end (tras Fase 5)") — aún no ejecutada con credenciales reales.

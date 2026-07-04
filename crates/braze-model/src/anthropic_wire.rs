@@ -648,7 +648,8 @@ mod tests {
             "index": 0,
             "delta": {"type": "input_json_delta", "partial_json": "{not valid"}
         }));
-        let events = state.handle_event(&serde_json::json!({"type": "content_block_stop", "index": 0}));
+        let events =
+            state.handle_event(&serde_json::json!({"type": "content_block_stop", "index": 0}));
         // No panic, and no ToolCallRequested emitted for the broken block.
         assert!(events.is_empty());
     }

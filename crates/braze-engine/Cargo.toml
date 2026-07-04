@@ -20,3 +20,8 @@ braze-model = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }

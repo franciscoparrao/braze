@@ -109,10 +109,19 @@ checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 name = "braze-cli"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "braze-config",
  "braze-engine",
+ "braze-events",
+ "braze-mcp-client",
+ "braze-model",
+ "braze-permissions",
  "braze-session",
+ "braze-tools-core",
+ "braze-tools-local",
+ "braze-types",
  "clap",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -131,6 +140,7 @@ dependencies = [
 name = "braze-engine"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "braze-config",
  "braze-events",
  "braze-mcp-client",
@@ -140,6 +150,8 @@ dependencies = [
  "braze-tools-core",
  "braze-tools-local",
  "braze-types",
+ "futures",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",
@@ -152,6 +164,7 @@ dependencies = [
  "async-trait",
  "braze-types",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]

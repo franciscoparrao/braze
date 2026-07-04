@@ -115,10 +115,7 @@ mod tests {
 
     #[test]
     fn default_session_dir_prefers_xdg_data_home() {
-        let env = env_map(&[
-            ("XDG_DATA_HOME", "/custom/data"),
-            ("HOME", "/home/someone"),
-        ]);
+        let env = env_map(&[("XDG_DATA_HOME", "/custom/data"), ("HOME", "/home/someone")]);
         let dir = resolve_default_session_dir(|k| env.get(k).cloned());
         assert_eq!(dir, PathBuf::from("/custom/data/braze/sessions"));
     }

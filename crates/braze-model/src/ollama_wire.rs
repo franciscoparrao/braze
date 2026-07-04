@@ -110,7 +110,9 @@ fn to_ollama_messages(message: &Message) -> Vec<OllamaMessage> {
     let mut text_buf = String::new();
     let mut tool_calls = Vec::new();
 
-    let flush = |text_buf: &mut String, tool_calls: &mut Vec<OllamaToolCallOut>, out: &mut Vec<OllamaMessage>| {
+    let flush = |text_buf: &mut String,
+                 tool_calls: &mut Vec<OllamaToolCallOut>,
+                 out: &mut Vec<OllamaMessage>| {
         if !text_buf.is_empty() || !tool_calls.is_empty() {
             out.push(OllamaMessage {
                 role,
@@ -268,7 +270,10 @@ impl OllamaStreamState {
 fn tool_call_from_json(call: &Value) -> Option<CompletionEvent> {
     let function = call.get("function")?;
     let name = function.get("name").and_then(Value::as_str)?.to_string();
-    let arguments = function.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let arguments = function
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
     let id = format!(
         "ollama-tool-call-{}",
         TOOL_CALL_COUNTER.fetch_add(1, Ordering::Relaxed)
@@ -284,8 +289,11 @@ fn tool_call_from_json(call: &Value) -> Option<CompletionEvent> {
 /// unit-tested — returns [`ModelError::Decode`] on invalid JSON, never
 /// panics.
 pub(crate) fn parse_ndjson_line(line: &str) -> Result<Value, ModelError> {
-    serde_json::from_str(line)
-        .map_err(|e| ModelError::Decode(format!("ollama NDJSON line is not valid JSON ({e}): {line:?}")))
+    serde_json::from_str(line).map_err(|e| {
+        ModelError::Decode(format!(
+            "ollama NDJSON line is not valid JSON ({e}): {line:?}"
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -375,15 +383,24 @@ mod tests {
     #[test]
     fn extract_next_ndjson_line_parses_one_line() {
         let mut buf = b"{\"a\":1}\n{\"b\":2}\n".to_vec();
-        assert_eq!(extract_next_ndjson_line(&mut buf), Some(r#"{"a":1}"#.to_string()));
-        assert_eq!(extract_next_ndjson_line(&mut buf), Some(r#"{"b":2}"#.to_string()));
+        assert_eq!(
+            extract_next_ndjson_line(&mut buf),
+            Some(r#"{"a":1}"#.to_string())
+        );
+        assert_eq!(
+            extract_next_ndjson_line(&mut buf),
+            Some(r#"{"b":2}"#.to_string())
+        );
         assert_eq!(extract_next_ndjson_line(&mut buf), None);
     }
 
     #[test]
     fn extract_next_ndjson_line_skips_blank_lines() {
         let mut buf = b"\n\n{\"a\":1}\n".to_vec();
-        assert_eq!(extract_next_ndjson_line(&mut buf), Some(r#"{"a":1}"#.to_string()));
+        assert_eq!(
+            extract_next_ndjson_line(&mut buf),
+            Some(r#"{"a":1}"#.to_string())
+        );
     }
 
     #[test]
@@ -391,7 +408,10 @@ mod tests {
         let mut buf = b"{\"a\":".to_vec();
         assert_eq!(extract_next_ndjson_line(&mut buf), None);
         buf.extend_from_slice(b"1}\n");
-        assert_eq!(extract_next_ndjson_line(&mut buf), Some(r#"{"a":1}"#.to_string()));
+        assert_eq!(
+            extract_next_ndjson_line(&mut buf),
+            Some(r#"{"a":1}"#.to_string())
+        );
     }
 
     #[test]
@@ -431,7 +451,10 @@ mod tests {
             other => panic!("expected TextDelta, got {other:?}"),
         }
         match &events[2] {
-            CompletionEvent::Usage { input_tokens, output_tokens } => {
+            CompletionEvent::Usage {
+                input_tokens,
+                output_tokens,
+            } => {
                 assert_eq!(*input_tokens, 12);
                 assert_eq!(*output_tokens, 4);
             }
@@ -465,7 +488,9 @@ mod tests {
             .collect();
         assert_eq!(tool_calls.len(), 1);
         match tool_calls[0] {
-            CompletionEvent::ToolCallRequested { name, arguments, .. } => {
+            CompletionEvent::ToolCallRequested {
+                name, arguments, ..
+            } => {
                 assert_eq!(name, "get_weather");
                 assert_eq!(arguments, &serde_json::json!({"city": "Santiago"}));
             }
@@ -482,7 +507,10 @@ mod tests {
         assert!(state.done);
         assert!(events.iter().any(|e| matches!(
             e,
-            CompletionEvent::Usage { input_tokens: 0, output_tokens: 0 }
+            CompletionEvent::Usage {
+                input_tokens: 0,
+                output_tokens: 0
+            }
         )));
     }
 }

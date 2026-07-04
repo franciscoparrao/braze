@@ -68,7 +68,10 @@ impl ModelBackend for AnthropicBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = CompletionEvent> + Send>>, ModelError> {
         let body = build_request(&req, &self.model);
-        tracing::info!(tool_count = body.tools.len(), "starting anthropic completion turn");
+        tracing::info!(
+            tool_count = body.tools.len(),
+            "starting anthropic completion turn"
+        );
 
         let response = self
             .client
@@ -192,7 +195,12 @@ mod tests {
             "data: {\"type\":\"message_stop\"}\n\n",
         );
 
-        let addr = crate::test_support::spawn_canned_http_server(200, "text/event-stream", sse_body.as_bytes().to_vec()).await;
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "text/event-stream",
+            sse_body.as_bytes().to_vec(),
+        )
+        .await;
 
         let backend = AnthropicBackend::with_base_url(
             "test-key".to_string(),
@@ -200,7 +208,10 @@ mod tests {
             format!("http://{addr}/v1/messages"),
         );
 
-        let mut stream = backend.complete(sample_request()).await.expect("request should succeed");
+        let mut stream = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed");
 
         let mut text = String::new();
         let mut saw_usage = false;
@@ -208,7 +219,10 @@ mod tests {
         while let Some(event) = stream.next().await {
             match event {
                 CompletionEvent::TextDelta(t) => text.push_str(&t),
-                CompletionEvent::Usage { input_tokens, output_tokens } => {
+                CompletionEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                } => {
                     assert_eq!(input_tokens, 10);
                     assert_eq!(output_tokens, 3);
                     saw_usage = true;
@@ -238,7 +252,12 @@ mod tests {
             "data: {\"type\":\"message_stop\"}\n\n",
         );
 
-        let addr = crate::test_support::spawn_canned_http_server(200, "text/event-stream", sse_body.as_bytes().to_vec()).await;
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "text/event-stream",
+            sse_body.as_bytes().to_vec(),
+        )
+        .await;
 
         let backend = AnthropicBackend::with_base_url(
             "test-key".to_string(),
@@ -256,9 +275,11 @@ mod tests {
         let tool_calls: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                CompletionEvent::ToolCallRequested { id, name, arguments } => {
-                    Some((id.clone(), name.clone(), arguments.clone()))
-                }
+                CompletionEvent::ToolCallRequested {
+                    id,
+                    name,
+                    arguments,
+                } => Some((id.clone(), name.clone(), arguments.clone())),
                 _ => None,
             })
             .collect();
@@ -272,8 +293,10 @@ mod tests {
 
     #[tokio::test]
     async fn complete_maps_429_to_rate_limited() {
-        let body = br#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#.to_vec();
-        let addr = crate::test_support::spawn_canned_http_server(429, "application/json", body).await;
+        let body = br#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#
+            .to_vec();
+        let addr =
+            crate::test_support::spawn_canned_http_server(429, "application/json", body).await;
 
         let backend = AnthropicBackend::with_base_url(
             "test-key".to_string(),
@@ -285,13 +308,17 @@ mod tests {
             Ok(_) => panic!("expected an error"),
             Err(e) => e,
         };
-        assert!(matches!(err, ModelError::RateLimited(_)), "expected RateLimited, got {err:?}");
+        assert!(
+            matches!(err, ModelError::RateLimited(_)),
+            "expected RateLimited, got {err:?}"
+        );
     }
 
     #[tokio::test]
     async fn complete_maps_500_to_request_error() {
         let body = br#"{"type":"error","error":{"type":"api_error","message":"boom"}}"#.to_vec();
-        let addr = crate::test_support::spawn_canned_http_server(500, "application/json", body).await;
+        let addr =
+            crate::test_support::spawn_canned_http_server(500, "application/json", body).await;
 
         let backend = AnthropicBackend::with_base_url(
             "test-key".to_string(),
@@ -303,6 +330,9 @@ mod tests {
             Ok(_) => panic!("expected an error"),
             Err(e) => e,
         };
-        assert!(matches!(err, ModelError::Request(_)), "expected Request, got {err:?}");
+        assert!(
+            matches!(err, ModelError::Request(_)),
+            "expected Request, got {err:?}"
+        );
     }
 }

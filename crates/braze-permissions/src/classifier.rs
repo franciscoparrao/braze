@@ -112,10 +112,7 @@ mod tests {
         let action = ActionDescriptor::WriteFile {
             path: PathBuf::from("src/main.rs"),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Reversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Reversible);
     }
 
     #[test]
@@ -123,10 +120,7 @@ mod tests {
         let action = ActionDescriptor::WriteFile {
             path: PathBuf::from("/etc/passwd"),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Irreversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Irreversible);
     }
 
     #[test]
@@ -134,10 +128,7 @@ mod tests {
         let action = ActionDescriptor::DeleteFile {
             path: PathBuf::from("src/main.rs"),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Reversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Reversible);
     }
 
     #[test]
@@ -145,10 +136,7 @@ mod tests {
         let action = ActionDescriptor::DeleteFile {
             path: PathBuf::from("/etc/passwd"),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Irreversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Irreversible);
     }
 
     #[test]
@@ -156,10 +144,7 @@ mod tests {
         let action = ActionDescriptor::Other {
             label: "mcp tool call".to_string(),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Reversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Reversible);
     }
 
     #[test]
@@ -179,7 +164,12 @@ mod tests {
 
     #[test]
     fn rm_long_flags_is_irreversible() {
-        assert!(is_rm_rf(&cmd(&["rm", "--recursive", "--force", "/tmp/foo"])));
+        assert!(is_rm_rf(&cmd(&[
+            "rm",
+            "--recursive",
+            "--force",
+            "/tmp/foo"
+        ])));
     }
 
     #[test]
@@ -212,10 +202,7 @@ mod tests {
         let action = ActionDescriptor::ShellCommand {
             command: cmd(&["rm", "-rf", "/tmp/foo"]),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Irreversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Irreversible);
     }
 
     #[test]
@@ -223,10 +210,7 @@ mod tests {
         let action = ActionDescriptor::ShellCommand {
             command: cmd(&["git", "push"]),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Irreversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Irreversible);
     }
 
     #[test]
@@ -234,10 +218,7 @@ mod tests {
         let action = ActionDescriptor::ShellCommand {
             command: cmd(&["rm", "archivo.txt"]),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Reversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Reversible);
     }
 
     #[test]
@@ -245,9 +226,6 @@ mod tests {
         let action = ActionDescriptor::ShellCommand {
             command: cmd(&["git", "status"]),
         };
-        assert_eq!(
-            classifier().classify(&action),
-            Reversibility::Reversible
-        );
+        assert_eq!(classifier().classify(&action), Reversibility::Reversible);
     }
 }

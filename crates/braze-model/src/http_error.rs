@@ -55,7 +55,8 @@ mod tests {
 
     #[test]
     fn extracts_anthropic_error_shape() {
-        let body = r#"{"type":"error","error":{"type":"rate_limit_error","message":"too many requests"}}"#;
+        let body =
+            r#"{"type":"error","error":{"type":"rate_limit_error","message":"too many requests"}}"#;
         assert_eq!(
             extract_error_message(body),
             Some("too many requests".to_string())

@@ -79,6 +79,15 @@ fn approx_char_len(event: &AgentEvent) -> usize {
     match event {
         AgentEvent::UserMessage { text } | AgentEvent::AssistantText { text } => text.len(),
         AgentEvent::ToolCallStarted { id, name, .. } => id.len() + name.len(),
+        // Added in Fase 5 (braze-engine history reconstruction, see
+        // AgentEvent::AssistantToolCall's doc comment) — not a durable
+        // type (see `is_settled_durable`), so it only needs a length
+        // heuristic here.
+        AgentEvent::AssistantToolCall {
+            id,
+            name,
+            arguments,
+        } => id.len() + name.len() + arguments.to_string().len(),
         AgentEvent::ToolCallCompleted { id, result } => id.len() + result.content.len(),
         AgentEvent::CompactionOccurred { summary, .. } => summary.len(),
         AgentEvent::PermissionRequested { action, .. }
@@ -129,6 +138,7 @@ impl ContextCompactor for SimpleContextCompactor {
 
         let mut user_messages = 0u32;
         let mut assistant_texts = 0u32;
+        let mut assistant_tool_calls = 0u32;
         let mut tool_calls_started = 0u32;
         let mut tool_calls_completed = 0u32;
         let mut tool_errors = 0u32;
@@ -141,6 +151,7 @@ impl ContextCompactor for SimpleContextCompactor {
             match event {
                 AgentEvent::UserMessage { .. } => user_messages += 1,
                 AgentEvent::AssistantText { .. } => assistant_texts += 1,
+                AgentEvent::AssistantToolCall { .. } => assistant_tool_calls += 1,
                 AgentEvent::ToolCallStarted { .. } => tool_calls_started += 1,
                 AgentEvent::ToolCallCompleted { result, .. } => {
                     tool_calls_completed += 1;
@@ -163,12 +174,13 @@ impl ContextCompactor for SimpleContextCompactor {
 
         Ok(format!(
             "Compacted {total} tactical event(s): {um} user message(s), {at} assistant \
-             message(s), {tcs} tool call(s) started, {tcc} tool call(s) completed \
-             ({err} error(s)), {pe} permission event(s), {co} prior compaction(s) folded in. \
-             Estimated dropped tokens: ~{tok}.",
+             message(s), {atc} assistant tool call(s) requested, {tcs} tool call(s) started, \
+             {tcc} tool call(s) completed ({err} error(s)), {pe} permission event(s), {co} \
+             prior compaction(s) folded in. Estimated dropped tokens: ~{tok}.",
             total = tactical.len(),
             um = user_messages,
             at = assistant_texts,
+            atc = assistant_tool_calls,
             tcs = tool_calls_started,
             tcc = tool_calls_completed,
             err = tool_errors,
@@ -218,7 +230,7 @@ mod tests {
         let compactor = SimpleContextCompactor::new(1);
         let events = vec![
             user("older message"),
-            tool_completed("1"), // older, settled -> durable
+            tool_completed("1"),    // older, settled -> durable
             user("newest message"), // inside window (last 1) -> tactical
         ];
 

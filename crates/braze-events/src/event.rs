@@ -13,6 +13,17 @@ pub enum AgentEvent {
     AssistantText {
         text: String,
     },
+    /// The assistant requested a tool invocation. Captured separately from
+    /// `ToolCallStarted` (which only records id/name/background) because
+    /// reconstructing message history for the next model call requires the
+    /// full `tool_use` block the assistant produced — the Anthropic API
+    /// requires that block to appear in history before the matching
+    /// `tool_result` (see `braze-engine::history`).
+    AssistantToolCall {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
     ToolCallStarted {
         id: String,
         name: String,

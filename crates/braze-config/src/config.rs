@@ -34,8 +34,16 @@ pub struct Config {
     /// `BRAZE_ANTHROPIC_API_KEY`.
     #[serde(default)]
     pub anthropic_api_key: Option<String>,
+    /// Anthropic model name (e.g. `"claude-opus-4-6-20260805"`). No
+    /// default: if the user selects `default_backend = "anthropic"` and
+    /// never configures this, that is a clear startup error, not a guessed
+    /// value.
+    #[serde(default)]
+    pub anthropic_model: Option<String>,
     /// Base URL for a local Ollama instance.
     pub ollama_base_url: String,
+    /// Ollama model name.
+    pub ollama_model: String,
     /// Default max tokens for a model completion request.
     pub max_tokens: u32,
     /// Directory where `braze-session` writes its rollout logs.
@@ -52,7 +60,9 @@ impl Default for Config {
             // burns API credit unless the user opts in explicitly.
             default_backend: "ollama".to_string(),
             anthropic_api_key: None,
+            anthropic_model: None,
             ollama_base_url: "http://localhost:11434".to_string(),
+            ollama_model: "llama3.1".to_string(),
             max_tokens: 4096,
             session_dir: paths::default_session_dir(),
             mcp_servers: Vec::new(),
@@ -109,8 +119,14 @@ impl Config {
         if let Some(v) = overrides.anthropic_api_key {
             self.anthropic_api_key = Some(v);
         }
+        if let Some(v) = overrides.anthropic_model {
+            self.anthropic_model = Some(v);
+        }
         if let Some(v) = overrides.ollama_base_url {
             self.ollama_base_url = v;
+        }
+        if let Some(v) = overrides.ollama_model {
+            self.ollama_model = v;
         }
         if let Some(v) = overrides.max_tokens {
             self.max_tokens = v;
@@ -147,7 +163,9 @@ mod tests {
         let config = Config::load_with(None, no_env()).unwrap();
         assert_eq!(config.default_backend, "ollama");
         assert_eq!(config.anthropic_api_key, None);
+        assert_eq!(config.anthropic_model, None);
         assert_eq!(config.ollama_base_url, "http://localhost:11434");
+        assert_eq!(config.ollama_model, "llama3.1");
         assert_eq!(config.max_tokens, 4096);
         assert!(config.mcp_servers.is_empty());
     }
