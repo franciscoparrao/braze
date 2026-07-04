@@ -53,6 +53,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 rmcp = "2"
 
+# JSON Schema validation for tool-call arguments (braze-engine). Default
+# features (`resolve-http`, `resolve-file`, `tls-aws-lc-rs`) are turned off
+# deliberately: they would pull in a second TLS stack (`aws-lc-rs`) on top
+# of the one `braze-model` already uses via `reqwest`/`rustls-tls`, and
+# `braze`'s tool schemas are self-contained JSON documents that never need
+# remote `$ref` resolution. Verified against 0.46.9 that `jsonschema::validate`
+# works correctly with `default-features = false` for plain object schemas
+# with `required`/`properties` (no extra feature needed back).
+jsonschema = { version = "0.46", default-features = false }
+
 [profile.release]
 lto = true
 codegen-units = 1

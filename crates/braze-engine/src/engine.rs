@@ -98,6 +98,12 @@ impl Engine {
 
         let mut messages = self.load_messages(session).await?;
 
+        // Per-turn, per-tool-name retry counter for the "one round of
+        // repair context" mechanism in `dispatch_tool_calls` below. Lives
+        // and dies with this `run_turn` call — it is not a field on
+        // `Engine` and never persists across turns.
+        let mut schema_retry_counts: HashMap<String, u32> = HashMap::new();
+
         for _ in 0..MAX_TURN_ITERATIONS {
             let tool_stubs = self.tools.all_stubs().await?;
             let req = CompletionRequest {
@@ -158,7 +164,8 @@ impl Engine {
                     .await?;
             }
 
-            self.dispatch_tool_calls(session, &tool_calls).await?;
+            self.dispatch_tool_calls(session, &tool_calls, &mut schema_retry_counts)
+                .await?;
 
             messages = self.load_messages(session).await?;
         }
@@ -174,6 +181,7 @@ impl Engine {
         &self,
         session: &SessionId,
         tool_calls: &[ToolCall],
+        retry_counts: &mut HashMap<String, u32>,
     ) -> Result<(), EngineError> {
         let mut handle_to_id: HashMap<TaskHandle, String> = HashMap::new();
         let mut pending: HashSet<TaskHandle> = HashSet::new();
@@ -190,17 +198,88 @@ impl Engine {
                 )
                 .await?;
 
-            // Best-effort schema resolution: known deferred-validation gap
-            // from Fase 3 (see anthropic_wire.rs::build_tools) — the MVP
-            // does not validate tool-call arguments against the resolved
-            // schema, it just leaves evidence in the log that resolution
-            // was attempted. A failure here never aborts the turn.
-            if let Err(err) = self.tools.resolve(&call.name).await {
-                tracing::warn!(
-                    tool = %call.name,
-                    error = %err,
-                    "failed to resolve tool schema before dispatch (MVP does not validate strictly)"
-                );
+            // Real schema validation before dispatch (closes the gap noted
+            // in Fase 3/5, see docs/SOTA-2026-07.md § 1): resolve the
+            // tool's real schema and validate the model-produced arguments
+            // against it. `ToolRegistry::resolve` returns
+            // `Result<ToolSchema, ToolError>`, not
+            // `Result<Option<ToolSchema>, ToolError>` — `ToolError::NotFound`
+            // is exactly the "no provider advertises this tool" case (every
+            // `ToolProvider::resolve_schema` implementation returns
+            // `Ok(None)` for an unrecognized name; the registry only turns
+            // that into `NotFound` once *no* provider claims the tool), so
+            // it's handled like the "no schema to validate against" case
+            // rather than a hard resolution failure.
+            match self.tools.resolve(&call.name).await {
+                Ok(schema) => {
+                    if let Err(validation_err) =
+                        jsonschema::validate(&schema.input_schema, &call.arguments)
+                    {
+                        // Retry counter is keyed by tool *name*, not by
+                        // individual call id: if the model calls the same
+                        // tool multiple times in one turn with different
+                        // arguments, this can't distinguish "first real
+                        // failure for this call" from "a different call to
+                        // the same tool that also happens to fail". This is
+                        // a deliberately simple, turn-bounded heuristic —
+                        // not a precise per-call correlation mechanism.
+                        let attempt_counter = retry_counts.entry(call.name.clone()).or_insert(0);
+                        *attempt_counter += 1;
+                        let attempt = *attempt_counter;
+
+                        let repair_message = if attempt == 1 {
+                            format!(
+                                "Tool call '{}' failed schema validation: {validation_err}. \
+                                 Expected input schema:\n{}\n\
+                                 Retry this tool call with corrected arguments.",
+                                call.name, schema.input_schema
+                            )
+                        } else {
+                            format!(
+                                "Tool call '{}' failed schema validation again: {validation_err}. \
+                                 No further automatic repair hints will be given for this tool \
+                                 this turn.",
+                                call.name
+                            )
+                        };
+
+                        tracing::warn!(
+                            tool = %call.name,
+                            attempt,
+                            error = %validation_err,
+                            "tool call arguments failed schema validation before dispatch"
+                        );
+
+                        self.store
+                            .append(
+                                session,
+                                &AgentEvent::ToolCallCompleted {
+                                    id: call.id.clone(),
+                                    result: ToolResult {
+                                        tool_call_id: call.id.clone(),
+                                        content: repair_message,
+                                        is_error: true,
+                                    },
+                                },
+                            )
+                            .await?;
+
+                        continue;
+                    }
+                }
+                Err(braze_tools_core::ToolError::NotFound(_)) => {
+                    tracing::warn!(
+                        tool = %call.name,
+                        "no provider advertises this tool; dispatching anyway"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        tool = %call.name,
+                        error = %err,
+                        "failed to resolve tool schema before dispatch (MVP does not validate strictly)"
+                    );
+                }
             }
 
             self.store
@@ -345,7 +424,7 @@ fn estimate_dropped_tokens(events: &[AgentEvent]) -> u32 {
 mod tests {
     use super::*;
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
     use async_trait::async_trait;
     use braze_model::ModelError;
@@ -434,8 +513,22 @@ mod tests {
     }
 
     /// Fake `ToolProvider` owning exactly one tool, `echo`, which returns
-    /// its `text` argument back verbatim.
-    struct EchoToolProvider;
+    /// its `text` argument back verbatim. Its schema requires `text` (a
+    /// real schema with a required field, not the generic permissive
+    /// `{"type":"object"}` this provider originally had) so tests can
+    /// exercise real validation failures. `invocations` is an `Arc` shared
+    /// with the test that constructs it, so a test can assert `invoke` was
+    /// never called for a call that should have been rejected by schema
+    /// validation before ever reaching dispatch.
+    struct EchoToolProvider {
+        invocations: Arc<AtomicU32>,
+    }
+
+    impl EchoToolProvider {
+        fn new(invocations: Arc<AtomicU32>) -> Self {
+            Self { invocations }
+        }
+    }
 
     #[async_trait]
     impl ToolProvider for EchoToolProvider {
@@ -456,7 +549,11 @@ mod tests {
                 Ok(Some(ToolSchema {
                     name: "echo".to_string(),
                     description: "echoes its input".to_string(),
-                    input_schema: serde_json::json!({"type": "object"}),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                        "required": ["text"],
+                    }),
                 }))
             } else {
                 Ok(None)
@@ -464,6 +561,7 @@ mod tests {
         }
 
         async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            self.invocations.fetch_add(1, Ordering::SeqCst);
             let text = call
                 .arguments
                 .get("text")
@@ -544,9 +642,12 @@ mod tests {
             ],
         ]);
 
+        let invocations = Arc::new(AtomicU32::new(0));
         let engine = Engine::new(
             Box::new(model),
-            ToolRegistry::new(vec![Box::new(EchoToolProvider)]),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
             Box::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
@@ -563,6 +664,9 @@ mod tests {
             .expect("turn should succeed");
 
         assert_eq!(streamed, "done");
+        // Valid arguments: unchanged behavior — the real tool actually ran,
+        // exactly once.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
 
         let verify_store = FileSessionStore::new(dir.clone());
         let events = verify_store.load(&session).await.expect("load events");
@@ -581,5 +685,183 @@ mod tests {
         assert!(matches!(events[4], AgentEvent::AssistantText { .. }));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn invalid_args_get_one_round_of_schema_repair_context_then_the_retry_succeeds() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                // First attempt: missing the required `text` field.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                // Second attempt (scripted as if the model read the repair
+                // context and corrected itself): valid arguments.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Box::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut |_| {})
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
+        assert!(matches!(events[1], AgentEvent::AssistantToolCall { .. }));
+
+        // The rejected call never gets a `ToolCallStarted` (it never
+        // reaches dispatch) — its `ToolCallCompleted` follows the
+        // `AssistantToolCall` directly, and carries the resolved schema so
+        // the model has something concrete to correct itself with.
+        match &events[2] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-1");
+                assert!(result.is_error);
+                // "properties" only appears in the serialized schema dump,
+                // never in `jsonschema`'s own error text (which reads
+                // along the lines of `"text" is a required property`,
+                // singular) — a reliable signal the schema was included.
+                assert!(result.content.contains("properties"));
+                assert!(result.content.contains("text"));
+                // The real tool must never have run for the rejected call.
+                assert_ne!(result.content, "echoed: hi");
+            }
+            other => panic!("expected ToolCallCompleted for call-1, got {other:?}"),
+        }
+
+        assert!(matches!(events[3], AgentEvent::AssistantToolCall { .. }));
+        assert!(matches!(events[4], AgentEvent::ToolCallStarted { .. }));
+        match &events[5] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-2");
+                assert!(!result.is_error);
+                assert_eq!(result.content, "echoed: hi");
+            }
+            other => panic!("expected ToolCallCompleted for call-2, got {other:?}"),
+        }
+
+        // `invoke` ran exactly once: only for the corrected, valid call.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn a_second_invalid_call_to_the_same_tool_in_one_turn_gets_no_more_schema_context() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                // Same tool, still invalid — the model didn't correct
+                // itself this time.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "wrong_field": 1 }),
+                },
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Box::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut |_| {})
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        let first_message = match &events[2] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-1");
+                assert!(result.is_error);
+                assert!(result.content.contains("properties"));
+                result.content.clone()
+            }
+            other => panic!("expected ToolCallCompleted for call-1, got {other:?}"),
+        };
+
+        match &events[4] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-2");
+                assert!(result.is_error);
+                // Second failure of the same tool name this turn: no
+                // schema dump this time, and a visibly shorter/different
+                // message than the first repair-context one.
+                assert!(!result.content.contains("properties"));
+                assert_ne!(result.content, first_message);
+                assert!(result.content.len() < first_message.len());
+            }
+            other => panic!("expected ToolCallCompleted for call-2, got {other:?}"),
+        }
+
+        // Both calls were rejected before dispatch — `invoke` never ran.
+        assert_eq!(invocations.load(Ordering::SeqCst), 0);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Confirms the generic permissive schema `braze-model` sends to the
+    /// model today (`{"type":"object","additionalProperties":true}`) would
+    /// not itself reject arbitrary arguments if it were ever validated
+    /// against — the new validation in `dispatch_tool_calls` is exactly as
+    /// strict as the real resolved schema says and no stricter, it doesn't
+    /// introduce false rejections for that permissive case.
+    #[test]
+    fn generic_permissive_schema_accepts_arbitrary_arguments() {
+        let schema = serde_json::json!({"type": "object", "additionalProperties": true});
+        let instance = serde_json::json!({"cualquier_cosa": 123});
+        assert!(jsonschema::validate(&schema, &instance).is_ok());
     }
 }
