@@ -236,6 +236,16 @@ pub trait TaskNotifier: Send + Sync {
 5. Disparar una acción de la tabla de confirmación (ej. pedirle que borre un archivo fuera del cwd) y verificar que el prompt y/n intercepta antes de ejecutar.
 6. Matar el proceso a mitad de sesión y verificar que `braze chat --resume <session-id>` recupera el historial desde el rollout log en disco.
 
+### Resultados de la validación manual (2026-07-03/04) — pasos 1, 2, 4, 6 confirmados
+
+- **Paso 1**: `cargo build --workspace` limpio.
+- **Paso 2 (Ollama)**: `braze run "..." ` contra `llama3.2:1b`, `qwen2.5:3b` y `qwen2.5:7b` reales. El loop completo funciona de punta a punta: tool call → error de argumentos → recuperación → persistencia en JSONL.
+- **Paso 4 (carga diferida)**: **confirmado en logs reales** — `RUST_LOG=braze=debug` muestra `resolved full tool schema on demand tool="read_file" provider="local"` exactamente en el momento en que el modelo pide invocar esa tool, nunca antes.
+- **Paso 6 (resume)**: confirmado — `braze chat --resume <id>` recupera el historial y el modelo mantiene contexto de la sesión anterior.
+- **Hallazgo importante (no un bug, evidencia de la deuda ya documentada)**: con `llama3.2:1b` el modelo invocó `read_file` con argumentos inventados (`{"fn":"...", "mode":"r"}` en vez de `{"path":"..."}`) porque el `input_schema` que le llega es el genérico permisivo (`additionalProperties: true`), no el real — exactamente el gap flageado en Fase 3/5 para resolver en una futura validación real de schema. Con `qwen2.5:3b`/`qwen2.5:7b` (mejor soporte de tool-calling nativo) el argumento salió correcto (`{"path":"Cargo.toml"}`) en ambos intentos, y sí trajo el contenido real del archivo. Conclusión: el bug de diseño es real pero su impacto depende fuertemente de la capacidad del modelo — no bloquea el MVP, pero es la prioridad más clara para una próxima iteración de `braze-engine`.
+- **Limitación de entorno detectada (no de braze)**: la máquina de pruebas es CPU-only (sin GPU) y en el momento de la prueba tenía load average 12-15 y swap casi lleno por procesos ajenos al proyecto — los turnos con `qwen2.5:7b`/`qwen2.5:3b` no alcanzaron a completar la respuesta final dentro de 180-400s en esas condiciones. No se investigó más a fondo por decisión explícita (prioridad baja frente a la evidencia de corrección ya obtenida).
+- **Pendiente**: paso 3 (Anthropic real, implica costo de API) y paso 5 (confirmación y/n en una acción irreversible real).
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace
