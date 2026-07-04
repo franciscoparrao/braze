@@ -4,10 +4,12 @@
 //! (via [`TaskNotifier::next_completed`]) rather than polling task status —
 //! see PLAN.md, principle B.3.
 
+mod channel_notifier;
 mod error;
 mod event;
 mod notify;
 
+pub use channel_notifier::ChannelTaskNotifier;
 pub use error::EventsError;
 pub use event::AgentEvent;
 pub use notify::{BackgroundTask, TaskHandle, TaskNotifier};

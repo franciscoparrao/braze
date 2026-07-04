@@ -1,22 +1,17 @@
-//! [`ChannelTaskNotifier`]: the concrete [`TaskNotifier`] this binary uses.
-//!
-//! This responsibility ("dispatch de tareas en background vía
-//! `tokio::spawn` + `tokio::sync::mpsc`, notificación push no polling") is
-//! declared as `braze-events`'s in PLAN.md, and it would be more natural
-//! for this type to live there. It is implemented here instead, for
-//! simplicity in this integration phase — `braze-cli` is currently the
-//! only binary that needs a `TaskNotifier`, so there is no shared-code
-//! pressure yet. If a second binary (e.g. a future TUI) needs one too,
-//! move this into `braze-events` so both can depend on it.
+//! [`ChannelTaskNotifier`]: the concrete [`TaskNotifier`] implementation
+//! this crate ships, backed by `tokio::spawn` + `tokio::sync::mpsc` —
+//! exactly the "background dispatch + push notification" responsibility
+//! this crate declares in PLAN.md.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use braze_events::{BackgroundTask, TaskHandle, TaskNotifier};
 use braze_types::ToolResult;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
+use crate::notify::{BackgroundTask, TaskHandle, TaskNotifier};
 
 /// `tokio::spawn` per task + an unbounded mpsc completion channel.
 /// `next_completed` needs `&mut self` on the receiver but the
@@ -65,5 +60,40 @@ impl TaskNotifier for ChannelTaskNotifier {
             .await
             .ok()
             .flatten()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn spawn_and_next_completed_roundtrip() {
+        let notifier = ChannelTaskNotifier::new();
+        let handle = notifier.spawn(BackgroundTask {
+            label: "test".to_string(),
+            work: Box::pin(async {
+                ToolResult {
+                    tool_call_id: "call-1".to_string(),
+                    content: "done".to_string(),
+                    is_error: false,
+                }
+            }),
+        });
+
+        let (completed_handle, result) = notifier
+            .next_completed(Duration::from_secs(5))
+            .await
+            .expect("task should complete within timeout");
+
+        assert_eq!(completed_handle, handle);
+        assert_eq!(result.content, "done");
+    }
+
+    #[tokio::test]
+    async fn next_completed_times_out_when_nothing_pending() {
+        let notifier = ChannelTaskNotifier::new();
+        let result = notifier.next_completed(Duration::from_millis(50)).await;
+        assert!(result.is_none());
     }
 }

@@ -6,7 +6,6 @@
 //! how they're rendered) and the only place that composes every crate in
 //! the workspace into a running [`braze_engine::Engine`].
 
-mod channel_notifier;
 mod cli_args;
 mod error;
 mod terminal_prompt;
@@ -16,8 +15,8 @@ use std::process::ExitCode;
 use clap::Parser;
 use tokio::io::AsyncBufReadExt;
 
+use braze_events::ChannelTaskNotifier;
 use braze_types::SessionId;
-use channel_notifier::ChannelTaskNotifier;
 use cli_args::{Cli, Command};
 use error::CliError;
 use terminal_prompt::TerminalConfirmationPrompt;
