@@ -12,6 +12,7 @@ members = [
     "crates/braze-mcp-client",
     "crates/braze-engine",
     "crates/braze-cli",
+    "crates/braze-bench",
 ]
 
 [workspace.package]
@@ -62,6 +63,10 @@ rmcp = "2"
 # works correctly with `default-features = false` for plain object schemas
 # with `required`/`properties` (no extra feature needed back).
 jsonschema = { version = "0.46", default-features = false }
+
+# Task-suite format for braze-bench (crates/braze-bench): plain data,
+# no need for anything fancier than TOML's serde support.
+toml = "0.8"
 
 [profile.release]
 lto = true

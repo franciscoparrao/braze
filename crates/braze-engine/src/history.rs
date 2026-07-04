@@ -119,7 +119,8 @@ fn event_to_message(event: &AgentEvent) -> Option<Message> {
         AgentEvent::ToolCallStarted { .. }
         | AgentEvent::CompactionOccurred { .. }
         | AgentEvent::PermissionRequested { .. }
-        | AgentEvent::PermissionDecided { .. } => None,
+        | AgentEvent::PermissionDecided { .. }
+        | AgentEvent::Usage { .. } => None,
     }
 }
 
@@ -301,6 +302,10 @@ mod tests {
                 action: "write file /tmp/x".to_string(),
                 allowed: true,
                 key: None,
+            },
+            AgentEvent::Usage {
+                input_tokens: 10,
+                output_tokens: 5,
             },
         ];
 

@@ -1,0 +1,60 @@
+# Suite por defecto de braze-bench: 7 tareas, todas resolubles con
+# acciones "Reversible" (ver PermissionGuard/DefaultClassifier) dentro
+# del sandbox aislado por corrida — el harness deniega cualquier acción
+# "Irreversible" por diseño (ver PLAN.md), así que ninguna tarea debería
+# necesitar una para completarse con éxito.
+
+[[tasks]]
+id = "read_file_basic"
+prompt = "Lee el archivo notas.txt del directorio actual y dime cuántas líneas tiene."
+expect_tool_call = "read_file"
+expect_text_contains = "3"
+
+[tasks.setup_files]
+"notas.txt" = "linea uno\nlinea dos\nlinea tres\n"
+
+[[tasks]]
+id = "grep_basic"
+prompt = "Busca la palabra ERROR en el archivo datos.txt y dime en qué línea aparece."
+expect_tool_call = "grep"
+
+[tasks.setup_files]
+"datos.txt" = "inicio del programa\nERROR: fallo de conexion\nfin del programa\n"
+
+[[tasks]]
+id = "glob_basic"
+prompt = "Lista todos los archivos con extensión .rs en el directorio actual."
+expect_tool_call = "glob"
+
+[tasks.setup_files]
+"a.rs" = "// archivo a\n"
+"b.rs" = "// archivo b\n"
+"notas.txt" = "no es un archivo rust\n"
+
+[[tasks]]
+id = "write_file_basic"
+prompt = "Crea un archivo llamado saludo.txt en el directorio actual con el contenido 'hola mundo'."
+expect_tool_call = "write_file"
+
+[[tasks]]
+id = "edit_file_basic"
+prompt = "Edita el archivo config.txt del directorio actual y cambia 'version=1' por 'version=2'."
+expect_tool_call = "edit_file"
+
+[tasks.setup_files]
+"config.txt" = "version=1\n"
+
+[[tasks]]
+id = "shell_exec_basic"
+prompt = "Ejecuta el comando `ls` en el directorio actual y dime qué archivos ves."
+expect_tool_call = "shell_exec"
+
+[tasks.setup_files]
+"uno.txt" = "contenido uno\n"
+"dos.txt" = "contenido dos\n"
+
+[[tasks]]
+id = "no_tool_qa"
+prompt = "¿Cuánto es 2+2? Responde solo con el número, sin usar ninguna herramienta."
+expect_no_tool_call = true
+expect_text_contains = "4"

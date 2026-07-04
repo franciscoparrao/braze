@@ -59,6 +59,17 @@ pub enum AgentEvent {
         #[serde(default)]
         key: Option<braze_types::PermissionKey>,
     },
+    /// Token usage reported by the model backend for one completion round.
+    /// Audit-only, like `ToolCallStarted`/`CompactionOccurred` — never
+    /// rendered back into model history (see
+    /// `braze-engine::history::event_to_message`). Added so tooling
+    /// (e.g. `braze-bench`) can read per-round usage back out of the
+    /// rollout log without `braze-engine` needing to expose it any other
+    /// way.
+    Usage {
+        input_tokens: u32,
+        output_tokens: u32,
+    },
 }
 
 #[cfg(test)]
@@ -83,6 +94,26 @@ mod tests {
                 assert_eq!(key, None);
             }
             other => panic!("expected PermissionDecided, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn usage_round_trips_through_json() {
+        let event = AgentEvent::Usage {
+            input_tokens: 123,
+            output_tokens: 45,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let round_tripped: AgentEvent = serde_json::from_str(&json).unwrap();
+        match round_tripped {
+            AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+            } => {
+                assert_eq!(input_tokens, 123);
+                assert_eq!(output_tokens, 45);
+            }
+            other => panic!("expected Usage, got {other:?}"),
         }
     }
 }

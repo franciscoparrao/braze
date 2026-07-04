@@ -1,0 +1,30 @@
+[package]
+name = "braze-bench"
+description = "Comparative benchmark harness: runs a TOML task suite through Engine::run_turn against several ModelBackend instances and reports tool-calling/convergence/token metrics side by side"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "braze-bench"
+path = "src/main.rs"
+
+[dependencies]
+braze-types = { workspace = true }
+braze-events = { workspace = true }
+braze-config = { workspace = true }
+braze-permissions = { workspace = true }
+braze-session = { workspace = true }
+braze-tools-core = { workspace = true }
+braze-tools-local = { workspace = true }
+braze-model = { workspace = true }
+braze-engine = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }

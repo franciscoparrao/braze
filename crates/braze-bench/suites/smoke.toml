@@ -1,0 +1,19 @@
+# Suite mínima para verificación en vivo rápida: 2 de las 7 tareas de
+# default.toml (una sin tool-calling, una con un solo round-trip), usada
+# para probar el harness end-to-end contra modelos locales sin esperar
+# el sweep completo (lento en hardware solo-CPU).
+
+[[tasks]]
+id = "no_tool_qa"
+prompt = "¿Cuánto es 2+2? Responde solo con el número, sin usar ninguna herramienta."
+expect_no_tool_call = true
+expect_text_contains = "4"
+
+[[tasks]]
+id = "read_file_basic"
+prompt = "Lee el archivo notas.txt del directorio actual y dime cuántas líneas tiene."
+expect_tool_call = "read_file"
+expect_text_contains = "3"
+
+[tasks.setup_files]
+"notas.txt" = "linea uno\nlinea dos\nlinea tres\n"
