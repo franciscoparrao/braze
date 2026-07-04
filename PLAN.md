@@ -247,6 +247,12 @@ pub trait TaskNotifier: Send + Sync {
 - **Paso 5 (confirmación y/n) — verificado (2026-07-04)**: `braze run 'Use the write_file tool with path "/tmp/.../outside.txt" ...'` contra `llama3.2:1b`, respondiendo "y" por stdin. El prompt real apareció exactamente como se diseñó (`write file /tmp/.../outside.txt\n¿Permitir? [y/N]: `), la escritura fuera del `cwd` se clasificó `Irreversible` correctamente, y el archivo se creó tras la confirmación. La rama de rechazo ("n") no se logró disparar en vivo tras 3 intentos — el modelo formó mal el JSON del tool call antes de llegar al chequeo de permisos en los 3 casos (mismo problema de siempre, no uno nuevo) — pero se verificó por inspección directa de `TerminalConfirmationPrompt::confirm`: es la misma lectura de stdin ya probada en vivo, comparada contra un literal distinto (`"y"`/`"yes"` → cualquier otra respuesta cae al mismo `else` → `false`/denegado), y la semántica de denegación de `PermissionGuard::check` ya tiene cobertura unitaria dedicada desde la Fase 3.
 - **Pendiente**: paso 3 (Anthropic real, implica costo de API).
 
+## MVP cerrado (2026-07-04) — tag `v0.1.0`
+
+5 de 6 pasos de verificación end-to-end confirmados en vivo (el único pendiente, Anthropic real, se difiere a criterio del usuario por su costo, no por duda técnica). Las 6 fases del plan original están completas, verificadas independientemente en cada una, y pusheadas a `github.com/franciscoparrao/braze` (rama `main`, tag `v0.1.0`).
+
+**Próximo incremento más claro si se retoma el proyecto**: validación real de tool schema en `braze-engine` antes del dispatch final (hoy solo hace un `resolve()` best-effort sin validar) — es la deuda con más evidencia empírica detrás, confirmada en vivo múltiples veces durante esta sesión de validación manual (modelos chicos arman argumentos inventados contra el schema genérico permisivo que usa `braze-model`). Ver también la lista de items diferidos a "Fase 2" en la sección de Arquitectura (sandboxing SO, multi-agente, TUI, otel, skills-packs, hooks plugueables).
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace
