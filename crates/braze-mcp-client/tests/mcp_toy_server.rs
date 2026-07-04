@@ -10,6 +10,8 @@
 //! and talks to a *real* separate process over stdio here — this is not a
 //! mock of the transport.
 
+use std::time::Duration;
+
 use braze_mcp_client::McpToolProvider;
 use braze_permissions::{
     ActionDescriptor, ConfirmationPrompt, DefaultClassifier, PermissionGuard, WorkdirAllowlist,
@@ -74,12 +76,42 @@ async fn connect() -> McpToolProvider {
     .expect("toy MCP server should spawn and complete the handshake")
 }
 
+/// Like [`connect`], but with an explicit tool-catalog cache TTL — used by
+/// the TTL-behavior tests below so they don't have to wait on (or somehow
+/// mock) the real 60-second production default.
+async fn connect_with_ttl(ttl: Duration) -> McpToolProvider {
+    McpToolProvider::connect_with_ttl(
+        "toy".to_string(),
+        toy_server_path(),
+        Vec::new(),
+        allow_guard(),
+        ttl,
+    )
+    .await
+    .expect("toy MCP server should spawn and complete the handshake")
+}
+
 fn tool_call(id: &str, name: &str, arguments: serde_json::Value) -> ToolCall {
     ToolCall {
         id: id.to_string(),
         name: name.to_string(),
         arguments,
     }
+}
+
+/// Invokes the toy server's hidden `call_count` tool (see
+/// `src/bin/toy_mcp_server.rs`) and parses the number of `tools/list`
+/// requests it has answered so far.
+async fn list_tools_call_count(provider: &McpToolProvider) -> u64 {
+    let call = tool_call("count", "call_count", serde_json::json!({}));
+    let result = provider
+        .invoke(&call)
+        .await
+        .expect("call_count invocation should succeed");
+    result
+        .content
+        .parse()
+        .expect("call_count should return a plain integer")
 }
 
 #[tokio::test]
@@ -260,4 +292,103 @@ async fn invoke_is_denied_by_a_guard_that_always_refuses() {
         }
         other => panic!("expected InvocationFailed, got {other:?}"),
     }
+}
+
+// --- Client-side tool-catalog TTL cache (PLAN.md's SOTA-2026-07 roadmap,
+// "Grupo 4") ---
+//
+// These tests confirm, against the real toy server subprocess, that
+// `McpToolProvider` caches `tools/list` results for `cache_ttl` and only
+// pays a fresh round trip once that window has elapsed — using the toy
+// server's `call_count` tool (see `src/bin/toy_mcp_server.rs`) as the
+// instrumentation, since there's no other way to observe how many real
+// `tools/list` requests reached the server from outside the process.
+
+#[tokio::test]
+async fn list_stubs_called_twice_within_the_ttl_only_fetches_once() {
+    let provider = connect_with_ttl(Duration::from_secs(30)).await;
+
+    provider
+        .list_stubs()
+        .await
+        .expect("first list_stubs should succeed");
+    provider
+        .list_stubs()
+        .await
+        .expect("second list_stubs should succeed");
+
+    assert_eq!(
+        list_tools_call_count(&provider).await,
+        1,
+        "a second list_stubs() call made well within the TTL must be served \
+         from cache, not cost another tools/list round trip"
+    );
+}
+
+#[tokio::test]
+async fn list_stubs_refetches_once_the_ttl_has_elapsed() {
+    let provider = connect_with_ttl(Duration::from_millis(20)).await;
+
+    provider
+        .list_stubs()
+        .await
+        .expect("first list_stubs should succeed");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    provider
+        .list_stubs()
+        .await
+        .expect("second list_stubs should succeed");
+
+    assert_eq!(
+        list_tools_call_count(&provider).await,
+        2,
+        "a list_stubs() call made after the TTL elapsed must trigger a \
+         fresh tools/list round trip"
+    );
+}
+
+#[tokio::test]
+async fn resolve_schema_for_a_known_tool_reuses_the_ttl_cache() {
+    let provider = connect_with_ttl(Duration::from_secs(30)).await;
+
+    provider
+        .list_stubs()
+        .await
+        .expect("list_stubs should succeed");
+    let schema = provider
+        .resolve_schema("echo")
+        .await
+        .expect("resolve_schema should succeed")
+        .expect("echo is a real tool");
+
+    assert_eq!(schema.name, "echo");
+    assert_eq!(
+        list_tools_call_count(&provider).await,
+        1,
+        "resolve_schema for a tool already present in the TTL-fresh cache \
+         must not cost another tools/list round trip"
+    );
+}
+
+#[tokio::test]
+async fn resolve_schema_bypasses_the_ttl_and_refetches_when_the_tool_is_unknown() {
+    let provider = connect_with_ttl(Duration::from_secs(30)).await;
+
+    provider
+        .list_stubs()
+        .await
+        .expect("list_stubs should succeed");
+    let schema = provider
+        .resolve_schema("does_not_exist")
+        .await
+        .expect("resolve_schema should succeed even for an unknown tool");
+
+    assert!(schema.is_none());
+    assert_eq!(
+        list_tools_call_count(&provider).await,
+        2,
+        "an unresolved tool name must force a fresh, TTL-bypassing \
+         re-fetch (it might be a brand new tool the TTL-fresh cache \
+         predates) before answering None"
+    );
 }

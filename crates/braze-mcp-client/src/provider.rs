@@ -21,6 +21,36 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// never leave a `ToolProvider` caller blocked indefinitely.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long a fetched tool catalog is trusted before a fresh `tools/list`
+/// round trip is forced again.
+///
+/// Context (see PLAN.md's SOTA-2026-07 roadmap, "Grupo 4"): the roadmap
+/// doc originally cited adopting the MCP spec's TTL/`cacheScope` mechanism
+/// (SEP-2549) here. That SEP does not exist yet — it only appears in a
+/// spec release-candidate dated 2026-07-28 (in the future relative to this
+/// change) and has zero implementation in `rmcp` 2.1.0, the latest version
+/// on crates.io and the one this crate already depends on. Meanwhile the
+/// actual problem is more pressing than the roadmap doc suggested:
+/// `braze-engine::Engine::run_turn` calls `ToolRegistry::all_stubs` (which
+/// calls every provider's `list_stubs`) once per model↔tool round inside a
+/// single turn, not once per session — up to `MAX_TURN_ITERATIONS` (20)
+/// times in the worst case. Every one of those was an unconditional
+/// network round trip before this change.
+///
+/// A client-side, elapsed-time TTL solves the same practical problem
+/// without depending on any server-side protocol support: an MCP server's
+/// tool catalog essentially never changes mid-session, but a bounded TTL
+/// still avoids permanently serving a stale catalog if the user
+/// reconnects/reconfigures a server without restarting `braze`.
+///
+/// 60 seconds is a starting point, not a tuned value — comfortably longer
+/// than a single turn's worth of round trips (closing the up-to-20x gap
+/// above), short enough that a genuine server-side change is picked up
+/// within a minute of the cache going stale. Revisit if a future session
+/// shows this is too short/long in practice, or if `rmcp` ever implements
+/// the real protocol-level mechanism (see doc comment above).
+const TOOL_CACHE_TTL: Duration = Duration::from_secs(60);
+
 /// One connection to one external MCP server, spawned as a stdio
 /// subprocess (`command args...`). Implements
 /// [`ToolProvider`](braze_tools_core::ToolProvider) so it composes into a
@@ -38,26 +68,38 @@ pub struct McpToolProvider {
     /// guard — see PLAN.md's SOTA-2026-07 roadmap ("Grupo 2"): before this
     /// crate had no permission gating at all, unlike `braze-tools-local`.
     guard: braze_permissions::PermissionGuard,
+    /// How long a fetched catalog is trusted before [`Self::tools_respecting_ttl`]
+    /// forces a fresh fetch. Always [`TOOL_CACHE_TTL`] in production; only
+    /// [`Self::connect_with_ttl`] (used by this crate's own tests) can set
+    /// it to something else, so expiration behavior can be exercised
+    /// without waiting on a real 60-second clock.
+    cache_ttl: Duration,
     service: RunningService<RoleClient, ()>,
-    /// Last full `tools/list` result. `None` until the first successful
-    /// fetch.
+    /// Last full `tools/list` result plus the instant it was fetched.
+    /// `None` until the first successful fetch.
     ///
     /// Caching trade-off (see [`McpToolProvider::list_stubs`] and
     /// [`McpToolProvider::resolve_schema`]): MCP has no "fetch one tool's
     /// schema" call, only a bulk `tools/list` — so every `resolve_schema`
     /// would otherwise cost a full round trip to re-list every tool just to
-    /// read one. Instead, `list_stubs` (which the registry calls at least
-    /// once per turn to build the flat stub list, per PLAN.md's deferred
-    /// loading design) always fetches fresh from the server and refreshes
-    /// this cache as a side effect; `resolve_schema` then almost always
-    /// serves from that cache with zero network cost. The trade-off is a
-    /// staleness window: if the server's tool set changes between a
-    /// `list_stubs` call and a `resolve_schema` call for a *new* tool that
-    /// wasn't in the cached list yet, `resolve_schema` would wrongly report
-    /// `Ok(None)`. To close that gap without paying the round-trip cost on
-    /// every call, `resolve_schema` treats a cache miss as "maybe stale"
-    /// and re-fetches once before finally answering `None`.
-    tool_cache: RwLock<Option<Vec<Tool>>>,
+    /// read one. Instead, both `list_stubs` and `resolve_schema` route
+    /// through [`McpToolProvider::tools_respecting_ttl`], which serves the
+    /// cached list as long as it's within [`TOOL_CACHE_TTL`] and only pays
+    /// the round-trip cost when the cache is empty or stale. The trade-off
+    /// is a staleness window bounded by the TTL: if the server's tool set
+    /// changes, `braze` can serve the old catalog for up to `TOOL_CACHE_TTL`.
+    /// `resolve_schema` additionally treats "the specific tool being looked
+    /// up isn't in the list we have" as always worth a forced, TTL-bypassing
+    /// re-fetch — the case a bare TTL wouldn't cover on its own (a brand new
+    /// tool that just appeared).
+    tool_cache: RwLock<Option<ToolCacheEntry>>,
+}
+
+/// A cached `tools/list` result, timestamped so [`TOOL_CACHE_TTL`] can be
+/// enforced.
+struct ToolCacheEntry {
+    tools: Vec<Tool>,
+    fetched_at: tokio::time::Instant,
 }
 
 impl McpToolProvider {
@@ -68,6 +110,24 @@ impl McpToolProvider {
         command: String,
         args: Vec<String>,
         guard: braze_permissions::PermissionGuard,
+    ) -> Result<Self, ToolError> {
+        Self::connect_with_ttl(name, command, args, guard, TOOL_CACHE_TTL).await
+    }
+
+    /// Same as [`Self::connect`], but with an explicit tool-catalog cache
+    /// TTL instead of the production default ([`TOOL_CACHE_TTL`]).
+    ///
+    /// Not needed by normal callers — `braze-cli` always uses [`Self::connect`].
+    /// This exists so this crate's own integration tests can exercise both
+    /// "within TTL" and "TTL expired" behavior deterministically (a short
+    /// TTL of a few milliseconds) instead of waiting on, or mocking, a real
+    /// 60-second clock.
+    pub async fn connect_with_ttl(
+        name: String,
+        command: String,
+        args: Vec<String>,
+        guard: braze_permissions::PermissionGuard,
+        cache_ttl: Duration,
     ) -> Result<Self, ToolError> {
         let provider_id = format!("mcp:{name}");
         tracing::info!(
@@ -93,12 +153,16 @@ impl McpToolProvider {
             provider_id,
             server_name: name,
             guard,
+            cache_ttl,
             service,
             tool_cache: RwLock::new(None),
         })
     }
 
-    /// Fetches the full tool list from the server, replacing the cache.
+    /// Fetches the full tool list from the server, unconditionally
+    /// replacing the cache with a fresh timestamp. Bypasses the TTL check —
+    /// callers that want the TTL respected should go through
+    /// [`Self::tools_respecting_ttl`] instead.
     async fn list_tools_fresh(&self) -> Result<Vec<Tool>, ToolError> {
         let tools = tokio::time::timeout(REQUEST_TIMEOUT, self.service.list_all_tools())
             .await
@@ -107,17 +171,28 @@ impl McpToolProvider {
             })?
             .map_err(|e| McpClientError::Request(e).into_tool_error(&self.provider_id))?;
 
-        *self.tool_cache.write().await = Some(tools.clone());
+        *self.tool_cache.write().await = Some(ToolCacheEntry {
+            tools: tools.clone(),
+            fetched_at: tokio::time::Instant::now(),
+        });
         Ok(tools)
     }
 
-    /// Looks up `name` in the current cache without touching the network.
-    async fn find_cached(&self, name: &str) -> Option<Tool> {
-        self.tool_cache
-            .read()
-            .await
-            .as_ref()
-            .and_then(|tools| tools.iter().find(|t| t.name.as_ref() == name).cloned())
+    /// Returns the cached tool list if it's still within `cache_ttl`,
+    /// otherwise fetches fresh from the server (refreshing the cache with a
+    /// new timestamp as a side effect). Both `list_stubs` and
+    /// `resolve_schema` route through this so the TTL policy lives in one
+    /// place.
+    async fn tools_respecting_ttl(&self) -> Result<Vec<Tool>, ToolError> {
+        {
+            let cache = self.tool_cache.read().await;
+            if let Some(entry) = cache.as_ref()
+                && entry.fetched_at.elapsed() < self.cache_ttl
+            {
+                return Ok(entry.tools.clone());
+            }
+        }
+        self.list_tools_fresh().await
     }
 }
 
@@ -154,7 +229,7 @@ impl ToolProvider for McpToolProvider {
     }
 
     async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
-        let tools = self.list_tools_fresh().await?;
+        let tools = self.tools_respecting_ttl().await?;
         Ok(tools
             .iter()
             .map(|tool| ToolStub {
@@ -166,19 +241,26 @@ impl ToolProvider for McpToolProvider {
     }
 
     async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
-        if let Some(tool) = self.find_cached(name).await {
+        let tools = self.tools_respecting_ttl().await?;
+        if let Some(tool) = tools.iter().find(|t| t.name.as_ref() == name) {
             tracing::debug!(
                 provider = %self.provider_id,
                 tool = name,
-                "resolved full tool schema from cache"
+                "resolved full tool schema from cache (respecting TTL)"
             );
-            return Ok(Some(to_schema(&tool)));
+            return Ok(Some(to_schema(tool)));
         }
 
+        // The tool isn't in the list we have. This could be because it
+        // genuinely doesn't exist, or because it's brand new and appeared
+        // on the server after our cached/TTL-fresh list was taken — a case
+        // a bare TTL doesn't cover on its own. Force a real, TTL-bypassing
+        // re-fetch before answering `None`, same safety net the MVP had
+        // before the TTL was introduced.
         tracing::debug!(
             provider = %self.provider_id,
             tool = name,
-            "tool not in cache, resolving full schema from MCP server on demand"
+            "tool not in TTL-respecting list, forcing a fresh fetch from the MCP server"
         );
         let tools = self.list_tools_fresh().await?;
         Ok(tools

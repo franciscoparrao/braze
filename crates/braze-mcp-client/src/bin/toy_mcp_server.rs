@@ -14,6 +14,18 @@
 //! with no early sentence boundary to exercise the word-boundary+ellipsis
 //! branch of `summary::summarize` end to end against a real server
 //! (`verbose`).
+//!
+//! It also tracks how many `tools/list` requests it has answered (`list_tools_calls`,
+//! an `AtomicU64`) and exposes that counter through a `call_count` tool
+//! reachable only via `tools/call`, never advertised by `tools/list` itself
+//! (so it doesn't disturb tests that assert the exact set of advertised
+//! tool names). This is the instrumentation the client-side TTL cache
+//! tests (`tests/mcp_toy_server.rs`) use to confirm, against a real
+//! subprocess, that a fresh-within-TTL `list_stubs()` call is served from
+//! `McpToolProvider`'s cache instead of costing another round trip.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
@@ -41,12 +53,17 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let service = ToyServer.serve(stdio()).await?;
+    let service = ToyServer::default().serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
 }
 
-struct ToyServer;
+#[derive(Default)]
+struct ToyServer {
+    /// Count of `tools/list` requests answered so far, readable by tests
+    /// through the `call_count` tool (see the module doc comment).
+    list_tools_calls: Arc<AtomicU64>,
+}
 
 impl ServerHandler for ToyServer {
     async fn list_tools(
@@ -54,6 +71,7 @@ impl ServerHandler for ToyServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        self.list_tools_calls.fetch_add(1, Ordering::SeqCst);
         Ok(ListToolsResult::with_all_items(all_tools()))
     }
 
@@ -62,6 +80,12 @@ impl ServerHandler for ToyServer {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        if request.name.as_ref() == "call_count" {
+            let count = self.list_tools_calls.load(Ordering::SeqCst);
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
+                count.to_string(),
+            )]));
+        }
         Ok(dispatch(&request))
     }
 }
