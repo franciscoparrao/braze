@@ -39,7 +39,7 @@ const TOOL_COMPLETION_TIMEOUT: Duration = Duration::from_secs(120);
 pub struct Engine {
     model: Box<dyn ModelBackend>,
     tools: Arc<ToolRegistry>,
-    store: Box<dyn SessionStore>,
+    store: Arc<dyn SessionStore>,
     compactor: Box<dyn ContextCompactor>,
     notifier: Box<dyn TaskNotifier>,
     system_prompt: String,
@@ -58,7 +58,7 @@ impl Engine {
     pub fn new(
         model: Box<dyn ModelBackend>,
         tools: ToolRegistry,
-        store: Box<dyn SessionStore>,
+        store: Arc<dyn SessionStore>,
         compactor: Box<dyn ContextCompactor>,
         notifier: Box<dyn TaskNotifier>,
         system_prompt: String,
@@ -598,7 +598,7 @@ mod tests {
         let engine = Engine::new(
             Box::new(model),
             ToolRegistry::new(vec![]),
-            Box::new(store),
+            Arc::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
             "system prompt".to_string(),
@@ -648,7 +648,7 @@ mod tests {
             ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
                 &invocations,
             )))]),
-            Box::new(store),
+            Arc::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
             "system prompt".to_string(),
@@ -720,7 +720,7 @@ mod tests {
             ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
                 &invocations,
             )))]),
-            Box::new(store),
+            Arc::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
             "system prompt".to_string(),
@@ -807,7 +807,7 @@ mod tests {
             ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
                 &invocations,
             )))]),
-            Box::new(store),
+            Arc::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
             "system prompt".to_string(),

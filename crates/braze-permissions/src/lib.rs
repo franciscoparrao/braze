@@ -16,13 +16,18 @@
 //! are always irreversible: an MCP server is arbitrary code the user chose
 //! to wire up, with no safe-by-construction subset to allowlist.
 //!
-//! [`PermissionGuard`] also remembers, in memory only (never persisted to
-//! disk — this is not a `--resume`-able decision), every irreversible
+//! [`PermissionGuard`] also remembers, in memory only, every irreversible
 //! action it has already gotten a "yes" for in this session, keyed by a
-//! coarse action identity (program+subcommand for shell, resolved path for
-//! writes/deletes, server+tool for MCP calls). A repeat of the same key
-//! proceeds without re-prompting; a denial is never remembered, so the
-//! next attempt always re-prompts.
+//! coarse action identity ([`braze_types::PermissionKey`]: program+subcommand
+//! for shell, resolved path for writes/deletes, server+tool for MCP calls,
+//! derived via the free function [`derive_permission_key`]). A repeat of the
+//! same key proceeds without re-prompting; a denial is never remembered, so
+//! the next attempt always re-prompts. This crate itself never persists
+//! that cache to disk — but [`PermissionGuard::seed_remembered`] lets a
+//! caller (`braze-cli`) replay previously-approved decisions it *did*
+//! persist elsewhere (as `AgentEvent::PermissionDecided` in the session's
+//! rollout log) back into a freshly-built guard, which is what makes a
+//! `--resume`d session not re-ask for the same action.
 //!
 //! [`PermissionGuard`] is the single entry point `braze-tools-local`,
 //! `braze-mcp-client`, and `braze-engine` call; everything else in this
@@ -40,4 +45,4 @@ pub use allowlist::WorkdirAllowlist;
 pub use classifier::{ActionClassifier, DefaultClassifier, Reversibility};
 pub use confirm::ConfirmationPrompt;
 pub use error::PermissionError;
-pub use guard::PermissionGuard;
+pub use guard::{PermissionGuard, derive_permission_key};

@@ -5,9 +5,11 @@
 //! a shape without depending on each other.
 
 mod message;
+mod permission;
 mod session;
 mod tool;
 
 pub use message::{ContentBlock, Message, Role};
+pub use permission::PermissionKey;
 pub use session::SessionId;
 pub use tool::{ToolCall, ToolResult, ToolStub};

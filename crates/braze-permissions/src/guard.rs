@@ -1,35 +1,57 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
+use braze_types::PermissionKey;
+
 use crate::action::ActionDescriptor;
-use crate::allowlist::WorkdirAllowlist;
+use crate::allowlist::{WorkdirAllowlist, normalize_lexically};
 use crate::classifier::{ActionClassifier, Reversibility};
 use crate::confirm::ConfirmationPrompt;
 use crate::error::PermissionError;
 
-/// Session-scoped "remember this decision" key. Two occurrences of the
-/// same action (by this coarser identity, not full equality — e.g. two
-/// `shell_exec` calls with the same program+subcommand but different
-/// trailing arguments) are treated as the same decision, so the user is
-/// only asked once per session per key. Never persisted to disk — this is
-/// purely an in-memory de-duplication of prompts within a single run.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum RememberKey {
-    Shell {
-        program: String,
-        subcommand: Option<String>,
-    },
-    WriteFile {
-        path: PathBuf,
-    },
-    DeleteFile {
-        path: PathBuf,
-    },
-    McpToolCall {
-        server: String,
-        tool: String,
-    },
+/// Maps an action to its session-remember identity. `None` means the
+/// action is never remembered (either it can't produce a stable key, or —
+/// as with `Other` — it's always Reversible and this is never consulted
+/// for it in practice).
+///
+/// A free function (not a method on `PermissionGuard`) so that
+/// `braze-cli`'s `TerminalConfirmationPrompt` — which has no
+/// `WorkdirAllowlist` instance of its own — can derive the exact same key
+/// independently, to persist it in `AgentEvent::PermissionRequested`/
+/// `PermissionDecided` for later `--resume` replay (see
+/// `PermissionGuard::seed_remembered`).
+///
+/// `WriteFile`/`DeleteFile` paths are normalized lexically (see
+/// [`normalize_lexically`]) but, unlike `WorkdirAllowlist::resolve`, are
+/// *not* joined against a cwd first — this function has no cwd context
+/// available to it. In practice this only matters for the (already
+/// Irreversible, since `check` only ever consults this for actions the
+/// classifier rejected) case of a *relative* path escaping the workdir —
+/// an edge case rare enough that a stable-but-cwd-unaware key is an
+/// acceptable trade-off for letting this be a free function callable from
+/// outside a `PermissionGuard` at all.
+pub fn derive_permission_key(action: &ActionDescriptor) -> Option<PermissionKey> {
+    match action {
+        ActionDescriptor::ShellCommand { command } => {
+            let program = command.first()?.clone();
+            let subcommand = command.get(1).cloned();
+            Some(PermissionKey::Shell {
+                program,
+                subcommand,
+            })
+        }
+        ActionDescriptor::WriteFile { path } => Some(PermissionKey::WriteFile {
+            path: normalize_lexically(path),
+        }),
+        ActionDescriptor::DeleteFile { path } => Some(PermissionKey::DeleteFile {
+            path: normalize_lexically(path),
+        }),
+        ActionDescriptor::McpToolCall { server, tool } => Some(PermissionKey::McpToolCall {
+            server: server.clone(),
+            tool: tool.clone(),
+        }),
+        ActionDescriptor::Other { .. } => None,
+    }
 }
 
 pub struct PermissionGuard {
@@ -38,7 +60,7 @@ pub struct PermissionGuard {
     prompt: Box<dyn ConfirmationPrompt>,
     /// Keys of previously *confirmed* irreversible actions in this session.
     /// A denial is never recorded here — see `check`.
-    remembered: Mutex<HashSet<RememberKey>>,
+    remembered: Mutex<HashSet<PermissionKey>>,
 }
 
 impl PermissionGuard {
@@ -55,32 +77,13 @@ impl PermissionGuard {
         }
     }
 
-    /// Maps an action to its session-remember identity. `None` means the
-    /// action is never remembered (either it can't produce a stable key, or
-    /// — as with `Other` — it's always Reversible and this is never
-    /// consulted for it in practice).
-    fn remember_key(&self, action: &ActionDescriptor) -> Option<RememberKey> {
-        match action {
-            ActionDescriptor::ShellCommand { command } => {
-                let program = command.first()?.clone();
-                let subcommand = command.get(1).cloned();
-                Some(RememberKey::Shell {
-                    program,
-                    subcommand,
-                })
-            }
-            ActionDescriptor::WriteFile { path } => Some(RememberKey::WriteFile {
-                path: self.allowlist.resolve(path),
-            }),
-            ActionDescriptor::DeleteFile { path } => Some(RememberKey::DeleteFile {
-                path: self.allowlist.resolve(path),
-            }),
-            ActionDescriptor::McpToolCall { server, tool } => Some(RememberKey::McpToolCall {
-                server: server.clone(),
-                tool: tool.clone(),
-            }),
-            ActionDescriptor::Other { .. } => None,
-        }
+    /// Seeds the in-memory "already approved this session" set from
+    /// previously-persisted decisions (used when resuming a session so
+    /// approvals aren't re-asked). Additive only — never removes existing
+    /// entries.
+    pub fn seed_remembered(&self, keys: impl IntoIterator<Item = PermissionKey>) {
+        let mut remembered = self.remembered.lock().unwrap();
+        remembered.extend(keys);
     }
 
     /// Reversible → proceeds silently. Irreversible → checks the
@@ -92,13 +95,13 @@ impl PermissionGuard {
         match self.classifier.classify(action) {
             Reversibility::Reversible => Ok(()),
             Reversibility::Irreversible => {
-                if let Some(key) = self.remember_key(action)
+                if let Some(key) = derive_permission_key(action)
                     && self.remembered.lock().unwrap().contains(&key)
                 {
                     return Ok(());
                 }
                 if self.prompt.confirm(action).await {
-                    if let Some(key) = self.remember_key(action) {
+                    if let Some(key) = derive_permission_key(action) {
                         self.remembered.lock().unwrap().insert(key);
                     }
                     Ok(())
@@ -255,6 +258,28 @@ mod tests {
             calls.load(Ordering::SeqCst),
             2,
             "two distinct keys must each be confirmed exactly once"
+        );
+    }
+
+    #[tokio::test]
+    async fn seeding_a_remembered_key_skips_the_prompt_for_the_matching_action() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let guard = guard_with(true, calls.clone());
+
+        // "mv" is not on the safe shell allowlist -> Irreversible, so this
+        // would normally have to go through `prompt.confirm`.
+        let action = ActionDescriptor::ShellCommand {
+            command: vec!["mv".to_string(), "a".to_string(), "b".to_string()],
+        };
+        let key = derive_permission_key(&action).expect("shell action must produce a key");
+
+        guard.seed_remembered([key]);
+
+        assert!(guard.check(&action).await.is_ok());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "a replayed/seeded key must short-circuit the prompt entirely"
         );
     }
 }

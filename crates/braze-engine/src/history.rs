@@ -295,10 +295,12 @@ mod tests {
             AgentEvent::PermissionRequested {
                 action: "write file /tmp/x".to_string(),
                 reversible: false,
+                key: None,
             },
             AgentEvent::PermissionDecided {
                 action: "write file /tmp/x".to_string(),
                 allowed: true,
+                key: None,
             },
         ];
 

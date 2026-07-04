@@ -4,7 +4,14 @@ use std::path::{Component, Path, PathBuf};
 /// touching the filesystem (no symlink resolution, no existence check).
 /// A leading `..` that would escape the root of an absolute path is kept
 /// as-is (there is nothing left to pop).
-fn normalize_lexically(path: &Path) -> PathBuf {
+///
+/// `pub(crate)` (not private) so `guard::derive_permission_key` — a free
+/// function with no `WorkdirAllowlist` instance to resolve against — can
+/// apply the same lexical normalization to `WriteFile`/`DeleteFile` paths
+/// without needing cwd context, keeping keys derived outside a guard
+/// (e.g. by `braze-cli`'s `TerminalConfirmationPrompt`, for persistence)
+/// consistent in form with keys derived inside one.
+pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {

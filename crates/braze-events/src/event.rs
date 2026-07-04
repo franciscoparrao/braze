@@ -40,9 +40,49 @@ pub enum AgentEvent {
     PermissionRequested {
         action: String,
         reversible: bool,
+        /// Coarse identity of the action being requested, if the caller
+        /// could derive one (see `braze_permissions::derive_permission_key`).
+        /// `#[serde(default)]` so rollout logs persisted before this field
+        /// existed still deserialize, with `key: None`.
+        #[serde(default)]
+        key: Option<braze_types::PermissionKey>,
     },
     PermissionDecided {
         action: String,
         allowed: bool,
+        /// Same coarse identity as `PermissionRequested::key`. When
+        /// `allowed` is `true` and this is `Some`, a resumed session
+        /// replays it back into a fresh `PermissionGuard` via
+        /// `PermissionGuard::seed_remembered` so the same action isn't
+        /// re-confirmed. `#[serde(default)]` for the same backward-compat
+        /// reason as `PermissionRequested::key`.
+        #[serde(default)]
+        key: Option<braze_types::PermissionKey>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Simulates loading a rollout log line written before this field
+    /// existed: the JSON has no `key` at all. `#[serde(default)]` must
+    /// still let it deserialize, defaulting to `None`.
+    #[test]
+    fn permission_decided_without_a_key_field_deserializes_with_none() {
+        let json = r#"{"type":"permission_decided","action":"run `mv a b`","allowed":true}"#;
+        let event: AgentEvent = serde_json::from_str(json).expect("must deserialize");
+        match event {
+            AgentEvent::PermissionDecided {
+                action,
+                allowed,
+                key,
+            } => {
+                assert_eq!(action, "run `mv a b`");
+                assert!(allowed);
+                assert_eq!(key, None);
+            }
+            other => panic!("expected PermissionDecided, got {other:?}"),
+        }
+    }
 }
