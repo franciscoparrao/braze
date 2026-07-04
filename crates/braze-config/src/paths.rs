@@ -22,11 +22,21 @@ pub fn config_file_path() -> Option<PathBuf> {
 }
 
 /// Default session log directory: `$XDG_DATA_HOME/braze/sessions`, falling
-/// back to `$HOME/.local/share/braze/sessions`, falling back to a relative
-/// `./braze-sessions` if even `HOME` is unavailable.
+/// back to `$HOME/.local/share/braze/sessions`, falling back to a system
+/// temp directory (never a path relative to the process's cwd) if even
+/// `HOME` is unavailable.
 ///
 /// Kept infallible (never returns `Result`) because it feeds
 /// [`crate::Config::default`], which must never fail.
+///
+/// The rollout log under this directory is what `braze-cli` replays as
+/// pre-approved permission decisions on `--resume` (see
+/// `PermissionGuard::seed_remembered`). A cwd-relative fallback here would
+/// place that log inside the same working directory the agent's own
+/// `WriteFile` tool treats as Reversible-without-confirmation — letting the
+/// model silently plant/edit approvals for its own next `--resume`. Falling
+/// back to the OS temp directory instead keeps the log outside any
+/// `WorkdirAllowlist` built from the project cwd.
 pub fn default_session_dir() -> PathBuf {
     resolve_default_session_dir(|key| std::env::var(key).ok())
 }
@@ -54,7 +64,9 @@ fn resolve_default_session_dir(env: impl Fn(&str) -> Option<String>) -> PathBuf 
             .join("braze")
             .join("sessions");
     }
-    PathBuf::from("./braze-sessions")
+    // Deliberately NOT a cwd-relative path — see the doc-comment on
+    // `default_session_dir` for why that would be a security hole.
+    std::env::temp_dir().join("braze-sessions")
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {
@@ -130,10 +142,23 @@ mod tests {
         );
     }
 
+    /// Regression test: without HOME/XDG, the fallback must land outside
+    /// the process's cwd (the system temp dir), never at a cwd-relative
+    /// path — a cwd-relative session dir would let the agent's own
+    /// in-allowlist `write_file` plant permission approvals for itself
+    /// (see the doc-comment on `default_session_dir`).
     #[test]
-    fn default_session_dir_falls_back_to_relative_path_without_home() {
+    fn default_session_dir_falls_back_to_system_temp_dir_not_cwd_relative() {
         let env: HashMap<String, String> = HashMap::new();
         let dir = resolve_default_session_dir(|k| env.get(k).cloned());
-        assert_eq!(dir, PathBuf::from("./braze-sessions"));
+        assert!(dir.is_absolute(), "expected an absolute path, got {dir:?}");
+        assert!(
+            dir.starts_with(std::env::temp_dir()),
+            "expected a path under the system temp dir, got {dir:?}"
+        );
+        assert_eq!(
+            dir.file_name().and_then(|n| n.to_str()),
+            Some("braze-sessions")
+        );
     }
 }

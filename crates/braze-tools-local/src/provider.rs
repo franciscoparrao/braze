@@ -1,7 +1,9 @@
 //! [`LocalToolsProvider`]: the single [`ToolProvider`] this crate exposes,
 //! fronting all six built-in local tools. Owns a caller-supplied
-//! [`PermissionGuard`] and checks it before every write/edit/shell action;
-//! reads (`read_file`, `grep`, `glob`) skip the guard entirely.
+//! [`PermissionGuard`] and checks it before every write/edit/shell/read
+//! action. Reads (`read_file`, `grep`, `glob`) proceed silently inside the
+//! `WorkdirAllowlist`, same as writes — only a read that reaches outside
+//! it (e.g. `~/.ssh/id_rsa`, `/etc/shadow`) requires confirmation.
 
 use std::path::PathBuf;
 
@@ -41,6 +43,7 @@ impl LocalToolsProvider {
 
     async fn invoke_read_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
         let args: ReadFileArgs = parse_args(call)?;
+        self.check_read(call, &args.path).await?;
         Ok(wrap(call, read_file::read_file(args).await))
     }
 
@@ -73,11 +76,13 @@ impl LocalToolsProvider {
 
     async fn invoke_grep(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
         let args: GrepArgs = parse_args(call)?;
+        self.check_read(call, &args.path).await?;
         Ok(wrap(call, grep::grep(args).await))
     }
 
     async fn invoke_glob(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
         let args: GlobArgs = parse_args(call)?;
+        self.check_read(call, &args.path).await?;
         Ok(wrap(call, glob::glob(args).await))
     }
 
@@ -86,6 +91,23 @@ impl LocalToolsProvider {
     /// "edit").
     async fn check_write(&self, call: &ToolCall, path: &str) -> Result<(), ToolError> {
         let action = ActionDescriptor::WriteFile {
+            path: PathBuf::from(path),
+        };
+        self.guard
+            .check(&action)
+            .await
+            .map_err(|err| ToolError::InvocationFailed {
+                name: call.name.clone(),
+                message: err.to_string(),
+            })
+    }
+
+    /// Shared by `read_file`, `grep`, and `glob`: all three are reads for
+    /// permission purposes. Silent inside the `WorkdirAllowlist`; a path
+    /// reaching outside it (e.g. `~/.ssh/id_rsa`) requires confirmation
+    /// instead of being read unconditionally.
+    async fn check_read(&self, call: &ToolCall, path: &str) -> Result<(), ToolError> {
+        let action = ActionDescriptor::ReadPath {
             path: PathBuf::from(path),
         };
         self.guard
@@ -407,6 +429,77 @@ mod tests {
         assert!(result.content.contains("keep.rs"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test: a `read_file` reaching outside the
+    /// `WorkdirAllowlist` (e.g. `~/.ssh/id_rsa`, `/etc/shadow`) must not
+    /// happen silently — `deny_guard`'s prompt always says no, so the read
+    /// must be denied rather than succeeding.
+    #[tokio::test]
+    async fn invoke_read_file_outside_allowlist_is_denied() {
+        let allow_root = unique_temp_dir("provider-read-file-denied-root");
+        let secret_dir = unique_temp_dir("provider-read-file-denied-secret");
+        tokio::fs::create_dir_all(&secret_dir)
+            .await
+            .expect("create secret dir");
+        let secret = secret_dir.join("id_rsa");
+        tokio::fs::write(&secret, "-----BEGIN PRIVATE KEY-----")
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::new(deny_guard(&allow_root));
+        let result = provider
+            .invoke(&call(
+                "read_file",
+                serde_json::json!({ "path": secret.to_string_lossy() }),
+            ))
+            .await;
+
+        assert!(result.is_err(), "read outside the workdir must be gated");
+
+        let _ = tokio::fs::remove_dir_all(&secret_dir).await;
+    }
+
+    #[tokio::test]
+    async fn invoke_grep_outside_allowlist_is_denied() {
+        let allow_root = unique_temp_dir("provider-grep-denied-root");
+        let outside = unique_temp_dir("provider-grep-denied-outside");
+        tokio::fs::create_dir_all(&outside)
+            .await
+            .expect("create outside dir");
+
+        let provider = LocalToolsProvider::new(deny_guard(&allow_root));
+        let result = provider
+            .invoke(&call(
+                "grep",
+                serde_json::json!({ "pattern": "x", "path": outside.to_string_lossy() }),
+            ))
+            .await;
+
+        assert!(result.is_err(), "grep outside the workdir must be gated");
+
+        let _ = tokio::fs::remove_dir_all(&outside).await;
+    }
+
+    #[tokio::test]
+    async fn invoke_glob_outside_allowlist_is_denied() {
+        let allow_root = unique_temp_dir("provider-glob-denied-root");
+        let outside = unique_temp_dir("provider-glob-denied-outside");
+        tokio::fs::create_dir_all(&outside)
+            .await
+            .expect("create outside dir");
+
+        let provider = LocalToolsProvider::new(deny_guard(&allow_root));
+        let result = provider
+            .invoke(&call(
+                "glob",
+                serde_json::json!({ "pattern": "*.rs", "path": outside.to_string_lossy() }),
+            ))
+            .await;
+
+        assert!(result.is_err(), "glob outside the workdir must be gated");
+
+        let _ = tokio::fs::remove_dir_all(&outside).await;
     }
 
     #[tokio::test]

@@ -14,6 +14,14 @@ pub enum ActionDescriptor {
     DeleteFile {
         path: PathBuf,
     },
+    /// A read (of a file, or of a directory tree for `grep`/`glob`).
+    /// Reversible inside the `WorkdirAllowlist` like `WriteFile`/
+    /// `DeleteFile`; outside it, treated as Irreversible so reading e.g.
+    /// `~/.ssh/id_rsa` or `/etc/shadow` requires confirmation instead of
+    /// happening silently.
+    ReadPath {
+        path: PathBuf,
+    },
     ShellCommand {
         command: Vec<String>,
     },
@@ -40,6 +48,7 @@ impl fmt::Display for ActionDescriptor {
         match self {
             Self::WriteFile { path } => write!(f, "write file {}", path.display()),
             Self::DeleteFile { path } => write!(f, "delete file {}", path.display()),
+            Self::ReadPath { path } => write!(f, "read path {}", path.display()),
             Self::ShellCommand { command } => write!(f, "run `{}`", command.join(" ")),
             Self::McpToolCall { server, tool } => {
                 write!(f, "call MCP tool `{tool}` on server `{server}`")
@@ -87,6 +96,14 @@ mod tests {
             action.to_string(),
             "call MCP tool `read_file` on server `filesystem`"
         );
+    }
+
+    #[test]
+    fn display_read_path() {
+        let action = ActionDescriptor::ReadPath {
+            path: PathBuf::from("/etc/shadow"),
+        };
+        assert_eq!(action.to_string(), "read path /etc/shadow");
     }
 
     #[test]

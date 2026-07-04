@@ -17,10 +17,12 @@
 //! to wire up, with no safe-by-construction subset to allowlist.
 //!
 //! [`PermissionGuard`] also remembers, in memory only, every irreversible
-//! action it has already gotten a "yes" for in this session, keyed by a
-//! coarse action identity ([`braze_types::PermissionKey`]: program+subcommand
-//! for shell, resolved path for writes/deletes, server+tool for MCP calls,
-//! derived via the free function [`derive_permission_key`]). A repeat of the
+//! action it has already gotten a "yes" for in this session, keyed by an
+//! action identity ([`braze_types::PermissionKey`]: the full argv for
+//! shell — approving `rm -rf /tmp/build` must never auto-approve `rm -rf
+//! /`, so the key cannot stop at program+subcommand — resolved path for
+//! writes/deletes, server+tool for MCP calls, derived via the free
+//! function [`derive_permission_key`]). A repeat of the
 //! same key proceeds without re-prompting; a denial is never remembered, so
 //! the next attempt always re-prompts. This crate itself never persists
 //! that cache to disk — but [`PermissionGuard::seed_remembered`] lets a

@@ -33,17 +33,22 @@ use crate::error::PermissionError;
 pub fn derive_permission_key(action: &ActionDescriptor) -> Option<PermissionKey> {
     match action {
         ActionDescriptor::ShellCommand { command } => {
-            let program = command.first()?.clone();
-            let subcommand = command.get(1).cloned();
+            // The full argv, not just program+first-arg — see the
+            // doc-comment on `PermissionKey::Shell` for why a coarser key
+            // would let one approved invocation silently cover a more
+            // dangerous one that merely shares a program and subcommand.
+            command.first()?;
             Some(PermissionKey::Shell {
-                program,
-                subcommand,
+                command: command.clone(),
             })
         }
         ActionDescriptor::WriteFile { path } => Some(PermissionKey::WriteFile {
             path: normalize_lexically(path),
         }),
         ActionDescriptor::DeleteFile { path } => Some(PermissionKey::DeleteFile {
+            path: normalize_lexically(path),
+        }),
+        ActionDescriptor::ReadPath { path } => Some(PermissionKey::ReadPath {
             path: normalize_lexically(path),
         }),
         ActionDescriptor::McpToolCall { server, tool } => Some(PermissionKey::McpToolCall {
@@ -258,6 +263,36 @@ mod tests {
             calls.load(Ordering::SeqCst),
             2,
             "two distinct keys must each be confirmed exactly once"
+        );
+    }
+
+    /// Regression test for the exact scenario the audit flagged: approving
+    /// a narrowly-scoped destructive command must NOT silently approve a
+    /// broader/more dangerous invocation that merely shares the program
+    /// and first argument.
+    #[tokio::test]
+    async fn approving_a_narrow_rm_rf_does_not_auto_approve_a_broader_target() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let guard = guard_with(true, calls.clone());
+
+        let narrow = ActionDescriptor::ShellCommand {
+            command: vec![
+                "rm".to_string(),
+                "-rf".to_string(),
+                "/tmp/build".to_string(),
+            ],
+        };
+        let broad = ActionDescriptor::ShellCommand {
+            command: vec!["rm".to_string(), "-rf".to_string(), "/".to_string()],
+        };
+
+        assert!(guard.check(&narrow).await.is_ok());
+        assert!(guard.check(&broad).await.is_ok());
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "a different target must re-prompt even though program+subcommand match"
         );
     }
 

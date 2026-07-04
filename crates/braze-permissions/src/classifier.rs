@@ -47,7 +47,9 @@ impl DefaultClassifier {
 impl ActionClassifier for DefaultClassifier {
     fn classify(&self, action: &ActionDescriptor) -> Reversibility {
         match action {
-            ActionDescriptor::WriteFile { path } | ActionDescriptor::DeleteFile { path } => {
+            ActionDescriptor::WriteFile { path }
+            | ActionDescriptor::DeleteFile { path }
+            | ActionDescriptor::ReadPath { path } => {
                 if self.allowlist.is_allowed(path) {
                     Reversibility::Reversible
                 } else {
@@ -125,11 +127,37 @@ fn is_safe_shell_command(command: &[String]) -> bool {
         return false;
     };
     match program {
-        "ls" | "pwd" | "cat" | "echo" | "wc" | "diff" | "whoami" | "date" | "env" | "which"
-        | "true" | "false" | "head" | "tail" | "file" | "grep" => true,
+        "ls" | "pwd" | "cat" | "echo" | "wc" | "diff" | "whoami" | "date" | "which" | "true"
+        | "false" | "head" | "tail" | "file" | "grep" => true,
         "find" => is_safe_find(command),
         "git" => is_safe_git(command),
+        "env" => is_safe_env(command),
         _ => false,
+    }
+}
+
+/// `env` is only safe when it has no trailing command to execute — i.e.
+/// every argument after `env` is a `NAME=VALUE` assignment (or there are
+/// none at all, the "print the environment" form). `env <program> ...`
+/// (with or without leading assignments) runs `<program>` as a child
+/// process, which is full, unaudited command execution wearing a
+/// read-only-looking mask — `env rm -rf /tmp/x` must never slip through
+/// as Reversible the way a bare `rm -rf` correctly does not.
+fn is_safe_env(command: &[String]) -> bool {
+    command[1..].iter().all(|arg| is_env_assignment(arg))
+}
+
+fn is_env_assignment(arg: &str) -> bool {
+    match arg.split_once('=') {
+        Some((name, _)) => {
+            !name.is_empty()
+                && name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        None => false,
     }
 }
 
@@ -412,5 +440,40 @@ mod tests {
             tool: "y".to_string(),
         };
         assert_eq!(classifier().classify(&action), Reversibility::Irreversible);
+    }
+
+    #[test]
+    fn bare_env_and_env_with_only_assignments_are_reversible() {
+        for parts in [
+            &["env"][..],
+            &["env", "FOO=bar"][..],
+            &["env", "A=1", "B=2"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Reversible,
+                "expected {parts:?} to be Reversible"
+            );
+        }
+    }
+
+    /// Regression test for the `env`-as-exec-bypass: `env <program> ...`
+    /// runs `<program>` as a child process. If this were classified
+    /// Reversible, any destructive command could dodge confirmation by
+    /// prefixing it with `env` (with or without leading assignments).
+    #[test]
+    fn env_with_a_trailing_command_is_irreversible() {
+        for parts in [
+            &["env", "rm", "-rf", "/tmp/x"][..],
+            &["env", "VAR=1", "rm", "-rf", "/tmp/x"][..],
+            &["env", "bash", "-c", "rm -rf /"][..],
+            &["env", "curl", "http://x"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Irreversible,
+                "expected {parts:?} to be Irreversible"
+            );
+        }
     }
 }

@@ -1,6 +1,7 @@
 //! `read_file` tool: reads the full contents of a text file at a given
-//! path. Never goes through the permission guard — PLAN.md only requires
-//! confirmation for writes/deletes/irreversible commands, not reads.
+//! path. The permission check (silent inside the `WorkdirAllowlist`,
+//! confirmation required outside it) lives in `provider.rs`, not here —
+//! this function only does the actual read.
 
 use std::path::PathBuf;
 

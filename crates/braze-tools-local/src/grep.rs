@@ -33,10 +33,14 @@ fn default_path() -> String {
 /// code >= 2 (bad pattern, unreadable path, ...) or a spawn failure.
 pub async fn grep(args: GrepArgs) -> Result<String, String> {
     let mode_flag = if args.regex { "-E" } else { "-F" };
+    // `--` stops grep's own option parsing so a `pattern` or `path` that
+    // happens to start with `-` (e.g. a pattern of `-f/etc/passwd`) is
+    // never reinterpreted as a flag.
     let cmd_args = vec![
         "-r".to_string(),
         "-n".to_string(),
         mode_flag.to_string(),
+        "--".to_string(),
         args.pattern,
         args.path,
     ];
@@ -147,6 +151,33 @@ mod tests {
         .expect("grep -F should succeed");
 
         assert!(result.contains("a.b"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for a `grep` argv-injection: a `pattern` starting
+    /// with `-` (e.g. `-f/etc/passwd`, which makes grep read patterns
+    /// from an arbitrary file) must be treated as a literal search
+    /// string, never reinterpreted as a flag.
+    #[tokio::test]
+    async fn dash_prefixed_pattern_is_not_interpreted_as_a_flag() {
+        let dir = unique_temp_dir("grep-dash-pattern");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        tokio::fs::write(dir.join("a.txt"), "line with -f/etc/passwd inside")
+            .await
+            .expect("write fixture");
+
+        let result = grep(GrepArgs {
+            pattern: "-f/etc/passwd".to_string(),
+            path: dir.to_string_lossy().into_owned(),
+            regex: false,
+        })
+        .await
+        .expect("grep should treat the pattern literally, not as a flag");
+
+        assert!(result.contains("-f/etc/passwd inside"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

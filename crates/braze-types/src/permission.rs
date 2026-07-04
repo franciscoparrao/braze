@@ -13,14 +13,22 @@ use serde::{Deserialize, Serialize};
 /// same rationale as `ToolStub`'s placement (see `tool.rs`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PermissionKey {
+    /// The full argv, not just `command[0]`/`command[1]`. A key derived
+    /// from only the program and first argument would make approving one
+    /// invocation (e.g. `rm -rf /tmp/build`) silently auto-approve any
+    /// other invocation of the same program+subcommand regardless of its
+    /// remaining arguments (e.g. `rm -rf /`) — remembering must be as
+    /// specific as the action actually confirmed.
     Shell {
-        program: String,
-        subcommand: Option<String>,
+        command: Vec<String>,
     },
     WriteFile {
         path: PathBuf,
     },
     DeleteFile {
+        path: PathBuf,
+    },
+    ReadPath {
         path: PathBuf,
     },
     McpToolCall {
@@ -42,13 +50,29 @@ mod tests {
     #[test]
     fn shell_round_trips() {
         round_trip(PermissionKey::Shell {
-            program: "mv".to_string(),
-            subcommand: Some("a".to_string()),
+            command: vec!["mv".to_string(), "a".to_string(), "b".to_string()],
         });
         round_trip(PermissionKey::Shell {
-            program: "ls".to_string(),
-            subcommand: None,
+            command: vec!["ls".to_string()],
         });
+    }
+
+    #[test]
+    fn shell_keys_with_different_arguments_are_distinct() {
+        let narrow = PermissionKey::Shell {
+            command: vec![
+                "rm".to_string(),
+                "-rf".to_string(),
+                "/tmp/build".to_string(),
+            ],
+        };
+        let broad = PermissionKey::Shell {
+            command: vec!["rm".to_string(), "-rf".to_string(), "/".to_string()],
+        };
+        assert_ne!(
+            narrow, broad,
+            "approving one target must not derive the same key as a different target"
+        );
     }
 
     #[test]
@@ -62,6 +86,13 @@ mod tests {
     fn delete_file_round_trips() {
         round_trip(PermissionKey::DeleteFile {
             path: PathBuf::from("/tmp/foo.txt"),
+        });
+    }
+
+    #[test]
+    fn read_path_round_trips() {
+        round_trip(PermissionKey::ReadPath {
+            path: PathBuf::from("/etc/shadow"),
         });
     }
 
