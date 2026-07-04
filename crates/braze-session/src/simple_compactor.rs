@@ -18,9 +18,10 @@ pub const DEFAULT_TACTICAL_WINDOW: usize = 20;
 ///    the engine still shows the model verbatim.
 /// 2. Of the events *older* than that window, the ones that are already
 ///    "settled" (`ToolCallCompleted`, `CompactionOccurred`,
-///    `PermissionDecided` — completed tool results and resolved
-///    permission decisions) are moved into `DurableState::durable_events`
-///    and never re-summarized again.
+///    `PermissionDecided`, `AssistantToolCall` — completed tool results,
+///    resolved permission decisions, and the `tool_use` requests that
+///    precede them) are moved into `DurableState::durable_events` and
+///    never re-summarized again.
 /// 3. Any prior `CompactionOccurred` summaries found among the older
 ///    events are concatenated into `DurableState::summary`, so callers
 ///    get a running plain-text digest of everything compacted so far
@@ -70,6 +71,14 @@ fn is_settled_durable(event: &AgentEvent) -> bool {
         AgentEvent::ToolCallCompleted { .. }
             | AgentEvent::CompactionOccurred { .. }
             | AgentEvent::PermissionDecided { .. }
+            // An old `tool_use` must migrate to `durable_events` together
+            // with its matching `ToolCallCompleted`, in the same relative
+            // order — otherwise the `tool_use` would be left orphaned in
+            // `tactical` while its `tool_result` sits in
+            // `durable_events`, which would be inconsistent given that
+            // `braze-engine::history` now renders both sides
+            // (`event_to_message_cleared`).
+            | AgentEvent::AssistantToolCall { .. }
     )
 }
 
@@ -80,9 +89,10 @@ fn approx_char_len(event: &AgentEvent) -> usize {
         AgentEvent::UserMessage { text } | AgentEvent::AssistantText { text } => text.len(),
         AgentEvent::ToolCallStarted { id, name, .. } => id.len() + name.len(),
         // Added in Fase 5 (braze-engine history reconstruction, see
-        // AgentEvent::AssistantToolCall's doc comment) — not a durable
-        // type (see `is_settled_durable`), so it only needs a length
-        // heuristic here.
+        // AgentEvent::AssistantToolCall's doc comment). This heuristic
+        // only feeds `compact_tactical`'s size estimate over the raw
+        // tactical window — it is unrelated to whether the event also
+        // counts as `is_settled_durable` (which it now does, see above).
         AgentEvent::AssistantToolCall {
             id,
             name,
@@ -213,6 +223,14 @@ mod tests {
         }
     }
 
+    fn tool_call(id: &str, name: &str) -> AgentEvent {
+        AgentEvent::AssistantToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments: serde_json::json!({}),
+        }
+    }
+
     #[test]
     fn split_never_loses_events_when_log_shorter_than_window() {
         let compactor = SimpleContextCompactor::new(20);
@@ -243,6 +261,40 @@ mod tests {
         ));
         assert_eq!(tactical.len(), 2);
         // No-silent-loss invariant: total in == total out.
+        assert_eq!(durable.durable_events.len() + tactical.len(), events.len());
+    }
+
+    #[test]
+    fn is_settled_durable_now_includes_assistant_tool_call() {
+        assert!(is_settled_durable(&tool_call("1", "read_file")));
+    }
+
+    #[test]
+    fn split_moves_a_tool_use_and_its_result_together_in_order() {
+        let compactor = SimpleContextCompactor::new(1);
+        let events = vec![
+            user("older message"),
+            tool_call("1", "read_file"), // older, now settled -> durable
+            tool_completed("1"),         // older, settled -> durable
+            user("newest message"),      // inside window (last 1) -> tactical
+        ];
+
+        let (durable, tactical) = compactor.split(&events);
+
+        // Both halves of the pair migrate together, in original order —
+        // otherwise the `tool_use` and its `tool_result` would end up
+        // split across durable/tactical, which `history.rs` relies on
+        // never happening.
+        assert_eq!(durable.durable_events.len(), 2);
+        assert!(matches!(
+            durable.durable_events[0],
+            AgentEvent::AssistantToolCall { .. }
+        ));
+        assert!(matches!(
+            durable.durable_events[1],
+            AgentEvent::ToolCallCompleted { .. }
+        ));
+        assert_eq!(tactical.len(), 2);
         assert_eq!(durable.durable_events.len() + tactical.len(), events.len());
     }
 
