@@ -309,9 +309,17 @@ impl OllamaStreamState {
                 .and_then(Value::as_u64)
                 .unwrap_or(0) as u32;
             let output_tokens = json.get("eval_count").and_then(Value::as_u64).unwrap_or(0) as u32;
+            // "length" means output was cut off by the num_predict budget
+            // rather than the model finishing on its own — see
+            // `CompletionEvent::Usage`'s doc comment.
+            let stop_reason = json
+                .get("done_reason")
+                .and_then(Value::as_str)
+                .map(str::to_string);
             events.push(CompletionEvent::Usage {
                 input_tokens,
                 output_tokens,
+                stop_reason,
             });
             events.push(CompletionEvent::Done);
             self.done = true;
@@ -523,6 +531,7 @@ mod tests {
             CompletionEvent::Usage {
                 input_tokens,
                 output_tokens,
+                ..
             } => {
                 assert_eq!(*input_tokens, 12);
                 assert_eq!(*output_tokens, 4);
@@ -530,6 +539,31 @@ mod tests {
             other => panic!("expected Usage, got {other:?}"),
         }
         assert!(matches!(events[3], CompletionEvent::Done));
+    }
+
+    #[test]
+    fn stream_state_captures_done_reason_as_stop_reason() {
+        let mut state = OllamaStreamState::new();
+        let line = serde_json::json!({
+            "model": "llama3",
+            "message": {"role": "assistant", "content": ""},
+            "done": true,
+            "done_reason": "length",
+            "prompt_eval_count": 12,
+            "eval_count": 4
+        });
+
+        let events = state.handle_line(&line);
+        let usage = events
+            .iter()
+            .find(|e| matches!(e, CompletionEvent::Usage { .. }))
+            .expect("expected a Usage event");
+        match usage {
+            CompletionEvent::Usage { stop_reason, .. } => {
+                assert_eq!(stop_reason.as_deref(), Some("length"));
+            }
+            _ => unreachable!(),
+        }
     }
 
     #[test]
@@ -578,7 +612,8 @@ mod tests {
             e,
             CompletionEvent::Usage {
                 input_tokens: 0,
-                output_tokens: 0
+                output_tokens: 0,
+                stop_reason: None
             }
         )));
     }

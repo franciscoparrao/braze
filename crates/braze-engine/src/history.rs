@@ -306,6 +306,7 @@ mod tests {
             AgentEvent::Usage {
                 input_tokens: 10,
                 output_tokens: 5,
+                stop_reason: Some("end_turn".to_string()),
             },
         ];
 

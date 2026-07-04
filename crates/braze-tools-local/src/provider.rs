@@ -163,19 +163,56 @@ fn parse_args<T: DeserializeOwned>(call: &ToolCall) -> Result<T, ToolError> {
 /// surfaced back to the model as a normal tool result, not a hard
 /// provider error — only permission denials and malformed arguments
 /// short-circuit `invoke` with `Err(ToolError)`.
+///
+/// Content is truncated (see [`truncate_output`]) here — the single seam
+/// every one of the six local tools' output passes through — rather than
+/// per-tool, so a large `read_file`/`grep`/`shell_exec` output can't blow
+/// the model's context budget on its own regardless of which tool
+/// produced it. See docs/AUDITORIA-2026-07.md hallazgo D2.
 fn wrap(call: &ToolCall, outcome: Result<String, String>) -> ToolResult {
     match outcome {
         Ok(content) => ToolResult {
             tool_call_id: call.id.clone(),
-            content,
+            content: truncate_output(content),
             is_error: false,
         },
         Err(content) => ToolResult {
             tool_call_id: call.id.clone(),
-            content,
+            content: truncate_output(content),
             is_error: true,
         },
     }
+}
+
+/// Cap on a single tool result's size. Chosen relative to
+/// `OllamaBackend`'s default `num_ctx` (8192 tokens, ~4 chars/token): one
+/// oversized tool result — a large file dump, a `grep -r`/`glob` over a
+/// big tree — must not, on its own, be able to push the prompt past a
+/// small local model's entire context window and trigger the silent
+/// truncation-from-the-front that `num_ctx` already documents as
+/// dangerous (loses the system prompt and tool definitions first).
+const MAX_TOOL_OUTPUT_BYTES: usize = 8_000;
+
+/// Truncates `content` to [`MAX_TOOL_OUTPUT_BYTES`] at a UTF-8-safe
+/// boundary, appending an actionable trailer (not just "truncated" — a
+/// small model needs to be told *what to do differently*, per
+/// docs/AUDITORIA-2026-07.md's finding that terse errors get retried
+/// verbatim instead of corrected).
+fn truncate_output(content: String) -> String {
+    if content.len() <= MAX_TOOL_OUTPUT_BYTES {
+        return content;
+    }
+    let mut cut = MAX_TOOL_OUTPUT_BYTES;
+    while !content.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let omitted = content.len() - cut;
+    format!(
+        "{}\n\n[output truncated: {omitted} of {} bytes omitted. Narrow your query — a more \
+         specific path/pattern, or a smaller file — instead of retrying this exact call.]",
+        &content[..cut],
+        content.len(),
+    )
 }
 
 #[cfg(test)]
@@ -256,6 +293,42 @@ mod tests {
 
         assert!(!result.is_error);
         assert_eq!(result.content, "hi");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for D2: a large file must not reach the model
+    /// unbounded — a single oversized tool result can blow a small local
+    /// model's entire context budget on its own.
+    #[tokio::test]
+    async fn invoke_read_file_truncates_a_large_file() {
+        let dir = unique_temp_dir("provider-read-file-large");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let file_path = dir.join("big.txt");
+        let big_content = "x".repeat(MAX_TOOL_OUTPUT_BYTES * 2);
+        tokio::fs::write(&file_path, &big_content)
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::new(allow_guard(&dir));
+        let result = provider
+            .invoke(&call(
+                "read_file",
+                serde_json::json!({ "path": file_path.to_string_lossy() }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        assert!(result.content.len() < big_content.len());
+        assert!(result.content.contains("output truncated"));
+        assert!(
+            result.content.contains("Narrow your query"),
+            "expected an actionable trailer, got: {}",
+            result.content
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -522,5 +595,49 @@ mod tests {
             .expect_err("malformed arguments must error");
 
         assert!(matches!(err, ToolError::InvocationFailed { .. }));
+    }
+
+    // --- truncate_output (hallazgo D2) ---
+
+    #[test]
+    fn short_content_passes_through_unchanged() {
+        let content = "hello world".to_string();
+        assert_eq!(truncate_output(content.clone()), content);
+    }
+
+    #[test]
+    fn content_at_exactly_the_cap_is_unchanged() {
+        let content = "x".repeat(MAX_TOOL_OUTPUT_BYTES);
+        assert_eq!(truncate_output(content.clone()), content);
+    }
+
+    #[test]
+    fn oversized_content_is_truncated_with_an_actionable_trailer() {
+        let original_len = MAX_TOOL_OUTPUT_BYTES * 3;
+        let content = "x".repeat(original_len);
+        let truncated = truncate_output(content);
+        // Retained content is capped exactly at MAX_TOOL_OUTPUT_BYTES; the
+        // trailer on top is small relative to the (much larger) original.
+        assert!(truncated.len() < original_len);
+        assert!(truncated.starts_with(&"x".repeat(MAX_TOOL_OUTPUT_BYTES)));
+        assert!(truncated.contains("output truncated"));
+        assert!(truncated.contains(&format!(
+            "{} of {original_len} bytes",
+            MAX_TOOL_OUTPUT_BYTES * 2
+        )));
+    }
+
+    #[test]
+    fn truncation_never_splits_a_multi_byte_utf8_character() {
+        // 'é' is 2 bytes; placed right at the cap so a naive byte-index
+        // slice would land mid-character and panic. A `String` return
+        // value is valid UTF-8 by construction, so simply not panicking
+        // here is the assertion.
+        let content = format!(
+            "{}é{}",
+            "x".repeat(MAX_TOOL_OUTPUT_BYTES - 1),
+            "y".repeat(50)
+        );
+        let _ = truncate_output(content);
     }
 }

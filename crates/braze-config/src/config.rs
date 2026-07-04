@@ -52,6 +52,14 @@ pub struct Config {
     pub ollama_num_ctx: u32,
     /// Default max tokens for a model completion request.
     pub max_tokens: u32,
+    /// System prompt sent with every request. `None` (the default) means
+    /// `braze-cli` uses its own built-in default, which includes anti-loop
+    /// guidance and the working directory — see
+    /// `braze-cli::default_system_prompt`. Overridable so a user can
+    /// tailor it (e.g. add domain-specific instructions, or work around a
+    /// particular small model's quirks) without recompiling.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
     /// Directory where `braze-session` writes its rollout logs.
     pub session_dir: PathBuf,
     /// MCP servers to connect to by default (consumed by `braze-mcp-client`, Fase 4).
@@ -71,6 +79,7 @@ impl Default for Config {
             ollama_model: "llama3.1".to_string(),
             ollama_num_ctx: 8192,
             max_tokens: 4096,
+            system_prompt: None,
             session_dir: paths::default_session_dir(),
             mcp_servers: Vec::new(),
         }
@@ -141,6 +150,9 @@ impl Config {
         if let Some(v) = overrides.max_tokens {
             self.max_tokens = v;
         }
+        if let Some(v) = overrides.system_prompt {
+            self.system_prompt = Some(v);
+        }
         if let Some(v) = overrides.session_dir {
             self.session_dir = v;
         }
@@ -178,7 +190,21 @@ mod tests {
         assert_eq!(config.ollama_model, "llama3.1");
         assert_eq!(config.ollama_num_ctx, 8192);
         assert_eq!(config.max_tokens, 4096);
+        assert_eq!(config.system_prompt, None);
         assert!(config.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn system_prompt_is_overridable_via_env() {
+        let env = vec![(
+            "BRAZE_SYSTEM_PROMPT".to_string(),
+            "Eres un asistente de prueba.".to_string(),
+        )];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(
+            config.system_prompt.as_deref(),
+            Some("Eres un asistente de prueba.")
+        );
     }
 
     #[test]

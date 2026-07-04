@@ -12,7 +12,7 @@ use braze_events::{AgentEvent, BackgroundTask, TaskHandle, TaskNotifier};
 use braze_model::{CompletionEvent, CompletionRequest, ModelBackend};
 use braze_session::{ContextCompactor, DurableState, SessionError, SessionStore};
 use braze_tools_core::ToolRegistry;
-use braze_types::{Message, SessionId, ToolCall, ToolResult};
+use braze_types::{Message, SessionId, ToolCall, ToolResult, ToolStub};
 
 use crate::error::EngineError;
 use crate::history::build_messages;
@@ -133,11 +133,19 @@ impl Engine {
         // `Engine` and never persists across turns.
         let mut schema_retry_counts: HashMap<String, u32> = HashMap::new();
 
+        // Per-turn memory of (tool name, canonical arguments) pairs
+        // already dispatched — see `dispatch_tool_calls`'s repetition
+        // check. A small/local model re-issuing the exact same call it
+        // already got a result for is the dominant non-convergence
+        // pattern this is meant to catch (docs/AUDITORIA-2026-07.md,
+        // hallazgo A5).
+        let mut seen_calls: HashSet<(String, String)> = HashSet::new();
+
         for _ in 0..MAX_TURN_ITERATIONS {
             let tool_stubs = self.tools.all_stubs().await?;
             let req = CompletionRequest {
                 messages: messages.clone(),
-                tool_stubs,
+                tool_stubs: tool_stubs.clone(),
                 system_prompt: self.system_prompt.clone(),
                 max_tokens: self.max_tokens,
             };
@@ -146,7 +154,7 @@ impl Engine {
 
             let mut text_buffer = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
-            let mut usage: Option<(u32, u32)> = None;
+            let mut usage: Option<(u32, u32, Option<String>)> = None;
             let mut saw_done = false;
 
             while let Some(event) = stream.next().await {
@@ -169,9 +177,31 @@ impl Engine {
                     Ok(CompletionEvent::Usage {
                         input_tokens,
                         output_tokens,
+                        stop_reason,
                     }) => {
-                        tracing::debug!(input_tokens, output_tokens, "model usage this round");
-                        usage = Some((input_tokens, output_tokens));
+                        tracing::debug!(
+                            input_tokens,
+                            output_tokens,
+                            stop_reason = stop_reason.as_deref(),
+                            "model usage this round"
+                        );
+                        // "max_tokens"/"length" means the round's output
+                        // (which may have been a tool call's JSON
+                        // arguments, mid-construction) was cut off by the
+                        // token budget rather than the model finishing on
+                        // its own — the tool call then fails to parse and
+                        // gets silently dropped downstream with no other
+                        // indication of why. Surfacing it here at least
+                        // makes that diagnosable from logs.
+                        if matches!(stop_reason.as_deref(), Some("max_tokens") | Some("length")) {
+                            tracing::warn!(
+                                output_tokens,
+                                max_tokens = self.max_tokens,
+                                "model output was truncated by max_tokens this round; a tool call's \
+                                 arguments may have been cut off mid-construction"
+                            );
+                        }
+                        usage = Some((input_tokens, output_tokens, stop_reason));
                     }
                     Ok(CompletionEvent::Done) => {
                         saw_done = true;
@@ -209,16 +239,35 @@ impl Engine {
             // comment. Order relative to the round's other events doesn't
             // matter: it's audit-only and never rendered into a `Message`
             // (see `history::event_to_message`).
-            if let Some((input_tokens, output_tokens)) = usage {
+            if let Some((input_tokens, output_tokens, stop_reason)) = usage {
                 self.store
                     .append(
                         session,
                         &AgentEvent::Usage {
                             input_tokens,
                             output_tokens,
+                            stop_reason,
                         },
                     )
                     .await?;
+            }
+
+            // Fallback for models that don't emit a structured tool call —
+            // small/local models, or a template without native tool-call
+            // support — but instead write the call out as JSON in plain
+            // text (optionally fenced in ```json). Rescuing it here beats
+            // treating it as the model's final answer, which would end
+            // the turn having silently ignored what was clearly meant to
+            // be a tool call. See docs/AUDITORIA-2026-07.md hallazgo B5.
+            if tool_calls.is_empty()
+                && let Some(rescued) = try_parse_textual_tool_call(&text_buffer)
+            {
+                tracing::info!(
+                    tool = %rescued.name,
+                    "rescued a tool call the model emitted as plain text instead of a structured tool_calls entry"
+                );
+                tool_calls.push(rescued);
+                text_buffer.clear();
             }
 
             if tool_calls.is_empty() {
@@ -240,10 +289,87 @@ impl Engine {
                     .await?;
             }
 
-            self.dispatch_tool_calls(session, &tool_calls, &mut schema_retry_counts)
-                .await?;
+            self.dispatch_tool_calls(
+                session,
+                &tool_calls,
+                &tool_stubs,
+                &mut schema_retry_counts,
+                &mut seen_calls,
+            )
+            .await?;
 
             messages = self.load_messages(session).await?;
+        }
+
+        self.attempt_final_summary_round(session, &messages, on_text)
+            .await
+    }
+
+    /// Called once the main loop exhausts [`MAX_TURN_ITERATIONS`] without
+    /// the model converging on a text-only response. Rather than failing
+    /// the turn outright with nothing to show for it, makes one last
+    /// tools-free request asking the model to summarize whatever it
+    /// learned and answer with that — persisted as a normal
+    /// `AssistantText` on success. Falls back to
+    /// `EngineError::TurnDidNotConverge` only if this final attempt itself
+    /// fails or produces nothing usable, so a legitimate hard failure
+    /// (e.g. the backend is unreachable) is still surfaced as an error
+    /// rather than silently swallowed.
+    async fn attempt_final_summary_round(
+        &self,
+        session: &SessionId,
+        messages: &[Message],
+        on_text: &mut dyn FnMut(&str),
+    ) -> Result<(), EngineError> {
+        tracing::warn!(
+            max_iterations = MAX_TURN_ITERATIONS,
+            "turn did not converge; attempting a final tools-free summary round instead of failing outright"
+        );
+
+        let req = CompletionRequest {
+            messages: messages.to_vec(),
+            tool_stubs: Vec::new(),
+            system_prompt: format!(
+                "{}\n\nYou have used all available tool-call rounds for this turn. Do not \
+                 call any tool — none are available in this request. Summarize what you \
+                 found so far and answer the user with the best answer you can give from \
+                 the information already gathered.",
+                self.system_prompt
+            ),
+            max_tokens: self.max_tokens,
+        };
+
+        let Ok(mut stream) = self.model.complete(req).await else {
+            return Err(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS));
+        };
+
+        let mut text_buffer = String::new();
+        let mut saw_done = false;
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(CompletionEvent::TextDelta(delta)) => {
+                    on_text(&delta);
+                    text_buffer.push_str(&delta);
+                }
+                Ok(CompletionEvent::Done) => {
+                    saw_done = true;
+                    break;
+                }
+                // No tools were offered in this request, so a tool call
+                // here would itself be a violation of the request — ignore
+                // rather than act on it. `Usage` is fine to skip too: this
+                // degraded round isn't worth the same bookkeeping as a
+                // normal one.
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+
+        if saw_done && !text_buffer.is_empty() {
+            self.store
+                .append(session, &AgentEvent::AssistantText { text: text_buffer })
+                .await?;
+            return Ok(());
         }
 
         Err(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS))
@@ -257,7 +383,9 @@ impl Engine {
         &self,
         session: &SessionId,
         tool_calls: &[ToolCall],
+        available_tools: &[ToolStub],
         retry_counts: &mut HashMap<String, u32>,
+        seen_calls: &mut HashSet<(String, String)>,
     ) -> Result<(), EngineError> {
         let mut handle_to_id: HashMap<TaskHandle, String> = HashMap::new();
         let mut pending: HashSet<TaskHandle> = HashSet::new();
@@ -273,6 +401,45 @@ impl Engine {
                     },
                 )
                 .await?;
+
+            // Exact repeat of a (name, arguments) pair already dispatched
+            // earlier in this same turn — the dominant non-convergence
+            // pattern for small/local models (they re-issue an identical
+            // call instead of using the result they already got, or
+            // giving up and answering in text). `arguments.to_string()` is
+            // a canonical key: `serde_json::Value` objects serialize their
+            // keys in sorted order by default (no `preserve_order`
+            // feature), so structurally-identical arguments compare equal
+            // regardless of the field order the model happened to emit
+            // this time. Nudge instead of re-running the tool.
+            let call_key = (call.name.clone(), call.arguments.to_string());
+            if !seen_calls.insert(call_key) {
+                tracing::warn!(
+                    tool = %call.name,
+                    "model repeated an identical tool call this turn; nudging instead of re-dispatching"
+                );
+                self.store
+                    .append(
+                        session,
+                        &AgentEvent::ToolCallCompleted {
+                            id: call.id.clone(),
+                            result: ToolResult {
+                                tool_call_id: call.id.clone(),
+                                content: format!(
+                                    "You already called '{}' with these exact arguments \
+                                     earlier in this turn — the result has not changed. Do \
+                                     not repeat this call; either use the result you already \
+                                     have, or respond to the user with text instead of \
+                                     calling a tool.",
+                                    call.name
+                                ),
+                                is_error: true,
+                            },
+                        },
+                    )
+                    .await?;
+                continue;
+            }
 
             // Real schema validation before dispatch (closes the gap noted
             // in Fase 3/5, see docs/SOTA-2026-07.md § 1): resolve the
@@ -344,10 +511,40 @@ impl Engine {
                     }
                 }
                 Err(braze_tools_core::ToolError::NotFound(_)) => {
+                    // A hallucinated tool name — frequent with small
+                    // models. Dispatching anyway would just fail identically
+                    // and, worse, the error the model saw ("tool not
+                    // found: X") gave it no way to self-correct. List the
+                    // names that actually exist (already at hand from this
+                    // round's stubs) so the model can retry with a valid
+                    // one instead of repeating the same hallucination.
+                    let available = available_tools
+                        .iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     tracing::warn!(
                         tool = %call.name,
-                        "no provider advertises this tool; dispatching anyway"
+                        "no provider advertises this tool; not dispatching"
                     );
+                    self.store
+                        .append(
+                            session,
+                            &AgentEvent::ToolCallCompleted {
+                                id: call.id.clone(),
+                                result: ToolResult {
+                                    tool_call_id: call.id.clone(),
+                                    content: format!(
+                                        "Unknown tool '{}'. Available tools are: {available}. \
+                                         Retry using one of these exact names.",
+                                        call.name
+                                    ),
+                                    is_error: true,
+                                },
+                            },
+                        )
+                        .await?;
+                    continue;
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -592,6 +789,39 @@ fn merge_summary(mut durable: DurableState, summary: String) -> DurableState {
         durable.summary = format!("{} {summary}", durable.summary);
     }
     durable
+}
+
+/// Best-effort rescue of a tool call a model emitted as plain text instead
+/// of a structured `tool_calls` entry — e.g. `{"name": "read_file",
+/// "arguments": {"path": "x.txt"}}`, optionally wrapped in a ```json
+/// fence. Returns `None` (not an error) for anything that doesn't parse as
+/// such — most final text responses legitimately aren't JSON at all, and
+/// this must never mistake prose for a tool call.
+///
+/// The synthesized id only needs to be unique within this session's event
+/// log (for `tool_use`/`tool_result` correlation) — a real backend id
+/// never applies here since none was ever assigned.
+fn try_parse_textual_tool_call(text: &str) -> Option<ToolCall> {
+    let candidate = text
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let value: serde_json::Value = serde_json::from_str(candidate).ok()?;
+    let name = value.get("name")?.as_str()?.to_string();
+    let arguments = value
+        .get("arguments")
+        .or_else(|| value.get("parameters"))?
+        .clone();
+    if !arguments.is_object() {
+        return None;
+    }
+    Some(ToolCall {
+        id: format!("rescued-{}", uuid::Uuid::new_v4()),
+        name,
+        arguments,
+    })
 }
 
 /// Rough token estimate (~4 chars/token) for the tactical events about to
@@ -913,6 +1143,7 @@ mod tests {
             CompletionEvent::Usage {
                 input_tokens: 42,
                 output_tokens: 7,
+                stop_reason: Some("end_turn".to_string()),
             },
             CompletionEvent::Done,
         ]]);
@@ -940,9 +1171,11 @@ mod tests {
             AgentEvent::Usage {
                 input_tokens,
                 output_tokens,
+                stop_reason,
             } => {
                 assert_eq!(*input_tokens, 42);
                 assert_eq!(*output_tokens, 7);
+                assert_eq!(stop_reason.as_deref(), Some("end_turn"));
             }
             other => panic!("expected Usage, got {other:?}"),
         }
@@ -1249,6 +1482,207 @@ mod tests {
 
         // Both calls were rejected before dispatch — `invoke` never ran.
         assert_eq!(invocations.load(Ordering::SeqCst), 0);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for A5: the model repeating an identical
+    /// (name, arguments) tool call within the same turn must be nudged
+    /// instead of re-dispatched — the dominant non-convergence pattern for
+    /// small/local models, which otherwise burn a round (and, in Ollama's
+    /// case, real CPU time) re-running a call whose result can't change.
+    #[tokio::test]
+    async fn an_identical_repeated_tool_call_is_nudged_not_re_dispatched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                // Same tool, same arguments, different id — a small model
+                // re-issuing the identical call instead of using the
+                // result it already has.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi twice", &mut |_| {})
+            .await
+            .expect("turn should succeed");
+
+        // The real tool only ran once — the repeat was nudged, not
+        // re-dispatched.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-2"))
+            .expect("expected a ToolCallCompleted for call-2")
+        {
+            AgentEvent::ToolCallCompleted { result, .. } => {
+                assert!(result.is_error);
+                assert!(result.content.contains("already called"));
+            }
+            _ => unreachable!(),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for A7: a hallucinated tool name must not be
+    /// dispatched, and the error the model sees must list the tools that
+    /// actually exist so a small model has something concrete to
+    /// self-correct with, instead of a bare "tool not found".
+    #[tokio::test]
+    async fn a_hallucinated_tool_name_is_not_dispatched_and_lists_valid_tools() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "read_files".to_string(), // hallucinated; only "echo" exists
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please read a file", &mut |_| {})
+            .await
+            .expect("turn should succeed");
+
+        // The hallucinated call never reached `invoke`.
+        assert_eq!(invocations.load(Ordering::SeqCst), 0);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-1"))
+            .expect("expected a ToolCallCompleted for call-1")
+        {
+            AgentEvent::ToolCallCompleted { result, .. } => {
+                assert!(result.is_error);
+                assert!(result.content.contains("read_files"));
+                assert!(
+                    result.content.contains("echo"),
+                    "expected the available tool name to be listed, got: {}",
+                    result.content
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for A6: a turn that never converges within
+    /// `MAX_TURN_ITERATIONS` must degrade gracefully — one final
+    /// tools-free round asking the model to summarize — instead of
+    /// failing outright with nothing to show for it.
+    #[tokio::test]
+    async fn a_turn_that_never_converges_gets_a_final_tools_free_summary_round() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let mut rounds: Vec<Vec<CompletionEvent>> = (0..MAX_TURN_ITERATIONS)
+            .map(|i| {
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: format!("call-{i}"),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({ "text": format!("attempt {i}") }),
+                    },
+                    CompletionEvent::Done,
+                ]
+            })
+            .collect();
+        // One round beyond the cap: the tools-free summary attempt.
+        rounds.push(vec![
+            CompletionEvent::TextDelta("aqui esta lo que encontre".to_string()),
+            CompletionEvent::Done,
+        ]);
+
+        let model = ScriptedModel::new(rounds);
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let mut streamed = String::new();
+        engine
+            .run_turn(&session, "hola", &mut |chunk| streamed.push_str(chunk))
+            .await
+            .expect("the turn should degrade gracefully instead of erroring");
+
+        assert_eq!(streamed, "aqui esta lo que encontre");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::AssistantText { text } if text == "aqui esta lo que encontre"
+        )));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -1567,5 +2001,126 @@ mod tests {
         let schema = serde_json::json!({"type": "object", "additionalProperties": true});
         let instance = serde_json::json!({"cualquier_cosa": 123});
         assert!(jsonschema::validate(&schema, &instance).is_ok());
+    }
+
+    // --- try_parse_textual_tool_call (hallazgo B5) ---
+
+    #[test]
+    fn parses_a_bare_json_tool_call() {
+        let rescued =
+            try_parse_textual_tool_call(r#"{"name": "read_file", "arguments": {"path": "x.txt"}}"#)
+                .expect("should parse");
+        assert_eq!(rescued.name, "read_file");
+        assert_eq!(rescued.arguments, serde_json::json!({"path": "x.txt"}));
+    }
+
+    #[test]
+    fn parses_a_tool_call_fenced_in_json_code_block() {
+        let text = "```json\n{\"name\": \"echo\", \"arguments\": {\"text\": \"hi\"}}\n```";
+        let rescued = try_parse_textual_tool_call(text).expect("should parse");
+        assert_eq!(rescued.name, "echo");
+    }
+
+    #[test]
+    fn parses_a_tool_call_fenced_in_a_bare_code_block() {
+        let text = "```\n{\"name\": \"echo\", \"arguments\": {}}\n```";
+        let rescued = try_parse_textual_tool_call(text).expect("should parse");
+        assert_eq!(rescued.name, "echo");
+    }
+
+    #[test]
+    fn accepts_parameters_as_a_synonym_for_arguments() {
+        let rescued =
+            try_parse_textual_tool_call(r#"{"name": "echo", "parameters": {"text": "hi"}}"#)
+                .expect("should parse");
+        assert_eq!(rescued.arguments, serde_json::json!({"text": "hi"}));
+    }
+
+    #[test]
+    fn plain_prose_is_not_mistaken_for_a_tool_call() {
+        assert!(try_parse_textual_tool_call("El archivo tiene 3 lineas.").is_none());
+    }
+
+    #[test]
+    fn json_without_a_name_field_is_not_a_tool_call() {
+        assert!(try_parse_textual_tool_call(r#"{"arguments": {"path": "x.txt"}}"#).is_none());
+    }
+
+    #[test]
+    fn non_object_arguments_are_rejected() {
+        assert!(
+            try_parse_textual_tool_call(r#"{"name": "echo", "arguments": "just a string"}"#)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn each_rescued_call_gets_a_distinct_id() {
+        let a = try_parse_textual_tool_call(r#"{"name": "echo", "arguments": {}}"#).unwrap();
+        let b = try_parse_textual_tool_call(r#"{"name": "echo", "arguments": {}}"#).unwrap();
+        assert_ne!(a.id, b.id);
+    }
+
+    /// Regression test for B5: a model that emits the tool call as plain
+    /// text (no structured `tool_calls` entry — the failure mode for
+    /// small/local models or templates without native tool-call support)
+    /// must still have the tool actually run, and the raw JSON must not
+    /// be persisted as if it were a normal conversational reply.
+    #[tokio::test]
+    async fn a_tool_call_emitted_as_plain_text_is_rescued_and_dispatched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta(
+                    r#"{"name": "echo", "arguments": {"text": "hi"}}"#.to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut |_| {})
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "the rescued call must actually reach the real tool"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallCompleted { result, .. } if result.content == "echoed: hi")),
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("\"name\"")
+            )),
+            "the raw JSON must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

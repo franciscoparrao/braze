@@ -82,6 +82,7 @@ pub fn compute_metrics(
                 AgentEvent::Usage {
                     input_tokens,
                     output_tokens,
+                    ..
                 } => (inp + input_tokens, out + output_tokens),
                 _ => (inp, out),
             });
@@ -368,10 +369,12 @@ mod tests {
             AgentEvent::Usage {
                 input_tokens: 10,
                 output_tokens: 2,
+                stop_reason: Some("end_turn".to_string()),
             },
             AgentEvent::Usage {
                 input_tokens: 15,
                 output_tokens: 3,
+                stop_reason: Some("end_turn".to_string()),
             },
         ];
         let result = compute_metrics(

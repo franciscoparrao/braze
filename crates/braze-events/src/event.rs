@@ -69,6 +69,18 @@ pub enum AgentEvent {
     Usage {
         input_tokens: u32,
         output_tokens: u32,
+        /// The provider's reason the round stopped (Anthropic's
+        /// `stop_reason`, Ollama's `done_reason`), when the backend
+        /// reports one — e.g. `"end_turn"`/`"stop"` for a normal
+        /// completion vs. `"max_tokens"`/`"length"` for output truncated
+        /// by the `max_tokens` budget. A tool call whose JSON arguments
+        /// got cut off mid-stream by `max_tokens` fails to parse and is
+        /// silently dropped with no other signal of *why* — this is what
+        /// lets that be diagnosed instead of just observed as "the model
+        /// gave up". `#[serde(default)]` for backward compat with rollout
+        /// logs written before this field existed.
+        #[serde(default)]
+        stop_reason: Option<String>,
     },
 }
 
@@ -102,6 +114,7 @@ mod tests {
         let event = AgentEvent::Usage {
             input_tokens: 123,
             output_tokens: 45,
+            stop_reason: Some("end_turn".to_string()),
         };
         let json = serde_json::to_string(&event).unwrap();
         let round_tripped: AgentEvent = serde_json::from_str(&json).unwrap();
@@ -109,10 +122,25 @@ mod tests {
             AgentEvent::Usage {
                 input_tokens,
                 output_tokens,
+                stop_reason,
             } => {
                 assert_eq!(input_tokens, 123);
                 assert_eq!(output_tokens, 45);
+                assert_eq!(stop_reason.as_deref(), Some("end_turn"));
             }
+            other => panic!("expected Usage, got {other:?}"),
+        }
+    }
+
+    /// Simulates loading a rollout log line written before `stop_reason`
+    /// existed: the JSON has no such field at all. `#[serde(default)]`
+    /// must still let it deserialize, defaulting to `None`.
+    #[test]
+    fn usage_without_a_stop_reason_field_deserializes_with_none() {
+        let json = r#"{"type":"usage","input_tokens":10,"output_tokens":5}"#;
+        let event: AgentEvent = serde_json::from_str(json).expect("must deserialize");
+        match event {
+            AgentEvent::Usage { stop_reason, .. } => assert_eq!(stop_reason, None),
             other => panic!("expected Usage, got {other:?}"),
         }
     }

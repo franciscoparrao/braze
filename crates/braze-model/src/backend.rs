@@ -28,6 +28,12 @@ pub enum CompletionEvent {
     Usage {
         input_tokens: u32,
         output_tokens: u32,
+        /// The provider's reason the round stopped (Anthropic's
+        /// `stop_reason`, Ollama's `done_reason`), when reported — see
+        /// `braze_events::AgentEvent::Usage`'s doc comment for why this
+        /// matters (diagnosing a tool call's JSON getting cut off by
+        /// `max_tokens` instead of it just silently vanishing).
+        stop_reason: Option<String>,
     },
     Done,
 }

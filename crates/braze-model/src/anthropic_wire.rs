@@ -241,6 +241,12 @@ pub(crate) struct AnthropicStreamState {
     blocks: HashMap<u64, BlockState>,
     input_tokens: u32,
     output_tokens: u32,
+    /// Captured from `message_delta.delta.stop_reason` — `"max_tokens"`
+    /// means the response (including, possibly, a tool call's JSON
+    /// arguments) was cut off by the `max_tokens` budget rather than the
+    /// model finishing on its own. See `CompletionEvent::Usage`'s doc
+    /// comment.
+    stop_reason: Option<String>,
     pub done: bool,
     /// Set by a mid-stream `"error"` SSE event (e.g. `overloaded_error`).
     /// The caller (`drive_stream` in `anthropic.rs`) checks this after
@@ -257,6 +263,7 @@ impl AnthropicStreamState {
             blocks: HashMap::new(),
             input_tokens: 0,
             output_tokens: 0,
+            stop_reason: None,
             done: false,
             stream_error: None,
         }
@@ -289,6 +296,13 @@ impl AnthropicStreamState {
                 {
                     self.output_tokens = tokens as u32;
                 }
+                if let Some(reason) = json
+                    .get("delta")
+                    .and_then(|d| d.get("stop_reason"))
+                    .and_then(Value::as_str)
+                {
+                    self.stop_reason = Some(reason.to_string());
+                }
                 Vec::new()
             }
             Some("message_stop") => {
@@ -297,6 +311,7 @@ impl AnthropicStreamState {
                     CompletionEvent::Usage {
                         input_tokens: self.input_tokens,
                         output_tokens: self.output_tokens,
+                        stop_reason: self.stop_reason.clone(),
                     },
                     CompletionEvent::Done,
                 ]
@@ -552,9 +567,11 @@ mod tests {
             CompletionEvent::Usage {
                 input_tokens,
                 output_tokens,
+                stop_reason,
             } => {
                 assert_eq!(*input_tokens, 10);
                 assert_eq!(*output_tokens, 5);
+                assert_eq!(stop_reason.as_deref(), Some("end_turn"));
             }
             other => panic!("expected Usage, got {other:?}"),
         }

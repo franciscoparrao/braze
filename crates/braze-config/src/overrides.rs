@@ -34,6 +34,8 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub max_tokens: Option<u32>,
     #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
     pub session_dir: Option<PathBuf>,
     #[serde(default)]
     pub mcp_servers: Option<Vec<McpServerConfigStub>>,
@@ -94,6 +96,9 @@ impl ConfigOverrides {
                             })?;
                     overrides.max_tokens = Some(parsed);
                 }
+                "SYSTEM_PROMPT" => {
+                    overrides.system_prompt = Some(value.to_string());
+                }
                 "SESSION_DIR" => overrides.session_dir = Some(PathBuf::from(value)),
                 _ => {} // unrecognized BRAZE_* var: ignore, forward-compatible
             }
@@ -124,6 +129,7 @@ mod tests {
             ("BRAZE_OLLAMA_MODEL", "llama3.1-test"),
             ("BRAZE_OLLAMA_NUM_CTX", "4096"),
             ("BRAZE_MAX_TOKENS", "8192"),
+            ("BRAZE_SYSTEM_PROMPT", "be terse"),
             ("BRAZE_SESSION_DIR", "/tmp/sessions"),
         ];
         let overrides = ConfigOverrides::from_env(vars).unwrap();
@@ -140,6 +146,7 @@ mod tests {
         assert_eq!(overrides.ollama_model.as_deref(), Some("llama3.1-test"));
         assert_eq!(overrides.ollama_num_ctx, Some(4096));
         assert_eq!(overrides.max_tokens, Some(8192));
+        assert_eq!(overrides.system_prompt.as_deref(), Some("be terse"));
         assert_eq!(overrides.session_dir, Some(PathBuf::from("/tmp/sessions")));
     }
 

@@ -27,6 +27,34 @@ use terminal_prompt::TerminalConfirmationPrompt;
 /// summary + durable/tactical events only).
 const CONTEXT_BUDGET_MARGIN_TOKENS: u32 = 1024;
 
+/// Default system prompt, used unless `config.system_prompt` overrides it.
+///
+/// Earlier versions of this shipped a single generic sentence with no
+/// tool-use guidance, no anti-loop rules, and no working directory — the
+/// cheapest lever for small/local models left completely unused (see
+/// docs/AUDITORIA-2026-07.md, hallazgo A10). The rules below target the
+/// two dominant small-model failure modes this project has observed
+/// empirically: repeating an identical tool call instead of using its
+/// result, and over-elaborating instead of answering once enough
+/// information has been gathered (arXiv 2604.02155's finding that longer
+/// reasoning *degrades* tool-calling accuracy in small models).
+fn default_system_prompt(cwd: &std::path::Path) -> String {
+    format!(
+        "You are braze, an agentic CLI assistant. Working directory: {}.\n\
+         \n\
+         Rules:\n\
+         - Never call the same tool with the same arguments twice in one turn — \
+         if you already have that result, use it instead of calling again.\n\
+         - Once you have enough information to answer, stop calling tools and \
+         answer in plain text. Do not keep exploring after you already have \
+         what was asked.\n\
+         - Keep reasoning brief before acting — a sentence or two, not an \
+         extended chain of thought.\n\
+         - Relative paths are resolved against the working directory above.",
+        cwd.display()
+    )
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     // Installed exactly once, here, never in any library crate — respects
@@ -227,7 +255,10 @@ async fn run() -> Result<(), CliError> {
     let notifier = ChannelTaskNotifier::new();
     let compactor = braze_session::SimpleContextCompactor::default();
 
-    let system_prompt = "You are braze, an experimental agentic CLI assistant.".to_string();
+    let system_prompt = config
+        .system_prompt
+        .clone()
+        .unwrap_or_else(|| default_system_prompt(&cwd));
 
     let mut engine = braze_engine::Engine::new(
         model,
@@ -288,17 +319,41 @@ async fn run() -> Result<(), CliError> {
                 }
 
                 let mut stdout = std::io::stdout();
-                engine
+                let result = engine
                     .run_turn(&session, trimmed, &mut |text| {
                         use std::io::Write;
                         print!("{text}");
                         let _ = stdout.flush();
                     })
-                    .await?;
+                    .await;
+                // A single failed turn (a transient backend error, the
+                // model exhausting its iteration cap, ...) must not kill
+                // the whole interactive session — print the error and let
+                // the user try again, instead of propagating with `?` and
+                // ending the process.
+                if let Err(err) = result {
+                    eprintln!("braze: turn failed: {err}");
+                }
                 println!();
             }
         }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for A10: the default prompt must actually carry
+    /// the working directory and the anti-loop/stop-condition guidance —
+    /// the whole point of moving off the old one-sentence default.
+    #[test]
+    fn default_system_prompt_includes_cwd_and_anti_loop_guidance() {
+        let prompt = default_system_prompt(std::path::Path::new("/home/user/project"));
+        assert!(prompt.contains("/home/user/project"));
+        assert!(prompt.contains("Never call the same tool"));
+        assert!(prompt.contains("stop calling tools"));
+    }
 }

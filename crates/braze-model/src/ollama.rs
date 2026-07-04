@@ -264,6 +264,7 @@ mod tests {
                 CompletionEvent::Usage {
                     input_tokens,
                     output_tokens,
+                    ..
                 } => {
                     assert_eq!(input_tokens, 7);
                     assert_eq!(output_tokens, 2);
