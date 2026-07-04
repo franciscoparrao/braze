@@ -46,7 +46,12 @@ pub async fn glob(args: GlobArgs) -> Result<String, String> {
         args.pattern,
     ];
 
-    let output = run("find", &cmd_args).await?;
+    // `workdir` is irrelevant here: `LocalToolsProvider` always resolves
+    // `args.path` to an absolute path before calling this function (see
+    // `anchor_path` above, which passes an already-absolute path through
+    // unchanged), so `find <absolute path> ...` behaves identically
+    // regardless of the child process's cwd.
+    let output = run("find", &cmd_args, std::path::Path::new(".")).await?;
     if !output.success {
         return Err(if output.stderr.is_empty() {
             output.stdout

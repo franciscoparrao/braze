@@ -67,6 +67,8 @@ mod tests {
             expect_tool_call: None,
             expect_no_tool_call: false,
             expect_text_contains: None,
+            expect_file_contains: HashMap::new(),
+            skill: None,
         }
     }
 

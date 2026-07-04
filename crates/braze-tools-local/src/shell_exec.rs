@@ -6,6 +6,8 @@
 //! three tools go through one `tokio::process::Command` code path instead
 //! of duplicating spawn/capture logic.
 
+use std::path::Path;
+
 use serde::Deserialize;
 use serde_json::json;
 use tokio::process::Command;
@@ -25,13 +27,21 @@ pub struct CommandOutput {
     pub success: bool,
 }
 
-/// Spawns `program` with `args` and waits for completion. `Err` only for
-/// spawn-level failures (program not found, exec permission denied, ...)
-/// — a nonzero exit code is a normal `CommandOutput { success: false }`,
-/// not an `Err`.
-pub async fn run(program: &str, args: &[String]) -> Result<CommandOutput, String> {
+/// Spawns `program` with `args` in `workdir` and waits for completion.
+/// `Err` only for spawn-level failures (program not found, exec
+/// permission denied, ...) — a nonzero exit code is a normal
+/// `CommandOutput { success: false }`, not an `Err`.
+///
+/// `workdir` matters here specifically (unlike `grep`/`glob`, whose sole
+/// path argument `LocalToolsProvider` already resolves to absolute before
+/// calling this): an arbitrary shell command's own arguments can
+/// reference relative paths braze has no way to rewrite generically
+/// (`cat notes.txt`, `ls subdir`), so the child process's actual cwd has
+/// to be right.
+pub async fn run(program: &str, args: &[String], workdir: &Path) -> Result<CommandOutput, String> {
     let output = Command::new(program)
         .args(args)
+        .current_dir(workdir)
         .output()
         .await
         .map_err(|err| format!("failed to spawn '{program}': {err}"))?;
@@ -48,12 +58,12 @@ pub async fn run(program: &str, args: &[String]) -> Result<CommandOutput, String
 /// otherwise — either way the JSON payload carries `exit_code`, `stdout`
 /// and `stderr` so the model can see exactly what happened. Spawn-level
 /// failures (bad `command[0]`) also come back as `Err`.
-pub async fn shell_exec(args: ShellExecArgs) -> Result<String, String> {
+pub async fn shell_exec(args: ShellExecArgs, workdir: &Path) -> Result<String, String> {
     let Some((program, rest)) = args.command.split_first() else {
         return Err("command must contain at least the program name".to_string());
     };
 
-    let output = run(program, rest).await?;
+    let output = run(program, rest, workdir).await?;
     let summary = json!({
         "exit_code": output.exit_code,
         "stdout": output.stdout,
@@ -72,11 +82,18 @@ pub async fn shell_exec(args: ShellExecArgs) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    fn cwd() -> std::path::PathBuf {
+        std::env::current_dir().unwrap()
+    }
+
     #[tokio::test]
     async fn captures_stdout_of_a_successful_command() {
-        let result = shell_exec(ShellExecArgs {
-            command: vec!["echo".to_string(), "hello".to_string()],
-        })
+        let result = shell_exec(
+            ShellExecArgs {
+                command: vec!["echo".to_string(), "hello".to_string()],
+            },
+            &cwd(),
+        )
         .await
         .expect("echo should succeed");
 
@@ -86,9 +103,12 @@ mod tests {
 
     #[tokio::test]
     async fn nonzero_exit_code_is_a_recoverable_error() {
-        let result = shell_exec(ShellExecArgs {
-            command: vec!["false".to_string()],
-        })
+        let result = shell_exec(
+            ShellExecArgs {
+                command: vec!["false".to_string()],
+            },
+            &cwd(),
+        )
         .await;
 
         assert!(result.is_err());
@@ -96,17 +116,48 @@ mod tests {
 
     #[tokio::test]
     async fn empty_command_is_rejected() {
-        let result = shell_exec(ShellExecArgs { command: vec![] }).await;
+        let result = shell_exec(ShellExecArgs { command: vec![] }, &cwd()).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn nonexistent_program_is_a_spawn_error() {
-        let result = shell_exec(ShellExecArgs {
-            command: vec!["this-binary-does-not-exist-anywhere".to_string()],
-        })
+        let result = shell_exec(
+            ShellExecArgs {
+                command: vec!["this-binary-does-not-exist-anywhere".to_string()],
+            },
+            &cwd(),
+        )
         .await;
 
         assert!(result.is_err());
+    }
+
+    /// Regression test for F1: the command must actually run inside
+    /// `workdir`, not the process's own cwd — otherwise a relative path
+    /// in the command's own arguments (which braze has no generic way to
+    /// rewrite) resolves against the wrong directory.
+    #[tokio::test]
+    async fn command_runs_inside_the_given_workdir_not_the_process_cwd() {
+        let dir = crate::test_support::unique_temp_dir("shell-exec-workdir");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        tokio::fs::write(dir.join("marker.txt"), "hi")
+            .await
+            .expect("write fixture");
+
+        let result = shell_exec(
+            ShellExecArgs {
+                command: vec!["cat".to_string(), "marker.txt".to_string()],
+            },
+            &dir,
+        )
+        .await
+        .expect("cat should find marker.txt via the workdir, not the process cwd");
+
+        assert!(result.contains("hi"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

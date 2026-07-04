@@ -14,9 +14,40 @@ struct BackendSummary {
     avg_wall_time_ms: f64,
     avg_input_tokens: f64,
     avg_output_tokens: f64,
+    /// Average number of model completion rounds per task — the central
+    /// diagnostic for small models (converging in 2 rounds vs. 14; see
+    /// `TaskResult::rounds`'s doc comment).
+    avg_rounds: f64,
     schema_validation_failures: u32,
     tool_execution_failures: u32,
     permission_denials: u32,
+    /// 95% Wilson score interval half-width around `passed/total`, in
+    /// percentage points. With `--repetitions 1` (or few repetitions) a
+    /// small local model's pass rate is mostly noise, not signal — this
+    /// makes the uncertainty visible instead of implying false precision.
+    /// See docs/AUDITORIA-2026-07.md hallazgo F3.
+    pass_rate_interval_pp: f64,
+}
+
+/// 95% Wilson score interval for a binomial proportion — chosen over the
+/// naive `p ± 1.96*sqrt(p(1-p)/n)` normal approximation because it stays
+/// well-behaved at small `n` and at `p` near 0 or 1, both common here
+/// (a handful of repetitions, and small models that either reliably pass
+/// or reliably fail a given task). Returns `(center, half_width)` as
+/// fractions in `[0, 1]`; `total == 0` returns `(0.0, 0.0)`.
+fn wilson_interval(passed: u32, total: u32) -> (f64, f64) {
+    if total == 0 {
+        return (0.0, 0.0);
+    }
+    let n = total as f64;
+    let p = passed as f64 / n;
+    // z for 95% confidence.
+    let z = 1.96_f64;
+    let z2 = z * z;
+    let denom = 1.0 + z2 / n;
+    let center = (p + z2 / (2.0 * n)) / denom;
+    let half_width = (z / denom) * ((p * (1.0 - p) / n) + z2 / (4.0 * n * n)).sqrt();
+    (center, half_width)
 }
 
 fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
@@ -25,7 +56,9 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
     let sum_wall_time: u128 = results.iter().map(|r| r.wall_time_ms).sum();
     let sum_input: u64 = results.iter().map(|r| r.input_tokens as u64).sum();
     let sum_output: u64 = results.iter().map(|r| r.output_tokens as u64).sum();
+    let sum_rounds: u64 = results.iter().map(|r| r.rounds as u64).sum();
     let n = total.max(1) as f64;
+    let (_center, half_width) = wilson_interval(passed, total);
 
     BackendSummary {
         backend: backend.to_string(),
@@ -34,9 +67,11 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
         avg_wall_time_ms: sum_wall_time as f64 / n,
         avg_input_tokens: sum_input as f64 / n,
         avg_output_tokens: sum_output as f64 / n,
+        avg_rounds: sum_rounds as f64 / n,
         schema_validation_failures: results.iter().map(|r| r.schema_validation_failures).sum(),
         tool_execution_failures: results.iter().map(|r| r.tool_execution_failures).sum(),
         permission_denials: results.iter().map(|r| r.permission_denials).sum(),
+        pass_rate_interval_pp: half_width * 100.0,
     }
 }
 
@@ -47,16 +82,26 @@ pub fn print_table(results: &[TaskResult]) {
     println!("\n== Resultados por tarea ==");
     for result in results {
         let status = if result.passed { "PASS" } else { "FAIL" };
+        let cause_suffix = result
+            .failure_cause
+            .map(|c| format!(" [{c:?}]"))
+            .unwrap_or_default();
         let error_suffix = result
             .run_error
             .as_ref()
             .map(|e| format!(" (error: {e})"))
             .unwrap_or_default();
+        let rep_suffix = if result.repetition > 0 {
+            format!(" (rep {})", result.repetition + 1)
+        } else {
+            String::new()
+        };
         println!(
-            "[{status}] {:<24} {:<20} {:>6}ms  tool_calls={}  schema_fail={}  exec_fail={}  denied={}  tokens_in={} tokens_out={}{error_suffix}",
+            "[{status}] {:<24} {:<20}{rep_suffix} {:>6}ms  rounds={} tool_calls={}  schema_fail={}  exec_fail={}  denied={}  tokens_in={} tokens_out={}{cause_suffix}{error_suffix}",
             result.task_id,
             result.backend,
             result.wall_time_ms,
+            result.rounds,
             result.tool_calls_total,
             result.schema_validation_failures,
             result.tool_execution_failures,
@@ -75,9 +120,10 @@ pub fn print_table(results: &[TaskResult]) {
 
     println!("\n== Comparación por backend ==");
     println!(
-        "{:<24} {:>10} {:>12} {:>14} {:>16} {:>17} {:>14} {:>10}",
+        "{:<24} {:>16} {:>8} {:>12} {:>14} {:>16} {:>17} {:>14} {:>10}",
         "backend",
-        "pass_rate",
+        "pass_rate(±95%)",
+        "avg_rounds",
         "avg_ms",
         "avg_tok_in",
         "avg_tok_out",
@@ -88,11 +134,15 @@ pub fn print_table(results: &[TaskResult]) {
     for backend in backend_order {
         let rows: Vec<&TaskResult> = results.iter().filter(|r| r.backend == backend).collect();
         let summary = summarize(backend, &rows);
+        let pass_rate_cell = format!(
+            "{}/{} (±{:.0}pp)",
+            summary.passed, summary.total, summary.pass_rate_interval_pp
+        );
         println!(
-            "{:<24} {:>9}/{:<2} {:>12.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10}",
+            "{:<24} {:>16} {:>8.1} {:>12.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10}",
             summary.backend,
-            summary.passed,
-            summary.total,
+            pass_rate_cell,
+            summary.avg_rounds,
             summary.avg_wall_time_ms,
             summary.avg_input_tokens,
             summary.avg_output_tokens,
@@ -100,6 +150,47 @@ pub fn print_table(results: &[TaskResult]) {
             summary.tool_execution_failures,
             summary.permission_denials,
         );
+    }
+
+    // Per-skill breakdown (F8): a flat pass-rate can't show *where* a
+    // model's capability ends — grouping by `TaskDef::skill` (when tasks
+    // set it) surfaces that a backend might ace single-tool tasks but
+    // collapse on multi-step or error-recovery ones.
+    let mut skills: Vec<&str> = Vec::new();
+    for result in results {
+        if let Some(skill) = result.skill.as_deref()
+            && !skills.contains(&skill)
+        {
+            skills.push(skill);
+        }
+    }
+    if !skills.is_empty() {
+        println!("\n== Comparación por skill ==");
+        println!("{:<24} {:<20} {:>12}", "backend", "skill", "pass_rate");
+        for backend in {
+            let mut order: Vec<&str> = Vec::new();
+            for result in results {
+                if !order.contains(&result.backend.as_str()) {
+                    order.push(&result.backend);
+                }
+            }
+            order
+        } {
+            for skill in &skills {
+                let rows: Vec<&TaskResult> = results
+                    .iter()
+                    .filter(|r| r.backend == backend && r.skill.as_deref() == Some(*skill))
+                    .collect();
+                if rows.is_empty() {
+                    continue;
+                }
+                let summary = summarize(backend, &rows);
+                println!(
+                    "{:<24} {:<20} {:>9}/{:<2}",
+                    backend, skill, summary.passed, summary.total
+                );
+            }
+        }
     }
 }
 
@@ -126,14 +217,19 @@ mod tests {
         TaskResult {
             backend: "ollama:x".to_string(),
             task_id: "t".to_string(),
+            skill: None,
+            repetition: 0,
             converged: passed,
             run_error: None,
+            failure_cause: None,
             tool_calls_total: 0,
             schema_validation_failures: 0,
             tool_execution_failures: 0,
             permission_denials: 0,
+            rounds: 0,
             expected_tool_called: None,
             expected_text_found: None,
+            expected_files_found: None,
             input_tokens,
             output_tokens,
             wall_time_ms,
@@ -162,5 +258,50 @@ mod tests {
         let summary = summarize("ollama:x", &rows);
         assert_eq!(summary.total, 0);
         assert_eq!(summary.avg_wall_time_ms, 0.0);
+    }
+
+    #[test]
+    fn summarize_averages_rounds_across_all_rows() {
+        let mut a = result(true, 100, 10, 2);
+        a.rounds = 2;
+        let mut b = result(false, 300, 20, 4);
+        b.rounds = 8;
+        let rows = vec![&a, &b];
+
+        let summary = summarize("ollama:x", &rows);
+
+        assert_eq!(summary.avg_rounds, 5.0);
+    }
+
+    #[test]
+    fn wilson_interval_of_empty_sample_is_zero_width() {
+        let (_center, half_width) = wilson_interval(0, 0);
+        assert_eq!(half_width, 0.0);
+    }
+
+    #[test]
+    fn wilson_interval_is_wide_for_a_single_repetition() {
+        // With n=1, a single pass/fail tells you almost nothing — the
+        // interval must be wide (this is the whole point of reporting it:
+        // making that uncertainty visible instead of implying a 100% or
+        // 0% pass rate is a real signal).
+        let (_center, half_width) = wilson_interval(1, 1);
+        assert!(
+            half_width > 0.2,
+            "expected a wide interval, got {half_width}"
+        );
+    }
+
+    #[test]
+    fn wilson_interval_narrows_with_more_repetitions() {
+        // Same observed proportion (80%), more samples: the interval must
+        // shrink — this is the statistical justification for
+        // `--repetitions` actually making the comparison meaningful.
+        let (_c1, narrow_at_5) = wilson_interval(4, 5);
+        let (_c2, narrow_at_50) = wilson_interval(40, 50);
+        assert!(
+            narrow_at_50 < narrow_at_5,
+            "expected the interval to narrow with more repetitions: n=5 -> {narrow_at_5}, n=50 -> {narrow_at_50}"
+        );
     }
 }

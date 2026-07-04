@@ -45,7 +45,11 @@ pub async fn grep(args: GrepArgs) -> Result<String, String> {
         args.path,
     ];
 
-    let output = run("grep", &cmd_args).await?;
+    // `workdir` is irrelevant here: `LocalToolsProvider` always resolves
+    // `args.path` to an absolute path before calling this function, so
+    // `grep -r <absolute path>` behaves identically regardless of the
+    // child process's cwd.
+    let output = run("grep", &cmd_args, std::path::Path::new(".")).await?;
     match output.exit_code {
         0 => Ok(output.stdout),
         1 => Ok("no matches found".to_string()),

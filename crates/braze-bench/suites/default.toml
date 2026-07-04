@@ -1,14 +1,24 @@
-# Suite por defecto de braze-bench: 7 tareas, todas resolubles con
-# acciones "Reversible" (ver PermissionGuard/DefaultClassifier) dentro
-# del sandbox aislado por corrida — el harness deniega cualquier acción
-# "Irreversible" por diseño (ver PLAN.md), así que ninguna tarea debería
-# necesitar una para completarse con éxito.
+# Suite por defecto de braze-bench: tareas resolubles con acciones
+# "Reversible" (ver PermissionGuard/DefaultClassifier) dentro del sandbox
+# aislado por corrida — el harness deniega cualquier acción "Irreversible"
+# por diseño (ver PLAN.md), así que ninguna tarea debería necesitar una
+# para completarse con éxito.
+#
+# Gradiente de dificultad (campo `skill`, ver docs/AUDITORIA-2026-07.md
+# hallazgo F8): las primeras 6 tareas son single_tool (una sola llamada,
+# un solo paso) — el piso que casi cualquier modelo con tool-calling
+# nativo debería despejar. Las últimas 3 suben la dificultad para separar
+# "sabe llamar una tool" de "puede encadenar pasos, recuperarse de un
+# nombre equivocado, o elegir entre distractores" — sin ese gradiente el
+# reporte no puede mostrar *dónde* se rompe la capacidad de un modelo
+# chico, solo que se rompió en algún punto.
 
 [[tasks]]
 id = "read_file_basic"
 prompt = "Lee el archivo notas.txt del directorio actual y dime cuántas líneas tiene."
 expect_tool_call = "read_file"
 expect_text_contains = "3"
+skill = "single_tool"
 
 [tasks.setup_files]
 "notas.txt" = "linea uno\nlinea dos\nlinea tres\n"
@@ -17,6 +27,7 @@ expect_text_contains = "3"
 id = "grep_basic"
 prompt = "Busca la palabra ERROR en el archivo datos.txt y dime en qué línea aparece."
 expect_tool_call = "grep"
+skill = "single_tool"
 
 [tasks.setup_files]
 "datos.txt" = "inicio del programa\nERROR: fallo de conexion\nfin del programa\n"
@@ -25,6 +36,7 @@ expect_tool_call = "grep"
 id = "glob_basic"
 prompt = "Lista todos los archivos con extensión .rs en el directorio actual."
 expect_tool_call = "glob"
+skill = "single_tool"
 
 [tasks.setup_files]
 "a.rs" = "// archivo a\n"
@@ -35,19 +47,31 @@ expect_tool_call = "glob"
 id = "write_file_basic"
 prompt = "Crea un archivo llamado saludo.txt en el directorio actual con el contenido 'hola mundo'."
 expect_tool_call = "write_file"
+skill = "single_tool"
+
+# Verificado contra el filesystem real del sandbox, no solo "se llamó
+# write_file" — una llamada fallida o un no-op también satisfarían
+# expect_tool_call, pero no esto (ver hallazgo F4).
+[tasks.expect_file_contains]
+"saludo.txt" = "hola mundo"
 
 [[tasks]]
 id = "edit_file_basic"
 prompt = "Edita el archivo config.txt del directorio actual y cambia 'version=1' por 'version=2'."
 expect_tool_call = "edit_file"
+skill = "single_tool"
 
 [tasks.setup_files]
 "config.txt" = "version=1\n"
+
+[tasks.expect_file_contains]
+"config.txt" = "version=2"
 
 [[tasks]]
 id = "shell_exec_basic"
 prompt = "Ejecuta el comando `ls` en el directorio actual y dime qué archivos ves."
 expect_tool_call = "shell_exec"
+skill = "single_tool"
 
 [tasks.setup_files]
 "uno.txt" = "contenido uno\n"
@@ -58,3 +82,38 @@ id = "no_tool_qa"
 prompt = "¿Cuánto es 2+2? Responde solo con el número, sin usar ninguna herramienta."
 expect_no_tool_call = true
 expect_text_contains = "4"
+skill = "no_tool"
+
+[[tasks]]
+id = "multi_step_read_count_write"
+prompt = "Lee el archivo resumen.txt del directorio actual, cuenta cuántas líneas tiene, y escribe ese número (solo el número, sin texto adicional) en un archivo nuevo llamado conteo.txt."
+skill = "multi_step"
+
+[tasks.setup_files]
+"resumen.txt" = "linea a\nlinea b\nlinea c\n"
+
+[tasks.expect_file_contains]
+"conteo.txt" = "3"
+
+[[tasks]]
+id = "error_recovery_wrong_filename"
+prompt = "Lee el archivo de informe del directorio actual (el nombre empieza con 'informe' pero no recuerdo el resto) y dime cuántas líneas tiene."
+expect_text_contains = "2"
+skill = "error_recovery"
+
+# El prompt deliberadamente no da el nombre exacto — el modelo tiene que
+# recuperarse de un primer read_file fallido (o usar glob/grep primero)
+# en vez de repetir la misma llamada o rendirse.
+[tasks.setup_files]
+"informe_final_v2.txt" = "dato uno\ndato dos\n"
+
+[[tasks]]
+id = "distractor_selection_among_files"
+prompt = "Hay varios archivos .txt en el directorio actual. Busca cuál de ellos menciona la palabra 'presupuesto' y dime el nombre de ese archivo."
+expect_text_contains = "notas_presupuesto"
+skill = "distractor_selection"
+
+[tasks.setup_files]
+"notas_viaje.txt" = "necesitamos reservar el vuelo y el hotel\n"
+"notas_presupuesto.txt" = "el presupuesto total del proyecto es 5000\n"
+"notas_equipo.txt" = "el equipo tiene cuatro integrantes\n"

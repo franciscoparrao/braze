@@ -6,7 +6,7 @@
 //! "Hallazgo de diseño no anticipado").
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use braze_config::Config;
@@ -18,11 +18,28 @@ use braze_types::SessionId;
 
 use crate::backend_spec::BackendSpec;
 use crate::error::BenchError;
-use crate::metrics::{TaskResult, compute_metrics};
+use crate::metrics::{RunOutcome, TaskResult, compute_metrics};
 use crate::sandbox::TaskSandbox;
 use crate::task::TaskDef;
 
-const SYSTEM_PROMPT: &str = "You are braze, an experimental agentic CLI assistant.";
+/// Wall-clock budget for a single task attempt. A model stuck in a
+/// non-convergence loop on CPU-only Ollama has been observed taking
+/// upwards of 20 minutes to exhaust `MAX_TURN_ITERATIONS` on its own —
+/// without an independent timeout here, one such task can stall an entire
+/// sweep instead of being recorded as the (diagnostically useful) failure
+/// it is. See docs/AUDITORIA-2026-07.md hallazgo F2.
+pub const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Builds the system prompt for one task run, including the sandbox path
+/// so the model knows where relative paths resolve to — without this, a
+/// model has no way to know its working directory isn't wherever it might
+/// otherwise assume.
+fn system_prompt(sandbox_path: &std::path::Path) -> String {
+    format!(
+        "You are braze, an experimental agentic CLI assistant. Working directory: {}.",
+        sandbox_path.display()
+    )
+}
 
 /// Always denies. Combined with a `WorkdirAllowlist` scoped to a
 /// throwaway sandbox directory, this means: safe/reversible actions
@@ -50,13 +67,21 @@ pub async fn run_task(
     spec: &BackendSpec,
     config: &Config,
     task: &TaskDef,
+    repetition: u32,
+    timeout: Duration,
 ) -> Result<TaskResult, BenchError> {
     let sandbox = TaskSandbox::new(task)?;
 
     let allowlist = WorkdirAllowlist::new(sandbox.path());
     let classifier = DefaultClassifier::new(WorkdirAllowlist::new(sandbox.path()));
     let guard = PermissionGuard::new(allowlist, Box::new(classifier), Box::new(DenyAll));
-    let tools_provider = braze_tools_local::LocalToolsProvider::new(guard);
+    // `with_workdir`, not `new`: the bench binary's own process cwd is
+    // wherever it happened to be launched from, not this task's sandbox —
+    // using `new` (which defaults to the process cwd) would silently
+    // decouple the guard's `WorkdirAllowlist` (scoped to the sandbox
+    // above) from where the tools' actual I/O lands. See
+    // docs/AUDITORIA-2026-07.md hallazgo F1.
+    let tools_provider = braze_tools_local::LocalToolsProvider::with_workdir(guard, sandbox.path());
     let tools = braze_tools_core::ToolRegistry::new(vec![Box::new(tools_provider)]);
 
     let session_dir = std::env::temp_dir().join(format!(
@@ -74,15 +99,24 @@ pub async fn run_task(
         Arc::clone(&store),
         Box::new(SimpleContextCompactor::default()),
         Box::new(braze_events::ChannelTaskNotifier::new()),
-        SYSTEM_PROMPT.to_string(),
+        system_prompt(sandbox.path()),
         config.max_tokens,
     );
 
     let started = Instant::now();
-    let run_result = engine
-        .run_turn(&session, &task.prompt, &mut |_text| {})
-        .await
-        .map_err(|err| err.to_string());
+    let run_outcome = match tokio::time::timeout(
+        timeout,
+        engine.run_turn(&session, &task.prompt, &mut |_text| {}),
+    )
+    .await
+    {
+        Ok(Ok(())) => RunOutcome::Converged,
+        Ok(Err(err)) => RunOutcome::Failed(err),
+        // The elapsed-timer future itself carries no useful information
+        // (just "it didn't finish in time") — the interesting bit is
+        // already captured by `RunOutcome::TimedOut`.
+        Err(_elapsed) => RunOutcome::TimedOut,
+    };
     let wall_time = started.elapsed();
 
     let events = match store.load(&session).await {
@@ -96,11 +130,31 @@ pub async fn run_task(
 
     let _ = tokio::fs::remove_dir_all(&session_dir).await;
 
+    // Checked before the sandbox drops at the end of this function (its
+    // `Drop` removes the directory) — this is what makes a write/edit
+    // task's pass/fail track the real filesystem outcome instead of only
+    // "was some tool called" (see docs/AUDITORIA-2026-07.md hallazgo F4).
+    let expected_files_found = if task.expect_file_contains.is_empty() {
+        None
+    } else {
+        Some(
+            task.expect_file_contains
+                .iter()
+                .all(|(relative_path, expected_substring)| {
+                    std::fs::read_to_string(sandbox.path().join(relative_path))
+                        .map(|contents| contents.contains(expected_substring.as_str()))
+                        .unwrap_or(false)
+                }),
+        )
+    };
+
     Ok(compute_metrics(
         &spec.display_name(config),
         task,
+        repetition,
         &events,
         wall_time,
-        run_result,
+        run_outcome,
+        expected_files_found,
     ))
 }

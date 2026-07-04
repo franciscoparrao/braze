@@ -4,8 +4,21 @@
 //! action. Reads (`read_file`, `grep`, `glob`) proceed silently inside the
 //! `WorkdirAllowlist`, same as writes — only a read that reaches outside
 //! it (e.g. `~/.ssh/id_rsa`, `/etc/shadow`) requires confirmation.
+//!
+//! All relative paths a tool call carries are resolved against
+//! [`LocalToolsProvider::workdir`] (join if relative, used as-is if
+//! absolute) *before* the permission check and *before* the actual I/O —
+//! both must agree on the same resolved path. Without an explicit
+//! workdir, a caller whose own process cwd doesn't match the directory
+//! its `PermissionGuard`'s `WorkdirAllowlist` was scoped to (e.g.
+//! `braze-bench` running tasks in a per-task sandbox while the bench
+//! binary itself runs from wherever it was launched) gets a mismatch:
+//! permission checks pass/fail against the sandbox, but the actual read
+//! or write happens relative to the wrong directory entirely — silently
+//! escaping the sandbox for writes, or failing to find files for reads.
+//! See docs/AUDITORIA-2026-07.md hallazgo F1.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use braze_permissions::{ActionDescriptor, PermissionGuard};
@@ -34,27 +47,59 @@ const PROVIDER_ID: &str = "local";
 /// [`LocalToolsProvider::new`].
 pub struct LocalToolsProvider {
     guard: PermissionGuard,
+    workdir: PathBuf,
 }
 
 impl LocalToolsProvider {
+    /// Uses the process's current directory as the workdir — correct for
+    /// `braze-cli`, where the process cwd *is* the project the agent
+    /// operates on. A caller whose process cwd doesn't match the logical
+    /// working directory (e.g. `braze-bench`, one sandbox per task) must
+    /// use [`LocalToolsProvider::with_workdir`] instead.
     pub fn new(guard: PermissionGuard) -> Self {
-        Self { guard }
+        let workdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self { guard, workdir }
+    }
+
+    /// Uses `workdir` as the base every relative path is resolved
+    /// against. Must match the directory `guard`'s `WorkdirAllowlist` was
+    /// scoped to, or the permission check and the actual I/O will
+    /// disagree about what's "inside" the sandbox.
+    pub fn with_workdir(guard: PermissionGuard, workdir: impl Into<PathBuf>) -> Self {
+        Self {
+            guard,
+            workdir: workdir.into(),
+        }
+    }
+
+    /// Joins `path` onto [`Self::workdir`] if relative; returns `path`
+    /// unchanged if already absolute.
+    fn resolve(&self, path: &str) -> String {
+        let candidate = Path::new(path);
+        if candidate.is_absolute() {
+            path.to_string()
+        } else {
+            self.workdir.join(candidate).to_string_lossy().into_owned()
+        }
     }
 
     async fn invoke_read_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let args: ReadFileArgs = parse_args(call)?;
+        let mut args: ReadFileArgs = parse_args(call)?;
+        args.path = self.resolve(&args.path);
         self.check_read(call, &args.path).await?;
         Ok(wrap(call, read_file::read_file(args).await))
     }
 
     async fn invoke_write_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let args: WriteFileArgs = parse_args(call)?;
+        let mut args: WriteFileArgs = parse_args(call)?;
+        args.path = self.resolve(&args.path);
         self.check_write(call, &args.path).await?;
         Ok(wrap(call, write_file::write_file(args).await))
     }
 
     async fn invoke_edit_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let args: EditFileArgs = parse_args(call)?;
+        let mut args: EditFileArgs = parse_args(call)?;
+        args.path = self.resolve(&args.path);
         self.check_write(call, &args.path).await?;
         Ok(wrap(call, edit_file::edit_file(args).await))
     }
@@ -71,17 +116,22 @@ impl LocalToolsProvider {
                 name: call.name.clone(),
                 message: err.to_string(),
             })?;
-        Ok(wrap(call, shell_exec::shell_exec(args).await))
+        Ok(wrap(
+            call,
+            shell_exec::shell_exec(args, &self.workdir).await,
+        ))
     }
 
     async fn invoke_grep(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let args: GrepArgs = parse_args(call)?;
+        let mut args: GrepArgs = parse_args(call)?;
+        args.path = self.resolve(&args.path);
         self.check_read(call, &args.path).await?;
         Ok(wrap(call, grep::grep(args).await))
     }
 
     async fn invoke_glob(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let args: GlobArgs = parse_args(call)?;
+        let mut args: GlobArgs = parse_args(call)?;
+        args.path = self.resolve(&args.path);
         self.check_read(call, &args.path).await?;
         Ok(wrap(call, glob::glob(args).await))
     }
@@ -293,6 +343,77 @@ mod tests {
 
         assert!(!result.is_error);
         assert_eq!(result.content, "hi");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for F1: a relative path must resolve against the
+    /// explicit workdir passed to `with_workdir`, not the process's own
+    /// cwd — this is the exact scenario `braze-bench` needs (one sandbox
+    /// per task, launched from wherever the bench binary itself runs).
+    #[tokio::test]
+    async fn invoke_read_file_resolves_relative_path_against_explicit_workdir() {
+        let dir = unique_temp_dir("provider-read-file-workdir");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        tokio::fs::write(dir.join("notas.txt"), "linea unica")
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::with_workdir(allow_guard(&dir), &dir);
+        let result = provider
+            .invoke(&call(
+                "read_file",
+                serde_json::json!({ "path": "notas.txt" }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        assert_eq!(result.content, "linea unica");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for F1: a relative `write_file` path must land
+    /// inside the explicit workdir, never wherever the process happens to
+    /// be running from — the exact bug that made `braze-bench` write
+    /// task-generated files into the real repo instead of the sandbox.
+    #[tokio::test]
+    async fn invoke_write_file_resolves_relative_path_against_explicit_workdir() {
+        let dir = unique_temp_dir("provider-write-file-workdir");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+
+        let provider = LocalToolsProvider::with_workdir(allow_guard(&dir), &dir);
+        let result = provider
+            .invoke(&call(
+                "write_file",
+                serde_json::json!({ "path": "saludo.txt", "content": "hola mundo" }),
+            ))
+            .await
+            .expect("invoke should succeed");
+
+        assert!(!result.is_error);
+        let contents = tokio::fs::read_to_string(dir.join("saludo.txt"))
+            .await
+            .expect("the file must exist inside the workdir");
+        assert_eq!(contents, "hola mundo");
+
+        let process_cwd_path = std::env::current_dir()
+            .expect("cwd should resolve")
+            .join("saludo.txt");
+        let leaked_into_cwd = process_cwd_path.exists();
+        // Clean up defensively before asserting, so a broken fix doesn't
+        // leave a stray file behind in the real working directory across
+        // test runs.
+        let _ = std::fs::remove_file(&process_cwd_path);
+        assert!(
+            !leaked_into_cwd,
+            "the file must not leak into the process cwd"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

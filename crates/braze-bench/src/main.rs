@@ -13,12 +13,13 @@ mod task;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::Parser;
 
 use backend_spec::BackendSpec;
 use error::BenchError;
-use metrics::TaskResult;
+use metrics::{TaskResult, harness_error_result};
 
 /// `braze-bench <suite.toml> --backends <spec,spec,...> [--output <path.json>]`
 #[derive(Parser, Debug)]
@@ -37,6 +38,20 @@ struct Cli {
     /// crudos (uno por tarea) como JSON en esta ruta.
     #[arg(long)]
     output: Option<PathBuf>,
+    /// Cuántas veces correr cada (tarea, backend). Con modelos locales
+    /// chicos la varianza corrida-a-corrida es alta — un pass_rate con
+    /// repetitions=1 es ruido, no señal. Recomendado >=5 para comparar
+    /// backends Ollama en serio.
+    #[arg(long, default_value_t = 1)]
+    repetitions: u32,
+    /// Presupuesto de tiempo por intento de tarea, en segundos. Un modelo
+    /// que no converge puede tardar mucho más que uno que sí (se ha
+    /// observado >20 minutos en CPU-only antes de agotar el cap de
+    /// iteraciones) — sin este límite, una sola tarea puede colgar todo
+    /// el sweep en vez de registrarse como el fallo (diagnósticamente
+    /// útil) que es.
+    #[arg(long, default_value_t = runner::DEFAULT_TASK_TIMEOUT.as_secs())]
+    task_timeout_secs: u64,
 }
 
 #[tokio::main]
@@ -69,6 +84,13 @@ async fn run() -> Result<(), BenchError> {
         .collect::<Result<_, _>>()?;
 
     let mut results: Vec<TaskResult> = Vec::new();
+    let task_timeout = Duration::from_secs(cli.task_timeout_secs);
+    if cli.repetitions > 1 {
+        println!(
+            "Corriendo {} repetición(es) por (tarea, backend) — timeout {}s por intento.",
+            cli.repetitions, cli.task_timeout_secs
+        );
+    }
 
     // Sequential on purpose: several large local Ollama models sharing
     // one GPU/CPU would just thrash each other under concurrency, and a
@@ -83,14 +105,34 @@ async fn run() -> Result<(), BenchError> {
         }
 
         for task in &tasks {
-            println!("-> {display_name} :: {}", task.id);
-            match runner::run_task(spec, &config, task).await {
-                Ok(result) => results.push(result),
-                Err(err) => {
-                    eprintln!(
-                        "braze-bench: fallo irrecuperable corriendo '{}' contra '{display_name}': {err}",
-                        task.id
+            for repetition in 0..cli.repetitions {
+                if cli.repetitions > 1 {
+                    println!(
+                        "-> {display_name} :: {} (rep {}/{})",
+                        task.id,
+                        repetition + 1,
+                        cli.repetitions
                     );
+                } else {
+                    println!("-> {display_name} :: {}", task.id);
+                }
+                match runner::run_task(spec, &config, task, repetition, task_timeout).await {
+                    Ok(result) => results.push(result),
+                    Err(err) => {
+                        // A harness-level failure (sandbox setup, reading
+                        // back the session log, ...) — not attributable to
+                        // the model at all. Still recorded as a row (with
+                        // its own failure cause) instead of silently
+                        // vanishing from the totals, which previously let
+                        // pass-rate denominators drift between backends
+                        // with no visible explanation. See
+                        // docs/AUDITORIA-2026-07.md hallazgo F5.
+                        eprintln!(
+                            "braze-bench: fallo irrecuperable corriendo '{}' contra '{display_name}': {err}",
+                            task.id
+                        );
+                        results.push(harness_error_result(&display_name, task, repetition, &err));
+                    }
                 }
             }
         }

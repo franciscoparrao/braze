@@ -24,6 +24,11 @@ pub struct TaskDef {
     #[serde(default)]
     pub setup_files: HashMap<String, String>,
     /// If set, the task only passes if this tool was called at least once.
+    /// A proxy for "did the model attempt the right approach" — doesn't
+    /// verify the attempt actually succeeded (a failed or schema-rejected
+    /// call still counts). Prefer `expect_file_contains` for tasks whose
+    /// point is a filesystem outcome (writes/edits); reserve this for
+    /// tasks that only care which tool got reached for.
     #[serde(default)]
     pub expect_tool_call: Option<String>,
     /// If true, the task only passes if NO tool was called at all — e.g.
@@ -35,6 +40,22 @@ pub struct TaskDef {
     /// contains this substring (case-insensitive).
     #[serde(default)]
     pub expect_text_contains: Option<String>,
+    /// If non-empty, the task only passes if every named file (path
+    /// relative to the sandbox root) exists and contains the given
+    /// substring — checked against the sandbox's actual filesystem state
+    /// after the run, not just "was some tool called". This is what makes
+    /// a write/edit task's pass/fail track the real outcome instead of a
+    /// proxy that a failed or no-op call could still satisfy.
+    #[serde(default)]
+    pub expect_file_contains: HashMap<String, String>,
+    /// Optional free-form label (e.g. `"single_tool"`, `"multi_step"`,
+    /// `"error_recovery"`) grouping tasks by the kind of capability they
+    /// probe, so a report can break results down by skill instead of only
+    /// by backend — a flat pass-rate can't show *where* a model's
+    /// capability actually ends. Purely descriptive: never affects
+    /// pass/fail.
+    #[serde(default)]
+    pub skill: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,9 +82,13 @@ mod tests {
             prompt = "Lee notas.txt y dime cuántas líneas tiene."
             expect_tool_call = "read_file"
             expect_text_contains = "3"
+            skill = "single_tool"
 
             [tasks.setup_files]
             "notas.txt" = "uno\ndos\ntres\n"
+
+            [tasks.expect_file_contains]
+            "notas.txt" = "tres"
         "#;
         let suite: TaskSuiteFile = toml::from_str(toml_src).unwrap();
         assert_eq!(suite.tasks.len(), 1);
@@ -72,6 +97,13 @@ mod tests {
         assert_eq!(task.expect_tool_call.as_deref(), Some("read_file"));
         assert_eq!(task.expect_text_contains.as_deref(), Some("3"));
         assert!(!task.expect_no_tool_call);
+        assert_eq!(task.skill.as_deref(), Some("single_tool"));
+        assert_eq!(
+            task.expect_file_contains
+                .get("notas.txt")
+                .map(String::as_str),
+            Some("tres")
+        );
         assert_eq!(
             task.setup_files.get("notas.txt").map(String::as_str),
             Some("uno\ndos\ntres\n")
@@ -91,6 +123,8 @@ mod tests {
         assert_eq!(task.expect_tool_call, None);
         assert!(!task.expect_no_tool_call);
         assert_eq!(task.expect_text_contains, None);
+        assert!(task.expect_file_contains.is_empty());
+        assert_eq!(task.skill, None);
     }
 
     #[test]
@@ -154,5 +188,39 @@ mod tests {
         assert!(result.is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression test for F8: the shipped `default.toml` must actually
+    /// parse, and must cover more than the "single_tool" floor — a
+    /// gradient with only one difficulty level can't show *where* a small
+    /// model's capability ends.
+    #[test]
+    fn default_suite_parses_and_covers_a_difficulty_gradient() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites/default.toml");
+        let tasks = load_suite(&path).expect("default.toml must parse");
+
+        assert!(
+            tasks.len() >= 9,
+            "expected at least 9 tasks, got {}",
+            tasks.len()
+        );
+
+        let skills: std::collections::HashSet<&str> =
+            tasks.iter().filter_map(|t| t.skill.as_deref()).collect();
+        for expected in [
+            "single_tool",
+            "multi_step",
+            "error_recovery",
+            "distractor_selection",
+        ] {
+            assert!(
+                skills.contains(expected),
+                "expected default.toml to include a '{expected}' task, got skills: {skills:?}"
+            );
+        }
+
+        // At least one task's pass/fail is verified against the sandbox's
+        // real filesystem state, not just "some tool was called" (F4).
+        assert!(tasks.iter().any(|t| !t.expect_file_contains.is_empty()));
     }
 }
