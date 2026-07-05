@@ -52,6 +52,15 @@ struct Cli {
     /// útil) que es.
     #[arg(long, default_value_t = runner::DEFAULT_TASK_TIMEOUT.as_secs())]
     task_timeout_secs: u64,
+    /// No ejecutar 'ollama stop <modelo>' al terminar con un backend Ollama.
+    /// Por defecto el sweep sí lo hace: en esta máquina (38GB RAM, ~1.4GB
+    /// libres bajo carga) un modelo grande que queda residente mientras
+    /// carga el siguiente produce contención de memoria que se manifiesta
+    /// como [Timeout] — no como fallo de razonamiento — inflando o
+    /// desinflando pass rates sin relación con la capacidad real del
+    /// modelo. Ver docs/AUDITORIA-2026-07.md.
+    #[arg(long)]
+    no_ollama_stop: bool,
 }
 
 #[tokio::main]
@@ -136,6 +145,15 @@ async fn run() -> Result<(), BenchError> {
                 }
             }
         }
+
+        // Release the model this backend just loaded before the next
+        // backend spec builds its own — see the `no_ollama_stop` doc
+        // comment above for why this isn't just tidiness.
+        if !cli.no_ollama_stop
+            && let Some(model) = spec.ollama_model(&config)
+        {
+            stop_ollama_model(&model).await;
+        }
     }
 
     report::print_table(&results);
@@ -146,4 +164,28 @@ async fn run() -> Result<(), BenchError> {
     }
 
     Ok(())
+}
+
+/// Unloads `model` from the local Ollama daemon (`ollama stop <model>`) so
+/// the next backend in the sweep starts from a clean memory baseline
+/// instead of contending with whatever this one left resident. Best
+/// effort: `ollama` missing or the daemon being down is logged, not fatal
+/// — the sweep already treats a hung/slow backend as a timed-out task, not
+/// a harness failure.
+async fn stop_ollama_model(model: &str) {
+    match tokio::process::Command::new("ollama")
+        .args(["stop", model])
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => eprintln!(
+            "braze-bench: 'ollama stop {model}' salió con {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+        Err(err) => {
+            eprintln!("braze-bench: no se pudo ejecutar 'ollama stop {model}': {err}");
+        }
+    }
 }

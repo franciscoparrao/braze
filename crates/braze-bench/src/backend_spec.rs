@@ -71,6 +71,20 @@ impl BackendSpec {
         }
     }
 
+    /// Resolves the local Ollama model this spec would load, if it names an
+    /// Ollama backend — `None` for `anthropic` specs, which hold nothing in
+    /// local memory to release between backends.
+    pub fn ollama_model(&self, config: &Config) -> Option<String> {
+        match self.provider {
+            Provider::Ollama => Some(
+                self.model_override
+                    .clone()
+                    .unwrap_or_else(|| config.ollama_model.clone()),
+            ),
+            Provider::Anthropic => None,
+        }
+    }
+
     /// Builds the `ModelBackend` this spec names.
     pub fn build(&self, config: &Config) -> Result<Box<dyn ModelBackend>, BenchError> {
         match self.provider {
