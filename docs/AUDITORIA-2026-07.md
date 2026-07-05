@@ -865,24 +865,45 @@ AI" (NVIDIA, jun-2025) — algoritmo LLM-to-SLM de conversión (§6, pasos
 S1-S6). `braze` ya cumple S1 gratis: cada turno persiste un `AgentEvent`
 JSONL completo con cada tool call, argumentos, resultado y ronda. `braze-bench`
 ya cumple S3 parcialmente: sus tareas vienen etiquetadas por `skill`
-(`single_tool`, `multi_step`, `error_recovery`, `distractor_selection`).*
-1. **H1** Script de curación (S2): extraer de logs de sesión reales +
-   `braze-bench --output` los pares prompt→tool_call→resultado, filtrando
-   fallos de harness (`HarnessError`, F5) y cualquier dato sensible.
+(`single_tool`, `multi_step`, `error_recovery`, `distractor_selection`).
+**H1 revisado (2026-07-05)** incorpora el mecanismo concreto de
+destilación R1→V3 de DeepSeek-AI, "DeepSeek-V3 Technical Report"
+(arXiv:2412.19437, §5.4.1): en vez de imitar trazas reales tal como
+ocurrieron, generar múltiples rollouts por tarea y aplicar *rejection
+sampling* contra un reward basado en reglas, descartando toda trayectoria
+que no verifique — controlando además la longitud de la trayectoria para
+no premiar sobre-razonamiento.*
+1. **H1** Curación por rejection sampling (S2): para cada tarea de
+   `braze-bench` (priorizando los skills débiles de H2), generar **N
+   rollouts** — no tomar una sola corrida — usando un backend fuerte como
+   "modelo experto" (`braze` ya soporta Anthropic como backend
+   intercambiable, sin infraestructura nueva) y quedarse **solo** con los
+   rollouts que satisfacen el spec de verificación ya existente de la
+   tarea (`expect_tool_call`, `expect_file_contains` — el equivalente
+   exacto del "rule-based reward" de DeepSeek para código/matemática).
+   Se descarta toda traza que no pase, en vez de solo filtrar
+   `HarnessError` (F5) como decía la versión anterior de este ítem.
+   Filtrar también cualquier dato sensible. Controlar la longitud/rondas
+   de las trayectorias aceptadas (relevante en esta máquina CPU-only,
+   donde la latencia por ronda ya es una restricción — ver Técnica G1
+   diferida) para no destilar hábitos de "sobre-razonar" en rondas
+   innecesarias.
 2. **H2** Clusterizar por `skill` (S3) para decidir qué combinación
    tarea×modelo justifica especialización — el sweep del 2026-07-04 ya
    señala candidatos concretos: `error_recovery` (0/5 en qwen2.5:3b y 7b) y
    `distractor_selection` (0/5 en qwen2.5:3b).
 3. **H3** Fine-tuning LoRA/QLoRA barato (S4-S5) de un candidato (de la
-   lista de modelos de G6) sobre el dataset curado de esos skills débiles,
-   en vez de asumir que hace falta un modelo más grande para esas tareas.
+   lista de modelos de G6) sobre el dataset curado por rejection sampling
+   de esos skills débiles, en vez de asumir que hace falta un modelo más
+   grande para esas tareas.
 4. **H4** Iterar (S6): re-correr `braze-bench` contra el modelo
    fine-tuneado y comparar `pass_rate` contra el baseline pre-fine-tuning.
 
 *Fuera de alcance inmediato: `braze` es un workspace Rust puro sin
 infraestructura de entrenamiento; H3 requeriría tooling externo
-(Python/PEFT) fuera de este repo. H1/H2 sí son alcanzables dentro de
-`braze-bench` o como script standalone.*
+(Python/PEFT) fuera de este repo. H1 (incluyendo la generación de
+rollouts vía el backend Anthropic ya soportado) y H2 sí son alcanzables
+dentro de `braze-bench` o como script standalone.*
 
 ---
 

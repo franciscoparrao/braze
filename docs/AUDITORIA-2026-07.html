@@ -487,9 +487,10 @@ Ok(build_messages(&amp;merge_summary(durable, summary), live))</code></pre></div
   <h3>Grupo H — Pipeline de datos para fine-tuning de SLMs <span class="badge b-low">baja / exploratoria</span></h3>
   <ul>
     <li>Basado en Belcak et al., "Small Language Models are the Future of Agentic AI" (NVIDIA, jun-2025), §6 — algoritmo LLM-to-SLM (S1-S6). <code>braze</code> ya cumple S1 gratis (persistencia <code>AgentEvent</code> por turno) y S3 parcialmente (tareas de <code>braze-bench</code> etiquetadas por <code>skill</code>).</li>
-    <li>H1 curación de logs de sesión (S2) · H2 clusterizar por skill — el sweep del 2026-07-04 ya señala <code>error_recovery</code> y <code>distractor_selection</code> como candidatos débiles</li>
-    <li>H3 fine-tuning LoRA/QLoRA barato de un candidato de la lista de modelos de Grupo F sobre esos skills débiles · H4 iterar re-corriendo el sweep</li>
-    <li>Fuera de alcance inmediato: H3 requiere tooling externo (Python/PEFT), fuera del workspace Rust de <code>braze</code></li>
+    <li><strong>H1 revisado (2026-07-05)</strong>: en vez de solo filtrar logs reales, incorpora el mecanismo de destilación R1→V3 de DeepSeek-AI, "DeepSeek-V3 Technical Report" (arXiv:2412.19437, §5.4.1) — generar <strong>múltiples rollouts</strong> por tarea de <code>braze-bench</code> usando un backend fuerte como "modelo experto" (Anthropic, ya soportado por <code>braze</code>) y aplicar <em>rejection sampling</em> contra el spec de verificación ya existente de la tarea (<code>expect_tool_call</code>, <code>expect_file_contains</code> — el equivalente al rule-based reward de DeepSeek), descartando toda trayectoria que no verifique y controlando la longitud de las aceptadas para no destilar sobre-razonamiento (relevante por la latencia en esta máquina CPU-only, ver G1 diferida)</li>
+    <li>H2 clusterizar por skill — el sweep del 2026-07-04 ya señala <code>error_recovery</code> y <code>distractor_selection</code> como candidatos débiles</li>
+    <li>H3 fine-tuning LoRA/QLoRA barato de un candidato de la lista de modelos de Grupo F sobre el dataset curado por rejection sampling de esos skills débiles · H4 iterar re-corriendo el sweep</li>
+    <li>Fuera de alcance inmediato: H3 requiere tooling externo (Python/PEFT), fuera del workspace Rust de <code>braze</code>. H1 (incluyendo la generación de rollouts vía backend Anthropic) y H2 sí son alcanzables dentro del repo</li>
   </ul>
 
   <h2 id="sweep">8 · Sobre el sweep pendiente</h2>
