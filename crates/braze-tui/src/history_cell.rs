@@ -169,6 +169,47 @@ impl HistoryCell for ErrorCell {
     }
 }
 
+/// A permission decision, recorded once it's been answered (`app.rs`'s
+/// `answer_pending_approval`) — the audit trail of *what got approved or
+/// denied* belongs in the transcript, not just in the ephemeral overlay
+/// that asked. `description` is `ActionDescriptor`'s `Display` output,
+/// same string persisted in the session's `PermissionRequested`/
+/// `PermissionDecided` events (see `approval::ChannelConfirmationPrompt`).
+pub struct PermissionCell {
+    pub description: String,
+    pub allowed: bool,
+}
+
+impl HistoryCell for PermissionCell {
+    fn as_text(&self) -> Text<'_> {
+        let (glyph, color, verb) = if self.allowed {
+            ("✓ ", Color::Green, "allowed")
+        } else {
+            ("✗ ", Color::Red, "denied")
+        };
+        Text::from(Line::from(vec![
+            Span::styled(glyph, Style::default().fg(color)),
+            Span::raw(format!("{verb}: {}", self.description)),
+        ]))
+    }
+}
+
+/// A neutral, informational note — distinct from `ErrorCell`: a turn the
+/// *user* chose to interrupt (Esc, `app.rs`'s `interrupt_turn`) isn't a
+/// failure, so it shouldn't read as one.
+pub struct NoticeCell {
+    pub message: String,
+}
+
+impl HistoryCell for NoticeCell {
+    fn as_text(&self) -> Text<'_> {
+        Text::from(Line::from(Span::styled(
+            self.message.clone(),
+            Style::default().fg(Color::Yellow),
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +286,37 @@ mod tests {
         };
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "error: boom");
+    }
+
+    #[test]
+    fn permission_cell_allowed_uses_a_check_glyph() {
+        let cell = PermissionCell {
+            description: "run `rm -rf /tmp/x`".to_string(),
+            allowed: true,
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines[0].spans[0].content, "✓ ");
+        assert!(text.lines[0].spans[1].content.contains("allowed"));
+        assert!(text.lines[0].spans[1].content.contains("rm -rf"));
+    }
+
+    #[test]
+    fn permission_cell_denied_uses_a_cross_glyph() {
+        let cell = PermissionCell {
+            description: "run `rm -rf /tmp/x`".to_string(),
+            allowed: false,
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines[0].spans[0].content, "✗ ");
+        assert!(text.lines[0].spans[1].content.contains("denied"));
+    }
+
+    #[test]
+    fn notice_cell_renders_the_message_verbatim() {
+        let cell = NoticeCell {
+            message: "interrupted by user".to_string(),
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines[0].spans[0].content, "interrupted by user");
     }
 }

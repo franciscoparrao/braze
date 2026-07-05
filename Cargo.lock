@@ -407,6 +407,7 @@ dependencies = [
  "braze-engine",
  "braze-events",
  "braze-permissions",
+ "braze-session",
  "braze-types",
  "crossterm",
  "futures",

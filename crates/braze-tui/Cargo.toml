@@ -11,6 +11,7 @@ authors.workspace = true
 braze-engine = { workspace = true }
 braze-events = { workspace = true }
 braze-permissions = { workspace = true }
+braze-session = { workspace = true }
 braze-types = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }

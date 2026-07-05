@@ -1,12 +1,12 @@
-//! The event loop: `tokio::select!` between keyboard input and the
-//! current turn's live updates (PLAN.md § "Fase TUI — diseño"). One
-//! [`Engine::run_turn`] runs at a time, spawned as a background task so
-//! the composer stays responsive while the model streams — a second
-//! submission is ignored while one is in flight (two concurrent
-//! `run_turn` calls on the same session would race on the session
-//! store's loads).
+//! The event loop: `tokio::select!` between keyboard input, the current
+//! turn's live updates, and pending permission approvals (PLAN.md §
+//! "Fase TUI — diseño"). One [`Engine::run_turn`] runs at a time, spawned
+//! as a background task so the composer stays responsive while the
+//! model streams — a second submission is ignored while one is in
+//! flight (two concurrent `run_turn` calls on the same session would
+//! race on the session store's loads).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use braze_engine::Engine;
@@ -15,34 +15,51 @@ use braze_types::SessionId;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::Terminal;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::{Color, Style};
+use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 use ratatui_textarea::TextArea;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
+use crate::approval::ApprovalRequest;
 use crate::error::TuiError;
-use crate::history_cell::{AssistantMarkdownCell, ErrorCell, HistoryCell, ToolCallCell, UserCell};
+use crate::history_cell::{
+    AssistantMarkdownCell, ErrorCell, HistoryCell, NoticeCell, PermissionCell, ToolCallCell,
+    UserCell,
+};
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::observer::{ChannelObserver, TuiUpdate};
+use crate::status_bar;
 use crate::terminal::{ACTIVE_ROWS, Backend};
 
 /// Drives the interactive TUI chat loop against an already-configured
 /// `Engine` for `session` until the user quits (Ctrl+C, or Ctrl+D on an
 /// empty composer). `braze-cli` builds `engine` exactly as it does for
 /// the plain-text `chat`/`run` path — this is just another frontend
-/// driving the same composition root.
+/// driving the same composition root. `approvals` is the receiving end
+/// of the channel every `ChannelConfirmationPrompt` this session's
+/// `PermissionGuard`s were built with sends into. `status_line` is a
+/// short, static "backend:model" label shown in the status bar.
 pub async fn run(
     terminal: &mut Terminal<Backend>,
     engine: Engine,
     session: SessionId,
+    approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
+    status_line: String,
 ) -> Result<(), TuiError> {
-    App::new(Arc::new(engine), session).run(terminal).await
+    App::new(Arc::new(engine), session, approvals, status_line)
+        .run(terminal)
+        .await
 }
 
 struct App {
     engine: Arc<Engine>,
     session: SessionId,
+    status_line: String,
+    total_input_tokens: u64,
+    total_output_tokens: u64,
     /// Accumulates the assistant's streaming text for the round in
     /// progress and gates what's safe to commit to the scrollback vs.
     /// still-live preview — see its own doc comment.
@@ -54,24 +71,45 @@ struct App {
     pending_tool_names: HashMap<String, String>,
     composer: TextArea<'static>,
     turn_running: bool,
+    /// The spawned turn's handle, so Esc can `abort()` it — see
+    /// `interrupt_turn`. `None` whenever no turn is in flight.
+    current_turn: Option<JoinHandle<()>>,
+    /// Confirmation requests waiting on an answer, in arrival order —
+    /// a `VecDeque` rather than a single `Option` because two tool
+    /// calls dispatched concurrently in the same round can each need
+    /// confirmation at once; only the front one is shown, answering it
+    /// reveals the next.
+    pending_approvals: VecDeque<ApprovalRequest>,
     should_quit: bool,
     update_tx: mpsc::UnboundedSender<TuiUpdate>,
     update_rx: mpsc::UnboundedReceiver<TuiUpdate>,
+    approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
 }
 
 impl App {
-    fn new(engine: Arc<Engine>, session: SessionId) -> Self {
+    fn new(
+        engine: Arc<Engine>,
+        session: SessionId,
+        approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
+        status_line: String,
+    ) -> Self {
         let (update_tx, update_rx) = mpsc::unbounded_channel();
         Self {
             engine,
             session,
+            status_line,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
             markdown: MarkdownStreamCollector::default(),
             pending_tool_names: HashMap::new(),
             composer: TextArea::default(),
             turn_running: false,
+            current_turn: None,
+            pending_approvals: VecDeque::new(),
             should_quit: false,
             update_tx,
             update_rx,
+            approval_rx,
         }
     }
 
@@ -103,18 +141,41 @@ impl App {
                 Some(update) = self.update_rx.recv() => {
                     self.apply_update(update, terminal)?;
                 }
+                Some(request) = self.approval_rx.recv() => {
+                    self.pending_approvals.push_back(request);
+                }
             }
         }
     }
 
     fn on_key(&mut self, key: KeyEvent, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        // Ctrl+C always quits, regardless of state — the universal
+        // escape hatch, even mid-approval or mid-turn.
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.should_quit = true;
+            return Ok(());
+        }
+
+        if !self.pending_approvals.is_empty() {
+            match key.code {
+                KeyCode::Char('y' | 'Y') => self.answer_pending_approval(true, terminal)?,
+                KeyCode::Char('n' | 'N') | KeyCode::Esc => {
+                    self.answer_pending_approval(false, terminal)?
+                }
+                // Ignore everything else while a decision is pending —
+                // no typing into the composer, no accidental submit.
+                _ => {}
+            }
+            return Ok(());
+        }
+
         let composer_is_empty = self.composer.lines().len() == 1 && self.composer.lines()[0].is_empty();
         match (key.code, key.modifiers) {
-            (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
-            }
             (KeyCode::Char('d'), m) if m.contains(KeyModifiers::CONTROL) && composer_is_empty => {
                 self.should_quit = true;
+            }
+            (KeyCode::Esc, KeyModifiers::NONE) if self.turn_running => {
+                self.interrupt_turn(terminal)?;
             }
             // Ctrl+J: literal newline, bypassing `TextArea::input`'s own
             // `Key::Enter` handling (which we deliberately never reach —
@@ -158,15 +219,96 @@ impl App {
         self.markdown = MarkdownStreamCollector::default();
         self.pending_tool_names.clear();
 
+        // A fresh channel per turn, not a long-lived one reused across
+        // turns: replacing `update_rx` drops the previous receiver, so
+        // if a just-`interrupt_turn`-aborted task's send races a brand
+        // new submit, it lands on an orphaned sender nobody reads from
+        // anymore instead of corrupting the new turn's `markdown`
+        // collector. `update_tx` keeps one live clone so `recv()` stays
+        // pending (not immediately `None`) between turns.
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.update_rx = rx;
+        self.update_tx = tx.clone();
+
         let engine = Arc::clone(&self.engine);
         let session = self.session;
-        let tx = self.update_tx.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut observer = ChannelObserver::new(tx.clone());
             let result = engine.run_turn(&session, &user_text, &mut observer).await;
             let _ = tx.send(TuiUpdate::TurnFinished(result.map_err(|err| err.to_string())));
         });
+        self.current_turn = Some(handle);
 
+        Ok(())
+    }
+
+    /// Aborts the in-flight turn (Esc while `turn_running`). Safe:
+    /// aborting a spawned task just drops its future at the next
+    /// `.await` point — whatever was already persisted to the session
+    /// store stays as-is, and any dangling `AssistantToolCall` with no
+    /// matching `ToolCallCompleted` gets synthesized an error result by
+    /// `Engine::repair_orphaned_tool_calls` the next time this session
+    /// loads (the same mechanism that already handles a killed/crashed
+    /// process — see PLAN.md § "Fase TUI — diseño"). Flushes whatever
+    /// text had streamed in so far rather than discarding it: the user
+    /// asked to stop generation, not to un-see what was already shown.
+    fn interrupt_turn(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        if let Some(handle) = self.current_turn.take() {
+            handle.abort();
+        }
+        self.turn_running = false;
+
+        // Aborting the top-level `run_turn` task does not cancel any
+        // tool-dispatch background task it spawned via `TaskNotifier`
+        // (a separate `tokio::spawn`, per `ChannelTaskNotifier`) — one
+        // of those could still be blocked in `confirm()` awaiting an
+        // answer for a request already sitting in this queue. A new
+        // turn can't have been submitted while `turn_running` was true,
+        // so anything still queued here belongs to the turn just
+        // abandoned — deny it (this codebase's safety default for any
+        // ambiguous case) rather than leave a stale prompt that could
+        // resurface confusingly once a new turn starts.
+        for request in self.pending_approvals.drain(..) {
+            let _ = request.respond.send(false);
+        }
+
+        if let Some(tail) = self.markdown.finish() {
+            self.commit_cell(&AssistantMarkdownCell { markdown: tail }, terminal)?;
+        }
+        self.commit_cell(
+            &NoticeCell {
+                message: "⏸ interrupted by user".to_string(),
+            },
+            terminal,
+        )?;
+        Ok(())
+    }
+
+    /// Answers the front pending approval and commits a `PermissionCell`
+    /// recording the decision. A queued approval that never got shown
+    /// yet is untouched — only the front of the queue is ever answered
+    /// (see `pending_approvals`'s doc comment).
+    fn answer_pending_approval(
+        &mut self,
+        allowed: bool,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
+        let Some(request) = self.pending_approvals.pop_front() else {
+            return Ok(());
+        };
+        let description = request.description.clone();
+        // The other end (`ChannelConfirmationPrompt::confirm`) may have
+        // stopped awaiting already only if it was itself dropped/aborted
+        // (e.g. its turn got interrupted) — sending is best-effort, not
+        // fatal if so.
+        let _ = request.respond.send(allowed);
+        self.commit_cell(
+            &PermissionCell {
+                description,
+                allowed,
+            },
+            terminal,
+        )?;
         Ok(())
     }
 
@@ -175,6 +317,18 @@ impl App {
         update: TuiUpdate,
         terminal: &mut Terminal<Backend>,
     ) -> Result<(), TuiError> {
+        // Every `TuiUpdate` variant only ever originates from the
+        // current turn's `ChannelObserver`/spawn block. If no turn is
+        // currently running, this can only be a stale message racing a
+        // turn that already finished or was interrupted (see
+        // `submit`'s per-turn channel replacement and
+        // `interrupt_turn`'s doc comment) — ignore it outright rather
+        // than let it re-open `markdown`/`pending_tool_names` state a
+        // fresh submit hasn't reset yet.
+        if !self.turn_running && !matches!(update, TuiUpdate::TurnFinished(_)) {
+            return Ok(());
+        }
+
         match update {
             TuiUpdate::TextDelta(delta) => {
                 self.markdown.push(&delta);
@@ -207,17 +361,36 @@ impl App {
                     terminal,
                 )?;
             }
-            TuiUpdate::Event(_) => {
-                // Permission/compaction/usage/unknown events are oleada 4
-                // (PLAN.md § "Fase TUI — diseño"). The engine still sees
-                // and acts on these events normally — they're mirrored
-                // here too, just not drawn yet in this skeleton.
+            TuiUpdate::Event(AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+                ..
+            }) => {
+                self.total_input_tokens += u64::from(input_tokens);
+                self.total_output_tokens += u64::from(output_tokens);
             }
+            TuiUpdate::Event(_) => {
+                // Compaction/permission-request-mirror/unknown events:
+                // permission decisions are already rendered from
+                // `answer_pending_approval`, not from their event
+                // mirror, and compaction cells are "fase TUI 2" (PLAN.md
+                // § "Fase TUI — diseño"). The engine still sees and acts
+                // on all of these normally regardless.
+            }
+            // Only `TurnFinished` can still reach this point with
+            // `turn_running` false (the early return above already
+            // handled every other variant) — a stale completion from a
+            // turn `interrupt_turn` already marked finished. Ignore it
+            // instead of double-reporting (e.g. a second, confusing
+            // error cell for a turn the user already saw get cut off).
+            _ if !self.turn_running => {}
             TuiUpdate::TurnFinished(Ok(())) => {
                 self.turn_running = false;
+                self.current_turn = None;
             }
             TuiUpdate::TurnFinished(Err(message)) => {
                 self.turn_running = false;
+                self.current_turn = None;
                 self.commit_cell(&ErrorCell { message }, terminal)?;
             }
         }
@@ -259,16 +432,45 @@ impl App {
             frame.render_widget(paragraph.scroll((scroll_y, 0)), active_area);
         }
 
-        let hint = if self.turn_running {
-            "esperando respuesta del modelo... (Ctrl+C para salir)"
+        let [hint_left, hint_right] =
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .areas(hint_area);
+
+        let hint = if !self.pending_approvals.is_empty() {
+            "esperando tu decisión... (y permitir · n/Esc denegar)"
+        } else if self.turn_running {
+            "esperando respuesta del modelo... (Ctrl+C salir · Esc interrumpir)"
         } else {
             "Enter enviar · Ctrl+J salto de linea · Ctrl+C salir"
         };
         frame.render_widget(
             Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
-            hint_area,
+            hint_left,
         );
 
-        frame.render_widget(&self.composer, composer_area);
+        let status = status_bar::render(
+            &self.status_line,
+            self.session,
+            self.total_input_tokens,
+            self.total_output_tokens,
+        );
+        frame.render_widget(
+            Paragraph::new(status)
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Right),
+            hint_right,
+        );
+
+        if let Some(request) = self.pending_approvals.front() {
+            let mut lines = vec![Line::from(request.description.clone())];
+            let mut answer_hint = "esta acción puede ser irreversible — y permitir · n/Esc denegar".to_string();
+            if self.pending_approvals.len() > 1 {
+                answer_hint.push_str(&format!("  ({} pendientes)", self.pending_approvals.len()));
+            }
+            lines.push(Line::from(answer_hint).style(Style::default().fg(Color::Yellow)));
+            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), composer_area);
+        } else {
+            frame.render_widget(&self.composer, composer_area);
+        }
     }
 }

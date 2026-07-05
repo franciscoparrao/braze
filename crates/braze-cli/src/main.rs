@@ -89,20 +89,27 @@ async fn main() -> ExitCode {
 /// `PermissionRequested`/`PermissionDecided` events for later `--resume`
 /// replay — but its stdin reads don't work correctly once the terminal is
 /// in raw mode (`braze-tui`'s requirement). Under `--tui` this builds
-/// `braze_tui::AutoDenyConfirmationPrompt` instead (see its doc comment for
-/// why denying is the safe stopgap until oleada 4's approval overlay).
+/// `braze_tui::ChannelConfirmationPrompt` instead, which asks over
+/// `approval_tx` (the sending half of the channel `braze_tui::run`'s
+/// caller also holds the receiving half of) rather than blocking on
+/// stdin — same session-store persistence, different question channel.
 fn build_permission_guard(
     cwd: &std::path::Path,
     session: braze_types::SessionId,
     store: std::sync::Arc<dyn braze_session::SessionStore>,
     replayed_keys: &[braze_types::PermissionKey],
     tui_mode: bool,
+    approval_tx: tokio::sync::mpsc::UnboundedSender<braze_tui::ApprovalRequest>,
 ) -> braze_permissions::PermissionGuard {
     let allowlist_for_classifier = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
     let allowlist_for_guard = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
     let classifier = braze_permissions::DefaultClassifier::new(allowlist_for_classifier);
     let confirmation: Box<dyn braze_permissions::ConfirmationPrompt> = if tui_mode {
-        Box::new(braze_tui::AutoDenyConfirmationPrompt)
+        Box::new(braze_tui::ChannelConfirmationPrompt::new(
+            session,
+            store,
+            approval_tx,
+        ))
     } else {
         Box::new(TerminalConfirmationPrompt::new(session, store))
     };
@@ -253,6 +260,12 @@ async fn run() -> Result<(), CliError> {
     // `ConfirmationPrompt` gets built.
     let tui_mode = matches!(cli.command, Command::Chat { tui: true, .. });
 
+    // Constructed unconditionally (cheap) even for the plain path, where
+    // it's simply never sent into a `ChannelConfirmationPrompt` and
+    // `approval_rx` is never read — only `--tui` wires it up for real.
+    let (approval_tx, approval_rx) =
+        tokio::sync::mpsc::unbounded_channel::<braze_tui::ApprovalRequest>();
+
     // Two-layer permission setup: a soft working-dir allowlist plus a
     // default-deny shell classifier + terminal y/n confirmation for
     // irreversible actions. Every `ToolProvider` (local tools, and now each
@@ -267,6 +280,7 @@ async fn run() -> Result<(), CliError> {
         std::sync::Arc::clone(&store),
         &replayed_keys,
         tui_mode,
+        approval_tx.clone(),
     );
 
     let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard);
@@ -300,6 +314,7 @@ async fn run() -> Result<(), CliError> {
             std::sync::Arc::clone(&store),
             &replayed_keys,
             tui_mode,
+            approval_tx.clone(),
         );
         match braze_mcp_client::McpToolProvider::connect(
             server.name.clone(),
@@ -331,6 +346,22 @@ async fn run() -> Result<(), CliError> {
         .system_prompt
         .clone()
         .unwrap_or_else(|| default_system_prompt(&cwd));
+
+    // Short "backend:model" label for the TUI's status bar — computed
+    // here (not inside `braze-tui`) since `Engine` doesn't expose the
+    // model name of the `ModelBackend` it was built with.
+    let status_line = match config.default_backend.as_str() {
+        "anthropic" => format!(
+            "anthropic:{}",
+            config.anthropic_model.as_deref().unwrap_or("?")
+        ),
+        "ollama" => format!("ollama:{}", config.ollama_model),
+        "openrouter" => format!(
+            "openrouter:{}",
+            config.openrouter_model.as_deref().unwrap_or("?")
+        ),
+        other => other.to_string(),
+    };
 
     let mut engine = braze_engine::Engine::new(
         model,
@@ -375,7 +406,7 @@ async fn run() -> Result<(), CliError> {
             println!();
         }
         Command::Chat { tui: true, .. } => {
-            braze_tui::run(engine, session).await?;
+            braze_tui::run(engine, session, approval_rx, status_line).await?;
         }
         Command::Chat { .. } => {
             println!("session: {session} (usa --resume {session} para continuarla luego)");

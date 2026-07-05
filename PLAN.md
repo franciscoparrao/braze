@@ -725,10 +725,108 @@ mensaje anterior y editarlo, como Codex).
      tardar 30-90s reales; los primeros intentos de verificación
      asumieron un cuelgue antes de confirmar que solo era latencia de
      inferencia CPU-bound.
-4. `approval.rs` + interrupción con Esc + `status_bar.rs`.
+4. **COMPLETA (2026-07-05)** — `approval.rs` (`ChannelConfirmationPrompt`
+   reemplazando `AutoDenyConfirmationPrompt`) + interrupción con Esc +
+   `status_bar.rs`.
+   - **Corrección honesta al diseño original**: la idea de "mostrar el
+     nivel de riesgo y la razón de la clasificación" no mapea a datos
+     reales — `Reversibility` (`braze-permissions::classifier`) es
+     binario, y por construcción `ConfirmationPrompt::confirm` **solo**
+     se invoca para acciones ya clasificadas `Irreversible` (las
+     `Reversible` nunca preguntan) — mostrar "nivel de riesgo:
+     irreversible" sería tautológico, y el clasificador no expone una
+     cadena de "razón" en absoluto (solo el enum binario). En vez de
+     forzar ese dato inexistente, el overlay muestra la descripción
+     concreta de la acción (`ActionDescriptor::Display`, ya rica: `run
+     \`mv /tmp/a /tmp/b\`` / `write file /etc/passwd`) más un texto de
+     encuadre explícito ("esta acción puede ser irreversible") — mismo
+     principio de "mostrar el porqué" del anexo académico, con los datos
+     que realmente existen.
+   - **`ChannelConfirmationPrompt`** (`approval.rs`) espeja casi
+     exactamente a `TerminalConfirmationPrompt` de `braze-cli` (misma
+     persistencia `PermissionRequested`/`PermissionDecided` para replay
+     de `--resume`), pero pregunta por un canal (`ApprovalRequest { description,
+     respond: oneshot::Sender<bool> }`) en vez de bloquear en stdin.
+     `AutoDenyConfirmationPrompt` de la oleada 2 se eliminó por completo
+     (su único propósito era ser el stopgap hasta este punto).
+   - **Cola de aprobaciones** (`pending_approvals: VecDeque`, no un
+     `Option`): dos tool calls despachadas concurrentemente en la misma
+     ronda pueden pedir confirmación a la vez — solo se muestra la
+     primera de la cola; responderla revela la siguiente.
+   - **Dos condiciones de carrera reales encontradas y corregidas
+     durante el diseño** (no en verificación posterior — se detectaron
+     leyendo el propio código antes de compilar):
+     1. *Canal de turno reusado entre turnos*: si `update_tx`/`update_rx`
+        vivieran toda la vida de la app, un mensaje residual de un turno
+        recién abortado (`interrupt_turn`) podría llegar DESPUÉS de que
+        el usuario ya envió un turno nuevo, corrompiendo el
+        `MarkdownStreamCollector` recién reseteado. Arreglo: `submit`
+        reemplaza `update_tx`/`update_rx` por un par fresco cada turno
+        — el sender del turno anterior queda huérfano (su receiver ya
+        no existe), cualquier envío tardío falla en silencio sin tocar
+        el estado del turno nuevo.
+     2. *Aprobaciones huérfanas al interrumpir*: abortar el `JoinHandle`
+        del turno principal (`run_turn`) **no cancela** las tareas de
+        fondo que despachan tool calls (spawneadas aparte vía
+        `TaskNotifier`) — una de ellas podría seguir bloqueada en
+        `confirm()` esperando una respuesta que ya está en la cola.
+        Arreglo: `interrupt_turn` vacía `pending_approvals` denegando
+        cada una (`respond.send(false)`, el default de seguridad ya
+        establecido en el codebase) en vez de dejar un prompt fantasma
+        que podría resurgir confuso en el turno siguiente.
+   - **Esc tiene significado dependiente del contexto**: si hay una
+     aprobación pendiente, deniega (mismo atajo que Gemini/Codex); si
+     no, e interrumpe el turno en curso — Ctrl+C siempre sale
+     incondicionalmente, sin importar el estado (vía de escape
+     universal).
+   - **`interrupt_turn`**: aborta el `JoinHandle`, hace *flush* de lo que
+     quedó sin commitear en `MarkdownStreamCollector` (el usuario pidió
+     parar la generación, no des-ver lo que ya se mostró) y commitea una
+     `NoticeCell` (amarilla, "⏸ interrupted by user" — deliberadamente
+     *no* `ErrorCell`, ya que una interrupción pedida por el usuario no
+     es una falla). Seguro porque `Engine::repair_orphaned_tool_calls`
+     ya repara cualquier `AssistantToolCall` colgante la próxima vez que
+     la sesión carga (mismo mecanismo que cubre un proceso matado/caído
+     — nada nuevo que persistir desde el lado de la TUI).
+   - **`status_bar.rs`**: función pura de formato (backend:modelo ·
+     prefijo de session id de 8 caracteres · tokens acumulados
+     `↑`/`↓` desde `AgentEvent::Usage`), renderizada en la mitad
+     derecha de la fila de hint (no una fila nueva — `VIEWPORT_HEIGHT`
+     no creció desde la oleada 2). `braze-cli` calcula el string
+     "backend:modelo" antes de construir el `Engine` (que no expone el
+     nombre del modelo del `ModelBackend` que recibió) y se lo pasa a
+     `braze_tui::run` como parámetro.
+   - **Nuevas celdas**: `PermissionCell` (✓/✗ + descripción, commiteada
+     al responder una aprobación — el registro de auditoría de qué se
+     permitió/denegó vive en el transcript, no solo en el overlay
+     efímero que preguntó) y `NoticeCell` (nota neutra, reutilizable
+     para futuras notificaciones no-error).
+   - **Tests**: 364 → 371. `approval` pasó de 1 a 3 (el único test de
+     `AutoDenyConfirmationPrompt` se reemplazó por 3 sobre
+     `ChannelConfirmationPrompt`: responder que sí persiste ambos
+     eventos, receiver caído deniega, respond-sender dropeado sin
+     responder deniega). `status_bar` es módulo nuevo con 2 tests.
+     `history_cell` pasó de 8 a 11 (`PermissionCell`×2, `NoticeCell`×1).
+     `cargo build/test/clippy --workspace` verdes.
+   - **Verificación manual en vivo, dos métodos**: (a) contra Ollama
+     real (`qwen2.5:3b`) para interrupción con Esc — confirmado en
+     pantalla: la celda "⏸ interrupted by user" aparece, el hint vuelve
+     a la normalidad, y un turno posterior funciona sin problemas
+     (sesión no corrupta tras interrumpir). (b) contra un **binario de
+     prueba con un `ModelBackend` scripteado** (determinístico, sin la
+     latencia real de Ollama de 30-90s que había hecho lento verificar
+     el flujo de aprobación) que fuerza una tool call de `shell_exec`
+     con `mv` — confirmado end-to-end en ambas ramas: denegar (`n`)
+     produce `PermissionCell(✗ denied)` + `ToolCallCell(✗, "action
+     denied: ...")`, y el `mv` real **nunca se ejecuta**; permitir (`y`)
+     produce `PermissionCell(✓ allowed)` y el comando `mv` **se ejecuta
+     de verdad** (falló con "no such file" porque la ruta de prueba no
+     existía — confirma que el permiso se aplica de verdad, no es
+     cosmético). Status bar visible y correcto en ambas verificaciones
+     (`scripted:test · <8 chars> · tokens 0↑/0↓`).
 5. Snapshot tests `insta` + `cargo clippy -D warnings` + verificación
-   manual contra Ollama local y OpenRouter (streaming largo, tool calls
-   reales, denegación de permiso, resize suave).
+   manual contra Ollama local y OpenRouter (streaming largo, resize
+   suave).
 
 ## Archivos críticos
 
