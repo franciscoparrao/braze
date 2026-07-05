@@ -142,9 +142,13 @@ async fn run() -> Result<(), CliError> {
                 ollama_model: Some(model.to_string()),
                 ..Default::default()
             },
+            "openrouter" => braze_config::ConfigOverrides {
+                openrouter_model: Some(model.to_string()),
+                ..Default::default()
+            },
             other => {
                 return Err(CliError::Startup(format!(
-                    "unknown backend '{other}' (expected 'anthropic' or 'ollama')"
+                    "unknown backend '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
                 )));
             }
         };
@@ -173,9 +177,28 @@ async fn run() -> Result<(), CliError> {
             )
             .with_num_ctx(config.ollama_num_ctx),
         ),
+        "openrouter" => {
+            let api_key = config.openrouter_api_key.clone().ok_or_else(|| {
+                CliError::Startup(
+                    "falta OPENROUTER_API_KEY (config file, BRAZE_OPENROUTER_API_KEY, o --backend openrouter sin key configurada)"
+                        .to_string(),
+                )
+            })?;
+            let model_name = config.openrouter_model.clone().ok_or_else(|| {
+                CliError::Startup(
+                    "falta --model o BRAZE_OPENROUTER_MODEL para el backend openrouter"
+                        .to_string(),
+                )
+            })?;
+            Box::new(braze_model::OpenRouterBackend::with_base_url(
+                api_key,
+                model_name,
+                config.openrouter_base_url.clone(),
+            ))
+        }
         other => {
             return Err(CliError::Startup(format!(
-                "unknown backend '{other}' (expected 'anthropic' or 'ollama')"
+                "unknown backend '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
             )));
         }
     };

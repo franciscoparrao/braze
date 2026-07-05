@@ -38,6 +38,18 @@ pub enum CompletionEvent {
     Done,
 }
 
+/// The permissive placeholder schema sent for a tool whose real
+/// `input_schema` isn't known yet (still-deferred MCP tools — see
+/// `ToolStub`'s two-tier schema policy). Shared by all three backends'
+/// `build_tools` so a future change to the fallback shape can't silently
+/// diverge between them.
+pub(crate) fn permissive_fallback_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": true
+    })
+}
+
 /// Abstracts over LLM providers. MVP requires at least two independent
 /// implementers (`AnthropicBackend`, `OllamaBackend`) to prove this isn't a
 /// one-off shaped around a single vendor's API.

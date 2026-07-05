@@ -13,6 +13,8 @@ mod error;
 mod http_error;
 mod ollama;
 mod ollama_wire;
+mod openrouter;
+mod openrouter_wire;
 #[cfg(test)]
 mod test_support;
 
@@ -20,3 +22,4 @@ pub use anthropic::AnthropicBackend;
 pub use backend::{CompletionEvent, CompletionRequest, ModelBackend};
 pub use error::ModelError;
 pub use ollama::OllamaBackend;
+pub use openrouter::OpenRouterBackend;

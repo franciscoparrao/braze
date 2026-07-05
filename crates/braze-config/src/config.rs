@@ -50,6 +50,25 @@ pub struct Config {
     /// from the front — no error, just a model that "forgot" its system
     /// prompt and tools mid-turn. See `braze-model::OllamaBackend`.
     pub ollama_num_ctx: u32,
+    /// OpenRouter API key. Never hardcoded — comes from the config file or
+    /// `BRAZE_OPENROUTER_API_KEY`.
+    #[serde(default)]
+    pub openrouter_api_key: Option<String>,
+    /// OpenRouter model identifier (e.g.
+    /// `"anthropic/claude-3.5-sonnet"`). No default: if the user selects
+    /// `default_backend = "openrouter"` and never configures this, that is
+    /// a clear startup error, not a guessed value.
+    #[serde(default)]
+    pub openrouter_model: Option<String>,
+    /// Base URL for the OpenRouter API. Configurable (unlike Anthropic's
+    /// hardcoded endpoint) so this backend can also target a self-hosted
+    /// OpenAI-compatible gateway or a corporate mirror. NOTE: unlike
+    /// Ollama, `braze` does not budget context per OpenRouter model —
+    /// OpenRouter routes to models with widely varying context windows,
+    /// and consuming its `/models` catalog to size that budget dynamically
+    /// is out of scope for now. A model with a small context window may
+    /// truncate or fail server-side without a client-side warning.
+    pub openrouter_base_url: String,
     /// Default max tokens for a model completion request.
     pub max_tokens: u32,
     /// System prompt sent with every request. `None` (the default) means
@@ -78,6 +97,9 @@ impl Default for Config {
             ollama_base_url: "http://localhost:11434".to_string(),
             ollama_model: "llama3.1".to_string(),
             ollama_num_ctx: 8192,
+            openrouter_api_key: None,
+            openrouter_model: None,
+            openrouter_base_url: "https://openrouter.ai/api/v1".to_string(),
             max_tokens: 4096,
             system_prompt: None,
             session_dir: paths::default_session_dir(),
@@ -147,6 +169,15 @@ impl Config {
         if let Some(v) = overrides.ollama_num_ctx {
             self.ollama_num_ctx = v;
         }
+        if let Some(v) = overrides.openrouter_api_key {
+            self.openrouter_api_key = Some(v);
+        }
+        if let Some(v) = overrides.openrouter_model {
+            self.openrouter_model = Some(v);
+        }
+        if let Some(v) = overrides.openrouter_base_url {
+            self.openrouter_base_url = v;
+        }
         if let Some(v) = overrides.max_tokens {
             self.max_tokens = v;
         }
@@ -189,6 +220,9 @@ mod tests {
         assert_eq!(config.ollama_base_url, "http://localhost:11434");
         assert_eq!(config.ollama_model, "llama3.1");
         assert_eq!(config.ollama_num_ctx, 8192);
+        assert_eq!(config.openrouter_api_key, None);
+        assert_eq!(config.openrouter_model, None);
+        assert_eq!(config.openrouter_base_url, "https://openrouter.ai/api/v1");
         assert_eq!(config.max_tokens, 4096);
         assert_eq!(config.system_prompt, None);
         assert!(config.mcp_servers.is_empty());
@@ -288,6 +322,31 @@ mod tests {
         let env = vec![("BRAZE_OLLAMA_NUM_CTX".to_string(), "4096".to_string())];
         let config = Config::load_with(None, env).unwrap();
         assert_eq!(config.ollama_num_ctx, 4096);
+    }
+
+    #[test]
+    fn openrouter_fields_are_overridable_via_env() {
+        let env = vec![
+            (
+                "BRAZE_OPENROUTER_API_KEY".to_string(),
+                "sk-or-test-123".to_string(),
+            ),
+            (
+                "BRAZE_OPENROUTER_MODEL".to_string(),
+                "openai/gpt-4o-mini".to_string(),
+            ),
+            (
+                "BRAZE_OPENROUTER_BASE_URL".to_string(),
+                "http://example:5555/api/v1".to_string(),
+            ),
+        ];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(config.openrouter_api_key.as_deref(), Some("sk-or-test-123"));
+        assert_eq!(
+            config.openrouter_model.as_deref(),
+            Some("openai/gpt-4o-mini")
+        );
+        assert_eq!(config.openrouter_base_url, "http://example:5555/api/v1");
     }
 
     #[test]

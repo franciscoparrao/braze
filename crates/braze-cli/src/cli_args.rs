@@ -1,8 +1,8 @@
 //! `clap` v4 derive command structure for the `braze` binary.
 //!
 //! ```text
-//! braze chat [--resume <session-id>] [--backend anthropic|ollama] [--model <nombre>]
-//! braze run <prompt> [--backend anthropic|ollama] [--model <nombre>]
+//! braze chat [--resume <session-id>] [--backend anthropic|ollama|openrouter] [--model <nombre>]
+//! braze run <prompt> [--backend anthropic|ollama|openrouter] [--model <nombre>]
 //! ```
 //!
 //! `--backend`/`--model` are optional overrides layered on top of whatever

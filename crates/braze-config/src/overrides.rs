@@ -32,6 +32,12 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub ollama_num_ctx: Option<u32>,
     #[serde(default)]
+    pub openrouter_api_key: Option<String>,
+    #[serde(default)]
+    pub openrouter_model: Option<String>,
+    #[serde(default)]
+    pub openrouter_base_url: Option<String>,
+    #[serde(default)]
     pub max_tokens: Option<u32>,
     #[serde(default)]
     pub system_prompt: Option<String>,
@@ -85,6 +91,9 @@ impl ConfigOverrides {
                             })?;
                     overrides.ollama_num_ctx = Some(parsed);
                 }
+                "OPENROUTER_API_KEY" => overrides.openrouter_api_key = Some(value.to_string()),
+                "OPENROUTER_MODEL" => overrides.openrouter_model = Some(value.to_string()),
+                "OPENROUTER_BASE_URL" => overrides.openrouter_base_url = Some(value.to_string()),
                 "MAX_TOKENS" => {
                     let parsed =
                         value
@@ -155,6 +164,28 @@ mod tests {
         let vars = [("BRAZE_MAX_TOKENS", "not-a-number")];
         let err = ConfigOverrides::from_env(vars).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
+    }
+
+    #[test]
+    fn from_env_parses_openrouter_fields() {
+        let vars = [
+            ("BRAZE_OPENROUTER_API_KEY", "sk-or-test-123"),
+            ("BRAZE_OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+            ("BRAZE_OPENROUTER_BASE_URL", "http://example:5555/api/v1"),
+        ];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(
+            overrides.openrouter_api_key.as_deref(),
+            Some("sk-or-test-123")
+        );
+        assert_eq!(
+            overrides.openrouter_model.as_deref(),
+            Some("openai/gpt-4o-mini")
+        );
+        assert_eq!(
+            overrides.openrouter_base_url.as_deref(),
+            Some("http://example:5555/api/v1")
+        );
     }
 
     #[test]

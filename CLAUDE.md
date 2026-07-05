@@ -30,12 +30,14 @@ durable vs. ventana táctica), ejecución en background con notificación push
 ## Alcance MVP
 
 Ver `PLAN.md` § "Alcance del MVP" para el detalle completo. Resumen:
-loop de tool-calling funcionando contra **Anthropic** (proveedor principal)
-y **Ollama local** (segundo implementador de `ModelBackend`, gratis);
-herramientas locales + cliente MCP implementando el mismo trait
-`ToolProvider`; carga diferida de herramientas end-to-end; persistencia de
-sesión a disco con compactación diferencial simple; capa mínima de
-confirmación de permisos (sin sandboxing de SO todavía).
+loop de tool-calling funcionando contra **Anthropic** (proveedor
+principal), **Ollama local** (segundo implementador de `ModelBackend`,
+gratis) y **OpenRouter** (tercer implementador, agregado 2026-07-05 —
+API OpenAI-compatible, da acceso a modelos de terceros vía una única
+cuenta/key); herramientas locales + cliente MCP implementando el mismo
+trait `ToolProvider`; carga diferida de herramientas end-to-end;
+persistencia de sesión a disco con compactación diferencial simple; capa
+mínima de confirmación de permisos (sin sandboxing de SO todavía).
 
 Diferido a Fase 2: sandboxing Landlock/seccomp, multi-agente/grafo de
 threads, TUI, observabilidad OTLP, paquetes de skills cargables, sistema de

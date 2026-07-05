@@ -14,7 +14,7 @@ use braze_types::{ContentBlock, Message, Role, ToolStub};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::backend::{CompletionEvent, CompletionRequest};
+use crate::backend::{CompletionEvent, CompletionRequest, permissive_fallback_schema};
 use crate::error::ModelError;
 
 // ---------------------------------------------------------------------
@@ -216,12 +216,10 @@ fn build_tools(stubs: &[ToolStub]) -> Vec<OllamaTool> {
             function: OllamaFunctionDef {
                 name: stub.name.clone(),
                 description: stub.summary.clone(),
-                parameters: stub.input_schema.clone().unwrap_or_else(|| {
-                    serde_json::json!({
-                        "type": "object",
-                        "additionalProperties": true
-                    })
-                }),
+                parameters: stub
+                    .input_schema
+                    .clone()
+                    .unwrap_or_else(permissive_fallback_schema),
             },
         })
         .collect()

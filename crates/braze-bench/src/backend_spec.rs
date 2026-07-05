@@ -1,12 +1,12 @@
 //! Parses `--backends` specs (`anthropic`, `anthropic:<model>`,
-//! `ollama`, `ollama:<model>`) and builds the `ModelBackend` each one
-//! names, reusing whatever `braze_config::Config` already resolved for
-//! the API key / base URL — same construction logic
-//! `braze-cli/src/main.rs` uses, just parameterized per spec instead of
-//! per process.
+//! `ollama`, `ollama:<model>`, `openrouter`, `openrouter:<model>`) and
+//! builds the `ModelBackend` each one names, reusing whatever
+//! `braze_config::Config` already resolved for the API key / base URL —
+//! same construction logic `braze-cli/src/main.rs` uses, just
+//! parameterized per spec instead of per process.
 
 use braze_config::Config;
-use braze_model::{AnthropicBackend, ModelBackend, OllamaBackend};
+use braze_model::{AnthropicBackend, ModelBackend, OllamaBackend, OpenRouterBackend};
 
 use crate::error::BenchError;
 
@@ -14,6 +14,7 @@ use crate::error::BenchError;
 enum Provider {
     Anthropic,
     Ollama,
+    OpenRouter,
 }
 
 /// One `--backends` entry, already split into provider + optional model
@@ -36,9 +37,10 @@ impl BackendSpec {
         let provider = match provider_str {
             "anthropic" => Provider::Anthropic,
             "ollama" => Provider::Ollama,
+            "openrouter" => Provider::OpenRouter,
             other => {
                 return Err(BenchError::Startup(format!(
-                    "unknown backend provider '{other}' (expected 'anthropic' or 'ollama')"
+                    "unknown backend provider '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
                 )));
             }
         };
@@ -56,6 +58,7 @@ impl BackendSpec {
         let provider = match self.provider {
             Provider::Anthropic => "anthropic",
             Provider::Ollama => "ollama",
+            Provider::OpenRouter => "openrouter",
         };
         let model = self
             .model_override
@@ -63,6 +66,7 @@ impl BackendSpec {
             .unwrap_or_else(|| match self.provider {
                 Provider::Anthropic => config.anthropic_model.clone().unwrap_or_default(),
                 Provider::Ollama => config.ollama_model.clone(),
+                Provider::OpenRouter => config.openrouter_model.clone().unwrap_or_default(),
             });
         if model.is_empty() {
             provider.to_string()
@@ -81,7 +85,7 @@ impl BackendSpec {
                     .clone()
                     .unwrap_or_else(|| config.ollama_model.clone()),
             ),
-            Provider::Anthropic => None,
+            Provider::Anthropic | Provider::OpenRouter => None,
         }
     }
 
@@ -118,6 +122,31 @@ impl BackendSpec {
                     OllamaBackend::with_base_url(model, config.ollama_base_url.clone())
                         .with_num_ctx(config.ollama_num_ctx),
                 ))
+            }
+            Provider::OpenRouter => {
+                let api_key = config.openrouter_api_key.clone().ok_or_else(|| {
+                    BenchError::Startup(
+                        "falta OPENROUTER_API_KEY (config file o BRAZE_OPENROUTER_API_KEY) para \
+                         un backend 'openrouter'"
+                            .to_string(),
+                    )
+                })?;
+                let model = self
+                    .model_override
+                    .clone()
+                    .or_else(|| config.openrouter_model.clone())
+                    .ok_or_else(|| {
+                        BenchError::Startup(
+                            "falta el modelo openrouter: usa 'openrouter:<modelo>' o configura \
+                             BRAZE_OPENROUTER_MODEL"
+                                .to_string(),
+                        )
+                    })?;
+                Ok(Box::new(OpenRouterBackend::with_base_url(
+                    api_key,
+                    model,
+                    config.openrouter_base_url.clone(),
+                )))
             }
         }
     }
@@ -180,6 +209,21 @@ mod tests {
     #[test]
     fn build_anthropic_backend_without_api_key_is_a_startup_error() {
         let spec = BackendSpec::parse("anthropic:claude-x").unwrap();
+        let result = spec.build(&config());
+        assert!(matches!(result, Err(BenchError::Startup(_))));
+    }
+
+    #[test]
+    fn parses_openrouter_with_model_override() {
+        let spec = BackendSpec::parse("openrouter:openai/gpt-4o-mini").unwrap();
+        assert_eq!(spec.provider, Provider::OpenRouter);
+        assert_eq!(spec.model_override.as_deref(), Some("openai/gpt-4o-mini"));
+        assert_eq!(spec.ollama_model(&config()), None);
+    }
+
+    #[test]
+    fn build_openrouter_backend_without_api_key_is_a_startup_error() {
+        let spec = BackendSpec::parse("openrouter:openai/gpt-4o-mini").unwrap();
         let result = spec.build(&config());
         assert!(matches!(result, Err(BenchError::Startup(_))));
     }
