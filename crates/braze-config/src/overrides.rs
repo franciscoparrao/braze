@@ -44,6 +44,10 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub session_dir: Option<PathBuf>,
     #[serde(default)]
+    pub tactical_window: Option<usize>,
+    #[serde(default)]
+    pub tactical_compaction_threshold: Option<usize>,
+    #[serde(default)]
     pub mcp_servers: Option<Vec<McpServerConfigStub>>,
 }
 
@@ -109,6 +113,28 @@ impl ConfigOverrides {
                     overrides.system_prompt = Some(value.to_string());
                 }
                 "SESSION_DIR" => overrides.session_dir = Some(PathBuf::from(value)),
+                "TACTICAL_WINDOW" => {
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.tactical_window = Some(parsed);
+                }
+                "TACTICAL_COMPACTION_THRESHOLD" => {
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.tactical_compaction_threshold = Some(parsed);
+                }
                 _ => {} // unrecognized BRAZE_* var: ignore, forward-compatible
             }
         }
@@ -140,6 +166,8 @@ mod tests {
             ("BRAZE_MAX_TOKENS", "8192"),
             ("BRAZE_SYSTEM_PROMPT", "be terse"),
             ("BRAZE_SESSION_DIR", "/tmp/sessions"),
+            ("BRAZE_TACTICAL_WINDOW", "10"),
+            ("BRAZE_TACTICAL_COMPACTION_THRESHOLD", "25"),
         ];
         let overrides = ConfigOverrides::from_env(vars).unwrap();
         assert_eq!(overrides.default_backend.as_deref(), Some("anthropic"));
@@ -157,11 +185,20 @@ mod tests {
         assert_eq!(overrides.max_tokens, Some(8192));
         assert_eq!(overrides.system_prompt.as_deref(), Some("be terse"));
         assert_eq!(overrides.session_dir, Some(PathBuf::from("/tmp/sessions")));
+        assert_eq!(overrides.tactical_window, Some(10));
+        assert_eq!(overrides.tactical_compaction_threshold, Some(25));
     }
 
     #[test]
     fn from_env_rejects_invalid_max_tokens() {
         let vars = [("BRAZE_MAX_TOKENS", "not-a-number")];
+        let err = ConfigOverrides::from_env(vars).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_tactical_window() {
+        let vars = [("BRAZE_TACTICAL_WINDOW", "not-a-number")];
         let err = ConfigOverrides::from_env(vars).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
     }

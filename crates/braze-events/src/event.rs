@@ -82,6 +82,23 @@ pub enum AgentEvent {
         #[serde(default)]
         stop_reason: Option<String>,
     },
+    /// Catch-all for a `"type"` tag this binary's enum doesn't have a
+    /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
+    /// shape is a frozen contract (PLAN.md) — a new variant is the only
+    /// additive way to evolve it, and without this fallback, an older
+    /// binary reading a rollout log written by a newer one (with a
+    /// variant it doesn't know) fails `load` for the *entire* session at
+    /// that line, not just the one it can't understand. `#[serde(other)]`
+    /// on a fieldless variant is serde's own forward-compatibility escape
+    /// hatch for internally-tagged enums: any unrecognized `type` value
+    /// deserializes to this variant instead of erroring, discarding the
+    /// rest of that line's fields (nothing useful to keep from a shape
+    /// this binary has no definition for). Downstream code treats it like
+    /// any other audit-only event — see
+    /// `braze_session::SimpleContextCompactor::compact_tactical` and
+    /// `braze_engine::history::event_to_message`.
+    #[serde(other)]
+    Unknown,
 }
 
 #[cfg(test)]
@@ -143,5 +160,17 @@ mod tests {
             AgentEvent::Usage { stop_reason, .. } => assert_eq!(stop_reason, None),
             other => panic!("expected Usage, got {other:?}"),
         }
+    }
+
+    /// Regression test for C9: a `"type"` value this enum has no variant
+    /// for (simulating a rollout log written by a newer binary with an
+    /// event kind this one predates) must deserialize to `Unknown`
+    /// instead of failing — the whole point of the forward-compat escape
+    /// hatch.
+    #[test]
+    fn unrecognized_type_tag_deserializes_as_unknown_instead_of_erroring() {
+        let json = r#"{"type":"some_future_event_kind","whatever":"fields","it":1}"#;
+        let event: AgentEvent = serde_json::from_str(json).expect("must deserialize");
+        assert!(matches!(event, AgentEvent::Unknown));
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
@@ -36,10 +37,26 @@ use crate::store::SessionStore;
 /// engine loop per process, appending sequentially as it processes
 /// events). Revisit if/when multi-process access to the same session
 /// directory becomes a real requirement.
+///
+/// ## In-memory cache (C11, docs/AUDITORIA-2026-07.md)
+///
+/// `Engine::run_turn` calls `load` once per round, and a turn can run many
+/// rounds — re-reading and re-parsing the *entire* on-disk log every round
+/// is O(n²) I/O+parsing per session, competing with model inference for
+/// CPU on a CPU-only box. `cache` holds the fully-parsed event list per
+/// session once it has been read from disk at least once in this
+/// process's lifetime; `append` keeps a *warm* cache entry up to date
+/// in-memory (no disk re-read needed), and leaves a *cold* one (not yet
+/// loaded in this process) alone — the next `load` call falls back to the
+/// disk read, which already includes everything appended so far, and
+/// warms the cache from that point on. This is only sound because of the
+/// single-writer assumption above: nothing else can append to the same
+/// session's file underneath this process and invalidate the cache.
 #[derive(Debug)]
 pub struct FileSessionStore {
     base_dir: PathBuf,
     write_lock: Mutex<()>,
+    cache: Mutex<HashMap<SessionId, Vec<AgentEvent>>>,
 }
 
 impl FileSessionStore {
@@ -49,6 +66,7 @@ impl FileSessionStore {
         Self {
             base_dir: base_dir.into(),
             write_lock: Mutex::new(()),
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -90,10 +108,29 @@ impl SessionStore for FileSessionStore {
             .await
             .map_err(|e| SessionError::Write(format!("flushing {path:?}: {e}")))?;
 
+        // Only extend an already-warm cache entry — a cold one means this
+        // process has never `load`ed this session yet, so it may not
+        // reflect events another process (or an earlier run) already
+        // wrote to disk; blindly seeding a one-event cache here would
+        // silently hide that prior history from the next `load`. The next
+        // `load` call for a cold session does the full disk read (which
+        // already includes this event) and warms the cache from there.
+        let mut cache = self.cache.lock().await;
+        if let Some(events) = cache.get_mut(session) {
+            events.push(event.clone());
+        }
+
         Ok(())
     }
 
     async fn load(&self, session: &SessionId) -> Result<Vec<AgentEvent>, SessionError> {
+        {
+            let cache = self.cache.lock().await;
+            if let Some(events) = cache.get(session) {
+                return Ok(events.clone());
+            }
+        }
+
         let path = self.path_for(session);
         let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -136,6 +173,10 @@ impl SessionStore for FileSessionStore {
                 }
             }
         }
+
+        let mut cache = self.cache.lock().await;
+        cache.insert(*session, events.clone());
+
         Ok(events)
     }
 
@@ -311,6 +352,92 @@ mod tests {
 
         let err = store.load(&session).await.unwrap_err();
         assert!(matches!(err, SessionError::NotFound(_)));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for C11: once a session has been `load`ed at least
+    /// once (warming the cache), a subsequent `append` must keep serving
+    /// `load` from memory instead of re-reading disk — proven here by
+    /// corrupting the on-disk file *after* warming the cache and
+    /// confirming `load` still succeeds with the correct, cache-backed
+    /// contents instead of failing on the corruption a disk re-read would
+    /// hit.
+    #[tokio::test]
+    async fn append_after_a_load_keeps_serving_from_cache_not_disk() {
+        let (store, dir) = temp_store("cache-after-load");
+        let session = SessionId::new();
+
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "primero".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Warms the cache for this session.
+        let events = store.load(&session).await.unwrap();
+        assert_eq!(events.len(), 1);
+
+        // A second append while the cache is warm.
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantText {
+                    text: "segundo".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Corrupt the file directly on disk — if `load` fell back to
+        // re-reading it now, this would surface as a `SessionError::Read`
+        // (a malformed non-final line), not as the two well-formed events
+        // already reflected in the cache.
+        let path = store.path_for(&session);
+        tokio::fs::write(&path, "not valid jsonl at all\n")
+            .await
+            .unwrap();
+
+        let events = store.load(&session).await.expect("must serve from cache");
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
+        assert!(matches!(events[1], AgentEvent::AssistantText { .. }));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for C11: an `append` before the session has ever
+    /// been `load`ed (a cold cache) must not seed a partial cache entry —
+    /// the very next `load` still needs to do the full disk read so it
+    /// picks up everything on disk, not just what this process happened
+    /// to append.
+    #[tokio::test]
+    async fn append_before_any_load_does_not_hide_prior_disk_state_on_the_next_load() {
+        let (store, dir) = temp_store("cache-cold-append");
+        let session = SessionId::new();
+
+        // Simulate history already on disk from a previous process,
+        // written without ever being `load`ed by this `store` instance.
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "de un proceso anterior".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let events = store.load(&session).await.unwrap();
+        assert_eq!(
+            events.len(),
+            1,
+            "the cold-cache append must not have been silently skipped"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

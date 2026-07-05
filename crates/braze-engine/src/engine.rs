@@ -105,11 +105,31 @@ impl Engine {
         self
     }
 
+    /// Overrides [`DEFAULT_TACTICAL_COMPACTION_THRESHOLD`] with a
+    /// caller-supplied value (C10, docs/AUDITORIA-2026-07.md) — e.g. from
+    /// `braze_config::Config::tactical_compaction_threshold`. Chainable,
+    /// same shape as [`Engine::with_context_budget`].
+    pub fn with_tactical_compaction_threshold(mut self, threshold: usize) -> Self {
+        self.tactical_compaction_threshold = threshold;
+        self
+    }
+
     /// Runs one complete turn: append the user's message, then loop
     /// model-completion <-> tool-dispatch rounds until the model responds
     /// with text and no further tool calls (or the safety cap is hit).
     /// `on_text` is invoked with each text fragment as it streams in, for
     /// real-time display by the caller (CLI/TUI/etc).
+    ///
+    /// A9 (docs/AUDITORIA-2026-07.md): `#[instrument]` wraps the whole
+    /// call in an `info_span!`-equivalent "turn" span carrying `session`,
+    /// so every log statement this turn produces — including ones nested
+    /// several calls deep (`load_messages`, `dispatch_tool_calls`) — is
+    /// automatically tagged with it. Diagnosing the "which turn produced
+    /// this pathological sequence of tool calls" failure mode with
+    /// `RUST_LOG=debug` was previously impossible; this is what makes it
+    /// possible without threading `session` through every log call by
+    /// hand.
+    #[tracing::instrument(name = "turn", skip(self, user_input, on_text), fields(session = %session))]
     pub async fn run_turn(
         &self,
         session: &SessionId,
@@ -141,7 +161,7 @@ impl Engine {
         // hallazgo A5).
         let mut seen_calls: HashSet<(String, String)> = HashSet::new();
 
-        for _ in 0..MAX_TURN_ITERATIONS {
+        for round in 0..MAX_TURN_ITERATIONS {
             let tool_stubs = self.tools.all_stubs().await?;
             let req = CompletionRequest {
                 messages: messages.clone(),
@@ -269,6 +289,12 @@ impl Engine {
                 tool_calls.push(rescued);
                 text_buffer.clear();
             }
+
+            // A9 (docs/AUDITORIA-2026-07.md): the round-level fact
+            // `RUST_LOG=debug` previously had no way to see — which round
+            // of this turn this was, and how many tool calls it produced
+            // — nested under the "turn" span's `session` field.
+            tracing::debug!(round, n_tool_calls = tool_calls.len(), "round completed");
 
             if tool_calls.is_empty() {
                 // Final response: no further tool calls requested.
@@ -555,6 +581,13 @@ impl Engine {
                 }
             }
 
+            // A9 (docs/AUDITORIA-2026-07.md): per-tool-call visibility for
+            // the ordinary/successful dispatch path — previously only
+            // failures (schema rejection, unknown tool, timeout) logged
+            // anything at all, so a `RUST_LOG=debug` trace of a healthy
+            // turn showed no tool-call activity whatsoever.
+            tracing::debug!(tool = %call.name, id = %call.id, "dispatching tool call");
+
             self.store
                 .append(
                     session,
@@ -618,6 +651,11 @@ impl Engine {
                     let id = handle_to_id
                         .remove(&handle)
                         .unwrap_or_else(|| result.tool_call_id.clone());
+                    tracing::debug!(
+                        tool_call_id = %id,
+                        is_error = result.is_error,
+                        "tool call completed"
+                    );
                     self.store
                         .append(session, &AgentEvent::ToolCallCompleted { id, result })
                         .await?;
@@ -694,6 +732,21 @@ impl Engine {
             .is_some_and(|budget| estimate_prompt_tokens(&durable, &tactical) > budget);
 
         if over_event_count_threshold || over_token_budget {
+            // A9 (docs/AUDITORIA-2026-07.md): previously this branch had
+            // no log statement at all — the only trace of a compaction
+            // having happened was the resulting `AgentEvent::CompactionOccurred`
+            // itself, silently, in the rollout log. `tactical_len` is the
+            // number that actually tripped this (whichever threshold),
+            // making a repeated/thrashing compaction pattern visible with
+            // `RUST_LOG=debug` instead of only inferable after the fact.
+            tracing::warn!(
+                tactical_len = tactical.len(),
+                tactical_compaction_threshold = self.tactical_compaction_threshold,
+                over_event_count_threshold,
+                over_token_budget,
+                "context compaction triggered"
+            );
+
             let summary = self.compactor.compact_tactical(&tactical)?;
             let dropped_tokens_estimate = estimate_dropped_tokens(&tactical);
 

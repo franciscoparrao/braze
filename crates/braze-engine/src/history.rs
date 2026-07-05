@@ -116,11 +116,15 @@ fn event_to_message(event: &AgentEvent) -> Option<Message> {
             }],
         }),
         // Metadata / audit-only — never part of conversational content.
+        // `Unknown` (C9's forward-compat catch-all) belongs here too:
+        // this binary has no definition for it, so there is nothing
+        // meaningful to render into a `Message`.
         AgentEvent::ToolCallStarted { .. }
         | AgentEvent::CompactionOccurred { .. }
         | AgentEvent::PermissionRequested { .. }
         | AgentEvent::PermissionDecided { .. }
-        | AgentEvent::Usage { .. } => None,
+        | AgentEvent::Usage { .. }
+        | AgentEvent::Unknown => None,
     }
 }
 

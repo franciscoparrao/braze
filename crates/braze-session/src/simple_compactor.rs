@@ -249,7 +249,8 @@ impl ContextCompactor for SimpleContextCompactor {
                 | AgentEvent::CompactionOccurred { .. }
                 | AgentEvent::PermissionRequested { .. }
                 | AgentEvent::PermissionDecided { .. }
-                | AgentEvent::Usage { .. } => {}
+                | AgentEvent::Usage { .. }
+                | AgentEvent::Unknown => {}
             }
         }
 

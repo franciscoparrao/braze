@@ -294,7 +294,10 @@ async fn run() -> Result<(), CliError> {
 
     let tools = braze_tools_core::ToolRegistry::new(providers);
     let notifier = ChannelTaskNotifier::new();
-    let compactor = braze_session::SimpleContextCompactor::default();
+    // C10 (docs/AUDITORIA-2026-07.md): tactical window/threshold come from
+    // config instead of `SimpleContextCompactor::default()`'s hardcoded
+    // constant, so they can be tuned per backend without recompiling.
+    let compactor = braze_session::SimpleContextCompactor::new(config.tactical_window);
 
     let system_prompt = config
         .system_prompt
@@ -309,7 +312,8 @@ async fn run() -> Result<(), CliError> {
         Box::new(notifier),
         system_prompt,
         config.max_tokens,
-    );
+    )
+    .with_tactical_compaction_threshold(config.tactical_compaction_threshold);
 
     // Only Ollama has a small, fixed context window worth budgeting for
     // (Anthropic's is large enough that raw event count remains a fine

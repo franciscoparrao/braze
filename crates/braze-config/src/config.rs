@@ -81,6 +81,20 @@ pub struct Config {
     pub system_prompt: Option<String>,
     /// Directory where `braze-session` writes its rollout logs.
     pub session_dir: PathBuf,
+    /// Number of raw tactical events `SimpleContextCompactor` always keeps
+    /// verbatim in the live conversational window — see
+    /// `braze_session::SimpleContextCompactor::new`. Previously hardcoded
+    /// (C10, docs/AUDITORIA-2026-07.md); the right size depends on the
+    /// backend's context window (Anthropic's large context can afford a
+    /// wider raw window than Ollama's small, fixed `num_ctx`), so it's
+    /// configurable rather than a single constant for every backend.
+    pub tactical_window: usize,
+    /// Number of raw tactical events above which `Engine::run_turn`
+    /// triggers a compaction pass — see
+    /// `braze_engine::DEFAULT_TACTICAL_COMPACTION_THRESHOLD`'s doc
+    /// comment. Previously hardcoded (C10, same rationale as
+    /// `tactical_window`).
+    pub tactical_compaction_threshold: usize,
     /// MCP servers to connect to by default (consumed by `braze-mcp-client`, Fase 4).
     #[serde(default)]
     pub mcp_servers: Vec<McpServerConfigStub>,
@@ -103,6 +117,12 @@ impl Default for Config {
             max_tokens: 4096,
             system_prompt: None,
             session_dir: paths::default_session_dir(),
+            // Mirrors `SimpleContextCompactor::DEFAULT_TACTICAL_WINDOW` /
+            // `braze_engine::DEFAULT_TACTICAL_COMPACTION_THRESHOLD` —
+            // this is the historical hardcoded value, now just the
+            // default a caller can override.
+            tactical_window: 20,
+            tactical_compaction_threshold: 40,
             mcp_servers: Vec::new(),
         }
     }
@@ -187,6 +207,12 @@ impl Config {
         if let Some(v) = overrides.session_dir {
             self.session_dir = v;
         }
+        if let Some(v) = overrides.tactical_window {
+            self.tactical_window = v;
+        }
+        if let Some(v) = overrides.tactical_compaction_threshold {
+            self.tactical_compaction_threshold = v;
+        }
         if let Some(v) = overrides.mcp_servers {
             self.mcp_servers = v;
         }
@@ -225,7 +251,23 @@ mod tests {
         assert_eq!(config.openrouter_base_url, "https://openrouter.ai/api/v1");
         assert_eq!(config.max_tokens, 4096);
         assert_eq!(config.system_prompt, None);
+        assert_eq!(config.tactical_window, 20);
+        assert_eq!(config.tactical_compaction_threshold, 40);
         assert!(config.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn tactical_fields_are_overridable_via_env() {
+        let env = vec![
+            ("BRAZE_TACTICAL_WINDOW".to_string(), "10".to_string()),
+            (
+                "BRAZE_TACTICAL_COMPACTION_THRESHOLD".to_string(),
+                "25".to_string(),
+            ),
+        ];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(config.tactical_window, 10);
+        assert_eq!(config.tactical_compaction_threshold, 25);
     }
 
     #[test]
