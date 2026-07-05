@@ -1,3 +1,7 @@
 /target
 .env
 *.session.jsonl
+
+# Papers de referencia leídos durante auditorías/investigación — nunca se
+# suben al repo (son grandes y no son necesarios para nadie más).
+docs/*.pdf
