@@ -681,14 +681,15 @@ imprescindibles).
   turnos interrumpidos con Esc. Instrumenta los estados de interacción
   donde se va el tiempo del usuario (taxonomía CUPS, CHI 2024).
 
-**Diferido (fase TUI 2)**: slash commands con popup, @-menciones de
-archivos, temas configurables, pager overlay del transcript completo
-(Ctrl+T), imágenes/clipboard, modo vim, inserción ANSI propia estilo
-Codex (`custom_terminal`), soporte especial Zellij, TUI como default,
-**celda de plan/todo editable antes de ejecutar** (descomposición
-interactiva de tareas — UIST 2024 — requiere soporte del engine para
-planes, no solo de la TUI) y **backtrack** (Esc-Esc para retroceder a un
-mensaje anterior y editarlo, como Codex).
+**Diferido (fase TUI 2)**: ~~slash commands con popup, @-menciones de
+archivos~~ (implementados 2026-07-05, ver § "Fase TUI 2 — slash commands
++ @-menciones" más abajo), temas configurables, pager overlay del
+transcript completo (Ctrl+T), imágenes/clipboard, modo vim, inserción
+ANSI propia estilo Codex (`custom_terminal`), soporte especial Zellij,
+TUI como default, **celda de plan/todo editable antes de ejecutar**
+(descomposición interactiva de tareas — UIST 2024 — requiere soporte del
+engine para planes, no solo de la TUI) y **backtrack** (Esc-Esc para
+retroceder a un mensaje anterior y editarlo, como Codex).
 
 ### Riesgos conocidos (aceptados para el MVP)
 
@@ -1013,6 +1014,104 @@ mensaje anterior y editarlo, como Codex).
      `ModelBackend` scripteado de la oleada 4). Repetir con OpenRouter
      solo confirmaría lo mismo con una tercera implementación del mismo
      trait ya probado.
+
+## Fase TUI 2 — slash commands + @-menciones (2026-07-05)
+
+Primer incremento del backlog "Diferido (fase TUI 2)" — el resto (temas,
+pager overlay, imágenes/clipboard, modo vim, backtrack, celda de
+plan/todo editable, inserción ANSI propia, promover `--tui` a default)
+sigue diferido, sin oleadas definidas todavía.
+
+**`composer_trigger.rs`** (nuevo, pura y testeable sin `TextArea` real):
+`detect_trigger(line, col, is_first_line)` — dado la línea actual del
+composer y la posición del cursor (ambos character-indexed, como expone
+`TextArea::cursor()`), busca hacia atrás el token delimitado por
+espacios en blanco inmediatamente detrás del cursor y lo clasifica:
+
+- `/comando` — **solo se reconoce como el primer token de todo el
+  mensaje** (fila 0, empezando en columna 0) — nunca a mitad de frase,
+  igual que en Codex/Gemini.
+- `@mención` — se reconoce en cualquier parte del texto (a diferencia de
+  `/`, una referencia a un archivo puede aparecer a mitad de una frase).
+
+**`slash_commands.rs`**: registro estático `SLASH_COMMANDS` (`help`,
+`quit`, `exit` — este último alias de `quit`, igual que el loop de chat
+plano acepta ambas palabras sueltas). `matching_commands(query)` hace
+*prefix match* case-insensitive (no substring — con nombres de comando
+cortos, "lo que vas a escribir a continuación" es más útil que "aparece
+en cualquier parte del nombre").
+
+**`mentions.rs`**: `list_files(root)` camina el cwd recursivamente,
+podando un puñado de directorios pesados hardcodeados (`.git`, `target`,
+`node_modules`, `.venv`, `__pycache__`, `dist`, `build`) — **no**
+parseo de `.gitignore` (para eso existe el crate `ignore`; de más para
+un MVP), documentado como simplificación aceptada, no bug. Tope duro de
+5000 archivos por si un árbol patológico (o un symlink cycle que la
+lista de exclusión no atrapa) se cuela. `matching_files(files, query)`
+es *substring* case-insensitive (a diferencia de los comandos, una ruta
+es lo bastante larga como para que "contiene el fragmento tipeado en
+cualquier parte" — p.ej. tipear "main" para encontrar
+`crates/braze-cli/src/main.rs` — sea mucho más útil que exigir prefijo
+contra la ruta completa).
+
+**El popup reusa el espacio de la vista previa de streaming, no crece el
+viewport**: ratatui no tiene una API pública para cambiar la altura de
+un viewport inline en tiempo de ejecución fuera de responder a un
+`Resize` real del terminal (`Terminal::resize` para `Viewport::Inline`
+recalcula la posición usando la altura ORIGINAL fijada en
+`Terminal::with_options`, no permite pedir una nueva altura) — crecer
+dinámicamente el viewport cada vez que se abre/cierra un popup habría
+tocado exactamente el punto frágil que la oleada 2 ya documentó como
+riesgo aceptado. En cambio: `refresh_popup` nunca deja un popup abierto
+mientras `turn_running` es verdadero, así que el área de vista previa
+(`ACTIVE_ROWS` + fila de hint, 3 filas) está garantizado ociosa cada vez
+que un popup podría estar activo — `draw` simplemente dibuja el popup
+ahí en vez de la vista previa+hint+status bar, sin tocar
+`VIEWPORT_HEIGHT` en absoluto. Costo: como consecuencia, **los popups
+solo pueden abrirse cuando no hay un turno corriendo** — tipear `/` o
+`@` mientras el modelo streamea inserta el carácter literal, sin popup
+(el usuario puede seguir encolando su próximo mensaje mientras tanto,
+simplemente sin autocompletado hasta que el turno termine). Aceptado
+como limitación razonable: el uso típico de comandos/menciones ocurre
+al empezar un mensaje nuevo, no a mitad de un streaming.
+
+**Solo 3 sugerencias visibles a la vez** (`POPUP_MAX_VISIBLE`), sin
+scroll dentro del popup — tipear otro carácter para acotar la búsqueda
+en vez de navegar una lista larga. `Up`/`Down` navegan entre las
+visibles, `Tab`/`Enter` aceptan (autocompletan el texto, **no**
+ejecutan/envían todavía — aceptar `/help` deja `"/help "` en el
+composer, igual que autocompletar cualquier palabra; un Enter aparte,
+ya con el popup cerrado, es lo que efectivamente ejecuta/envía), `Esc`
+cierra sin aceptar.
+
+**Los comandos slash se manejan enteramente del lado del cliente**: en
+`submit`, si el texto (trimeado) es exactamente `/nombre` para un
+comando reconocido, `run_slash_command` se ejecuta y la llamada
+**nunca** llega a `Engine::run_turn` — el engine no tiene ni necesita
+noción de comandos slash. Un mensaje que solo *empieza* con `/` pero no
+matchea un nombre exacto se envía al modelo como texto normal (mismo
+comportamiento que Codex/Gemini para comandos no reconocidos).
+`/help` commitea una `HelpCell` nueva (estática, lista atajos +
+comandos + hint de menciones) al scrollback; `/quit`/`/exit` salen
+igual que Ctrl+C.
+
+**Tests**: 388 → 407 (19 nuevos: 8 en `composer_trigger` incluyendo el
+caso "un `/` que no está al inicio del mensaje no es un comando" y "un
+token ya terminado con espacio no es un trigger activo", 5 en
+`slash_commands`, 4 en `mentions` incluyendo la exclusión de
+`.git`/`target`, 2 en `history_cell` para `HelpCell` — uno de contenido,
+uno de snapshot `insta`). `cargo build/test/clippy --workspace` verdes.
+
+**Verificación manual en vivo** contra el binario de prueba con
+`ModelBackend` scripteado de la oleada 4 (mismo patrón — determinístico,
+sin depender de la latencia de un LLM real): tipear `/h` mostró el popup
+filtrado a solo `/help` (no `/quit`/`/exit`); Tab autocompletó a
+`"/help "`; Enter commiteó el contenido de ayuda al scrollback **sin**
+disparar un turno del modelo (confirmando la intercepción client-side).
+Tipear `revisa @main` sobre un sandbox con `main.rs`/`src/lib.rs`/
+`README.md` mostró el popup con `@main.rs` (único match real); Tab
+completó a `"revisa @main.rs "`, preservando el resto del texto ya
+escrito. Salida limpia con Ctrl+C en ambos casos.
 
 ## Archivos críticos
 

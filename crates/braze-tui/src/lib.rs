@@ -3,18 +3,22 @@
 //!
 //! Opt-in via `braze chat --tui` (see `braze-cli`) — the plain-text
 //! `chat`/`run` path is unchanged and remains the default. Inline
-//! viewport + native scrollback, a multi-line composer, markdown
-//! streaming with fence-aware commit boundaries, tool-call cells, a real
-//! permission approval overlay, Esc-to-interrupt, and a status bar.
-//! Snapshot tests and a pager overlay for full tool output are later
-//! oleadas — see PLAN.md for the full plan.
+//! viewport + native scrollback, a multi-line composer with `/command`
+//! and `@mention` completion, markdown streaming with fence-aware commit
+//! boundaries, tool-call cells, a real permission approval overlay,
+//! Esc-to-interrupt, and a status bar. A pager overlay for full tool
+//! output, themes, and promoting `--tui` to the default are later
+//! increments — see PLAN.md § "Diferido (fase TUI 2)" for the rest.
 
 mod app;
 mod approval;
+mod composer_trigger;
 mod error;
 mod history_cell;
 mod markdown_stream;
+mod mentions;
 mod observer;
+mod slash_commands;
 mod status_bar;
 mod terminal;
 

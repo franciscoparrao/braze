@@ -15,24 +15,39 @@ use braze_types::SessionId;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::Terminal;
-use ratatui::layout::{Alignment, Constraint, Layout};
-use ratatui::style::{Color, Style};
-use ratatui::text::Line;
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 use ratatui_textarea::TextArea;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::approval::ApprovalRequest;
+use crate::composer_trigger::{ComposerTrigger, detect_trigger};
 use crate::error::TuiError;
 use crate::history_cell::{
-    AssistantMarkdownCell, ErrorCell, HistoryCell, NoticeCell, PermissionCell, ToolCallCell,
-    UserCell,
+    AssistantMarkdownCell, ErrorCell, HelpCell, HistoryCell, NoticeCell, PermissionCell,
+    ToolCallCell, UserCell,
 };
 use crate::markdown_stream::MarkdownStreamCollector;
+use crate::mentions::{list_files, matching_files};
 use crate::observer::{ChannelObserver, TuiUpdate};
+use crate::slash_commands::{SLASH_COMMANDS, SlashCommand, matching_commands};
 use crate::status_bar;
 use crate::terminal::{ACTIVE_ROWS, Backend};
+
+/// Suggestions shown at once in the `/`/`@` popup — see `draw_popup`.
+/// Kept small and fixed (no scrolling within the popup): it reuses the
+/// same 3-row budget `ACTIVE_ROWS + hint` already occupies when not
+/// popped up, rather than growing `VIEWPORT_HEIGHT` (ratatui has no
+/// public API to resize an inline viewport's height at runtime outside
+/// of responding to a real terminal `Resize` — see
+/// `docs/TUI-INVESTIGACION-2026-07.md` on why growing/shrinking the
+/// inline viewport is the fragile part of this whole approach). More
+/// matches than fit just aren't shown — typing another character
+/// narrows the query instead.
+const POPUP_MAX_VISIBLE: usize = 3;
 
 /// Drives the interactive TUI chat loop against an already-configured
 /// `Engine` for `session` until the user quits (Ctrl+C, or Ctrl+D on an
@@ -54,6 +69,27 @@ pub async fn run(
         .await
 }
 
+/// `/command` and `@mention` suggestions currently shown above the
+/// composer — "fase TUI 2" (PLAN.md). Not stored as trait objects or
+/// references into `App` state (would need self-referential lifetimes);
+/// `Mention`'s matches are cloned out of `App::mentionable_files` once,
+/// cheap since they're already capped to `POPUP_MAX_VISIBLE`.
+enum ComposerPopup {
+    Slash {
+        /// Character length of the query typed so far (everything after
+        /// the `/`) — `accept_popup_selection` deletes exactly this many
+        /// characters backward before inserting the full command name.
+        query_len: usize,
+        matches: Vec<&'static SlashCommand>,
+        selected: usize,
+    },
+    Mention {
+        query_len: usize,
+        matches: Vec<String>,
+        selected: usize,
+    },
+}
+
 struct App {
     engine: Arc<Engine>,
     session: SessionId,
@@ -70,6 +106,15 @@ struct App {
     /// with a name. Entries are removed once consumed.
     pending_tool_names: HashMap<String, String>,
     composer: TextArea<'static>,
+    /// `/command` or `@mention` suggestions currently showing, if any —
+    /// see `refresh_popup`. Always `None` while `turn_running` (no
+    /// spare viewport rows to show it in without a live preview to hide
+    /// — see `POPUP_MAX_VISIBLE`'s doc comment).
+    popup: Option<ComposerPopup>,
+    /// Every file under the cwd, relative paths, populated lazily on the
+    /// first `@` trigger and cached for the rest of the session — see
+    /// `mentionable_files`.
+    mentionable_files: Option<Vec<String>>,
     turn_running: bool,
     /// The spawned turn's handle, so Esc can `abort()` it — see
     /// `interrupt_turn`. `None` whenever no turn is in flight.
@@ -103,6 +148,8 @@ impl App {
             markdown: MarkdownStreamCollector::default(),
             pending_tool_names: HashMap::new(),
             composer: TextArea::default(),
+            popup: None,
+            mentionable_files: None,
             turn_running: false,
             current_turn: None,
             pending_approvals: VecDeque::new(),
@@ -169,6 +216,32 @@ impl App {
             return Ok(());
         }
 
+        if self.popup.is_some() {
+            match key.code {
+                KeyCode::Up => {
+                    self.move_popup_selection(-1);
+                    return Ok(());
+                }
+                KeyCode::Down => {
+                    self.move_popup_selection(1);
+                    return Ok(());
+                }
+                KeyCode::Tab | KeyCode::Enter => {
+                    self.accept_popup_selection();
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    self.popup = None;
+                    return Ok(());
+                }
+                // Anything else (typing more of the query, Backspace,
+                // ...) falls through to the normal composer handling
+                // below, which then re-evaluates the popup from the new
+                // cursor state via `refresh_popup`.
+                _ => {}
+            }
+        }
+
         let composer_is_empty = self.composer.lines().len() == 1 && self.composer.lines()[0].is_empty();
         match (key.code, key.modifiers) {
             (KeyCode::Char('d'), m) if m.contains(KeyModifiers::CONTROL) && composer_is_empty => {
@@ -197,16 +270,165 @@ impl App {
                 self.composer.input(Event::Key(key));
             }
         }
+
+        self.refresh_popup();
         Ok(())
+    }
+
+    /// Re-evaluates whether the composer's cursor now sits inside an
+    /// active `/`/`@` token, updating `self.popup` accordingly — called
+    /// after every composer edit (`on_key`'s fallthrough arm), since
+    /// typing, deleting, or moving the cursor can start, narrow, or end
+    /// a trigger.
+    fn refresh_popup(&mut self) {
+        if self.turn_running {
+            self.popup = None;
+            return;
+        }
+
+        let cursor = self.composer.cursor();
+        let is_first_line = cursor.0 == 0;
+        let Some(line) = self.composer.lines().get(cursor.0) else {
+            self.popup = None;
+            return;
+        };
+
+        self.popup = match detect_trigger(line, cursor.1, is_first_line) {
+            Some(ComposerTrigger::Slash(query)) => {
+                let matches: Vec<&'static SlashCommand> = matching_commands(&query)
+                    .into_iter()
+                    .take(POPUP_MAX_VISIBLE)
+                    .collect();
+                (!matches.is_empty()).then(|| ComposerPopup::Slash {
+                    query_len: query.chars().count(),
+                    matches,
+                    selected: 0,
+                })
+            }
+            Some(ComposerTrigger::Mention(query)) => {
+                let matches: Vec<String> = {
+                    let files = self.mentionable_files();
+                    matching_files(files, &query)
+                        .into_iter()
+                        .take(POPUP_MAX_VISIBLE)
+                        .map(str::to_string)
+                        .collect()
+                };
+                (!matches.is_empty()).then(|| ComposerPopup::Mention {
+                    query_len: query.chars().count(),
+                    matches,
+                    selected: 0,
+                })
+            }
+            None => None,
+        };
+    }
+
+    /// Lazily walks the cwd on the first `@` trigger and caches the
+    /// result for the rest of the session — see `mentions::list_files`'s
+    /// doc comment for why a session-long-stale list is an accepted
+    /// simplification, not silently wrong.
+    fn mentionable_files(&mut self) -> &[String] {
+        if self.mentionable_files.is_none() {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            self.mentionable_files = Some(list_files(&cwd));
+        }
+        self.mentionable_files.as_deref().unwrap_or(&[])
+    }
+
+    fn move_popup_selection(&mut self, delta: isize) {
+        let Some(popup) = &mut self.popup else {
+            return;
+        };
+        let len = match popup {
+            ComposerPopup::Slash { matches, .. } => matches.len(),
+            ComposerPopup::Mention { matches, .. } => matches.len(),
+        };
+        if len == 0 {
+            return;
+        }
+        let selected = match popup {
+            ComposerPopup::Slash { selected, .. } | ComposerPopup::Mention { selected, .. } => {
+                selected
+            }
+        };
+        *selected = (*selected as isize + delta).rem_euclid(len as isize) as usize;
+    }
+
+    /// Replaces the `/query` or `@query` token behind the cursor with
+    /// the selected suggestion (plus a trailing space) — deletes exactly
+    /// `query_len` characters backward (the query, not the `/`/`@`
+    /// marker itself) then inserts the full replacement. Does not submit
+    /// or execute anything by itself: accepting a `/help` suggestion
+    /// only autocompletes the composer to `"/help "`, same as accepting
+    /// any other word — a separate Enter (now with the popup closed)
+    /// actually submits/executes it, via `submit`'s own slash-command
+    /// interception.
+    fn accept_popup_selection(&mut self) {
+        let Some(popup) = self.popup.take() else {
+            return;
+        };
+        let replacement = match popup {
+            ComposerPopup::Slash {
+                query_len,
+                matches,
+                selected,
+            } => matches.get(selected).map(|cmd| (query_len, cmd.name.to_string())),
+            ComposerPopup::Mention {
+                query_len,
+                matches,
+                selected,
+            } => matches.get(selected).map(|path| (query_len, path.clone())),
+        };
+        let Some((query_len, replacement)) = replacement else {
+            return;
+        };
+        for _ in 0..query_len {
+            self.composer.delete_char();
+        }
+        self.composer.insert_str(&replacement);
+        self.composer.insert_str(" ");
+    }
+
+    /// Executes a built-in `/command` — only ever called from `submit`
+    /// after confirming `command` exactly matches a `SLASH_COMMANDS`
+    /// entry, so the wildcard arm here is unreachable in practice, not a
+    /// silent fallback for a typo.
+    fn run_slash_command(&mut self, command: &str, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        match command {
+            "help" => self.commit_cell(&HelpCell, terminal),
+            "quit" | "exit" => {
+                self.should_quit = true;
+                Ok(())
+            }
+            _ => Ok(()),
+        }
     }
 
     fn submit(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
         let text = self.composer.lines().join("\n");
-        let user_text = text.trim().to_string();
-        if user_text.is_empty() {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
             return Ok(());
         }
+
+        // Built-in slash commands are handled entirely client-side and
+        // never reach `Engine::run_turn` — the engine has no notion of
+        // them at all (see `slash_commands`'s doc comment). Only an
+        // exact match (post-autocomplete) counts; a message that merely
+        // starts with `/` but isn't a recognized command name is sent
+        // to the model as ordinary text instead.
+        if let Some(command) = trimmed.strip_prefix('/')
+            && SLASH_COMMANDS.iter().any(|c| c.name == command)
+        {
+            self.composer = TextArea::default();
+            self.popup = None;
+            return self.run_slash_command(command, terminal);
+        }
+
+        let user_text = trimmed.to_string();
         self.composer = TextArea::default();
+        self.popup = None;
 
         self.commit_cell(
             &UserCell {
@@ -420,46 +642,60 @@ impl App {
         ])
         .areas(area);
 
-        let pending = self.markdown.pending();
-        if !pending.is_empty() {
-            // Deliberately plain text, not markdown-rendered: this is
-            // still-unstable, partial content (see
-            // `MarkdownStreamCollector::pending`'s doc comment) — only
-            // committed, final chunks get `tui-markdown` treatment.
-            let paragraph = Paragraph::new(pending).wrap(Wrap { trim: false });
-            let total_lines = paragraph.line_count(active_area.width) as u16;
-            let scroll_y = total_lines.saturating_sub(ACTIVE_ROWS);
-            frame.render_widget(paragraph.scroll((scroll_y, 0)), active_area);
-        }
-
-        let [hint_left, hint_right] =
-            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-                .areas(hint_area);
-
-        let hint = if !self.pending_approvals.is_empty() {
-            "esperando tu decisión... (y permitir · n/Esc denegar)"
-        } else if self.turn_running {
-            "esperando respuesta del modelo... (Ctrl+C salir · Esc interrumpir)"
+        if let Some(popup) = &self.popup {
+            // Reuses the active-preview + hint rows for the popup
+            // instead of growing the viewport — see `POPUP_MAX_VISIBLE`'s
+            // doc comment. Safe: `refresh_popup` never sets a popup while
+            // `turn_running`, so the preview area is otherwise idle.
+            let popup_area = Rect {
+                x: active_area.x,
+                y: active_area.y,
+                width: active_area.width,
+                height: active_area.height + hint_area.height,
+            };
+            draw_popup(frame, popup_area, popup);
         } else {
-            "Enter enviar · Ctrl+J salto de linea · Ctrl+C salir"
-        };
-        frame.render_widget(
-            Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
-            hint_left,
-        );
+            let pending = self.markdown.pending();
+            if !pending.is_empty() {
+                // Deliberately plain text, not markdown-rendered: this is
+                // still-unstable, partial content (see
+                // `MarkdownStreamCollector::pending`'s doc comment) — only
+                // committed, final chunks get `tui-markdown` treatment.
+                let paragraph = Paragraph::new(pending).wrap(Wrap { trim: false });
+                let total_lines = paragraph.line_count(active_area.width) as u16;
+                let scroll_y = total_lines.saturating_sub(ACTIVE_ROWS);
+                frame.render_widget(paragraph.scroll((scroll_y, 0)), active_area);
+            }
 
-        let status = status_bar::render(
-            &self.status_line,
-            self.session,
-            self.total_input_tokens,
-            self.total_output_tokens,
-        );
-        frame.render_widget(
-            Paragraph::new(status)
-                .style(Style::default().fg(Color::DarkGray))
-                .alignment(Alignment::Right),
-            hint_right,
-        );
+            let [hint_left, hint_right] =
+                Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                    .areas(hint_area);
+
+            let hint = if !self.pending_approvals.is_empty() {
+                "esperando tu decisión... (y permitir · n/Esc denegar)"
+            } else if self.turn_running {
+                "esperando respuesta del modelo... (Ctrl+C salir · Esc interrumpir)"
+            } else {
+                "Enter enviar · Ctrl+J salto de linea · / comandos · @ archivos · Ctrl+C salir"
+            };
+            frame.render_widget(
+                Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
+                hint_left,
+            );
+
+            let status = status_bar::render(
+                &self.status_line,
+                self.session,
+                self.total_input_tokens,
+                self.total_output_tokens,
+            );
+            frame.render_widget(
+                Paragraph::new(status)
+                    .style(Style::default().fg(Color::DarkGray))
+                    .alignment(Alignment::Right),
+                hint_right,
+            );
+        }
 
         if let Some(request) = self.pending_approvals.front() {
             let mut lines = vec![Line::from(request.description.clone())];
@@ -473,4 +709,42 @@ impl App {
             frame.render_widget(&self.composer, composer_area);
         }
     }
+}
+
+/// Renders the `/`/`@` suggestion list into `area` — a free function
+/// (not a method) since it only needs `popup`, not the rest of `App`.
+fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
+    let selected_style = Style::default().add_modifier(Modifier::REVERSED);
+
+    let lines: Vec<Line> = match popup {
+        ComposerPopup::Slash { matches, selected, .. } => matches
+            .iter()
+            .enumerate()
+            .map(|(i, cmd)| {
+                let style = if i == *selected {
+                    selected_style
+                } else {
+                    Style::default()
+                };
+                Line::from(Span::styled(
+                    format!("/{}  {}", cmd.name, cmd.description),
+                    style,
+                ))
+            })
+            .collect(),
+        ComposerPopup::Mention { matches, selected, .. } => matches
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let style = if i == *selected {
+                    selected_style
+                } else {
+                    Style::default()
+                };
+                Line::from(Span::styled(format!("@{path}"), style))
+            })
+            .collect(),
+    };
+
+    frame.render_widget(Paragraph::new(lines), area);
 }

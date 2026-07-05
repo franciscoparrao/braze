@@ -210,6 +210,31 @@ impl HistoryCell for NoticeCell {
     }
 }
 
+/// The `/help` command's output — "fase TUI 2" (PLAN.md). Static
+/// (doesn't reflect current app state, e.g. `turn_running`) — a
+/// deliberate simplification for a command whose whole purpose is
+/// "remind me what's available", not a live status readout.
+pub struct HelpCell;
+
+impl HistoryCell for HelpCell {
+    fn as_text(&self) -> Text<'_> {
+        let heading_style = Style::default().add_modifier(Modifier::BOLD);
+        Text::from(vec![
+            Line::from(Span::styled("Atajos", heading_style)),
+            Line::from("Enter enviar · Ctrl+J salto de línea"),
+            Line::from("Esc interrumpe el turno en curso (o deniega una aprobación pendiente)"),
+            Line::from("Ctrl+C / Ctrl+D (composer vacío) salir"),
+            Line::from(""),
+            Line::from(Span::styled("Comandos", heading_style)),
+            Line::from("/help  este mensaje"),
+            Line::from("/quit, /exit  salir de braze"),
+            Line::from(""),
+            Line::from(Span::styled("Menciones", heading_style)),
+            Line::from("@ seguido de parte de un nombre de archivo abre un buscador"),
+        ])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +344,21 @@ mod tests {
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "interrupted by user");
     }
+
+    #[test]
+    fn help_cell_lists_commands_and_keybindings() {
+        let text = HelpCell.as_text();
+        let rendered: String = text
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("/help"));
+        assert!(rendered.contains("/quit"));
+        assert!(rendered.contains("Ctrl+C"));
+        assert!(rendered.contains('@'));
+    }
 }
 
 /// Snapshot tests (PLAN.md § "Fase TUI — diseño", oleada 5): each cell
@@ -412,5 +452,10 @@ mod snapshot_tests {
             message: "⏸ interrupted by user".to_string(),
         };
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn help_cell() {
+        insta::assert_debug_snapshot!(render_to_buffer(&HelpCell, 50));
     }
 }
