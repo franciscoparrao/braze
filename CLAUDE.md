@@ -112,6 +112,27 @@ concretos sobre qué modelos priorizar para desarrollo/benchmarking local:
   instruct genéricas del mismo tamaño (Llama3.2, Gemma3) — técnica G6 del
   roadmap de la auditoría 2026-07.
 
+## Modelo recomendado vía OpenRouter (`deepseek/deepseek-v4-flash`)
+
+Sweep de `braze-bench` del 2026-07-05 (5 repeticiones, mismo suite
+`default.toml`) contra `openrouter:deepseek/deepseek-v4-flash` — datos
+crudos en `docs/sweep-deepseek-v4-flash.json`/`.log`:
+
+- **49/50 pass rate** (±5pp), 2.4 rondas promedio, ~6.6s de latencia
+  promedio por tarea, 0 fallos de validación de schema, 0 fallos de
+  ejecución, 0 denegaciones de permiso. Perfecto en 4 de 5 skills
+  (`no_tool`, `multi_step`, `error_recovery`, `distractor_selection`);
+  29/30 en `single_tool`.
+- **Verificado también en vivo con la TUI** (`braze chat --tui --backend
+  openrouter --model deepseek/deepseek-v4-flash`, 2026-07-05): streaming
+  fluido, tool calls reales (`write_file`) renderizando correctamente.
+  Notablemente más rápido en la práctica que Ollama local en esta
+  máquina — inferencia en la nube vs. CPU local, no una diferencia de
+  arquitectura de `braze`.
+- Buen default de bajo costo para probar `braze` sin la latencia CPU-bound
+  de un modelo local ni el costo de un modelo de frontera — recomendado
+  como primera opción al evaluar cambios rápidos o hacer demos.
+
 Esto no cambia el default de `braze-config` (`ollama_model = "llama3.1"`,
 `crates/braze-config/src/config.rs`) — queda como criterio para elegir qué
 modelo configurar/tener disponible localmente, no como un cambio de código.

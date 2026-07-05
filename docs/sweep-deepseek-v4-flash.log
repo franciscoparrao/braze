@@ -1,0 +1,117 @@
+Corriendo 5 repetición(es) por (tarea, backend) — timeout 180s por intento.
+-> openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 5/5)
+-> openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 1/5)
+-> openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 2/5)
+-> openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 3/5)
+-> openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 4/5)
+-> openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 5/5)
+
+== Resultados por tarea ==
+[PASS] read_file_basic          openrouter:deepseek/deepseek-v4-flash   6259ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2035 tokens_out=124
+[PASS] read_file_basic          openrouter:deepseek/deepseek-v4-flash (rep 2)   5248ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1988 tokens_out=110
+[PASS] read_file_basic          openrouter:deepseek/deepseek-v4-flash (rep 3)   5241ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2012 tokens_out=114
+[PASS] read_file_basic          openrouter:deepseek/deepseek-v4-flash (rep 4)   4638ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2011 tokens_out=117
+[PASS] read_file_basic          openrouter:deepseek/deepseek-v4-flash (rep 5)   9522ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2011 tokens_out=125
+[FAIL] grep_basic               openrouter:deepseek/deepseek-v4-flash   9680ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=2209 tokens_out=289 [AssertionToolCall]
+[PASS] grep_basic               openrouter:deepseek/deepseek-v4-flash (rep 2)  10177ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3263 tokens_out=275
+[PASS] grep_basic               openrouter:deepseek/deepseek-v4-flash (rep 3)   7619ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2064 tokens_out=185
+[PASS] grep_basic               openrouter:deepseek/deepseek-v4-flash (rep 4)   7150ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3208 tokens_out=241
+[PASS] grep_basic               openrouter:deepseek/deepseek-v4-flash (rep 5)   4755ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2046 tokens_out=175
+[PASS] glob_basic               openrouter:deepseek/deepseek-v4-flash   4286ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2081 tokens_out=129
+[PASS] glob_basic               openrouter:deepseek/deepseek-v4-flash (rep 2)   5754ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2058 tokens_out=151
+[PASS] glob_basic               openrouter:deepseek/deepseek-v4-flash (rep 3)   5039ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2081 tokens_out=136
+[PASS] glob_basic               openrouter:deepseek/deepseek-v4-flash (rep 4)   4815ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2081 tokens_out=134
+[PASS] glob_basic               openrouter:deepseek/deepseek-v4-flash (rep 5)   5296ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2058 tokens_out=133
+[PASS] write_file_basic         openrouter:deepseek/deepseek-v4-flash   7330ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3237 tokens_out=220
+[PASS] write_file_basic         openrouter:deepseek/deepseek-v4-flash (rep 2)   7371ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3259 tokens_out=209
+[PASS] write_file_basic         openrouter:deepseek/deepseek-v4-flash (rep 3)   8775ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3212 tokens_out=195
+[PASS] write_file_basic         openrouter:deepseek/deepseek-v4-flash (rep 4)   4398ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2033 tokens_out=129
+[PASS] write_file_basic         openrouter:deepseek/deepseek-v4-flash (rep 5)   7289ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3194 tokens_out=220
+[PASS] edit_file_basic          openrouter:deepseek/deepseek-v4-flash   6796ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3139 tokens_out=207
+[PASS] edit_file_basic          openrouter:deepseek/deepseek-v4-flash (rep 2)   7369ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3139 tokens_out=198
+[PASS] edit_file_basic          openrouter:deepseek/deepseek-v4-flash (rep 3)   7095ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3162 tokens_out=236
+[PASS] edit_file_basic          openrouter:deepseek/deepseek-v4-flash (rep 4)   8250ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3185 tokens_out=252
+[PASS] edit_file_basic          openrouter:deepseek/deepseek-v4-flash (rep 5)   6965ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3186 tokens_out=243
+[PASS] shell_exec_basic         openrouter:deepseek/deepseek-v4-flash   5559ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2018 tokens_out=157
+[PASS] shell_exec_basic         openrouter:deepseek/deepseek-v4-flash (rep 2)   4533ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2048 tokens_out=111
+[PASS] shell_exec_basic         openrouter:deepseek/deepseek-v4-flash (rep 3)   5836ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2001 tokens_out=114
+[PASS] shell_exec_basic         openrouter:deepseek/deepseek-v4-flash (rep 4)   4694ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2024 tokens_out=112
+[PASS] shell_exec_basic         openrouter:deepseek/deepseek-v4-flash (rep 5)   4792ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2024 tokens_out=154
+[PASS] no_tool_qa               openrouter:deepseek/deepseek-v4-flash   2530ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=988 tokens_out=43
+[PASS] no_tool_qa               openrouter:deepseek/deepseek-v4-flash (rep 2)   2012ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=964 tokens_out=39
+[PASS] no_tool_qa               openrouter:deepseek/deepseek-v4-flash (rep 3)   2297ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=988 tokens_out=38
+[PASS] no_tool_qa               openrouter:deepseek/deepseek-v4-flash (rep 4)   2147ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=964 tokens_out=51
+[PASS] no_tool_qa               openrouter:deepseek/deepseek-v4-flash (rep 5)   2424ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=988 tokens_out=46
+[PASS] multi_step_read_count_write openrouter:deepseek/deepseek-v4-flash   7210ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3232 tokens_out=284
+[PASS] multi_step_read_count_write openrouter:deepseek/deepseek-v4-flash (rep 2)   7402ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3208 tokens_out=269
+[PASS] multi_step_read_count_write openrouter:deepseek/deepseek-v4-flash (rep 3)   8986ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3278 tokens_out=270
+[PASS] multi_step_read_count_write openrouter:deepseek/deepseek-v4-flash (rep 4)   7394ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3236 tokens_out=289
+[PASS] multi_step_read_count_write openrouter:deepseek/deepseek-v4-flash (rep 5)  12241ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3231 tokens_out=216
+[PASS] error_recovery_wrong_filename openrouter:deepseek/deepseek-v4-flash   8006ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3282 tokens_out=203
+[PASS] error_recovery_wrong_filename openrouter:deepseek/deepseek-v4-flash (rep 2)   7405ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3183 tokens_out=226
+[PASS] error_recovery_wrong_filename openrouter:deepseek/deepseek-v4-flash (rep 3)   7657ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3285 tokens_out=255
+[PASS] error_recovery_wrong_filename openrouter:deepseek/deepseek-v4-flash (rep 4)   8229ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3183 tokens_out=192
+[PASS] error_recovery_wrong_filename openrouter:deepseek/deepseek-v4-flash (rep 5)   9023ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3268 tokens_out=187
+[PASS] distractor_selection_among_files openrouter:deepseek/deepseek-v4-flash   7785ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3404 tokens_out=239
+[PASS] distractor_selection_among_files openrouter:deepseek/deepseek-v4-flash (rep 2)   9929ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3453 tokens_out=237
+[PASS] distractor_selection_among_files openrouter:deepseek/deepseek-v4-flash (rep 3)   7879ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3412 tokens_out=229
+[PASS] distractor_selection_among_files openrouter:deepseek/deepseek-v4-flash (rep 4)   8396ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3453 tokens_out=291
+[PASS] distractor_selection_among_files openrouter:deepseek/deepseek-v4-flash (rep 5)   7628ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3382 tokens_out=253
+
+== Comparación por backend ==
+backend                   pass_rate(±95%) avg_rounds       avg_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied
+openrouter:deepseek/deepseek-v4-flash     49/50 (±5pp)      2.4         6582           2569              181                 0              0          0
+
+== Comparación por skill ==
+backend                  skill                   pass_rate
+openrouter:deepseek/deepseek-v4-flash single_tool                 29/30
+openrouter:deepseek/deepseek-v4-flash no_tool                      5/5 
+openrouter:deepseek/deepseek-v4-flash multi_step                   5/5 
+openrouter:deepseek/deepseek-v4-flash error_recovery               5/5 
+openrouter:deepseek/deepseek-v4-flash distractor_selection         5/5 
+
+Resultados JSON escritos en /tmp/claude-1000/-home-franciscoparrao-proyectos-braze/edab670b-ce1d-4cdd-a5df-e15284bd257e/scratchpad/sweep-deepseek-v4-flash.json

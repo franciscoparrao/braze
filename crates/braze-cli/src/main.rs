@@ -32,12 +32,18 @@ const CONTEXT_BUDGET_MARGIN_TOKENS: u32 = 1024;
 /// Earlier versions of this shipped a single generic sentence with no
 /// tool-use guidance, no anti-loop rules, and no working directory — the
 /// cheapest lever for small/local models left completely unused (see
-/// docs/AUDITORIA-2026-07.md, hallazgo A10). The rules below target the
-/// two dominant small-model failure modes this project has observed
+/// docs/AUDITORIA-2026-07.md, hallazgo A10). The rules below target
+/// dominant small-model failure modes this project has observed
 /// empirically: repeating an identical tool call instead of using its
-/// result, and over-elaborating instead of answering once enough
+/// result; over-elaborating instead of answering once enough
 /// information has been gathered (arXiv 2604.02155's finding that longer
-/// reasoning *degrades* tool-calling accuracy in small models).
+/// reasoning *degrades* tool-calling accuracy in small models); and
+/// narrating an intended action instead of actually calling the tool for
+/// it — observed live against `qwen2.5:3b` via `braze chat --tui`
+/// (2026-07-05): asked to save a file, it kept restating the plan
+/// ("Voy a proceder con estos pasos ahora") across several turns, even
+/// after explicit confirmation, without ever emitting the `write_file`
+/// call.
 fn default_system_prompt(cwd: &std::path::Path) -> String {
     format!(
         "You are braze, an agentic CLI assistant. Working directory: {}.\n\
@@ -50,6 +56,10 @@ fn default_system_prompt(cwd: &std::path::Path) -> String {
          what was asked.\n\
          - Keep reasoning brief before acting — a sentence or two, not an \
          extended chain of thought.\n\
+         - When the user asks you to perform an action (write a file, run a \
+         command, edit something), call the tool for it in the same turn. \
+         Do not just describe or restate the plan — an action you only \
+         narrate never actually happens.\n\
          - Relative paths are resolved against the working directory above.",
         cwd.display()
     )
@@ -470,5 +480,15 @@ mod tests {
         assert!(prompt.contains("/home/user/project"));
         assert!(prompt.contains("Never call the same tool"));
         assert!(prompt.contains("stop calling tools"));
+    }
+
+    /// Regression test for the "narrates instead of acts" failure mode
+    /// observed live against `qwen2.5:3b` via `braze chat --tui`
+    /// (2026-07-05): asked to save a file, the model kept restating the
+    /// plan instead of ever calling `write_file`.
+    #[test]
+    fn default_system_prompt_tells_the_model_to_act_not_just_narrate() {
+        let prompt = default_system_prompt(std::path::Path::new("/home/user/project"));
+        assert!(prompt.contains("call the tool for it in the same turn"));
     }
 }
