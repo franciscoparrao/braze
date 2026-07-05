@@ -200,8 +200,12 @@ fn to_ollama_messages(message: &Message) -> Vec<OllamaMessage> {
 
 /// Builds the Ollama `tools` array from deferred-loading stubs.
 ///
-/// Same generic-permissive-schema decision as the Anthropic backend (see
-/// `anthropic_wire::build_tools` for the full rationale and the Fase 5
+/// Same two-tier schema policy as the Anthropic backend (see
+/// `anthropic_wire::build_tools` for the full rationale): a stub that
+/// already carries its real `input_schema` (the local built-ins, per
+/// `braze-tools-local::schema::all_stubs`) sends it as-is; a stub that
+/// doesn't (still-deferred MCP tools) falls back to the permissive
+/// placeholder schema, resolved for real only on demand (Fase 5
 /// deferred-validation note) — applied here too for consistency, even
 /// though Ollama tends to be more tolerant of loose schemas in practice.
 fn build_tools(stubs: &[ToolStub]) -> Vec<OllamaTool> {
@@ -212,9 +216,11 @@ fn build_tools(stubs: &[ToolStub]) -> Vec<OllamaTool> {
             function: OllamaFunctionDef {
                 name: stub.name.clone(),
                 description: stub.summary.clone(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "additionalProperties": true
+                parameters: stub.input_schema.clone().unwrap_or_else(|| {
+                    serde_json::json!({
+                        "type": "object",
+                        "additionalProperties": true
+                    })
                 }),
             },
         })
@@ -396,11 +402,12 @@ mod tests {
     }
 
     #[test]
-    fn build_tools_uses_permissive_generic_schema() {
+    fn build_tools_uses_permissive_generic_schema_when_stub_has_none() {
         let stubs = vec![ToolStub {
             name: "read_file".to_string(),
             summary: "Reads a file".to_string(),
-            source: "local".to_string(),
+            source: "mcp:filesystem".to_string(),
+            input_schema: None,
         }];
         let tools = build_tools(&stubs);
         assert_eq!(tools.len(), 1);
@@ -410,6 +417,25 @@ mod tests {
             tools[0].function.parameters,
             serde_json::json!({"type": "object", "additionalProperties": true})
         );
+    }
+
+    #[test]
+    fn build_tools_passes_through_stub_schema_when_present() {
+        let real_schema = serde_json::json!({
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": false
+        });
+        let stubs = vec![ToolStub {
+            name: "read_file".to_string(),
+            summary: "Reads a file".to_string(),
+            source: "local".to_string(),
+            input_schema: Some(real_schema.clone()),
+        }];
+        let tools = build_tools(&stubs);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].function.parameters, real_schema);
     }
 
     #[test]

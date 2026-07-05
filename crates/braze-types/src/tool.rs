@@ -16,19 +16,26 @@ pub struct ToolResult {
     pub is_error: bool,
 }
 
-/// A cheap, prompt-sized descriptor: name + one-line summary only.
+/// A cheap, prompt-sized descriptor: name + one-line summary, plus an
+/// optional real JSON Schema.
 ///
 /// This is what gets listed in-context for every connected tool source, on
-/// every turn. It deliberately excludes the full JSON Schema — that's
-/// resolved on demand by `braze-tools-core::ToolRegistry::resolve`, only
-/// once the model is about to invoke (or is deciding whether to invoke)
-/// this specific tool. Lives in `braze-types` (not `braze-tools-core`) so
-/// that `braze-model` can reference it without depending on
-/// `braze-tools-core` — the two are siblings and must not depend on each
-/// other (see PLAN.md, dependency graph).
+/// every turn. Two policies coexist here: for a small, static set of tools
+/// (the local built-ins) the real `input_schema` is cheap to include up
+/// front — no I/O, no round-trip — so `input_schema` is `Some`. For an
+/// unbounded/dynamic set (MCP servers) including every real schema on
+/// every turn would bloat the prompt, so `input_schema` stays `None` and
+/// the schema is resolved on demand by
+/// `braze-tools-core::ToolRegistry::resolve`, only once the model is about
+/// to invoke (or is deciding whether to invoke) this specific tool. Lives
+/// in `braze-types` (not `braze-tools-core`) so that `braze-model` can
+/// reference it without depending on `braze-tools-core` — the two are
+/// siblings and must not depend on each other (see PLAN.md, dependency
+/// graph).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolStub {
     pub name: String,
     pub summary: String,
     pub source: String,
+    pub input_schema: Option<serde_json::Value>,
 }

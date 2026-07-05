@@ -194,6 +194,24 @@ impl McpToolProvider {
         }
         self.list_tools_fresh().await
     }
+
+    /// Returns whatever tool list is cached, however stale, only fetching
+    /// if the cache has never been populated at all. Used by `invoke` to
+    /// resolve a namespaced name back to the server's raw one (D5) —
+    /// deliberately *not* `tools_respecting_ttl`: `invoke` follows a
+    /// `resolve_schema` call in the normal `ToolRegistry::dispatch` flow
+    /// (which already paid for TTL freshness moments earlier), so forcing
+    /// another TTL check here would only add a redundant staleness window
+    /// for the identity of a tool the caller already committed to — no
+    /// freshness is gained, only the risk of a surprise network round trip
+    /// on a call whose whole point (from the caller's perspective) is "just
+    /// invoke it".
+    async fn cached_tools_or_bootstrap(&self) -> Result<Vec<Tool>, ToolError> {
+        if let Some(entry) = self.tool_cache.read().await.as_ref() {
+            return Ok(entry.tools.clone());
+        }
+        self.list_tools_fresh().await
+    }
 }
 
 // `PermissionGuard` doesn't implement `Debug`, so this can no longer be
@@ -230,19 +248,28 @@ impl ToolProvider for McpToolProvider {
 
     async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
         let tools = self.tools_respecting_ttl().await?;
+        warn_on_intra_provider_collisions(&self.provider_id, &self.server_name, &tools);
         Ok(tools
             .iter()
             .map(|tool| ToolStub {
-                name: tool.name.to_string(),
+                name: advertised_name(&self.server_name, &tool.name),
                 summary: summarize(tool.description.as_deref().unwrap_or("")),
                 source: self.provider_id.clone(),
+                // Deferred by design, unlike the local built-ins: an MCP
+                // server's tool set is unbounded/dynamic, so including
+                // every real schema on every turn would bloat the prompt.
+                // Resolved on demand instead, via `resolve_schema` below.
+                input_schema: None,
             })
             .collect())
     }
 
     async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
         let tools = self.tools_respecting_ttl().await?;
-        if let Some(tool) = tools.iter().find(|t| t.name.as_ref() == name) {
+        if let Some(tool) = tools
+            .iter()
+            .find(|t| advertised_name(&self.server_name, &t.name) == name)
+        {
             tracing::debug!(
                 provider = %self.provider_id,
                 tool = name,
@@ -265,14 +292,37 @@ impl ToolProvider for McpToolProvider {
         let tools = self.list_tools_fresh().await?;
         Ok(tools
             .into_iter()
-            .find(|t| t.name.as_ref() == name)
+            .find(|t| advertised_name(&self.server_name, &t.name) == name)
             .map(|t| to_schema(&t)))
     }
 
     async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        // Forward-map every raw tool name to its advertised (namespaced)
+        // form and compare — never invert the namespacing/sanitization by
+        // stripping a prefix off `call.name`. Stripping would be lossy
+        // whenever the raw tool name itself contains characters the
+        // sanitizer rewrites (e.g. `"fs.read"` advertised as
+        // `mcp__server__fs_read` — stripping the prefix back off yields
+        // `"fs_read"`, which no longer matches the server's real
+        // `"fs.read"`). This always calls the server with the exact name
+        // it originally reported.
+        let tools = self.cached_tools_or_bootstrap().await?;
+        let bare_name = tools
+            .iter()
+            .find(|t| advertised_name(&self.server_name, &t.name) == call.name)
+            .map(|t| t.name.to_string())
+            .ok_or_else(|| ToolError::InvocationFailed {
+                name: call.name.clone(),
+                message: format!("no MCP tool is currently advertised as '{}'", call.name),
+            })?;
+
+        // `PermissionKey::McpToolCall.tool` persists in `AgentEvent::PermissionDecided`
+        // and is reconstructed on `--resume` — it must stay the bare
+        // server-reported name (not the namespaced one) so permissions
+        // recorded before this namespacing existed keep matching.
         let action = braze_permissions::ActionDescriptor::McpToolCall {
             server: self.server_name.clone(),
-            tool: call.name.clone(),
+            tool: bare_name.clone(),
         };
         self.guard
             .check(&action)
@@ -298,7 +348,11 @@ impl ToolProvider for McpToolProvider {
             }
         };
 
-        let mut params = CallToolRequestParams::new(call.name.clone());
+        // Every error surfaced to the model above uses `call.name` (the
+        // namespaced name it invoked with), so it can correlate the error
+        // with its own tool call — only the wire request to the server
+        // itself uses `bare_name`.
+        let mut params = CallToolRequestParams::new(bare_name);
         if let Some(arguments) = arguments {
             params = params.with_arguments(arguments);
         }
@@ -315,6 +369,55 @@ impl ToolProvider for McpToolProvider {
             content: render_content(&result.content),
             is_error: result.is_error.unwrap_or(false),
         })
+    }
+}
+
+/// Builds a namespaced tool name in the same style as Claude Code's own
+/// MCP client (`mcp__<server>__<tool>`), sanitizing both components so the
+/// combined name always matches the `^[a-zA-Z0-9_-]+$`-style pattern
+/// model-facing tool-call APIs (Anthropic, Ollama) require. Local built-in
+/// tools never carry this prefix, and each server gets its own, so this
+/// alone eliminates the local-vs-MCP and server-vs-server name collisions
+/// described in `docs/AUDITORIA-2026-07.md` (hallazgo D5).
+///
+/// This is a pure, forward-only mapping. `resolve_schema`/`invoke` never
+/// try to invert it (strip a prefix back off) — see their doc comments for
+/// why that would be lossy.
+fn advertised_name(server: &str, raw_tool_name: &str) -> String {
+    format!("mcp__{}__{}", sanitize(server), sanitize(raw_tool_name))
+}
+
+fn sanitize(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Sanitization is lossy: two distinct raw names from the same server can
+/// collapse to the same `advertised_name` (e.g. `"foo.bar"` and
+/// `"foo:bar"` both become `foo_bar`), silently shadowing one of them.
+/// Defensive-only: logs so the collision is diagnosable, never fails the
+/// call — an unreachable tool is a better failure mode than a broken
+/// server connection.
+fn warn_on_intra_provider_collisions(provider_id: &str, server_name: &str, tools: &[Tool]) {
+    let mut seen = std::collections::HashSet::new();
+    for tool in tools {
+        let advertised = advertised_name(server_name, &tool.name);
+        if !seen.insert(advertised.clone()) {
+            tracing::warn!(
+                provider = %provider_id,
+                tool = %tool.name,
+                advertised_name = %advertised,
+                "two distinct MCP tool names from this server sanitize to the same advertised \
+                 name — one is now unreachable"
+            );
+        }
     }
 }
 
@@ -392,5 +495,43 @@ fn render_resource_contents(resource: &ResourceContents) -> String {
             blob.len()
         ),
         _ => "[unsupported MCP resource contents]".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advertised_name_namespaces_with_server_and_tool() {
+        assert_eq!(advertised_name("toy", "echo"), "mcp__toy__echo");
+    }
+
+    #[test]
+    fn advertised_name_sanitizes_invalid_characters_in_both_components() {
+        assert_eq!(
+            advertised_name("my server", "fs.read"),
+            "mcp__my_server__fs_read"
+        );
+    }
+
+    #[test]
+    fn advertised_name_is_a_pure_forward_mapping_not_meant_to_be_inverted() {
+        // Two distinct raw names can sanitize to the same advertised name
+        // — this is the documented, defensive-only collision case that
+        // `warn_on_intra_provider_collisions` logs rather than prevents.
+        assert_eq!(
+            advertised_name("srv", "foo.bar"),
+            advertised_name("srv", "foo:bar")
+        );
+    }
+
+    #[test]
+    fn warn_on_intra_provider_collisions_does_not_panic_on_distinct_names() {
+        let tools = vec![
+            Tool::new("echo", "", serde_json::Map::new()),
+            Tool::new("add", "", serde_json::Map::new()),
+        ];
+        warn_on_intra_provider_collisions("mcp:toy", "toy", &tools);
     }
 }

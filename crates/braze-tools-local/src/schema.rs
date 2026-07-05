@@ -28,6 +28,7 @@ pub fn all_stubs(source: &str) -> Vec<ToolStub> {
             name: name.to_string(),
             summary: summary_for(name).to_string(),
             source: source.to_string(),
+            input_schema: schema_for(name).map(|schema| schema.input_schema),
         })
         .collect()
 }
@@ -165,6 +166,19 @@ mod tests {
         let names: Vec<&str> = stubs.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, TOOL_NAMES.to_vec());
         assert!(stubs.iter().all(|s| s.source == "local"));
+    }
+
+    #[test]
+    fn all_stubs_carries_the_real_input_schema_up_front() {
+        for stub in all_stubs("local") {
+            let expected = schema_for(&stub.name).unwrap().input_schema;
+            assert_eq!(
+                stub.input_schema,
+                Some(expected),
+                "stub for {} should carry its real schema, not defer it",
+                stub.name
+            );
+        }
     }
 
     #[test]

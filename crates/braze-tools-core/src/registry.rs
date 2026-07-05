@@ -43,6 +43,7 @@ impl ToolRegistry {
         for result in results {
             stubs.extend(result?);
         }
+        warn_on_cross_provider_collisions(&stubs);
         Ok(stubs)
     }
 
@@ -91,6 +92,30 @@ impl ToolRegistry {
             }
         }
         Err(ToolError::NotFound(call.name.clone()))
+    }
+}
+
+/// Defensive-only: `resolve`/`dispatch` do a first-match linear search, so
+/// two connected providers advertising the same tool name silently shadow
+/// one another (the second becomes unreachable). Namespacing at the
+/// `McpToolProvider` boundary (`mcp__<server>__<tool>`) already prevents
+/// this in the common case — this just logs the residual possibility
+/// (e.g. two MCP servers configured with the same server name) rather than
+/// failing the whole stub list over it.
+fn warn_on_cross_provider_collisions(stubs: &[ToolStub]) {
+    let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for stub in stubs {
+        if let Some(&first_source) = seen.get(stub.name.as_str()) {
+            tracing::warn!(
+                tool = %stub.name,
+                first_provider = first_source,
+                second_provider = %stub.source,
+                "two connected tool providers advertise the same tool name — the second is now \
+                 unreachable via ToolRegistry::resolve/dispatch (first match wins)"
+            );
+        } else {
+            seen.insert(&stub.name, &stub.source);
+        }
     }
 }
 
@@ -143,6 +168,7 @@ mod tests {
                     name: name.to_string(),
                     summary: format!("{name} summary"),
                     source: self.id.to_string(),
+                    input_schema: None,
                 })
                 .collect())
         }
@@ -208,6 +234,27 @@ mod tests {
             .expect_err("a failing provider must fail the whole call");
 
         assert!(matches!(err, ToolError::ProviderUnavailable(id) if id == "mcp:broken"));
+    }
+
+    #[tokio::test]
+    async fn all_stubs_does_not_fail_when_two_providers_advertise_the_same_name() {
+        // Namespacing at the McpToolProvider boundary should make this rare
+        // in practice, but ToolRegistry itself has no such guarantee — the
+        // collision is only logged (see `warn_on_cross_provider_collisions`),
+        // never a hard error, so one misbehaving/misconfigured provider
+        // can't take down the whole stub list.
+        let registry = ToolRegistry::new(vec![
+            Box::new(MockProvider::new("local", vec!["read_file"])),
+            Box::new(MockProvider::new("mcp:weird_server", vec!["read_file"])),
+        ]);
+
+        let stubs = registry
+            .all_stubs()
+            .await
+            .expect("a duplicate name must not fail all_stubs");
+
+        assert_eq!(stubs.len(), 2);
+        assert!(stubs.iter().all(|s| s.name == "read_file"));
     }
 
     #[tokio::test]

@@ -227,6 +227,24 @@ async fn run() -> Result<(), CliError> {
     let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
         vec![Box::new(local_provider)];
 
+    // D5 (auditoría 2026-07): two `mcp_servers` entries sharing a `name`
+    // would produce identical `mcp__<name>__<tool>` advertised names,
+    // reintroducing the exact collision namespacing exists to prevent.
+    // `ToolRegistry::all_stubs` only catches this at runtime (a warning per
+    // round) — this catches the common config-typo case once, at startup.
+    {
+        let mut seen_server_names = std::collections::HashSet::new();
+        for server in &config.mcp_servers {
+            if !seen_server_names.insert(server.name.as_str()) {
+                tracing::warn!(
+                    server = %server.name,
+                    "two mcp_servers entries share the same name — their tools will \
+                     collide under mcp__<name>__<tool> namespacing"
+                );
+            }
+        }
+    }
+
     // Best-effort: a dead/misconfigured MCP server never aborts startup,
     // it's just unavailable for this run (logged as a warning).
     for server in &config.mcp_servers {

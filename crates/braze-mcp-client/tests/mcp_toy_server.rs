@@ -47,6 +47,38 @@ impl ConfirmationPrompt for AlwaysDeny {
     }
 }
 
+/// Always answers "yes", and records every action it was asked to confirm
+/// — used to inspect the `ActionDescriptor::McpToolCall` that `invoke`
+/// actually constructs (D5: the `tool` field must stay the bare,
+/// server-reported name, not the namespaced one, or permissions recorded
+/// before namespacing existed would stop matching on `--resume`). Kept
+/// behind `Arc` (not owned outright by the guard) so the test can still
+/// read `seen` after handing a `SharedRecordingPrompt` to `PermissionGuard`.
+struct RecordingPrompt {
+    seen: std::sync::Mutex<Vec<ActionDescriptor>>,
+}
+
+impl RecordingPrompt {
+    fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            seen: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+}
+
+/// Local newtype around `Arc<RecordingPrompt>` — the orphan rule blocks
+/// implementing `ConfirmationPrompt` (foreign trait) directly for `Arc`
+/// (foreign type) from this integration-test crate.
+struct SharedRecordingPrompt(std::sync::Arc<RecordingPrompt>);
+
+#[async_trait::async_trait]
+impl ConfirmationPrompt for SharedRecordingPrompt {
+    async fn confirm(&self, action: &ActionDescriptor) -> bool {
+        self.0.seen.lock().unwrap().push(action.clone());
+        true
+    }
+}
+
 fn allow_guard() -> PermissionGuard {
     let cwd = std::env::temp_dir();
     PermissionGuard::new(
@@ -103,7 +135,7 @@ fn tool_call(id: &str, name: &str, arguments: serde_json::Value) -> ToolCall {
 /// `src/bin/toy_mcp_server.rs`) and parses the number of `tools/list`
 /// requests it has answered so far.
 async fn list_tools_call_count(provider: &McpToolProvider) -> u64 {
-    let call = tool_call("count", "call_count", serde_json::json!({}));
+    let call = tool_call("count", "mcp__toy__call_count", serde_json::json!({}));
     let result = provider
         .invoke(&call)
         .await
@@ -129,10 +161,23 @@ async fn list_stubs_reflects_every_tool_the_server_advertises() {
         .expect("list_stubs should succeed");
 
     let names: Vec<&str> = stubs.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, vec!["echo", "add", "fail", "verbose"]);
+    assert_eq!(
+        names,
+        vec![
+            "mcp__toy__echo",
+            "mcp__toy__add",
+            "mcp__toy__fail",
+            "mcp__toy__verbose",
+            "mcp__toy__call_count",
+        ]
+    );
 
     for stub in &stubs {
         assert_eq!(stub.source, "mcp:toy");
+        assert!(
+            stub.input_schema.is_none(),
+            "MCP stubs stay deferred (D3) — only local built-ins carry a real schema up front"
+        );
     }
 }
 
@@ -144,7 +189,10 @@ async fn list_stubs_summary_matches_the_documented_truncation_criteria() {
         .await
         .expect("list_stubs should succeed");
 
-    let echo = stubs.iter().find(|s| s.name == "echo").expect("echo stub");
+    let echo = stubs
+        .iter()
+        .find(|s| s.name == "mcp__toy__echo")
+        .expect("echo stub");
     assert_eq!(
         echo.summary,
         "Echoes back the exact text it was given, for round-trip testing."
@@ -152,7 +200,7 @@ async fn list_stubs_summary_matches_the_documented_truncation_criteria() {
 
     let verbose = stubs
         .iter()
-        .find(|s| s.name == "verbose")
+        .find(|s| s.name == "mcp__toy__verbose")
         .expect("verbose stub");
     // Long, no early sentence boundary in the source description -> must be
     // word-boundary truncated with a trailing ellipsis (see summary.rs).
@@ -164,7 +212,7 @@ async fn list_stubs_summary_matches_the_documented_truncation_criteria() {
 async fn resolve_schema_returns_the_real_json_schema_for_a_known_tool() {
     let provider = connect().await;
     let schema = provider
-        .resolve_schema("echo")
+        .resolve_schema("mcp__toy__echo")
         .await
         .expect("resolve_schema should succeed")
         .expect("echo is a real tool the server advertised");
@@ -192,7 +240,7 @@ async fn resolve_schema_works_without_a_prior_list_stubs_call() {
     // cache starts empty and `resolve_schema` must fetch on its own.
     let provider = connect().await;
     let schema = provider
-        .resolve_schema("add")
+        .resolve_schema("mcp__toy__add")
         .await
         .expect("resolve_schema should succeed")
         .expect("add is a real tool");
@@ -202,7 +250,11 @@ async fn resolve_schema_works_without_a_prior_list_stubs_call() {
 #[tokio::test]
 async fn invoke_echo_round_trips_the_text_argument() {
     let provider = connect().await;
-    let call = tool_call("call-1", "echo", serde_json::json!({"text": "hello mcp"}));
+    let call = tool_call(
+        "call-1",
+        "mcp__toy__echo",
+        serde_json::json!({"text": "hello mcp"}),
+    );
     let result = provider.invoke(&call).await.expect("invoke should succeed");
 
     assert_eq!(result.tool_call_id, "call-1");
@@ -213,7 +265,11 @@ async fn invoke_echo_round_trips_the_text_argument() {
 #[tokio::test]
 async fn invoke_add_computes_the_sum() {
     let provider = connect().await;
-    let call = tool_call("call-2", "add", serde_json::json!({"a": 2, "b": 3}));
+    let call = tool_call(
+        "call-2",
+        "mcp__toy__add",
+        serde_json::json!({"a": 2, "b": 3}),
+    );
     let result = provider.invoke(&call).await.expect("invoke should succeed");
 
     assert_eq!(result.content, "5");
@@ -223,7 +279,7 @@ async fn invoke_add_computes_the_sum() {
 #[tokio::test]
 async fn invoke_fail_maps_the_mcp_tool_level_error_flag_to_is_error() {
     let provider = connect().await;
-    let call = tool_call("call-3", "fail", serde_json::json!({}));
+    let call = tool_call("call-3", "mcp__toy__fail", serde_json::json!({}));
     let result = provider.invoke(&call).await.expect("invoke should succeed");
 
     assert!(result.is_error);
@@ -233,7 +289,11 @@ async fn invoke_fail_maps_the_mcp_tool_level_error_flag_to_is_error() {
 #[tokio::test]
 async fn invoke_rejects_non_object_arguments_without_touching_the_server() {
     let provider = connect().await;
-    let call = tool_call("call-4", "echo", serde_json::json!("not an object"));
+    let call = tool_call(
+        "call-4",
+        "mcp__toy__echo",
+        serde_json::json!("not an object"),
+    );
     let err = provider
         .invoke(&call)
         .await
@@ -241,10 +301,50 @@ async fn invoke_rejects_non_object_arguments_without_touching_the_server() {
 
     match err {
         ToolError::InvocationFailed { name, message } => {
-            assert_eq!(name, "echo");
+            assert_eq!(name, "mcp__toy__echo");
             assert!(message.contains("JSON object"));
         }
         other => panic!("expected InvocationFailed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn invoke_records_the_permission_action_with_the_bare_tool_name() {
+    let cwd = std::env::temp_dir();
+    let recorder = RecordingPrompt::new();
+    let guard = PermissionGuard::new(
+        WorkdirAllowlist::new(cwd.clone()),
+        Box::new(DefaultClassifier::new(WorkdirAllowlist::new(cwd))),
+        Box::new(SharedRecordingPrompt(std::sync::Arc::clone(&recorder))),
+    );
+    let provider = McpToolProvider::connect("toy".to_string(), toy_server_path(), Vec::new(), guard)
+        .await
+        .expect("toy MCP server should spawn and complete the handshake");
+
+    let call = tool_call(
+        "call-5",
+        "mcp__toy__add",
+        serde_json::json!({"a": 2, "b": 3}),
+    );
+    provider
+        .invoke(&call)
+        .await
+        .expect("invoke should succeed");
+
+    let seen = recorder.seen.lock().unwrap();
+    assert_eq!(seen.len(), 1);
+    match &seen[0] {
+        ActionDescriptor::McpToolCall { server, tool } => {
+            assert_eq!(server, "toy");
+            assert_eq!(
+                tool, "add",
+                "PermissionKey must key on the bare server-reported name, not \
+                 the namespaced one the model invoked with — otherwise \
+                 permissions recorded before namespacing existed stop \
+                 matching on --resume"
+            );
+        }
+        other => panic!("expected McpToolCall, got {other:?}"),
     }
 }
 
@@ -276,7 +376,11 @@ async fn invoke_is_denied_by_a_guard_that_always_refuses() {
     .await
     .expect("toy MCP server should spawn and complete the handshake");
 
-    let call = tool_call("call-denied", "add", serde_json::json!({"a": 2, "b": 3}));
+    let call = tool_call(
+        "call-denied",
+        "mcp__toy__add",
+        serde_json::json!({"a": 2, "b": 3}),
+    );
     let err = provider
         .invoke(&call)
         .await
@@ -284,7 +388,7 @@ async fn invoke_is_denied_by_a_guard_that_always_refuses() {
 
     match err {
         ToolError::InvocationFailed { name, message } => {
-            assert_eq!(name, "add");
+            assert_eq!(name, "mcp__toy__add");
             assert!(
                 message.contains("denied"),
                 "expected a permission-denial message, got: {message}"
@@ -356,7 +460,7 @@ async fn resolve_schema_for_a_known_tool_reuses_the_ttl_cache() {
         .await
         .expect("list_stubs should succeed");
     let schema = provider
-        .resolve_schema("echo")
+        .resolve_schema("mcp__toy__echo")
         .await
         .expect("resolve_schema should succeed")
         .expect("echo is a real tool");

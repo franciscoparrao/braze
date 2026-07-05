@@ -1015,6 +1015,7 @@ mod tests {
                 name: "echo".to_string(),
                 summary: "echoes its input".to_string(),
                 source: "test:echo".to_string(),
+                input_schema: None,
             }])
         }
 

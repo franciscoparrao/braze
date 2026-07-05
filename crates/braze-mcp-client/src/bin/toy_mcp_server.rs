@@ -15,14 +15,17 @@
 //! branch of `summary::summarize` end to end against a real server
 //! (`verbose`).
 //!
-//! It also tracks how many `tools/list` requests it has answered (`list_tools_calls`,
-//! an `AtomicU64`) and exposes that counter through a `call_count` tool
-//! reachable only via `tools/call`, never advertised by `tools/list` itself
-//! (so it doesn't disturb tests that assert the exact set of advertised
-//! tool names). This is the instrumentation the client-side TTL cache
-//! tests (`tests/mcp_toy_server.rs`) use to confirm, against a real
-//! subprocess, that a fresh-within-TTL `list_stubs()` call is served from
-//! `McpToolProvider`'s cache instead of costing another round trip.
+//! It also tracks how many `tools/list` requests it has answered
+//! (`list_tools_calls`, an `AtomicU64`) and exposes that counter through a
+//! `call_count` tool, advertised like the other four (required since
+//! `McpToolProvider::invoke` — D5's namespacing fix — only dispatches a
+//! call whose name resolves against the advertised tool list; it can no
+//! longer blindly forward an unlisted name straight to the server). This is
+//! the instrumentation the client-side TTL cache tests
+//! (`tests/mcp_toy_server.rs`) use to confirm, against a real subprocess,
+//! that a fresh-within-TTL `list_stubs()` call is served from
+//! `McpToolProvider`'s cache instead of costing another round trip; the
+//! tests that assert the exact set of advertised tool names account for it.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -111,6 +114,11 @@ fn all_tools() -> Vec<Tool> {
             object_schema(&[], &[]),
         ),
         Tool::new("verbose", VERBOSE_DESCRIPTION, object_schema(&[], &[])),
+        Tool::new(
+            "call_count",
+            "Test-only instrumentation: returns how many tools/list requests this server has answered so far.",
+            object_schema(&[], &[]),
+        ),
     ]
 }
 

@@ -123,33 +123,32 @@ fn to_anthropic_block(block: &ContentBlock) -> AnthropicContentBlock {
 
 /// Builds the Anthropic `tools` array from deferred-loading stubs.
 ///
-/// ## GAP DE DISEÑO (resuelto — ver instrucciones de la tarea)
+/// ## Política de schema de dos vías (D3, auditoría 2026-07)
 ///
-/// `CompletionRequest.tool_stubs` solo trae `name` + `summary` (carga
-/// diferida: braze-model nunca ve el JSON Schema completo por adelantado,
-/// y no puede depender de `braze-tools-core` para resolverlo — son crates
-/// hermanos de Nivel 1 que nunca se dependen entre sí, por diseño
-/// arquitectónico, ver PLAN.md). La API de Anthropic exige un
-/// `input_schema` por cada tool declarada, así que aquí se envía un schema
-/// **permisivo/genérico** (`{"type":"object","additionalProperties":true}`)
-/// para cada stub, confiando en que el modelo infiera argumentos
-/// razonables a partir de nombre + resumen.
-///
-/// **DEUDA PENDIENTE PARA FASE 5 (braze-engine):** la validación/resolución
-/// del schema REAL de cada tool (vía `braze-tools-core::ToolRegistry`)
-/// queda pendiente para quien construya `braze-engine`, que sí ve
-/// `ToolRegistry` y `ModelBackend` simultáneamente y puede resolver el
-/// schema completo antes del dispatch final de una tool call. No se
-/// resuelve aquí — este comentario es el marcador para esa fase.
+/// `CompletionRequest.tool_stubs` no depende de `braze-tools-core` para
+/// resolver un schema (braze-model y braze-tools-core son crates hermanos
+/// de Nivel 1 que nunca se dependen entre sí, ver PLAN.md) — pero
+/// `ToolStub` (en `braze-types`, Nivel 0) sí puede cargar opcionalmente el
+/// `input_schema` real, poblado por el *provider* que lo produjo, no por
+/// esta función. Para el set pequeño y estático de tools locales
+/// (`braze-tools-local::schema::all_stubs`) el schema real ya viene en el
+/// stub, así que se envía tal cual. Para tools MCP (set dinámico/no
+/// acotado, `McpToolProvider::list_stubs`) el schema sigue diferido —
+/// `input_schema` es `None` en el stub, y aquí se cae al schema
+/// **permisivo/genérico** (`{"type":"object","additionalProperties":true}`),
+/// resuelto para real recién en el dispatch (`braze-engine::Engine::dispatch_tool_calls`,
+/// vía `braze-tools-core::ToolRegistry`).
 fn build_tools(stubs: &[ToolStub]) -> Vec<AnthropicTool> {
     stubs
         .iter()
         .map(|stub| AnthropicTool {
             name: stub.name.clone(),
             description: stub.summary.clone(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "additionalProperties": true
+            input_schema: stub.input_schema.clone().unwrap_or_else(|| {
+                serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": true
+                })
             }),
         })
         .collect()
@@ -453,11 +452,12 @@ mod tests {
     use braze_types::Role;
 
     #[test]
-    fn build_tools_uses_permissive_generic_schema() {
+    fn build_tools_uses_permissive_generic_schema_when_stub_has_none() {
         let stubs = vec![ToolStub {
             name: "read_file".to_string(),
             summary: "Reads a file from disk".to_string(),
-            source: "local".to_string(),
+            source: "mcp:filesystem".to_string(),
+            input_schema: None,
         }];
         let tools = build_tools(&stubs);
         assert_eq!(tools.len(), 1);
@@ -467,6 +467,25 @@ mod tests {
             tools[0].input_schema,
             serde_json::json!({"type": "object", "additionalProperties": true})
         );
+    }
+
+    #[test]
+    fn build_tools_passes_through_stub_schema_when_present() {
+        let real_schema = serde_json::json!({
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": false
+        });
+        let stubs = vec![ToolStub {
+            name: "read_file".to_string(),
+            summary: "Reads a file from disk".to_string(),
+            source: "local".to_string(),
+            input_schema: Some(real_schema.clone()),
+        }];
+        let tools = build_tools(&stubs);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].input_schema, real_schema);
     }
 
     #[test]
