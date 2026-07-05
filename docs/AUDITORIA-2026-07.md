@@ -846,11 +846,20 @@ nota.*
    (two-stage) — depende de D3 (ya resuelto), diseño explícitamente diferido
    por su impacto en la latencia del loop (potencial doble round-trip HTTP
    en una máquina ya limitada por CPU).
-5. **Técnica G10** (pendiente, nueva) Best-of-n / Test-Time Scaling barato
-   solo en la tool call — ver tabla de técnicas arriba. Más barato de probar
-   que Grupo H (sin entrenamiento, reusa el loop de rondas ya existente en
-   `Engine::run_turn`); candidato natural para las skills que el sweep marcó
-   como débiles (`error_recovery`, `distractor_selection`).
+5. ✅⚠️ **Técnica G10** Best-of-n / Test-Time Scaling barato solo en la
+   tool call — `Engine::complete_with_best_of_n` + voto por pluralidad
+   sobre la firma canónica de cada candidato, config
+   `best_of_n`/`BRAZE_BEST_OF_N`, mecanismo verificado correcto por logs
+   de debug. **Pero el sweep real (n=5) contra `qwen2.5:3b` en los dos
+   skills débiles dio *peor* pass rate con `best_of_n=3` (0/10) que el
+   baseline (2/10), más 3 timeouts que el baseline no tuvo** — hipótesis:
+   a la `temperature=0.2` default de Ollama los candidatos no diversifican
+   lo suficiente para que votar ayude. Queda en `main` con default `1`
+   (desactivada) porque el código es correcto, no un bug; no se recomienda
+   activarla en Ollama sin antes probar temperatura elevada para la
+   generación de candidatos. Ver PLAN.md § "Técnica G10 del roadmap SOTA"
+   para el detalle completo de diseño y los datos del sweep.
+   *(2026-07-05)*
 
 ### Grupo G — Observabilidad y calidad (media prioridad, transversal)
 1. **A9** spans por turno/ronda/tool-call.

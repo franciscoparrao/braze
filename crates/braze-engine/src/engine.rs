@@ -63,6 +63,23 @@ pub struct Engine {
     /// large tool result can blow the budget long before the event count
     /// does. See [`Engine::load_messages`].
     context_budget_tokens: Option<u32>,
+    /// Number of independent candidates per round for técnica G10
+    /// (docs/AUDITORIA-2026-07.md, Best-of-n / Test-Time Scaling). `1`
+    /// (the default) or `0` disable the technique entirely — the round
+    /// goes through [`Engine::complete_once`] directly, exactly the same
+    /// code path as before G10 existed. Only `> 1` routes the round
+    /// through [`Engine::complete_with_best_of_n`].
+    best_of_n: usize,
+}
+
+/// The resolved outcome of one full model completion — everything the
+/// round loop in [`Engine::run_turn`] needs to decide what happens next,
+/// whether it came from a single attempt ([`Engine::complete_once`]) or
+/// was chosen by vote among several ([`Engine::complete_with_best_of_n`]).
+struct RoundOutcome {
+    text_buffer: String,
+    tool_calls: Vec<ToolCall>,
+    usage: Option<(u32, u32, Option<String>)>,
 }
 
 impl Engine {
@@ -92,6 +109,7 @@ impl Engine {
             max_tokens,
             tactical_compaction_threshold: DEFAULT_TACTICAL_COMPACTION_THRESHOLD,
             context_budget_tokens: None,
+            best_of_n: 1,
         }
     }
 
@@ -114,6 +132,17 @@ impl Engine {
         self
     }
 
+    /// Sets the number of independent candidates each round generates
+    /// before voting on which one to use — técnica G10
+    /// (docs/AUDITORIA-2026-07.md), e.g. from
+    /// `braze_config::Config::best_of_n`. `n <= 1` is a no-op (the round
+    /// loop already treats that as "disabled"). Chainable, same shape as
+    /// [`Engine::with_context_budget`].
+    pub fn with_best_of_n(mut self, n: usize) -> Self {
+        self.best_of_n = n;
+        self
+    }
+
     /// Persists `event` to the session store and mirrors it into the
     /// turn's [`TurnObserver`] — the live seam frontends consume (see
     /// PLAN.md § "Fase TUI — diseño"). Persistence stays the source of
@@ -129,6 +158,214 @@ impl Engine {
         self.store.append(session, event).await?;
         observer.on_event(event);
         Ok(())
+    }
+
+    /// Makes one completion call and consumes its stream fully into a
+    /// [`RoundOutcome`] — the single-attempt building block both the
+    /// normal path and técnica G10's best-of-n voting
+    /// (docs/AUDITORIA-2026-07.md) are built from; extracted verbatim
+    /// from what used to be inline in `run_turn`'s round loop, no
+    /// behavior change for the `best_of_n <= 1` (default) path.
+    ///
+    /// `emit_deltas` controls whether text deltas reach `observer` as
+    /// they stream in: `false` when this is one of several best-of-n
+    /// candidates being generated — there is no single "the" answer to
+    /// show live until voting picks one (see
+    /// `complete_with_best_of_n`'s doc comment for what happens to the
+    /// winner's text instead).
+    async fn complete_once(
+        &self,
+        req: CompletionRequest,
+        observer: &mut dyn TurnObserver,
+        emit_deltas: bool,
+    ) -> Result<RoundOutcome, EngineError> {
+        let mut stream = self.model.complete(req).await?;
+
+        let mut text_buffer = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut usage: Option<(u32, u32, Option<String>)> = None;
+        let mut saw_done = false;
+
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(CompletionEvent::TextDelta(delta)) => {
+                    if emit_deltas {
+                        observer.on_text_delta(&delta);
+                    }
+                    text_buffer.push_str(&delta);
+                }
+                Ok(CompletionEvent::ToolCallRequested {
+                    id,
+                    name,
+                    arguments,
+                }) => {
+                    tool_calls.push(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    });
+                }
+                Ok(CompletionEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    stop_reason,
+                }) => {
+                    tracing::debug!(
+                        input_tokens,
+                        output_tokens,
+                        stop_reason = stop_reason.as_deref(),
+                        "model usage this round"
+                    );
+                    // "max_tokens"/"length" means the round's output
+                    // (which may have been a tool call's JSON arguments,
+                    // mid-construction) was cut off by the token budget
+                    // rather than the model finishing on its own — the
+                    // tool call then fails to parse and gets silently
+                    // dropped downstream with no other indication of
+                    // why. Surfacing it here at least makes that
+                    // diagnosable from logs.
+                    if matches!(stop_reason.as_deref(), Some("max_tokens") | Some("length")) {
+                        tracing::warn!(
+                            output_tokens,
+                            max_tokens = self.max_tokens,
+                            "model output was truncated by max_tokens this round; a tool call's \
+                             arguments may have been cut off mid-construction"
+                        );
+                    }
+                    usage = Some((input_tokens, output_tokens, stop_reason));
+                }
+                Ok(CompletionEvent::Done) => {
+                    saw_done = true;
+                    break;
+                }
+                Err(err) => {
+                    // Whatever text/tool-calls arrived before the stream
+                    // failed must NOT be treated as a complete, converged
+                    // response — nothing from this attempt has been
+                    // persisted yet, so propagating here silently
+                    // discards the partial attempt instead of persisting
+                    // it as if it were real. See `ModelError::StreamError`'s
+                    // doc comment / docs/AUDITORIA-2026-07.md hallazgo A3/B4.
+                    return Err(err.into());
+                }
+            }
+        }
+
+        // A `ModelBackend` must uphold the invariant that its stream
+        // either yields an `Err` or ends with `Ok(Done)` as its last item
+        // (see the trait's doc comment) — this only trips if a backend
+        // implementation violates that, but the same reasoning as the
+        // `Err` arm above applies: an unconverged, possibly-truncated
+        // attempt must not be persisted as if it were complete.
+        if !saw_done {
+            return Err(EngineError::IncompleteStream);
+        }
+
+        // Fallback for models that don't emit a structured tool call —
+        // small/local models, or a template without native tool-call
+        // support — but instead write the call out as JSON in plain
+        // text (optionally fenced in ```json). Rescuing it here beats
+        // treating it as the model's final answer, which would end the
+        // turn having silently ignored what was clearly meant to be a
+        // tool call. See docs/AUDITORIA-2026-07.md hallazgo B5. Applied
+        // per-attempt (not after best-of-n voting) so a textually
+        // described tool call counts as a real candidate signature for
+        // the vote too.
+        if tool_calls.is_empty()
+            && let Some(rescued) = try_parse_textual_tool_call(&text_buffer)
+        {
+            tracing::info!(
+                tool = %rescued.name,
+                "rescued a tool call the model emitted as plain text instead of a structured tool_calls entry"
+            );
+            tool_calls.push(rescued);
+            text_buffer.clear();
+        }
+
+        Ok(RoundOutcome {
+            text_buffer,
+            tool_calls,
+            usage,
+        })
+    }
+
+    /// Técnica G10 (docs/AUDITORIA-2026-07.md): generates `self.best_of_n`
+    /// independent completions of the same request and picks the one
+    /// whose outcome — canonicalized as the sorted set of (tool name,
+    /// canonical arguments) pairs it requested, or an empty set for a
+    /// "no tool call, final answer" candidate — is the most common among
+    /// all attempts (plurality vote; ties keep the earliest-generated
+    /// candidate, never `Iterator::max_by_key`'s "last wins" default).
+    /// Cheap test-time scaling with no training required: the evidence
+    /// behind this (docs/AUDITORIA-2026-07.md § 6, técnica 10 — Corradini
+    /// et al. 2025, BDCC) is that letting a small model try several times
+    /// and vote beats one greedy attempt, particularly on the ambiguous
+    /// decisions this project's own sweep flagged as weak
+    /// (`error_recovery`, `distractor_selection` — both 0/5 for
+    /// `qwen2.5:3b`/`7b`, see `CLAUDE.md`).
+    ///
+    /// Deltas are not streamed live during the `best_of_n` attempts (see
+    /// `complete_once`'s `emit_deltas` parameter) — there is no single
+    /// "the" answer to show token-by-token until voting resolves one.
+    /// The winner's full text is delivered to `observer` as a single
+    /// delta right after the vote, so downstream consumers (the plain
+    /// CLI, `braze-tui`) still receive it exactly the way they receive
+    /// every other round's text, just without the live streaming feel
+    /// for this specific round — an accepted, deliberate trade-off.
+    ///
+    /// The persisted usage for the round is the *sum* across every
+    /// candidate (this makes `self.best_of_n` real model calls, and
+    /// token/cost accounting must reflect that), with `stop_reason`
+    /// taken specifically from the winning candidate.
+    async fn complete_with_best_of_n(
+        &self,
+        req: &CompletionRequest,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<RoundOutcome, EngineError> {
+        let mut candidates = Vec::with_capacity(self.best_of_n);
+        for attempt in 0..self.best_of_n {
+            let outcome = self.complete_once(req.clone(), observer, false).await?;
+            tracing::debug!(
+                attempt,
+                n_tool_calls = outcome.tool_calls.len(),
+                "best-of-n candidate generated"
+            );
+            candidates.push(outcome);
+        }
+
+        let signatures: Vec<Vec<(String, String)>> =
+            candidates.iter().map(candidate_signature).collect();
+        let mut winner_index = 0;
+        let mut winner_votes = 0;
+        for (i, signature) in signatures.iter().enumerate() {
+            let votes = signatures.iter().filter(|s| *s == signature).count();
+            if votes > winner_votes {
+                winner_votes = votes;
+                winner_index = i;
+            }
+        }
+
+        let total_input_tokens: u32 = candidates.iter().filter_map(|c| c.usage.as_ref()).map(|u| u.0).sum();
+        let total_output_tokens: u32 = candidates.iter().filter_map(|c| c.usage.as_ref()).map(|u| u.1).sum();
+        let any_usage_reported = candidates.iter().any(|c| c.usage.is_some());
+        let winner_stop_reason = candidates[winner_index].usage.as_ref().and_then(|u| u.2.clone());
+
+        tracing::debug!(
+            winner_index,
+            winner_votes,
+            n_candidates = candidates.len(),
+            "best-of-n vote resolved"
+        );
+
+        let mut winner = candidates.swap_remove(winner_index);
+        winner.usage = any_usage_reported
+            .then_some((total_input_tokens, total_output_tokens, winner_stop_reason));
+
+        if !winner.text_buffer.is_empty() {
+            observer.on_text_delta(&winner.text_buffer);
+        }
+
+        Ok(winner)
     }
 
     /// Runs one complete turn: append the user's message, then loop
@@ -191,95 +428,29 @@ impl Engine {
                 max_tokens: self.max_tokens,
             };
 
-            let mut stream = self.model.complete(req).await?;
-
-            let mut text_buffer = String::new();
-            let mut tool_calls: Vec<ToolCall> = Vec::new();
-            let mut usage: Option<(u32, u32, Option<String>)> = None;
-            let mut saw_done = false;
-
-            while let Some(event) = stream.next().await {
-                match event {
-                    Ok(CompletionEvent::TextDelta(delta)) => {
-                        observer.on_text_delta(&delta);
-                        text_buffer.push_str(&delta);
-                    }
-                    Ok(CompletionEvent::ToolCallRequested {
-                        id,
-                        name,
-                        arguments,
-                    }) => {
-                        tool_calls.push(ToolCall {
-                            id,
-                            name,
-                            arguments,
-                        });
-                    }
-                    Ok(CompletionEvent::Usage {
-                        input_tokens,
-                        output_tokens,
-                        stop_reason,
-                    }) => {
-                        tracing::debug!(
-                            input_tokens,
-                            output_tokens,
-                            stop_reason = stop_reason.as_deref(),
-                            "model usage this round"
-                        );
-                        // "max_tokens"/"length" means the round's output
-                        // (which may have been a tool call's JSON
-                        // arguments, mid-construction) was cut off by the
-                        // token budget rather than the model finishing on
-                        // its own — the tool call then fails to parse and
-                        // gets silently dropped downstream with no other
-                        // indication of why. Surfacing it here at least
-                        // makes that diagnosable from logs.
-                        if matches!(stop_reason.as_deref(), Some("max_tokens") | Some("length")) {
-                            tracing::warn!(
-                                output_tokens,
-                                max_tokens = self.max_tokens,
-                                "model output was truncated by max_tokens this round; a tool call's \
-                                 arguments may have been cut off mid-construction"
-                            );
-                        }
-                        usage = Some((input_tokens, output_tokens, stop_reason));
-                    }
-                    Ok(CompletionEvent::Done) => {
-                        saw_done = true;
-                        break;
-                    }
-                    Err(err) => {
-                        // Whatever text/tool-calls arrived before the
-                        // stream failed must NOT be treated as a complete,
-                        // converged response — nothing from this round has
-                        // been persisted yet (the loop below only appends
-                        // after this point), so propagating here silently
-                        // discards the partial round instead of
-                        // persisting it as if it were real. See
-                        // `ModelError::StreamError`'s doc comment /
-                        // docs/AUDITORIA-2026-07.md hallazgo A3/B4.
-                        return Err(err.into());
-                    }
-                }
-            }
-
-            // A `ModelBackend` must uphold the invariant that its stream
-            // either yields an `Err` or ends with `Ok(Done)` as its last
-            // item (see the trait's doc comment) — this only trips if a
-            // backend implementation violates that, but the same
-            // reasoning as the `Err` arm above applies: an unconverged,
-            // possibly-truncated round must not be persisted as if it
-            // were complete.
-            if !saw_done {
-                return Err(EngineError::IncompleteStream);
-            }
+            // técnica G10 (docs/AUDITORIA-2026-07.md): `best_of_n <= 1`
+            // takes the exact single-call path that existed before G10 —
+            // `complete_once` is a straight extraction of what used to be
+            // inline here, not new behavior.
+            let RoundOutcome {
+                text_buffer,
+                tool_calls,
+                usage,
+            } = if self.best_of_n > 1 {
+                self.complete_with_best_of_n(&req, observer).await?
+            } else {
+                self.complete_once(req, observer, true).await?
+            };
 
             // Persisted once per round (if the backend reported it) so
             // tooling like `braze-bench` can read per-round token usage
             // back out of the rollout log — see `AgentEvent::Usage`'s doc
             // comment. Order relative to the round's other events doesn't
             // matter: it's audit-only and never rendered into a `Message`
-            // (see `history::event_to_message`).
+            // (see `history::event_to_message`). Under G10, this already
+            // reflects the *summed* cost of every candidate this round
+            // generated, not just the winner's — see
+            // `complete_with_best_of_n`.
             if let Some((input_tokens, output_tokens, stop_reason)) = usage {
                 self.append_and_notify(
                     session,
@@ -291,24 +462,6 @@ impl Engine {
                     observer,
                 )
                 .await?;
-            }
-
-            // Fallback for models that don't emit a structured tool call —
-            // small/local models, or a template without native tool-call
-            // support — but instead write the call out as JSON in plain
-            // text (optionally fenced in ```json). Rescuing it here beats
-            // treating it as the model's final answer, which would end
-            // the turn having silently ignored what was clearly meant to
-            // be a tool call. See docs/AUDITORIA-2026-07.md hallazgo B5.
-            if tool_calls.is_empty()
-                && let Some(rescued) = try_parse_textual_tool_call(&text_buffer)
-            {
-                tracing::info!(
-                    tool = %rescued.name,
-                    "rescued a tool call the model emitted as plain text instead of a structured tool_calls entry"
-                );
-                tool_calls.push(rescued);
-                text_buffer.clear();
             }
 
             // A9 (docs/AUDITORIA-2026-07.md): the round-level fact
@@ -882,6 +1035,25 @@ fn merge_summary(mut durable: DurableState, summary: String) -> DurableState {
         durable.summary = format!("{} {summary}", durable.summary);
     }
     durable
+}
+
+/// Canonical signature of a completion outcome for técnica G10's vote
+/// (`Engine::complete_with_best_of_n`): the sorted set of (tool name,
+/// canonical arguments) pairs it requested — sorted so two candidates
+/// that requested the same calls in a different order compare equal —
+/// or an empty vec for a "no tool call, final answer" candidate. Reuses
+/// the exact canonicalization `dispatch_tool_calls`'s repeated-call
+/// detection already relies on (`arguments.to_string()`, stable because
+/// `serde_json::Value` serializes object keys in sorted order without
+/// the `preserve_order` feature).
+fn candidate_signature(outcome: &RoundOutcome) -> Vec<(String, String)> {
+    let mut signature: Vec<(String, String)> = outcome
+        .tool_calls
+        .iter()
+        .map(|call| (call.name.clone(), call.arguments.to_string()))
+        .collect();
+    signature.sort();
+    signature
 }
 
 /// Best-effort rescue of a tool call a model emitted as plain text instead
@@ -2319,6 +2491,327 @@ mod tests {
             )),
             "the raw JSON must not be persisted as conversational text"
         );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- técnica G10: best-of-n / test-time scaling (docs/AUDITORIA-2026-07.md) ---
+
+    /// Regression test for G10's core value proposition: a 2-vote
+    /// majority ("hi") beats a 1-vote dissenter ("wrong") among 3
+    /// candidates, and only the winning call is ever dispatched.
+    #[tokio::test]
+    async fn best_of_n_dispatches_the_majority_tool_call_signature() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-a".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-b".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "wrong" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-c".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(3);
+
+        engine
+            .run_turn(
+                &session,
+                "please echo hi (with a dissenting distractor)",
+                &mut NoopObserver,
+            )
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "only the winning candidate's call should ever reach the real tool"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { .. }))
+        {
+            Some(AgentEvent::ToolCallCompleted { result, .. }) => {
+                assert_eq!(
+                    result.content, "echoed: hi",
+                    "the 2-vote majority ('hi') must win over the 1-vote dissenter ('wrong')"
+                );
+            }
+            other => panic!("expected a ToolCallCompleted, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A 1-vs-1 tie must resolve deterministically to the
+    /// earliest-generated candidate — never `Iterator::max_by_key`'s
+    /// "last wins" default, which would make the outcome depend on
+    /// implementation details of the vote-counting loop.
+    #[tokio::test]
+    async fn best_of_n_breaks_ties_by_keeping_the_earliest_candidate() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-a".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "first" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-b".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "second" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(2);
+
+        engine
+            .run_turn(&session, "please echo something", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { .. }))
+        {
+            Some(AgentEvent::ToolCallCompleted { result, .. }) => {
+                assert_eq!(
+                    result.content, "echoed: first",
+                    "a 1-vs-1 tie must keep the earliest-generated candidate"
+                );
+            }
+            other => panic!("expected a ToolCallCompleted, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `self.best_of_n` real model calls happen per round — the
+    /// persisted `Usage` must reflect the *summed* cost across every
+    /// candidate, not just the winner's, or token/cost accounting
+    /// silently under-reports by every discarded candidate's share.
+    /// `stop_reason` is taken from the winning candidate specifically.
+    #[tokio::test]
+    async fn best_of_n_sums_usage_across_candidates_and_keeps_the_winners_stop_reason() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Both candidates answer with the same plain text (no tool call
+        // — same "no tool call" signature, so it's a 1-vs-1 tie and
+        // candidate 0 wins per the tie-break rule tested above).
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("hola".to_string()),
+                CompletionEvent::Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    stop_reason: Some("end_turn".to_string()),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("hola".to_string()),
+                CompletionEvent::Usage {
+                    input_tokens: 20,
+                    output_tokens: 8,
+                    stop_reason: Some("stop_sequence".to_string()),
+                },
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(2);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events.iter().find(|e| matches!(e, AgentEvent::Usage { .. })) {
+            Some(AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+                stop_reason,
+            }) => {
+                assert_eq!(
+                    *input_tokens, 30,
+                    "usage must sum every candidate's cost, not just the winner's"
+                );
+                assert_eq!(*output_tokens, 13);
+                assert_eq!(
+                    stop_reason.as_deref(),
+                    Some("end_turn"),
+                    "stop_reason must reflect the winning candidate specifically"
+                );
+            }
+            other => panic!("expected a Usage event, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `best_of_n: 0` (e.g. from a misconfigured env var) must degrade
+    /// gracefully to the same single-call path as the default (`1`),
+    /// not panic on an empty candidate vec.
+    #[tokio::test]
+    async fn best_of_n_set_to_zero_behaves_like_disabled_not_a_panic() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(0);
+
+        let mut streamed = String::new();
+        engine
+            .run_turn(
+                &session,
+                "hola",
+                &mut TextDeltaObserver(|chunk: &str| streamed.push_str(chunk)),
+            )
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(streamed, "hola");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Deltas from individual best-of-n candidates never reach the
+    /// observer live (there's no single "the" answer to show until the
+    /// vote resolves one) — only the winner's full text arrives, as one
+    /// delta, right after voting.
+    #[tokio::test]
+    async fn best_of_n_suppresses_live_deltas_but_delivers_the_winners_full_text_once() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("respuesta ".to_string()),
+                CompletionEvent::TextDelta("candidata".to_string()),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("otra ".to_string()),
+                CompletionEvent::TextDelta("respuesta".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(2);
+
+        let mut observer = RecordingObserver {
+            deltas: Vec::new(),
+            events: Vec::new(),
+        };
+        engine
+            .run_turn(&session, "hola", &mut observer)
+            .await
+            .expect("turn should succeed");
+
+        // Neither candidate's individual deltas streamed live — exactly
+        // one delta arrives, carrying the (tied, so earliest-kept)
+        // winner's whole text in one shot.
+        assert_eq!(observer.deltas, vec!["respuesta candidata".to_string()]);
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

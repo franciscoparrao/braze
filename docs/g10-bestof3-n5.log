@@ -1,0 +1,34 @@
+Corriendo 5 repetición(es) por (tarea, backend) — timeout 180s por intento.
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 4/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 1/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 2/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 3/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 4/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 5/5)
+
+== Resultados por tarea ==
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    133264ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=4488 tokens_out=181 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 2) 132245ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=4488 tokens_out=184 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 3) 129287ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=4494 tokens_out=191 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 4)  85639ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=4488 tokens_out=186 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 5)  95942ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=4491 tokens_out=175 [AssertionText]
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b     94176ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4341 tokens_out=161 [AssertionText]
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b    (rep 2) 180002ms  rounds=1 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2103 tokens_out=78 [Timeout] (error: task exceeded its time budget)
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b    (rep 3) 180001ms  rounds=1 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2103 tokens_out=78 [Timeout] (error: task exceeded its time budget)
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b    (rep 4) 180004ms  rounds=1 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2103 tokens_out=78 [Timeout] (error: task exceeded its time budget)
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b    (rep 5) 156424ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4341 tokens_out=154 [AssertionText]
+
+== Comparación por backend ==
+backend                   pass_rate(±95%) avg_rounds       avg_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied
+ollama:qwen2.5:3b            0/10 (±14pp)      1.7       136698           3744              147                 0              5          0
+
+== Comparación por skill ==
+backend                  skill                   pass_rate
+ollama:qwen2.5:3b        error_recovery               0/5 
+ollama:qwen2.5:3b        distractor_selection         0/5 
+
+Resultados JSON escritos en /tmp/claude-1000/-home-franciscoparrao-proyectos-braze/141e30b4-6166-499b-a366-8f32978e07fc/scratchpad/g10-bestof3-n5.json

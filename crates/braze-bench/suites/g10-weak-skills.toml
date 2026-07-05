@@ -1,0 +1,26 @@
+# Subconjunto de default.toml con solo los 2 skills que el sweep del
+# 2026-07-04 marcó en 0/5 para qwen2.5:3b/7b (ver CLAUDE.md) — usado para
+# medir en vivo si la técnica G10 (Best-of-n / Test-Time Scaling,
+# docs/AUDITORIA-2026-07.md) mejora el pass_rate en esos dos skills
+# específicos. No es parte de la suite de regresión — es una suite de
+# medición puntual, se puede borrar o mantener según convenga.
+
+[[tasks]]
+id = "error_recovery_wrong_filename"
+prompt = "Lee el archivo de informe del directorio actual (el nombre empieza con 'informe' pero no recuerdo el resto) y dime cuántas líneas tiene."
+expect_text_contains = "2"
+skill = "error_recovery"
+
+[tasks.setup_files]
+"informe_final_v2.txt" = "dato uno\ndato dos\n"
+
+[[tasks]]
+id = "distractor_selection_among_files"
+prompt = "Hay varios archivos .txt en el directorio actual. Busca cuál de ellos menciona la palabra 'presupuesto' y dime el nombre de ese archivo."
+expect_text_contains = "notas_presupuesto"
+skill = "distractor_selection"
+
+[tasks.setup_files]
+"notas_viaje.txt" = "necesitamos reservar el vuelo y el hotel\n"
+"notas_presupuesto.txt" = "el presupuesto total del proyecto es 5000\n"
+"notas_equipo.txt" = "el equipo tiene cuatro integrantes\n"

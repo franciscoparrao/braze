@@ -94,8 +94,8 @@ pub async fn run_task(
 
     let model = spec.build(config)?;
     // C10 (docs/AUDITORIA-2026-07.md): mirrors braze-cli's wiring, so a
-    // bench run measures the same tactical window/threshold behavior a
-    // real `braze` invocation with this config would use.
+    // bench run measures the same tactical window/threshold/best_of_n
+    // behavior a real `braze` invocation with this config would use.
     let engine = braze_engine::Engine::new(
         model,
         tools,
@@ -105,7 +105,8 @@ pub async fn run_task(
         system_prompt(sandbox.path()),
         config.max_tokens,
     )
-    .with_tactical_compaction_threshold(config.tactical_compaction_threshold);
+    .with_tactical_compaction_threshold(config.tactical_compaction_threshold)
+    .with_best_of_n(config.best_of_n);
 
     let started = Instant::now();
     let run_outcome = match tokio::time::timeout(

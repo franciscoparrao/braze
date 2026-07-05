@@ -6,7 +6,11 @@ use futures::Stream;
 
 use crate::error::ModelError;
 
-/// What the engine sends to a [`ModelBackend`] on each turn.
+/// What the engine sends to a [`ModelBackend`] on each turn. `Clone` so
+/// `braze-engine`'s G10 best-of-n voting (docs/AUDITORIA-2026-07.md) can
+/// issue the same request to the model several times without rebuilding
+/// it from scratch per attempt.
+#[derive(Clone)]
 pub struct CompletionRequest {
     pub messages: Vec<Message>,
     /// Names + one-line summaries only — never full JSON schemas up front.

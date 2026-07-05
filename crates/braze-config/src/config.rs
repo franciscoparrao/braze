@@ -98,6 +98,12 @@ pub struct Config {
     /// MCP servers to connect to by default (consumed by `braze-mcp-client`, Fase 4).
     #[serde(default)]
     pub mcp_servers: Vec<McpServerConfigStub>,
+    /// Independent candidates `Engine` generates per round before voting
+    /// on which one to use — técnica G10, docs/AUDITORIA-2026-07.md
+    /// (Best-of-n / Test-Time Scaling). `1` (the default) disables it:
+    /// the round takes the exact single-call path that existed before
+    /// G10. See `braze_engine::Engine::with_best_of_n`.
+    pub best_of_n: usize,
 }
 
 impl Default for Config {
@@ -124,6 +130,7 @@ impl Default for Config {
             tactical_window: 20,
             tactical_compaction_threshold: 40,
             mcp_servers: Vec::new(),
+            best_of_n: 1,
         }
     }
 }
@@ -216,6 +223,9 @@ impl Config {
         if let Some(v) = overrides.mcp_servers {
             self.mcp_servers = v;
         }
+        if let Some(v) = overrides.best_of_n {
+            self.best_of_n = v;
+        }
     }
 }
 
@@ -254,6 +264,21 @@ mod tests {
         assert_eq!(config.tactical_window, 20);
         assert_eq!(config.tactical_compaction_threshold, 40);
         assert!(config.mcp_servers.is_empty());
+        assert_eq!(config.best_of_n, 1);
+    }
+
+    #[test]
+    fn best_of_n_is_overridable_via_env() {
+        let env = vec![("BRAZE_BEST_OF_N".to_string(), "5".to_string())];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(config.best_of_n, 5);
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_best_of_n() {
+        let env = vec![("BRAZE_BEST_OF_N".to_string(), "not-a-number".to_string())];
+        let result = Config::load_with(None, env);
+        assert!(matches!(result, Err(ConfigError::InvalidEnvValue { .. })));
     }
 
     #[test]

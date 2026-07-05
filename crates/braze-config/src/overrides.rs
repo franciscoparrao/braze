@@ -49,6 +49,8 @@ pub struct ConfigOverrides {
     pub tactical_compaction_threshold: Option<usize>,
     #[serde(default)]
     pub mcp_servers: Option<Vec<McpServerConfigStub>>,
+    #[serde(default)]
+    pub best_of_n: Option<usize>,
 }
 
 impl ConfigOverrides {
@@ -135,6 +137,17 @@ impl ConfigOverrides {
                             })?;
                     overrides.tactical_compaction_threshold = Some(parsed);
                 }
+                "BEST_OF_N" => {
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.best_of_n = Some(parsed);
+                }
                 _ => {} // unrecognized BRAZE_* var: ignore, forward-compatible
             }
         }
@@ -168,6 +181,7 @@ mod tests {
             ("BRAZE_SESSION_DIR", "/tmp/sessions"),
             ("BRAZE_TACTICAL_WINDOW", "10"),
             ("BRAZE_TACTICAL_COMPACTION_THRESHOLD", "25"),
+            ("BRAZE_BEST_OF_N", "3"),
         ];
         let overrides = ConfigOverrides::from_env(vars).unwrap();
         assert_eq!(overrides.default_backend.as_deref(), Some("anthropic"));
@@ -187,6 +201,7 @@ mod tests {
         assert_eq!(overrides.session_dir, Some(PathBuf::from("/tmp/sessions")));
         assert_eq!(overrides.tactical_window, Some(10));
         assert_eq!(overrides.tactical_compaction_threshold, Some(25));
+        assert_eq!(overrides.best_of_n, Some(3));
     }
 
     #[test]

@@ -383,6 +383,148 @@ Implementa los 4 ítems concretos de `docs/AUDITORIA-2026-07.md` § "Grupo G —
 
 **Decisiones de diseño no completamente especificadas de antemano**: (1) A9 no agregó spans anidados por ronda/tool-call (una lectura literal de "spans por turno/ronda/tool-call" del resumen del Grupo G) — el detalle completo del hallazgo A9 en la auditoría pide explícitamente `info_span!("turn", %session)` (uno solo, por turno) más `debug!(round, n_tool_calls)`/`warn!` como líneas de log con campos, no spans anidados adicionales; anidar un span por ronda habría requerido extraer el cuerpo del loop a un método aparte (dado que mantener un `Span::enter()` a través de puntos `.await` en un runtime multi-hilo es el anti-patrón que la propia documentación de `tracing` advierte) — refactor de alcance mayor no justificado por lo que A9 realmente pedía. (2) El ítem 5 del grupo ("tests de edge cases A15/C16/D12/E7/F") se dejó fuera deliberadamente — cada hallazgo referenciado pertenece a un área temática distinta (permisos, MCP, robustez de red, etc.) sin relación directa con observabilidad, y closearlos de forma apropiada requeriría releer cada auditoría de área por separado en vez de ser una extensión natural de A9/C9/C10/C11.
 
+## Técnica G10 del roadmap SOTA — Best-of-n / Test-Time Scaling (2026-07-05)
+
+Implementa la técnica G10 de `docs/AUDITORIA-2026-07.md` § "Grupo F — SOTA
+nuevo": generar `N` candidatos independientes por ronda y votar cuál usar,
+en vez de un solo intento greedy — cheap test-time scaling sin
+entrenamiento, respaldado por evidencia de que modelos chicos mejoran
+sustancialmente cuando se les permite intentar varias veces y votar
+(Corradini et al. 2025, BDCC). Candidatos naturales del propio sweep del
+proyecto: `error_recovery` y `distractor_selection`, ambos 0/5 para
+`qwen2.5:3b`/`7b` (ver `CLAUDE.md`).
+
+**Refactor previo en `braze-engine::engine`**: el cuerpo del loop de
+rondas que consumía el stream de una sola llamada a `model.complete()` se
+extrajo verbatim a un método privado nuevo, `Engine::complete_once` (toma
+`req`, `observer`, y un flag `emit_deltas` que controla si los text
+deltas se reenvían en vivo al observer). El `run_turn` original con
+`best_of_n <= 1` (el default) llama a este método exactamente una vez —
+mismo bytecode, cero cambio de comportamiento, confirmado porque los 35
+tests preexistentes de `engine.rs` pasan sin tocarlos.
+
+**`Engine::complete_with_best_of_n`** (nuevo, solo se ejecuta con
+`best_of_n > 1`):
+- Llama a `complete_once` `best_of_n` veces **secuencialmente** (no
+  concurrente — cada llamada reutiliza `req.clone()`, por lo que
+  `CompletionRequest` ganó `#[derive(Clone)]` en `braze-model`), con
+  `emit_deltas: false` en cada una — no hay una sola "la" respuesta que
+  mostrar en vivo hasta que la votación resuelve una.
+- **Canonicaliza cada candidato** (`candidate_signature`) como el
+  conjunto ordenado de pares (nombre de tool, argumentos canónicos) que
+  pidió — reusando exactamente la misma canonicalización que
+  `dispatch_tool_calls` ya usa para detectar llamadas repetidas
+  (`arguments.to_string()`, estable porque `serde_json::Value` serializa
+  claves ordenadas sin `preserve_order`) — o el conjunto vacío para un
+  candidato de "respuesta final, sin tool call".
+- **Vota por pluralidad**: el candidato cuya firma aparece más veces
+  gana; empates se resuelven a favor del candidato generado **primero**
+  (nunca `Iterator::max_by_key`, cuyo comportamiento de "el último gana"
+  en empates haría el resultado depender de un detalle de
+  implementación del loop de conteo, no del contenido).
+- **El rescate de tool call textual (hallazgo B5) se aplica por
+  candidato**, dentro de `complete_once`, no después de la votación — un
+  candidato que describe la tool call como JSON en texto plano cuenta
+  con esa firma rescatada para el voto, igual que en el camino
+  single-call.
+- **El uso de tokens persistido es la suma de todos los candidatos**, no
+  solo el del ganador — `best_of_n` rondas hacen `best_of_n` llamadas
+  reales al modelo, y el `AgentEvent::Usage` debe reflejar el costo
+  agregado real o el accounting de costo/tokens subreporta
+  silenciosamente por cada candidato descartado. `stop_reason` sí viene
+  específicamente del candidato ganador (lo único que tiene sentido
+  reportar de "por qué paró la respuesta que terminamos usando").
+- **El texto del ganador llega al observer como un solo delta**, emitido
+  después de la votación — un trade-off deliberado y documentado: no se
+  puede mostrar en vivo, token a token, una respuesta cuyo "ganador" no
+  se conoce hasta tener los `N` intentos completos. Esto degrada la
+  sensación de streaming en vivo solo para las rondas con
+  `best_of_n > 1`, sin requerir ningún cambio en `braze-cli` ni
+  `braze-tui` (ambos ya consumen texto vía `on_text_delta`, sin importar
+  si llega en un fragmento o en muchos).
+
+**Config** (`braze-config`, mismo patrón exacto que `tactical_window`):
+`Config::best_of_n: usize` (default `1`), `ConfigOverrides::best_of_n:
+Option<usize>`, parseo bajo `BRAZE_BEST_OF_N` en `overrides.rs`.
+`Engine::with_best_of_n(n)` builder chainable, wireado en
+`braze-cli::main.rs` y `braze-bench::runner::run_task` (este último
+comentado explícitamente como "mide el mismo comportamiento que una
+invocación real" — mismo criterio que C10). `braze-bench` no necesita un
+flag de CLI dedicado: como ya carga `Config::load()`, `BRAZE_BEST_OF_N`
+fluye igual que cualquier otro campo de config.
+
+**Alcance explícitamente NO tocado**: `attempt_final_summary_round` (la
+ronda de degradación tras agotar `MAX_TURN_ITERATIONS`) no pasa por
+best-of-n — es tools-free por diseño, y la técnica G10 aplica
+específicamente "solo en la tool call" (título de la técnica en la
+tabla de `docs/AUDITORIA-2026-07.md` § 6), no a la calidad general de la
+prosa final.
+
+**Tests agregados**: `braze-engine` pasó de 35 a 40
+(`best_of_n_dispatches_the_majority_tool_call_signature`,
+`best_of_n_breaks_ties_by_keeping_the_earliest_candidate`,
+`best_of_n_sums_usage_across_candidates_and_keeps_the_winners_stop_reason`,
+`best_of_n_set_to_zero_behaves_like_disabled_not_a_panic`,
+`best_of_n_suppresses_live_deltas_but_delivers_the_winners_full_text_once`).
+`braze-config` gana 2 (`best_of_n_is_overridable_via_env`,
+`from_env_rejects_invalid_best_of_n`). `braze-cli` no gana tests nuevos
+(el wiring es mecánico, mismo patrón ya cubierto por
+`with_tactical_compaction_threshold`).
+
+**Verificación**: `cargo build/test/clippy --workspace` verdes (380 → 388
+tests). El mecanismo de voto se verificó correcto inspeccionando logs
+`RUST_LOG=braze_engine=debug` en una corrida puntual: voto 2-1 real en
+la ronda de la tool call (`grep`), voto 3-0 unánime en la ronda final de
+texto, respuesta correcta — el pipeline no tiene bugs.
+
+**Hallazgo empírico honesto — la técnica NO ayudó a `qwen2.5:3b` en
+estos dos skills, y probablemente empeora las cosas**: sweep de
+`braze-bench` (`crates/braze-bench/suites/g10-weak-skills.toml`,
+`--repetitions 5`) comparando baseline (`best_of_n=1`) contra
+`BRAZE_BEST_OF_N=3` sobre `error_recovery_wrong_filename` +
+`distractor_selection_among_files` — datos crudos en
+`docs/g10-baseline-n5.json`/`.log` y `docs/g10-bestof3-n5.json`/`.log`:
+
+| | pass_rate | error_recovery | distractor_selection | avg tokens_in | timeouts |
+|---|---|---|---|---|---|
+| baseline (`best_of_n=1`) | 2/10 (±23pp) | 0/5 | 2/5 | ~1480 | 0 |
+| `best_of_n=3` | 0/10 (±14pp) | 0/5 | 0/5 | ~3744 | **3/10** |
+
+El costo en tokens se triplicó como se diseñó (correcto), pero el pass
+rate empeoró en vez de mejorar, y aparecieron **3 timeouts** de 180s en
+`distractor_selection` que el baseline nunca tuvo (3 llamadas
+secuenciales a veces se acumulan más de lo esperado). Los intervalos de
+confianza (Wilson) se solapan parcialmente, así que no es
+estadísticamente aplastante — pero la dirección (peor, no mejor) más el
+riesgo de timeout es una señal real, no ruido puro.
+
+**Hipótesis de por qué, respaldada por el log de debug de arriba**: a
+`temperature=0.2` (default de `OllamaBackend`, nunca tocado por esta
+técnica — ver "alcance no tocado" más abajo) los `N` candidatos
+probablemente convergen al mismo error de forma consistente en vez de
+diversificar. Votar entre 3 respuestas casi idénticas no puede corregir
+un error sistemático del modelo — solo agrega costo y, peor, riesgo de
+timeout. La diversidad real que la técnica necesita para funcionar
+(ver la evidencia de Corradini et al. citada en el diseño) probablemente
+requiere una temperatura más alta específicamente para la generación de
+candidatos — algo que esta implementación **deliberadamente no incluyó**
+(ver diseño: `CompletionRequest` no ganó un campo `temperature` en este
+incremento, para no tocar los 3 backends sin datos que lo justificaran
+de antemano). Con esta evidencia, ese sería el primer refinamiento a
+probar si se retoma la técnica — no antes.
+
+**Decisión**: la implementación queda mergeada (`best_of_n` default `1`
+= desactivado, cero riesgo para quien no lo configure explícitamente;
+correcta y bien testeada a nivel unitario/mecanismo), pero **no se
+recomienda activarla en producción con Ollama sin antes resolver la
+diversidad de candidatos** (probablemente vía temperatura elevada
+específica para la generación de candidatos). Documentado aquí en vez de
+revertido: el código es correcto, la pregunta abierta es de eficacia
+empírica bajo un ajuste que todavía no se probó, no un bug — y el propio
+espíritu de "bench-as-regression-tool" del proyecto es justamente medir
+antes de asumir, en vez de descartar una técnica de la literatura sin
+haberla intentado.
+
 ## Fase TUI — diseño (2026-07-05)
 
 Saca `braze-tui` de la lista de diferidos de Fase 2 y lo diseña como el

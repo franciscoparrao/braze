@@ -382,7 +382,8 @@ async fn run() -> Result<(), CliError> {
         system_prompt,
         config.max_tokens,
     )
-    .with_tactical_compaction_threshold(config.tactical_compaction_threshold);
+    .with_tactical_compaction_threshold(config.tactical_compaction_threshold)
+    .with_best_of_n(config.best_of_n);
 
     // Only Ollama has a small, fixed context window worth budgeting for
     // (Anthropic's is large enough that raw event count remains a fine
