@@ -40,16 +40,24 @@ persistencia de sesión a disco con compactación diferencial simple; capa
 mínima de confirmación de permisos (sin sandboxing de SO todavía).
 
 Diferido a Fase 2: sandboxing Landlock/seccomp, multi-agente/grafo de
-threads, TUI, observabilidad OTLP, paquetes de skills cargables, sistema de
+threads, observabilidad OTLP, paquetes de skills cargables, sistema de
 hooks plugueable.
+
+**TUI (`braze-tui`)**: implementada completa (2026-07-05, PLAN.md §
+"Fase TUI — diseño", 5 oleadas) — `braze chat --tui`, opt-in. Viewport
+inline + scrollback nativo, streaming markdown con gateo por fence,
+tool-call cells, approval overlay real con interrupción por Esc, status
+bar, snapshot tests. `--tui` sigue siendo opt-in, no el default; ver
+PLAN.md § "fase TUI 2" para lo diferido (pager overlay, temas, promover a
+default).
 
 ## Arquitectura
 
-Workspace de 11 crates (`crates/braze-*`), grafo de dependencias en 5
-niveles — ver `PLAN.md` para el diagrama y las firmas de los tres traits
-que actúan de contrato congelado: `ToolProvider` (`braze-tools-core`),
-`ModelBackend` (`braze-model`), `SessionStore`/`ContextCompactor`
-(`braze-session`).
+Workspace de 12 crates (`crates/braze-*`, incluye `braze-tui`), grafo de
+dependencias en niveles — ver `PLAN.md` para el diagrama y las firmas de
+los tres traits que actúan de contrato congelado: `ToolProvider`
+(`braze-tools-core`), `ModelBackend` (`braze-model`),
+`SessionStore`/`ContextCompactor` (`braze-session`).
 
 **Desviaciones deliberadas de la convención del resto del ecosistema Rust
 del autor** (datacube-rs, geostat-rs, swarm-abm son 100% sync + rayon):
