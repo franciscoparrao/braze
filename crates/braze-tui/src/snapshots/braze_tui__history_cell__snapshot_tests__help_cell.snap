@@ -3,12 +3,14 @@ source: crates/braze-tui/src/history_cell.rs
 expression: "render_to_buffer(&HelpCell, 50)"
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 50, height: 13 },
+    area: Rect { x: 0, y: 0, width: 50, height: 15 },
     content: [
         "Atajos                                            ",
         "Enter enviar · Ctrl+J salto de línea              ",
         "Esc interrumpe el turno en curso (o deniega una   ",
         "aprobación pendiente)                             ",
+        "Ctrl+T ver el output completo de la última tool   ",
+        "call                                              ",
         "Ctrl+C / Ctrl+D (composer vacío) salir            ",
         "                                                  ",
         "Comandos                                          ",
@@ -22,9 +24,9 @@ Buffer {
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 8, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 9, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 8, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 9, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

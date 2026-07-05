@@ -27,8 +27,8 @@ use crate::approval::ApprovalRequest;
 use crate::composer_trigger::{ComposerTrigger, detect_trigger};
 use crate::error::TuiError;
 use crate::history_cell::{
-    AssistantMarkdownCell, ErrorCell, HelpCell, HistoryCell, NoticeCell, PermissionCell,
-    ToolCallCell, UserCell,
+    AssistantMarkdownCell, ErrorCell, ExpandedToolOutputCell, HelpCell, HistoryCell, NoticeCell,
+    PermissionCell, ToolCallCell, UserCell,
 };
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::mentions::{list_files, matching_files};
@@ -56,15 +56,21 @@ const POPUP_MAX_VISIBLE: usize = 3;
 /// driving the same composition root. `approvals` is the receiving end
 /// of the channel every `ChannelConfirmationPrompt` this session's
 /// `PermissionGuard`s were built with sends into. `status_line` is a
-/// short, static "backend:model" label shown in the status bar.
+/// short, static "backend:model" label shown in the status bar. `store`
+/// is the same `SessionStore` handle `engine` was built with — passed
+/// separately (not obtained through `engine`, which exposes no such
+/// accessor) so Ctrl+T (`expand_last_tool_call`) can read the rollout
+/// log fresh, the same seam `braze-cli`'s `ChannelConfirmationPrompt`
+/// already uses this way.
 pub async fn run(
     terminal: &mut Terminal<Backend>,
     engine: Engine,
     session: SessionId,
+    store: Arc<dyn braze_session::SessionStore>,
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
     status_line: String,
 ) -> Result<(), TuiError> {
-    App::new(Arc::new(engine), session, approvals, status_line)
+    App::new(Arc::new(engine), session, store, approvals, status_line)
         .run(terminal)
         .await
 }
@@ -93,6 +99,10 @@ enum ComposerPopup {
 struct App {
     engine: Arc<Engine>,
     session: SessionId,
+    /// Same handle `engine` was built with — used only to read the
+    /// rollout log back (Ctrl+T, `expand_last_tool_call`); every write
+    /// still goes exclusively through `engine`/`Engine::run_turn`.
+    store: Arc<dyn braze_session::SessionStore>,
     status_line: String,
     total_input_tokens: u64,
     total_output_tokens: u64,
@@ -135,6 +145,7 @@ impl App {
     fn new(
         engine: Arc<Engine>,
         session: SessionId,
+        store: Arc<dyn braze_session::SessionStore>,
         approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
         status_line: String,
     ) -> Self {
@@ -142,6 +153,7 @@ impl App {
         Self {
             engine,
             session,
+            store,
             status_line,
             total_input_tokens: 0,
             total_output_tokens: 0,
@@ -174,7 +186,7 @@ impl App {
                 maybe_event = events.next() => {
                     match maybe_event {
                         Some(Ok(Event::Key(key))) if key.kind != KeyEventKind::Release => {
-                            self.on_key(key, terminal)?;
+                            self.on_key(key, terminal).await?;
                         }
                         Some(Ok(_)) => {}
                         Some(Err(err)) => return Err(err.into()),
@@ -195,11 +207,20 @@ impl App {
         }
     }
 
-    fn on_key(&mut self, key: KeyEvent, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    async fn on_key(&mut self, key: KeyEvent, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
         // Ctrl+C always quits, regardless of state — the universal
         // escape hatch, even mid-approval or mid-turn.
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.should_quit = true;
+            return Ok(());
+        }
+
+        // Ctrl+T is read-only (peeks at the rollout log, never mutates
+        // anything) — harmless in any state, so it's checked globally
+        // like Ctrl+C rather than gated behind "no popup/approval
+        // active".
+        if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.expand_last_tool_call(terminal).await?;
             return Ok(());
         }
 
@@ -534,6 +555,64 @@ impl App {
         Ok(())
     }
 
+    /// Ctrl+T: commits the full, untruncated content of the most
+    /// recently *completed* tool call to the scrollback — the simple
+    /// alternative to a true fullscreen pager overlay (PLAN.md § "Fase
+    /// TUI 2"): reads straight from the session store (the single
+    /// source of truth for this content) rather than keeping any
+    /// TUI-side cache of past cells. A no-op with a `NoticeCell` if no
+    /// tool call has completed yet in this session, or if the store
+    /// can't be read at all.
+    async fn expand_last_tool_call(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        let events = match self.store.load(&self.session).await {
+            Ok(events) => events,
+            Err(err) => {
+                return self.commit_cell(
+                    &NoticeCell {
+                        message: format!("no se pudo leer el historial de la sesión: {err}"),
+                    },
+                    terminal,
+                );
+            }
+        };
+
+        let Some((id, result)) = events.iter().rev().find_map(|event| match event {
+            AgentEvent::ToolCallCompleted { id, result } => Some((id.clone(), result.clone())),
+            _ => None,
+        }) else {
+            return self.commit_cell(
+                &NoticeCell {
+                    message: "todavía no se completó ninguna tool call en esta sesión".to_string(),
+                },
+                terminal,
+            );
+        };
+
+        // `ToolCallCompleted` doesn't carry the tool's name (only
+        // `id`/`result`) — `AssistantToolCall` is the event that does,
+        // same correlation `apply_update` already relies on for live
+        // `ToolCallCell`s, just looked up from the full log here instead
+        // of the in-memory `pending_tool_names` map.
+        let name = events
+            .iter()
+            .find_map(|event| match event {
+                AgentEvent::AssistantToolCall {
+                    id: call_id, name, ..
+                } if *call_id == id => Some(name.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "tool".to_string());
+
+        self.commit_cell(
+            &ExpandedToolOutputCell {
+                name,
+                is_error: result.is_error,
+                content: result.content,
+            },
+            terminal,
+        )
+    }
+
     fn apply_update(
         &mut self,
         update: TuiUpdate,
@@ -676,7 +755,7 @@ impl App {
             } else if self.turn_running {
                 "esperando respuesta del modelo... (Ctrl+C salir · Esc interrumpir)"
             } else {
-                "Enter enviar · Ctrl+J salto de linea · / comandos · @ archivos · Ctrl+C salir"
+                "Enter enviar · Ctrl+J salto de linea · / comandos · @ archivos · Ctrl+T output · Ctrl+C salir"
             };
             frame.render_widget(
                 Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),

@@ -417,7 +417,14 @@ async fn run() -> Result<(), CliError> {
             println!();
         }
         Command::Chat { tui: true, .. } => {
-            braze_tui::run(engine, session, approval_rx, status_line).await?;
+            braze_tui::run(
+                engine,
+                session,
+                std::sync::Arc::clone(&store),
+                approval_rx,
+                status_line,
+            )
+            .await?;
         }
         Command::Chat { .. } => {
             println!("session: {session} (usa --resume {session} para continuarla luego)");

@@ -223,6 +223,7 @@ impl HistoryCell for HelpCell {
             Line::from(Span::styled("Atajos", heading_style)),
             Line::from("Enter enviar · Ctrl+J salto de línea"),
             Line::from("Esc interrumpe el turno en curso (o deniega una aprobación pendiente)"),
+            Line::from("Ctrl+T ver el output completo de la última tool call"),
             Line::from("Ctrl+C / Ctrl+D (composer vacío) salir"),
             Line::from(""),
             Line::from(Span::styled("Comandos", heading_style)),
@@ -232,6 +233,63 @@ impl HistoryCell for HelpCell {
             Line::from(Span::styled("Menciones", heading_style)),
             Line::from("@ seguido de parte de un nombre de archivo abre un buscador"),
         ])
+    }
+}
+
+/// The full, untruncated content of a completed tool call — Ctrl+T
+/// ("fase TUI 2", PLAN.md), for when `ToolCallCell`'s ~80-char summary
+/// isn't enough. Read fresh from the session store when requested (see
+/// `app.rs`'s `expand_last_tool_call`), never from a TUI-side cache —
+/// the rollout log is already the single source of truth for this
+/// content; duplicating it in `App` state would just be another copy to
+/// keep in sync for no benefit.
+pub struct ExpandedToolOutputCell {
+    pub name: String,
+    pub is_error: bool,
+    pub content: String,
+}
+
+/// Longest content this cell shows before truncating with a note — much
+/// more generous than `ToolCallCell`'s ~80-char summary (this *is* the
+/// "give me the full thing" view), but still bounded: an extreme tool
+/// output (a huge file read) dumped unbounded into the scrollback would
+/// be unwieldy to scroll past, and risks `insert_before`'s known
+/// `u16::MAX`-row ceiling (ratatui#1426) on top of that.
+const EXPANDED_TOOL_OUTPUT_MAX_LINES: usize = 200;
+
+impl HistoryCell for ExpandedToolOutputCell {
+    fn as_text(&self) -> Text<'_> {
+        let (glyph, color) = if self.is_error {
+            ("✗ ", Color::Red)
+        } else {
+            ("✓ ", Color::Green)
+        };
+        let mut lines = vec![Line::from(vec![
+            Span::styled(glyph, Style::default().fg(color)),
+            Span::styled(
+                format!("{} (completo)", self.name),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+        ])];
+
+        let content_lines: Vec<&str> = self.content.lines().collect();
+        lines.extend(
+            content_lines
+                .iter()
+                .take(EXPANDED_TOOL_OUTPUT_MAX_LINES)
+                .map(|line| Line::from((*line).to_string())),
+        );
+        if content_lines.len() > EXPANDED_TOOL_OUTPUT_MAX_LINES {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "… (+{} líneas más — ver el rollout log completo de la sesión)",
+                    content_lines.len() - EXPANDED_TOOL_OUTPUT_MAX_LINES
+                ),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        Text::from(lines)
     }
 }
 
@@ -357,7 +415,65 @@ mod tests {
         assert!(rendered.contains("/help"));
         assert!(rendered.contains("/quit"));
         assert!(rendered.contains("Ctrl+C"));
+        assert!(rendered.contains("Ctrl+T"));
         assert!(rendered.contains('@'));
+    }
+
+    #[test]
+    fn expanded_tool_output_cell_shows_the_full_content_untruncated() {
+        let long_content = (0..10)
+            .map(|i| format!("linea {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let cell = ExpandedToolOutputCell {
+            name: "read_file".to_string(),
+            is_error: false,
+            content: long_content.clone(),
+        };
+        let text = cell.as_text();
+        let rendered: String = text
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("read_file"));
+        assert!(rendered.contains("linea 0"));
+        assert!(rendered.contains("linea 9"));
+        assert!(!rendered.contains("líneas más"));
+    }
+
+    #[test]
+    fn expanded_tool_output_cell_truncates_past_the_line_cap_with_a_note() {
+        let content = (0..(EXPANDED_TOOL_OUTPUT_MAX_LINES + 5))
+            .map(|i| format!("linea {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let cell = ExpandedToolOutputCell {
+            name: "grep".to_string(),
+            is_error: false,
+            content,
+        };
+        let text = cell.as_text();
+        let rendered: String = text
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("+5 líneas más"));
+        assert!(!rendered.contains(&format!("linea {}", EXPANDED_TOOL_OUTPUT_MAX_LINES + 4)));
+    }
+
+    #[test]
+    fn expanded_tool_output_cell_error_uses_a_cross_glyph() {
+        let cell = ExpandedToolOutputCell {
+            name: "shell_exec".to_string(),
+            is_error: true,
+            content: "boom".to_string(),
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines[0].spans[0].content, "✗ ");
     }
 }
 
@@ -457,5 +573,15 @@ mod snapshot_tests {
     #[test]
     fn help_cell() {
         insta::assert_debug_snapshot!(render_to_buffer(&HelpCell, 50));
+    }
+
+    #[test]
+    fn expanded_tool_output_cell() {
+        let cell = ExpandedToolOutputCell {
+            name: "read_file".to_string(),
+            is_error: false,
+            content: "linea uno\nlinea dos".to_string(),
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
 }

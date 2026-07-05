@@ -1113,6 +1113,71 @@ Tipear `revisa @main` sobre un sandbox con `main.rs`/`src/lib.rs`/
 completó a `"revisa @main.rs "`, preservando el resto del texto ya
 escrito. Salida limpia con Ctrl+C en ambos casos.
 
+## Fase TUI 2 — Ctrl+T expande el output completo de una tool call (2026-07-05)
+
+Resuelve el "pager overlay del transcript completo (Ctrl+T)" del
+backlog original — **con un cambio de alcance deliberado, decidido
+antes de implementar**: no un overlay fullscreen real, sino commitear
+una celda nueva al scrollback con el contenido completo. Motivo: un
+pager fullscreen requeriría un segundo `Terminal` de ratatui en modo
+`Fullscreen` alternando con el viewport inline actual (ratatui no
+expone forma de decirle a un `Terminal` ya construido "usá toda la
+pantalla ahora" — solo se fija el `Viewport` al construirlo), sería el
+primer código de este proyecto manejando dos `Terminal`s a la vez, y
+resuelve el mismo dolor real (ver el output completo de una tool call,
+hoy truncado a ~80 caracteres en `ToolCallCell`) con una fracción del
+riesgo arquitectónico.
+
+**`ExpandedToolOutputCell`** (`history_cell.rs`): nueva celda, con un
+tope de 200 líneas (`EXPANDED_TOOL_OUTPUT_MAX_LINES`, mucho más generoso
+que el resumen de 80 caracteres de `ToolCallCell` — esta *es* la vista
+"dame todo" — pero no ilimitado: un output extremo volcado sin límite
+sería inmanejable de scrollear, y arriesga el techo de `u16::MAX` filas
+de `insert_before` documentado en ratatui#1426) con una nota si se
+trunca ahí.
+
+**`app.rs::expand_last_tool_call`** (Ctrl+T, ahora global — funciona en
+cualquier estado, incluso con un popup o una aprobación pendiente, ya
+que es de solo lectura y nunca muta nada): lee **fresco desde el
+`SessionStore`** (no desde ningún cache del lado de la TUI) los eventos
+de la sesión, busca el `ToolCallCompleted` más reciente, correlaciona su
+`id` contra el `AssistantToolCall` correspondiente para recuperar el
+nombre de la tool (mismo patrón de correlación que `apply_update` ya usa
+para los `ToolCallCell` en vivo, solo que sobre el log completo en vez
+del mapa en memoria), y commitea la celda expandida. Si todavía no se
+completó ninguna tool call en la sesión, o si el store falla al leer,
+commitea una `NoticeCell` en vez de fallar en silencio.
+
+**`braze_tui::run` y `App` ganan un parámetro `store:
+Arc<dyn SessionStore>`** — el mismo handle con el que se construyó
+`Engine`, pasado por separado (no hay accessor público en `Engine` para
+recuperarlo) porque `Engine` no expone ninguna forma de leer su propio
+store hacia atrás. Mismo patrón que `ChannelConfirmationPrompt` ya usa
+(recibe su propio `Arc<dyn SessionStore>` directamente desde
+`braze-cli::main.rs`, no a través de `Engine`) — consistente, no un
+mecanismo nuevo). `on_key` pasó de método sync a `async fn` — el único
+cambio de arquitectura que este incremento exige, para poder hacer
+`store.load(...).await` directo dentro del manejo de la tecla en vez de
+spawnear una tarea aparte y comunicar el resultado por canal (el
+mecanismo que sí hace falta para `run_turn`, que puede tardar segundos o
+minutos reales). Una lectura de `FileSessionStore` es rápida — una
+pausa breve del loop principal mientras se resuelve es aceptable, a
+diferencia de bloquear en algo de duración real.
+
+**Tests**: 407 → 411 (4 nuevos en `history_cell` para
+`ExpandedToolOutputCell`: contenido completo sin truncar, truncamiento
+con nota pasado el tope de líneas, glifo de error, más el snapshot
+`insta`). `cargo build/test/clippy --workspace` verdes.
+
+**Verificación manual en vivo** contra el binario de prueba con
+`ModelBackend` scripteado, esta vez pidiendo `read_file` sobre un
+archivo de 5 líneas (cada una >80 caracteres): confirmado que
+`ToolCallCell` mostró el resumen truncado de siempre ("...deberia
+truncarse e… (+N more lines)"), y que Ctrl+T commiteó
+`"✓ read_file (completo)"` seguido de las **5 líneas completas sin
+truncar** — el contenido íntegro llega correctamente desde el rollout
+log. Salida limpia con Ctrl+C.
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace

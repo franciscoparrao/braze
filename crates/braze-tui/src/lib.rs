@@ -5,10 +5,11 @@
 //! `chat`/`run` path is unchanged and remains the default. Inline
 //! viewport + native scrollback, a multi-line composer with `/command`
 //! and `@mention` completion, markdown streaming with fence-aware commit
-//! boundaries, tool-call cells, a real permission approval overlay,
-//! Esc-to-interrupt, and a status bar. A pager overlay for full tool
-//! output, themes, and promoting `--tui` to the default are later
-//! increments — see PLAN.md § "Diferido (fase TUI 2)" for the rest.
+//! boundaries, tool-call cells (with Ctrl+T to expand the last one's
+//! full output), a real permission approval overlay, Esc-to-interrupt,
+//! and a status bar. Themes, backtrack, and promoting `--tui` to the
+//! default are later increments — see PLAN.md § "Diferido (fase TUI 2)"
+//! for the rest.
 
 mod app;
 mod approval;
@@ -25,6 +26,8 @@ mod terminal;
 pub use approval::{ApprovalRequest, ChannelConfirmationPrompt};
 pub use error::TuiError;
 
+use std::sync::Arc;
+
 use braze_engine::Engine;
 use braze_types::SessionId;
 use tokio::sync::mpsc;
@@ -37,14 +40,18 @@ use tokio::sync::mpsc;
 /// `approvals` is the receiving end of the channel every
 /// `ChannelConfirmationPrompt` this session's `PermissionGuard`s were
 /// built with sends into — `braze-cli` constructs the channel and passes
-/// the sender half into each guard before ever calling this. `status_line`
-/// is a short, static "backend:model" label shown in the status bar.
+/// the sender half into each guard before ever calling this. `store` is
+/// the same `SessionStore` handle `engine` was built with, passed
+/// separately so Ctrl+T can read the rollout log back (see
+/// `app::expand_last_tool_call`). `status_line` is a short, static
+/// "backend:model" label shown in the status bar.
 pub async fn run(
     engine: Engine,
     session: SessionId,
+    store: Arc<dyn braze_session::SessionStore>,
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
     status_line: String,
 ) -> Result<(), TuiError> {
     let mut guard = terminal::setup()?;
-    app::run(&mut guard.terminal, engine, session, approvals, status_line).await
+    app::run(&mut guard.terminal, engine, session, store, approvals, status_line).await
 }
