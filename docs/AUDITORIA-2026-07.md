@@ -762,7 +762,7 @@ de un paso. Es exactamente la tesis de braze.
 | 7 | `num_ctx` explícito siempre `[docs]` | **B1** (crítico) |
 | 8 | Compactación por evicción estructurada, no summarización LLM `[paper]` | C6 (validado; falta contenido) |
 | 9 | Schemas planos, errores accionables `[bench]` | Ya cumplido (fortaleza) |
-| 10 | Best-of-n barato solo en la tool call + CoT breve `[paper]` | **Nuevo** — futuro |
+| 10 | Best-of-n / Test-Time Scaling (TTS) barato solo en la tool call + CoT breve `[paper]` — evidencia reforzada por Corradini et al. 2025 (BDCC, revisión sistemática de 70 estudios SLM): *"a 1B parameter model solving math problems better than a 405B parameter model when allowed more iterative reasoning and voting at test time"* | **Nuevo** — proponer como técnica G10 de Grupo F (ver roadmap) |
 
 ### Proyectos comparables
 
@@ -835,11 +835,22 @@ nota.*
 
 ### Grupo F — SOTA nuevo (media prioridad, tras estabilizar)
 *Palancas de la literatura no presentes hoy.*
-1. **Técnica G1** constrained decoding vía `format` de Ollama (two-stage).
-2. **Técnica G6** recomendación de modelos/templates por defecto (docs+config).
-3. **D3** carga diferida real de dos vías (schema real para locales; router
-   semántico para MCP).
-4. **D5** namespacing de tools MCP.
+1. ✅ **D3** carga diferida real de dos vías: schema real up-front para las 6
+   tools locales; MCP se mantiene diferido (el router semántico para MCP
+   sigue fuera de alcance, no existe hoy). *(2026-07-05)*
+2. ✅ **D5** namespacing de tools MCP (`mcp__<server>__<tool>`) +
+   sanitización + detección de colisiones inter/intra-provider. *(2026-07-05)*
+3. ✅ **Técnica G6** recomendación de modelos/templates por defecto — agregada
+   a `CLAUDE.md` con evidencia del sweep del 2026-07-04. *(2026-07-05)*
+4. **Técnica G1** (pendiente) constrained decoding vía `format` de Ollama
+   (two-stage) — depende de D3 (ya resuelto), diseño explícitamente diferido
+   por su impacto en la latencia del loop (potencial doble round-trip HTTP
+   en una máquina ya limitada por CPU).
+5. **Técnica G10** (pendiente, nueva) Best-of-n / Test-Time Scaling barato
+   solo en la tool call — ver tabla de técnicas arriba. Más barato de probar
+   que Grupo H (sin entrenamiento, reusa el loop de rondas ya existente en
+   `Engine::run_turn`); candidato natural para las skills que el sweep marcó
+   como débiles (`error_recovery`, `distractor_selection`).
 
 ### Grupo G — Observabilidad y calidad (media prioridad, transversal)
 1. **A9** spans por turno/ronda/tool-call.
@@ -847,6 +858,31 @@ nota.*
 3. **C10** ventana/umbral configurables.
 4. **C11** cachear eventos en memoria.
 5. Tests de todos los edge cases (A15, C16, D12, E7, F).
+
+### Grupo H — Pipeline de datos para fine-tuning de SLMs desde sesiones reales (nueva, prioridad baja/exploratoria)
+*Basado en Belcak et al., "Small Language Models are the Future of Agentic
+AI" (NVIDIA, jun-2025) — algoritmo LLM-to-SLM de conversión (§6, pasos
+S1-S6). `braze` ya cumple S1 gratis: cada turno persiste un `AgentEvent`
+JSONL completo con cada tool call, argumentos, resultado y ronda. `braze-bench`
+ya cumple S3 parcialmente: sus tareas vienen etiquetadas por `skill`
+(`single_tool`, `multi_step`, `error_recovery`, `distractor_selection`).*
+1. **H1** Script de curación (S2): extraer de logs de sesión reales +
+   `braze-bench --output` los pares prompt→tool_call→resultado, filtrando
+   fallos de harness (`HarnessError`, F5) y cualquier dato sensible.
+2. **H2** Clusterizar por `skill` (S3) para decidir qué combinación
+   tarea×modelo justifica especialización — el sweep del 2026-07-04 ya
+   señala candidatos concretos: `error_recovery` (0/5 en qwen2.5:3b y 7b) y
+   `distractor_selection` (0/5 en qwen2.5:3b).
+3. **H3** Fine-tuning LoRA/QLoRA barato (S4-S5) de un candidato (de la
+   lista de modelos de G6) sobre el dataset curado de esos skills débiles,
+   en vez de asumir que hace falta un modelo más grande para esas tareas.
+4. **H4** Iterar (S6): re-correr `braze-bench` contra el modelo
+   fine-tuneado y comparar `pass_rate` contra el baseline pre-fine-tuning.
+
+*Fuera de alcance inmediato: `braze` es un workspace Rust puro sin
+infraestructura de entrenamiento; H3 requeriría tooling externo
+(Python/PEFT) fuera de este repo. H1/H2 sí son alcanzables dentro de
+`braze-bench` o como script standalone.*
 
 ---
 

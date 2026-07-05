@@ -430,7 +430,7 @@ Ok(build_messages(&amp;merge_summary(durable, summary), live))</code></pre></div
       <tr><td><code>num_ctx</code> explícito siempre <span class="tag">docs</span></td><td><strong>B1 (crítico)</strong></td></tr>
       <tr><td>Evicción estructurada, no summarización LLM <span class="tag">paper</span></td><td>C6 (validado)</td></tr>
       <tr><td>Schemas planos, errores accionables <span class="tag">bench</span></td><td>Ya cumplido ✓</td></tr>
-      <tr><td>Best-of-n barato solo en la tool call + CoT breve <span class="tag">paper</span></td><td>Nuevo → futuro</td></tr>
+      <tr><td>Best-of-n / Test-Time Scaling barato solo en la tool call + CoT breve <span class="tag">paper</span> — reforzado por Corradini et al. 2025 (BDCC): "a 1B model beat a 405B model with more iterative reasoning/voting at test time"</td><td>Nuevo → técnica G10 de Grupo F</td></tr>
     </tbody>
   </table>
   <p class="muted"><strong>Comparables:</strong> aider usa formatos de edición textuales (no tool-calls nativas) por robustez; goose reporta 7-13B "no útiles para ingeniería real"; smolagents apuesta por CodeAgent (código &gt; JSON); nanocoder es el más cercano ideológicamente a braze.</p>
@@ -476,13 +476,20 @@ Ok(build_messages(&amp;merge_summary(durable, summary), live))</code></pre></div
   </ul>
   <h3>Grupo F — SOTA nuevo <span class="badge b-med">media</span></h3>
   <ul>
-    <li>Constrained decoding vía <code>format</code> de Ollama (two-stage)</li>
-    <li>Recomendación de modelos/templates por defecto</li>
-    <li>D3 carga diferida de dos vías · D5 namespacing MCP</li>
+    <li>✅ D3 carga diferida de dos vías (schema real up-front para locales, MCP diferido) · ✅ D5 namespacing MCP + detección de colisiones · ✅ G6 recomendación de modelos/templates (en <code>CLAUDE.md</code>) — <em>2026-07-05</em></li>
+    <li>Pendiente: G1 constrained decoding vía <code>format</code> de Ollama (two-stage) — depende de D3 (ya resuelto), diferido por su impacto en latencia (doble round-trip HTTP)</li>
+    <li>Pendiente: G10 (nueva) Best-of-n / Test-Time Scaling barato en la tool call — más barato que Grupo H, sin entrenamiento; candidato para <code>error_recovery</code>/<code>distractor_selection</code></li>
   </ul>
   <h3>Grupo G — Observabilidad y calidad <span class="badge b-med">media</span></h3>
   <ul>
     <li>A9 spans · C9 versionado de formato · C10 configurables · C11 caché en memoria · tests de edge cases</li>
+  </ul>
+  <h3>Grupo H — Pipeline de datos para fine-tuning de SLMs <span class="badge b-low">baja / exploratoria</span></h3>
+  <ul>
+    <li>Basado en Belcak et al., "Small Language Models are the Future of Agentic AI" (NVIDIA, jun-2025), §6 — algoritmo LLM-to-SLM (S1-S6). <code>braze</code> ya cumple S1 gratis (persistencia <code>AgentEvent</code> por turno) y S3 parcialmente (tareas de <code>braze-bench</code> etiquetadas por <code>skill</code>).</li>
+    <li>H1 curación de logs de sesión (S2) · H2 clusterizar por skill — el sweep del 2026-07-04 ya señala <code>error_recovery</code> y <code>distractor_selection</code> como candidatos débiles</li>
+    <li>H3 fine-tuning LoRA/QLoRA barato de un candidato de la lista de modelos de Grupo F sobre esos skills débiles · H4 iterar re-corriendo el sweep</li>
+    <li>Fuera de alcance inmediato: H3 requiere tooling externo (Python/PEFT), fuera del workspace Rust de <code>braze</code></li>
   </ul>
 
   <h2 id="sweep">8 · Sobre el sweep pendiente</h2>

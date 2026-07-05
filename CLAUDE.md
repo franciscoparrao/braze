@@ -79,3 +79,29 @@ Ver `PLAN.md` § "Fases de Implementación" — Fase 6 (verificación adicional:
 agente de tests, agente de review de código) y la verificación manual
 end-to-end contra Anthropic/Ollama reales (PLAN.md § "Verificación
 end-to-end (tras Fase 5)") — aún no ejecutada con credenciales reales.
+
+## Modelos locales recomendados (Ollama)
+
+El sweep real de `braze-bench` del 2026-07-04 (`crates/braze-bench/suites/default.toml`,
+`--repetitions 5`, ver `docs/AUDITORIA-2026-07.md`) dejó dos hallazgos
+concretos sobre qué modelos priorizar para desarrollo/benchmarking local:
+
+- **No todo modelo instruct genérico soporta tool-calling en Ollama.**
+  `gemma3:1b` falló 0/50 tareas instantáneamente (~185ms promedio) porque
+  Ollama devuelve HTTP 400 "does not support tools" para ese modelo — no es
+  un problema de capacidad de razonamiento, es incompatibilidad de API.
+  Verificar `ollama show <modelo>` o probar una tarea trivial con tools
+  antes de asumir que un modelo nuevo funciona con `braze`.
+- **Modelos orientados a function-calling superan claramente a los
+  genéricos del mismo tamaño.** `qwen2.5:3b` y `qwen2.5:7b` (ambos con
+  soporte de tools nativo) alcanzaron 62-64% de pass rate en el sweep;
+  `llama3.2:1b` (soporta tools, pero es un modelo pequeño genérico) quedó
+  en 18%. Para evaluar `braze` con modelos locales, priorizar modelos ya
+  fine-tuneados para tool-calling (p.ej. la familia Qwen2.5/3.5 orientada a
+  function-calling, xLAM-2-3B, Hammer, Nemotron Nano) por sobre variantes
+  instruct genéricas del mismo tamaño (Llama3.2, Gemma3) — técnica G6 del
+  roadmap de la auditoría 2026-07.
+
+Esto no cambia el default de `braze-config` (`ollama_model = "llama3.1"`,
+`crates/braze-config/src/config.rs`) — queda como criterio para elegir qué
+modelo configurar/tener disponible localmente, no como un cambio de código.
