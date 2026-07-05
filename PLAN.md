@@ -645,16 +645,86 @@ mensaje anterior y editarlo, como Codex).
      (raw mode restaurado, proceso terminó con exit code 0 incluso con
      un turno todavía en vuelo — el log de sesión quedó en un estado
      válido y resumible, sin tool call huérfano sin resultado).
-     **Hallazgo cosmético no bloqueante**: la línea de hint mostró una
-     vez texto corrupto ("esphoando" en vez de "esperando") justo en el
-     frame donde `commit_cell` corrió un `insert_before` entre dos
-     `draw()` — no se investigó a fondo (posible interacción entre el
-     diffing de ratatui y el shift de fila que produce `insert_before`);
-     queda anotado para revisar si reaparece en la oleada 3, no bloquea
-     el incremento porque es puramente cosmético en un renglón de
-     estado transitorio, nunca en el contenido de la conversación.
-3. `markdown_stream.rs` + `AssistantMarkdownCell` + `ToolCallCell` con
-   estados.
+     **Hallazgo cosmético, re-investigado y explicado en la oleada 3**:
+     la línea de hint mostró una vez texto corrupto ("esphoando" en vez
+     de "esperando"). Con el análisis byte-a-byte hecho en la oleada 3
+     (ver más abajo) quedó claro que esto **no es un bug de braze-tui**:
+     es una limitación conocida del harness de verificación (`pyte` no
+     emula perfectamente `scroll_region_up`/`scroll_region_down`/DECSTBM
+     bajo la feature `scrolling-regions` de ratatui, que se usa tanto
+     para `insert_before` como para el diffing normal de `draw()` cuando
+     detecta contenido que se desplazó dentro del mismo viewport). El
+     stream de bytes real es correcto (confirmado inspeccionando el
+     stream ANSI crudo directamente, sin pasar por `pyte`); un terminal
+     real (xterm/kitty/gnome-terminal, con soporte VT100 completo)
+     renderiza esto sin problema. No hay acción pendiente sobre esto.
+3. **COMPLETA (2026-07-05)** — `markdown_stream.rs` + `AssistantMarkdownCell`
+   + `ToolCallCell` con estados.
+   - **`markdown_stream.rs`**: `MarkdownStreamCollector` adapta el
+     `findLastSafeSplitPoint` de Gemini (gateo por párrafo/`\n\n`) a
+     gateo por **línea** — igual que `drain_ready_lines` de la oleada 2
+     — pero con conciencia de fences: una línea que abre un bloque
+     ` ``` ` retiene todo lo que sigue (aunque sean líneas completas)
+     hasta que llega el cierre, momento en el que **todo el fence se
+     commitea de una sola vez** como un chunk atómico. La razón: cada
+     commit se renderiza independientemente vía
+     `tui_markdown::from_str`, sin memoria del commit anterior — partir
+     un fence en dos renderizaría su mitad de cierre como texto plano,
+     no como código. Solo reconoce ` ``` ` (no `~~~`), simplificación
+     consistente con otras heurísticas del codebase
+     (`engine::try_parse_textual_tool_call`). Invariante clave (con test
+     de propiedad dedicado, chunking byte-a-byte adversarial): la
+     concatenación de todo lo que devuelve `commit_ready()` más
+     `finish()` reconstruye el texto original exacto sin importar cómo
+     se fragmentaron los `push()`.
+   - **Vista previa (`ACTIVE_ROWS`) sigue en texto plano**, deliberadamente
+     no renderizada como markdown — solo los chunks ya commiteados
+     (estables, terminados) pasan por `tui-markdown`. Renderizar
+     markdown parcial/inestable en vivo es un problema bastante más
+     grande que el gateo de fronteras de commit y quedó fuera de
+     alcance.
+   - **`HistoryCell::as_text` cambió de `Text<'static>` a `Text<'_>`**
+     (préstamo desde `&self`) — necesario porque
+     `tui_markdown::from_str(&str) -> Text<'_>` toma prestado del
+     markdown de entrada; las demás celdas (que ya construían `Text`
+     propio) siguen compilando sin cambios por varianza de lifetime.
+   - **`ToolCallCell`**: no es una celda mutable que se actualiza in
+     situ — los commits al scrollback son append-only (como el
+     scrollback real de una terminal), así que una tool call que
+     arranca y termina produce **dos líneas separadas** en el
+     transcript (una en `ToolCallStarted`, otra en `ToolCallCompleted`),
+     ambas usando el mismo tipo de celda con distinto estado
+     (`Running`/`Done{is_error, summary}`). Una llamada rechazada antes
+     de ejecutar (schema inválido, tool desconocida, duplicado) nunca
+     emite `ToolCallStarted` — salta directo a `Done{is_error: true}`,
+     así que no aparece una línea "running" engañosa para algo que
+     nunca corrió. `ToolCallCompleted` no trae el nombre de la tool
+     (solo `id`) — se correlaciona con un `HashMap<String, String>`
+     poblado en `AssistantToolCall` (el único evento con `id` + `name`
+     que siempre precede tanto a `ToolCallStarted` como a un rechazo
+     directo). El output se trunca a la primera línea + 80 caracteres +
+     conteo de líneas restantes (mismo criterio que
+     `codex-rs/tui`) — el contenido completo sigue en el rollout log,
+     solo no hay pager overlay todavía para verlo (fase TUI 2).
+   - **Tests**: 356 → 364 (8 nuevos: 6 en `markdown_stream` incluyendo
+     el test de propiedad de reconstrucción, 2 más en `history_cell`
+     para `AssistantMarkdownCell`/`ToolCallCell`/`summarize_tool_output`
+     — en total `history_cell` pasó de 3 a 8 tests).
+     `cargo build/test/clippy --workspace` verdes.
+   - **Verificación manual en vivo** contra Ollama (`qwen2.5:3b`) con el
+     mismo harness pty+pyte de la oleada 2, más un tercer método:
+     inspección directa del stream ANSI crudo (sin pasar por `pyte`)
+     para un caso con bloque de código. Confirmado a nivel de bytes: el
+     fence se retiene completo (las líneas dentro de él no aparecen
+     sueltas en el transcript) y se commitea atómico una vez cerrado;
+     la vista previa muestra el markdown crudo sin renderizar mientras
+     está pendiente, exactamente como se diseñó. Un tool call real
+     (`read_file`) generó las dos líneas esperadas (running→done). Nota
+     de proceso: `qwen2.5:3b` corre 100% CPU en esta máquina (`ollama
+     ps`), con load average ~6 — las respuestas con tool calls pueden
+     tardar 30-90s reales; los primeros intentos de verificación
+     asumieron un cuelgue antes de confirmar que solo era latencia de
+     inferencia CPU-bound.
 4. `approval.rs` + interrupción con Esc + `status_bar.rs`.
 5. Snapshot tests `insta` + `cargo clippy -D warnings` + verificación
    manual contra Ollama local y OpenRouter (streaming largo, tool calls

@@ -1,11 +1,12 @@
 //! The event loop: `tokio::select!` between keyboard input and the
-//! current turn's live updates (PLAN.md § "Fase TUI — diseño", oleada 2).
-//! One [`Engine::run_turn`] runs at a time, spawned as a background task
-//! so the composer stays responsive while the model streams — a second
+//! current turn's live updates (PLAN.md § "Fase TUI — diseño"). One
+//! [`Engine::run_turn`] runs at a time, spawned as a background task so
+//! the composer stays responsive while the model streams — a second
 //! submission is ignored while one is in flight (two concurrent
 //! `run_turn` calls on the same session would race on the session
 //! store's loads).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use braze_engine::Engine;
@@ -21,7 +22,8 @@ use ratatui_textarea::TextArea;
 use tokio::sync::mpsc;
 
 use crate::error::TuiError;
-use crate::history_cell::{AssistantTextCell, ErrorCell, HistoryCell, UserCell};
+use crate::history_cell::{AssistantMarkdownCell, ErrorCell, HistoryCell, ToolCallCell, UserCell};
+use crate::markdown_stream::MarkdownStreamCollector;
 use crate::observer::{ChannelObserver, TuiUpdate};
 use crate::terminal::{ACTIVE_ROWS, Backend};
 
@@ -41,11 +43,15 @@ pub async fn run(
 struct App {
     engine: Arc<Engine>,
     session: SessionId,
-    /// The still-unflushed tail of the assistant's current line —
-    /// previewed live in `ACTIVE_ROWS` above the composer. Never grows
-    /// unbounded: `drain_ready_lines` flushes every completed line to
-    /// the scrollback as soon as it arrives (see that fn's doc comment).
-    active_text: String,
+    /// Accumulates the assistant's streaming text for the round in
+    /// progress and gates what's safe to commit to the scrollback vs.
+    /// still-live preview — see its own doc comment.
+    markdown: MarkdownStreamCollector,
+    /// `tool_call_id` -> tool name, recorded at `AssistantToolCall` time
+    /// (the only event carrying both) so the later `ToolCallCompleted`
+    /// (which only carries the id) can still render a `ToolCallCell`
+    /// with a name. Entries are removed once consumed.
+    pending_tool_names: HashMap<String, String>,
     composer: TextArea<'static>,
     turn_running: bool,
     should_quit: bool,
@@ -59,7 +65,8 @@ impl App {
         Self {
             engine,
             session,
-            active_text: String::new(),
+            markdown: MarkdownStreamCollector::default(),
+            pending_tool_names: HashMap::new(),
             composer: TextArea::default(),
             turn_running: false,
             should_quit: false,
@@ -148,7 +155,8 @@ impl App {
         )?;
 
         self.turn_running = true;
-        self.active_text.clear();
+        self.markdown = MarkdownStreamCollector::default();
+        self.pending_tool_names.clear();
 
         let engine = Arc::clone(&self.engine);
         let session = self.session;
@@ -169,23 +177,38 @@ impl App {
     ) -> Result<(), TuiError> {
         match update {
             TuiUpdate::TextDelta(delta) => {
-                self.active_text.push_str(&delta);
-                if let Some(ready) = drain_ready_lines(&mut self.active_text) {
-                    self.commit_cell(&AssistantTextCell { text: ready }, terminal)?;
+                self.markdown.push(&delta);
+                if let Some(ready) = self.markdown.commit_ready() {
+                    self.commit_cell(&AssistantMarkdownCell { markdown: ready }, terminal)?;
                 }
             }
             TuiUpdate::Event(AgentEvent::AssistantText { .. }) => {
                 // The round's text is now persisted — flush whatever's
-                // left in `active_text` (the trailing partial line, if
-                // the response didn't end in a newline; the overwhelming
-                // common case).
-                if !self.active_text.is_empty() {
-                    let tail = std::mem::take(&mut self.active_text);
-                    self.commit_cell(&AssistantTextCell { text: tail }, terminal)?;
+                // left in the collector (the trailing partial line, or
+                // an unclosed fence; either way, nothing more is coming
+                // for it this round).
+                if let Some(tail) = self.markdown.finish() {
+                    self.commit_cell(&AssistantMarkdownCell { markdown: tail }, terminal)?;
                 }
             }
+            TuiUpdate::Event(AgentEvent::AssistantToolCall { id, name, .. }) => {
+                self.pending_tool_names.insert(id, name);
+            }
+            TuiUpdate::Event(AgentEvent::ToolCallStarted { name, .. }) => {
+                self.commit_cell(&ToolCallCell::running(name), terminal)?;
+            }
+            TuiUpdate::Event(AgentEvent::ToolCallCompleted { id, result }) => {
+                let name = self
+                    .pending_tool_names
+                    .remove(&id)
+                    .unwrap_or_else(|| "tool".to_string());
+                self.commit_cell(
+                    &ToolCallCell::done(name, result.is_error, &result.content),
+                    terminal,
+                )?;
+            }
             TuiUpdate::Event(_) => {
-                // Tool-call/permission/compaction cells are oleada 3/4
+                // Permission/compaction/usage/unknown events are oleada 4
                 // (PLAN.md § "Fase TUI — diseño"). The engine still sees
                 // and acts on these events normally — they're mirrored
                 // here too, just not drawn yet in this skeleton.
@@ -224,8 +247,13 @@ impl App {
         ])
         .areas(area);
 
-        if !self.active_text.is_empty() {
-            let paragraph = Paragraph::new(self.active_text.as_str()).wrap(Wrap { trim: false });
+        let pending = self.markdown.pending();
+        if !pending.is_empty() {
+            // Deliberately plain text, not markdown-rendered: this is
+            // still-unstable, partial content (see
+            // `MarkdownStreamCollector::pending`'s doc comment) — only
+            // committed, final chunks get `tui-markdown` treatment.
+            let paragraph = Paragraph::new(pending).wrap(Wrap { trim: false });
             let total_lines = paragraph.line_count(active_area.width) as u16;
             let scroll_y = total_lines.saturating_sub(ACTIVE_ROWS);
             frame.render_widget(paragraph.scroll((scroll_y, 0)), active_area);
@@ -242,44 +270,5 @@ impl App {
         );
 
         frame.render_widget(&self.composer, composer_area);
-    }
-}
-
-/// Extracts and returns every newline-terminated line currently buffered
-/// in `active_text`, leaving only the trailing partial line (if any)
-/// still in `active_text`. The plain-text equivalent of the newline-gated
-/// commit `docs/TUI-INVESTIGACION-2026-07.md` documents for Codex/Gemini
-/// — markdown-aware commit boundaries (never sealing inside a code
-/// block or an incomplete table) are oleada 3.
-fn drain_ready_lines(active_text: &mut String) -> Option<String> {
-    let last_newline = active_text.rfind('\n')?;
-    Some(active_text.drain(..=last_newline).collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn drain_ready_lines_leaves_only_the_trailing_partial_line() {
-        let mut buf = "linea completa\nlinea parcial".to_string();
-        let ready = drain_ready_lines(&mut buf).expect("one full line ready");
-        assert_eq!(ready, "linea completa\n");
-        assert_eq!(buf, "linea parcial");
-    }
-
-    #[test]
-    fn drain_ready_lines_returns_none_with_no_newline_yet() {
-        let mut buf = "todavia sin salto de linea".to_string();
-        assert!(drain_ready_lines(&mut buf).is_none());
-        assert_eq!(buf, "todavia sin salto de linea");
-    }
-
-    #[test]
-    fn drain_ready_lines_drains_multiple_complete_lines_at_once() {
-        let mut buf = "uno\ndos\ntres\ncola".to_string();
-        let ready = drain_ready_lines(&mut buf).expect("three full lines ready");
-        assert_eq!(ready, "uno\ndos\ntres\n");
-        assert_eq!(buf, "cola");
     }
 }

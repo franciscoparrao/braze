@@ -12,6 +12,7 @@ mod app;
 mod approval;
 mod error;
 mod history_cell;
+mod markdown_stream;
 mod observer;
 mod terminal;
 

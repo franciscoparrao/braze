@@ -39,3 +39,8 @@ crossterm = { version = "0.29", features = ["event-stream", "bracketed-paste"] }
 # § "Widgets y crates útiles para chat"). Default features already include
 # "crossterm".
 ratatui-textarea = { version = "0.9" }
+# Markdown -> ratatui `Text` for committed assistant chunks
+# (`history_cell::AssistantMarkdownCell`). Default features include
+# `highlight-code` (syntect + ansi-to-tui) for syntax-highlighted code
+# blocks.
+tui-markdown = { version = "0.3" }
