@@ -31,7 +31,8 @@ struct Cli {
     /// Ruta al archivo TOML con la suite de tareas.
     suite: PathBuf,
     /// Backends a comparar, separados por coma. Cada uno es
-    /// "anthropic", "anthropic:<modelo>", "ollama" o "ollama:<modelo>".
+    /// "anthropic", "anthropic:<modelo>", "ollama", "ollama:<modelo>",
+    /// "openrouter" o "openrouter:<modelo>".
     #[arg(long, value_delimiter = ',', required = true)]
     backends: Vec<String>,
     /// Si se pasa, además de la tabla en stdout escribe los resultados
