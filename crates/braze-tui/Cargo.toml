@@ -1,0 +1,41 @@
+[package]
+name = "braze-tui"
+description = "braze terminal UI: inline-viewport chat frontend over braze-engine's TurnObserver seam"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+braze-engine = { workspace = true }
+braze-events = { workspace = true }
+braze-permissions = { workspace = true }
+braze-types = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+
+# scrolling-regions on top of the defaults (which already pull in the
+# crossterm backend): lets `Terminal::insert_before` use the terminal's
+# own scroll-region escape sequences instead of clear+redraw — the
+# difference between smooth and flickering scrollback commits during
+# streaming (see docs/TUI-INVESTIGACION-2026-07.md, ratatui#584/PR#1341).
+# unstable-rendered-line-info: `Paragraph::line_count`, used to size each
+# `insert_before` call to exactly how many wrapped rows a cell needs at
+# the terminal's current width — same feature codex-rs/tui enables for
+# the same reason (see docs/TUI-INVESTIGACION-2026-07.md, informe 1).
+ratatui = { version = "0.30", features = ["scrolling-regions", "unstable-rendered-line-info"] }
+# event-stream: async `Stream` over crossterm input, so the app loop can
+# `tokio::select!` between keyboard events and the engine's `AgentEvent`
+# channel instead of polling. bracketed-paste: needed later for the
+# composer to tell a paste apart from fast typing (deferred; harmless to
+# enable now).
+crossterm = { version = "0.29", features = ["event-stream", "bracketed-paste"] }
+# The `ratatui` org's maintained fork of rhysd/tui-textarea, tracking
+# ratatui-core's release cadence directly (see docs/TUI-INVESTIGACION-2026-07.md
+# § "Widgets y crates útiles para chat"). Default features already include
+# "crossterm".
+ratatui-textarea = { version = "0.9" }

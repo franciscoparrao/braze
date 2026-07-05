@@ -19,6 +19,9 @@ pub enum CliError {
     #[error("session store error: {0}")]
     Session(#[from] braze_session::SessionError),
 
+    #[error("terminal UI error: {0}")]
+    Tui(#[from] braze_tui::TuiError),
+
     /// Catch-all for startup problems with a human-authored, specific
     /// message (missing API key/model, unknown backend, unparseable
     /// `--resume` session id, ...) — deliberately a plain string rather

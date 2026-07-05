@@ -582,8 +582,77 @@ mensaje anterior y editarlo, como Codex).
    contra el log persistido que el espejo ve exactamente los mismos
    eventos, en el mismo orden, más los deltas). `cargo
    build/test/clippy --workspace` verdes.
-2. Esqueleto `braze-tui`: loop `select!`, viewport inline, composer,
-   `UserCell` + texto plano del asistente streameando a la celda activa.
+2. **COMPLETA (2026-07-05)** — Esqueleto `braze-tui`: loop `select!`,
+   viewport inline, composer, `UserCell` + texto plano del asistente
+   streameando a la celda activa. Crate nuevo (nivel 4; `braze-cli` pasa
+   a nivel 5), deps verificadas reales contra crates.io: `ratatui` 0.30.2
+   (features `scrolling-regions` + `unstable-rendered-line-info` — esta
+   segunda no estaba en el diseño original; `Paragraph::line_count`, que
+   `commit_cell` usa para dimensionar cada `insert_before` al alto exacto
+   en líneas envueltas, vive detrás de ese feature flag inestable, igual
+   que en `codex-rs/tui`), `crossterm` 0.29 (`event-stream` +
+   `bracketed-paste`), `ratatui-textarea` 0.9.2 (el fork de la org
+   `ratatui`, no `tui-textarea` 0.7 del diseño original — mismo crate que
+   `docs/TUI-INVESTIGACION-2026-07.md` ya señalaba como el mantenido).
+   `tui-markdown` **no** se agregó todavía — no hace falta hasta la
+   oleada 3 (markdown), agregar la dependencia antes sería inflar el
+   crate sin uso.
+   - **`braze-events::TurnObserver` en acción**: `ChannelObserver`
+     (`observer.rs`) reenvía cada callback por un canal `mpsc` no acotado
+     hacia el loop de la app — la costura de la oleada 1 resultó ser
+     exactamente la interfaz necesaria, sin cambios.
+   - **Patrón de scrollback simplificado respecto al diseño original**:
+     en vez de mantener una `active_cell` que crece sin límite mientras
+     el mensaje del asistente streamea (lo que exigiría un viewport de
+     alto variable — el punto débil de ratatui, ver riesgos), el texto
+     se commitea línea por línea al scrollback apenas cada línea se
+     completa (`drain_ready_lines`, gateado por `\n`), dejando solo la
+     última línea parcial en un área fija de `ACTIVE_ROWS = 2` filas con
+     scroll automático al fondo. El viewport total queda fijo en 5 filas
+     (2 preview + 1 hint + 2 composer) sin importar cuán larga sea la
+     respuesta — evita el problema de resize dinámico del viewport por
+     completo, a costa de diferir a la oleada 3 el gateo *semántico*
+     (nunca sellar dentro de un code block markdown).
+   - **Aprobación de permisos**: en vez de la `ChannelConfirmationPrompt`
+     completa (oleada 4), este incremento usa
+     `AutoDenyConfirmationPrompt` — deniega toda acción irreversible bajo
+     `--tui`, documentado como stopgap seguro (no se puede usar
+     `TerminalConfirmationPrompt`'s lectura de stdin con la terminal en
+     raw mode: sin edición de línea canónica, Enter manda `\r` no `\n`).
+     `braze-cli::build_permission_guard` gana un parámetro `tui_mode`
+     que selecciona el prompt correcto antes de construir cada
+     `ToolProvider`.
+   - **Integración**: `braze chat --tui` (nuevo flag en `cli_args.rs`),
+     dispatcha a `braze_tui::run(engine, session)` en vez del loop
+     stdin/stdout; `braze run` y el `chat` sin `--tui` no cambian.
+   - **Tests**: 347 → 356 (9 nuevos en `braze-tui`: 3 de
+     `drain_ready_lines`, 3 de `HistoryCell`, 2 de `ChannelObserver`, 1 de
+     `AutoDenyConfirmationPrompt`). `cargo build/test/clippy --workspace`
+     verdes.
+   - **Verificación manual en vivo**: contra Ollama local
+     (`qwen2.5:3b`, ya recomendado en `CLAUDE.md` por soportar
+     tool-calling nativo) usando un harness propio en Python
+     (`pty.openpty()` + `pyte` para reconstruir la pantalla real, ya que
+     crossterm consulta la posición del cursor con `ESC[6n` al iniciar
+     el viewport inline — un pty desnudo nunca responde esa consulta sin
+     un emulador de verdad detrás). Confirmado en una sesión real:
+     tipeo multi-tecla en el composer, commit del `UserCell` al
+     scrollback nativo con el marcador `> `, cambio del hint a "esperando
+     respuesta...", el modelo real invocando una tool (intentó leer un
+     archivo inexistente) sin que su evento se dibuje (esperado, oleada
+     3/4), el texto de la respuesta del modelo streameando y
+     commiteándose al scrollback en vivo, y salida limpia con Ctrl+C
+     (raw mode restaurado, proceso terminó con exit code 0 incluso con
+     un turno todavía en vuelo — el log de sesión quedó en un estado
+     válido y resumible, sin tool call huérfano sin resultado).
+     **Hallazgo cosmético no bloqueante**: la línea de hint mostró una
+     vez texto corrupto ("esphoando" en vez de "esperando") justo en el
+     frame donde `commit_cell` corrió un `insert_before` entre dos
+     `draw()` — no se investigó a fondo (posible interacción entre el
+     diffing de ratatui y el shift de fila que produce `insert_before`);
+     queda anotado para revisar si reaparece en la oleada 3, no bloquea
+     el incremento porque es puramente cosmético en un renglón de
+     estado transitorio, nunca en el contenido de la conversación.
 3. `markdown_stream.rs` + `AssistantMarkdownCell` + `ToolCallCell` con
    estados.
 4. `approval.rs` + interrupción con Esc + `status_bar.rs`.

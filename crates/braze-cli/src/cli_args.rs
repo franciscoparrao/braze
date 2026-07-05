@@ -1,7 +1,7 @@
 //! `clap` v4 derive command structure for the `braze` binary.
 //!
 //! ```text
-//! braze chat [--resume <session-id>] [--backend anthropic|ollama|openrouter] [--model <nombre>]
+//! braze chat [--resume <session-id>] [--backend anthropic|ollama|openrouter] [--model <nombre>] [--tui]
 //! braze run <prompt> [--backend anthropic|ollama|openrouter] [--model <nombre>]
 //! ```
 //!
@@ -37,6 +37,13 @@ pub enum Command {
         /// Override the configured model name for this run.
         #[arg(long)]
         model: Option<String>,
+        /// Use the terminal UI (`braze-tui`, PLAN.md § "Fase TUI —
+        /// diseño") instead of the plain-text stdin/stdout loop.
+        /// Opt-in for now — irreversible-action tool calls are denied
+        /// automatically under `--tui` until the real approval overlay
+        /// ships (oleada 4); the plain path still confirms interactively.
+        #[arg(long)]
+        tui: bool,
     },
     /// One-shot: run a single prompt and exit.
     Run {

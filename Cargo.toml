@@ -11,6 +11,7 @@ members = [
     "crates/braze-tools-local",
     "crates/braze-mcp-client",
     "crates/braze-engine",
+    "crates/braze-tui",
     "crates/braze-cli",
     "crates/braze-bench",
 ]
@@ -33,6 +34,7 @@ braze-model = { path = "crates/braze-model" }
 braze-tools-local = { path = "crates/braze-tools-local" }
 braze-mcp-client = { path = "crates/braze-mcp-client" }
 braze-engine = { path = "crates/braze-engine" }
+braze-tui = { path = "crates/braze-tui" }
 
 # Async runtime — deviation from the owner's sync-first convention,
 # adopted workspace-wide per PLAN.md (I/O-concurrent domain: model

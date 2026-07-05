@@ -76,27 +76,40 @@ async fn main() -> ExitCode {
 
 /// Builds a fresh `PermissionGuard` scoped to `cwd`: a `WorkdirAllowlist` +
 /// `DefaultClassifier` pair (each needs its own `WorkdirAllowlist` instance
-/// since it isn't `Clone`) plus a `TerminalConfirmationPrompt` — the latter
-/// now carrying `session`/`store` so it can persist
+/// since it isn't `Clone`) plus a `ConfirmationPrompt`. Every `ToolProvider`
+/// this binary constructs (the local tools provider, and one per connected
+/// MCP server) gets its own guard from this same helper, each with an
+/// independent in-memory "remembered" session cache — seeded from
+/// `replayed_keys` so approvals confirmed earlier in this same session
+/// (before a restart) aren't re-asked.
+///
+/// `tui_mode` selects which `ConfirmationPrompt` gets built: the plain
+/// path's `TerminalConfirmationPrompt` reads y/n answers from stdin, which
+/// carries `session`/`store` so it can persist
 /// `PermissionRequested`/`PermissionDecided` events for later `--resume`
-/// replay. Every `ToolProvider` this binary constructs (the local tools
-/// provider, and one per connected MCP server) gets its own guard from this
-/// same helper, each with an independent in-memory "remembered" session
-/// cache — seeded from `replayed_keys` so approvals confirmed earlier in
-/// this same session (before a restart) aren't re-asked.
+/// replay — but its stdin reads don't work correctly once the terminal is
+/// in raw mode (`braze-tui`'s requirement). Under `--tui` this builds
+/// `braze_tui::AutoDenyConfirmationPrompt` instead (see its doc comment for
+/// why denying is the safe stopgap until oleada 4's approval overlay).
 fn build_permission_guard(
     cwd: &std::path::Path,
     session: braze_types::SessionId,
     store: std::sync::Arc<dyn braze_session::SessionStore>,
     replayed_keys: &[braze_types::PermissionKey],
+    tui_mode: bool,
 ) -> braze_permissions::PermissionGuard {
     let allowlist_for_classifier = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
     let allowlist_for_guard = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
     let classifier = braze_permissions::DefaultClassifier::new(allowlist_for_classifier);
+    let confirmation: Box<dyn braze_permissions::ConfirmationPrompt> = if tui_mode {
+        Box::new(braze_tui::AutoDenyConfirmationPrompt)
+    } else {
+        Box::new(TerminalConfirmationPrompt::new(session, store))
+    };
     let guard = braze_permissions::PermissionGuard::new(
         allowlist_for_guard,
         Box::new(classifier),
-        Box::new(TerminalConfirmationPrompt::new(session, store)),
+        confirmation,
     );
     guard.seed_remembered(replayed_keys.iter().cloned());
     guard
@@ -235,6 +248,11 @@ async fn run() -> Result<(), CliError> {
         Err(err) => return Err(err.into()),
     };
 
+    // Only `chat --tui` drives the terminal in raw mode — see
+    // `build_permission_guard`'s doc comment for why that changes which
+    // `ConfirmationPrompt` gets built.
+    let tui_mode = matches!(cli.command, Command::Chat { tui: true, .. });
+
     // Two-layer permission setup: a soft working-dir allowlist plus a
     // default-deny shell classifier + terminal y/n confirmation for
     // irreversible actions. Every `ToolProvider` (local tools, and now each
@@ -243,8 +261,13 @@ async fn run() -> Result<(), CliError> {
     // shared/`Clone` across providers. All of them share the same
     // `replayed_keys`, seeded from the same session's own prior decisions.
     let cwd = std::env::current_dir()?;
-    let local_guard =
-        build_permission_guard(&cwd, session, std::sync::Arc::clone(&store), &replayed_keys);
+    let local_guard = build_permission_guard(
+        &cwd,
+        session,
+        std::sync::Arc::clone(&store),
+        &replayed_keys,
+        tui_mode,
+    );
 
     let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard);
     let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
@@ -271,8 +294,13 @@ async fn run() -> Result<(), CliError> {
     // Best-effort: a dead/misconfigured MCP server never aborts startup,
     // it's just unavailable for this run (logged as a warning).
     for server in &config.mcp_servers {
-        let mcp_guard =
-            build_permission_guard(&cwd, session, std::sync::Arc::clone(&store), &replayed_keys);
+        let mcp_guard = build_permission_guard(
+            &cwd,
+            session,
+            std::sync::Arc::clone(&store),
+            &replayed_keys,
+            tui_mode,
+        );
         match braze_mcp_client::McpToolProvider::connect(
             server.name.clone(),
             server.command.clone(),
@@ -345,6 +373,9 @@ async fn run() -> Result<(), CliError> {
                 )
                 .await?;
             println!();
+        }
+        Command::Chat { tui: true, .. } => {
+            braze_tui::run(engine, session).await?;
         }
         Command::Chat { .. } => {
             println!("session: {session} (usa --resume {session} para continuarla luego)");
