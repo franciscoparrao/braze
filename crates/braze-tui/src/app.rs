@@ -16,7 +16,7 @@ use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyM
 use futures::StreamExt;
 use ratatui::Terminal;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 use ratatui_textarea::TextArea;
@@ -36,6 +36,7 @@ use crate::observer::{ChannelObserver, TuiUpdate};
 use crate::slash_commands::{SLASH_COMMANDS, SlashCommand, matching_commands};
 use crate::status_bar;
 use crate::terminal::{ACTIVE_ROWS, Backend};
+use crate::theme::Theme;
 
 /// Suggestions shown at once in the `/`/`@` popup — see `draw_popup`.
 /// Kept small and fixed (no scrolling within the popup): it reuses the
@@ -69,10 +70,18 @@ pub async fn run(
     store: Arc<dyn braze_session::SessionStore>,
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
     status_line: String,
+    theme: Theme,
 ) -> Result<(), TuiError> {
-    App::new(Arc::new(engine), session, store, approvals, status_line)
-        .run(terminal)
-        .await
+    App::new(
+        Arc::new(engine),
+        session,
+        store,
+        approvals,
+        status_line,
+        theme,
+    )
+    .run(terminal)
+    .await
 }
 
 /// `/command` and `@mention` suggestions currently shown above the
@@ -104,6 +113,10 @@ struct App {
     /// still goes exclusively through `engine`/`Engine::run_turn`.
     store: Arc<dyn braze_session::SessionStore>,
     status_line: String,
+    /// Color preset every `HistoryCell` this session commits renders
+    /// with — resolved once at startup (`braze-cli` from
+    /// `Config::tui_theme`), never changes mid-session.
+    theme: Theme,
     total_input_tokens: u64,
     total_output_tokens: u64,
     /// Accumulates the assistant's streaming text for the round in
@@ -148,6 +161,7 @@ impl App {
         store: Arc<dyn braze_session::SessionStore>,
         approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
         status_line: String,
+        theme: Theme,
     ) -> Self {
         let (update_tx, update_rx) = mpsc::unbounded_channel();
         Self {
@@ -155,6 +169,7 @@ impl App {
             session,
             store,
             status_line,
+            theme,
             total_input_tokens: 0,
             total_output_tokens: 0,
             markdown: MarkdownStreamCollector::default(),
@@ -521,6 +536,7 @@ impl App {
         self.commit_cell(
             &NoticeCell {
                 message: "⏸ interrupted by user".to_string(),
+                theme: self.theme,
             },
             terminal,
         )?;
@@ -549,6 +565,7 @@ impl App {
             &PermissionCell {
                 description,
                 allowed,
+                theme: self.theme,
             },
             terminal,
         )?;
@@ -570,6 +587,7 @@ impl App {
                 return self.commit_cell(
                     &NoticeCell {
                         message: format!("no se pudo leer el historial de la sesión: {err}"),
+                        theme: self.theme,
                     },
                     terminal,
                 );
@@ -583,6 +601,7 @@ impl App {
             return self.commit_cell(
                 &NoticeCell {
                     message: "todavía no se completó ninguna tool call en esta sesión".to_string(),
+                    theme: self.theme,
                 },
                 terminal,
             );
@@ -608,6 +627,7 @@ impl App {
                 name,
                 is_error: result.is_error,
                 content: result.content,
+                theme: self.theme,
             },
             terminal,
         )
@@ -650,7 +670,7 @@ impl App {
                 self.pending_tool_names.insert(id, name);
             }
             TuiUpdate::Event(AgentEvent::ToolCallStarted { name, .. }) => {
-                self.commit_cell(&ToolCallCell::running(name), terminal)?;
+                self.commit_cell(&ToolCallCell::running(name, self.theme), terminal)?;
             }
             TuiUpdate::Event(AgentEvent::ToolCallCompleted { id, result }) => {
                 let name = self
@@ -658,7 +678,7 @@ impl App {
                     .remove(&id)
                     .unwrap_or_else(|| "tool".to_string());
                 self.commit_cell(
-                    &ToolCallCell::done(name, result.is_error, &result.content),
+                    &ToolCallCell::done(name, result.is_error, &result.content, self.theme),
                     terminal,
                 )?;
             }
@@ -692,7 +712,13 @@ impl App {
             TuiUpdate::TurnFinished(Err(message)) => {
                 self.turn_running = false;
                 self.current_turn = None;
-                self.commit_cell(&ErrorCell { message }, terminal)?;
+                self.commit_cell(
+                    &ErrorCell {
+                        message,
+                        theme: self.theme,
+                    },
+                    terminal,
+                )?;
             }
         }
         Ok(())
@@ -758,7 +784,7 @@ impl App {
                 "Enter enviar · Ctrl+J salto de linea · / comandos · @ archivos · Ctrl+T output · Ctrl+C salir"
             };
             frame.render_widget(
-                Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new(hint).style(Style::default().fg(self.theme.muted)),
                 hint_left,
             );
 
@@ -770,7 +796,7 @@ impl App {
             );
             frame.render_widget(
                 Paragraph::new(status)
-                    .style(Style::default().fg(Color::DarkGray))
+                    .style(Style::default().fg(self.theme.muted))
                     .alignment(Alignment::Right),
                 hint_right,
             );
@@ -782,7 +808,7 @@ impl App {
             if self.pending_approvals.len() > 1 {
                 answer_hint.push_str(&format!("  ({} pendientes)", self.pending_approvals.len()));
             }
-            lines.push(Line::from(answer_hint).style(Style::default().fg(Color::Yellow)));
+            lines.push(Line::from(answer_hint).style(Style::default().fg(self.theme.warning)));
             frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), composer_area);
         } else {
             frame.render_widget(&self.composer, composer_area);

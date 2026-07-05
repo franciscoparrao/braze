@@ -6,10 +6,10 @@
 //! viewport + native scrollback, a multi-line composer with `/command`
 //! and `@mention` completion, markdown streaming with fence-aware commit
 //! boundaries, tool-call cells (with Ctrl+T to expand the last one's
-//! full output), a real permission approval overlay, Esc-to-interrupt,
-//! and a status bar. Themes, backtrack, and promoting `--tui` to the
-//! default are later increments — see PLAN.md § "Diferido (fase TUI 2)"
-//! for the rest.
+//! full output), a real permission approval overlay, Esc-to-interrupt, a
+//! status bar, and a `Theme` preset (dark/light/high-contrast — see
+//! `theme`). Backtrack and promoting `--tui` to the default are later
+//! increments — see PLAN.md § "Diferido (fase TUI 2)" for the rest.
 
 mod app;
 mod approval;
@@ -22,9 +22,11 @@ mod observer;
 mod slash_commands;
 mod status_bar;
 mod terminal;
+mod theme;
 
 pub use approval::{ApprovalRequest, ChannelConfirmationPrompt};
 pub use error::TuiError;
+pub use theme::Theme;
 
 use std::sync::Arc;
 
@@ -44,14 +46,26 @@ use tokio::sync::mpsc;
 /// the same `SessionStore` handle `engine` was built with, passed
 /// separately so Ctrl+T can read the rollout log back (see
 /// `app::expand_last_tool_call`). `status_line` is a short, static
-/// "backend:model" label shown in the status bar.
+/// "backend:model" label shown in the status bar. `theme` picks the
+/// color preset every `HistoryCell` renders with — `braze-cli` resolves
+/// it from `Config::tui_theme` before calling this.
 pub async fn run(
     engine: Engine,
     session: SessionId,
     store: Arc<dyn braze_session::SessionStore>,
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
     status_line: String,
+    theme: Theme,
 ) -> Result<(), TuiError> {
     let mut guard = terminal::setup()?;
-    app::run(&mut guard.terminal, engine, session, store, approvals, status_line).await
+    app::run(
+        &mut guard.terminal,
+        engine,
+        session,
+        store,
+        approvals,
+        status_line,
+        theme,
+    )
+    .await
 }

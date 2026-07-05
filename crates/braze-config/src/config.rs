@@ -104,6 +104,12 @@ pub struct Config {
     /// the round takes the exact single-call path that existed before
     /// G10. See `braze_engine::Engine::with_best_of_n`.
     pub best_of_n: usize,
+    /// Color preset for `braze chat --tui`: `"dark"`, `"light"`, or
+    /// `"high-contrast"` — see `braze_tui::Theme`. Not validated at this
+    /// layer (`braze-config` doesn't depend on `braze-tui`) — `braze-cli`
+    /// resolves it via `Theme::from_name` and errors at startup on an
+    /// unrecognized name, same as `default_backend`.
+    pub tui_theme: String,
 }
 
 impl Default for Config {
@@ -131,6 +137,7 @@ impl Default for Config {
             tactical_compaction_threshold: 40,
             mcp_servers: Vec::new(),
             best_of_n: 1,
+            tui_theme: "dark".to_string(),
         }
     }
 }
@@ -226,6 +233,9 @@ impl Config {
         if let Some(v) = overrides.best_of_n {
             self.best_of_n = v;
         }
+        if let Some(v) = overrides.tui_theme {
+            self.tui_theme = v;
+        }
     }
 }
 
@@ -265,6 +275,7 @@ mod tests {
         assert_eq!(config.tactical_compaction_threshold, 40);
         assert!(config.mcp_servers.is_empty());
         assert_eq!(config.best_of_n, 1);
+        assert_eq!(config.tui_theme, "dark");
     }
 
     #[test]
@@ -279,6 +290,13 @@ mod tests {
         let env = vec![("BRAZE_BEST_OF_N".to_string(), "not-a-number".to_string())];
         let result = Config::load_with(None, env);
         assert!(matches!(result, Err(ConfigError::InvalidEnvValue { .. })));
+    }
+
+    #[test]
+    fn tui_theme_is_overridable_via_env() {
+        let env = vec![("BRAZE_TUI_THEME".to_string(), "light".to_string())];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(config.tui_theme, "light");
     }
 
     #[test]

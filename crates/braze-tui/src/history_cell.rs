@@ -10,8 +10,10 @@
 //! `AssistantMarkdownCell` renders straight from its stored markdown
 //! source via `tui_markdown::from_str`, which itself borrows.
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
+
+use crate::theme::Theme;
 
 pub trait HistoryCell {
     fn as_text(&self) -> Text<'_>;
@@ -74,6 +76,7 @@ impl HistoryCell for AssistantMarkdownCell {
 pub struct ToolCallCell {
     name: String,
     state: ToolCallOutcome,
+    theme: Theme,
 }
 
 enum ToolCallOutcome {
@@ -91,20 +94,22 @@ enum ToolCallOutcome {
 const TOOL_SUMMARY_MAX_CHARS: usize = 80;
 
 impl ToolCallCell {
-    pub fn running(name: String) -> Self {
+    pub fn running(name: String, theme: Theme) -> Self {
         Self {
             name,
             state: ToolCallOutcome::Running,
+            theme,
         }
     }
 
-    pub fn done(name: String, is_error: bool, content: &str) -> Self {
+    pub fn done(name: String, is_error: bool, content: &str, theme: Theme) -> Self {
         Self {
             name,
             state: ToolCallOutcome::Done {
                 is_error,
                 summary: summarize_tool_output(content),
             },
+            theme,
         }
     }
 }
@@ -127,14 +132,14 @@ impl HistoryCell for ToolCallCell {
     fn as_text(&self) -> Text<'_> {
         match &self.state {
             ToolCallOutcome::Running => Text::from(Line::from(vec![
-                Span::styled("▶ ", Style::default().fg(Color::Yellow)),
+                Span::styled("▶ ", Style::default().fg(self.theme.warning)),
                 Span::raw(self.name.clone()),
             ])),
             ToolCallOutcome::Done { is_error, summary } => {
                 let (glyph, color) = if *is_error {
-                    ("✗ ", Color::Red)
+                    ("✗ ", self.theme.error)
                 } else {
-                    ("✓ ", Color::Green)
+                    ("✓ ", self.theme.success)
                 };
                 let mut spans = vec![
                     Span::styled(glyph, Style::default().fg(color)),
@@ -144,7 +149,7 @@ impl HistoryCell for ToolCallCell {
                     spans.push(Span::raw(": "));
                     spans.push(Span::styled(
                         summary.clone(),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(self.theme.muted),
                     ));
                 }
                 Text::from(Line::from(spans))
@@ -158,13 +163,14 @@ impl HistoryCell for ToolCallCell {
 /// part of the assistant's answer.
 pub struct ErrorCell {
     pub message: String,
+    pub theme: Theme,
 }
 
 impl HistoryCell for ErrorCell {
     fn as_text(&self) -> Text<'_> {
         Text::from(Line::from(Span::styled(
             format!("error: {}", self.message),
-            Style::default().fg(Color::Red),
+            Style::default().fg(self.theme.error),
         )))
     }
 }
@@ -178,14 +184,15 @@ impl HistoryCell for ErrorCell {
 pub struct PermissionCell {
     pub description: String,
     pub allowed: bool,
+    pub theme: Theme,
 }
 
 impl HistoryCell for PermissionCell {
     fn as_text(&self) -> Text<'_> {
         let (glyph, color, verb) = if self.allowed {
-            ("✓ ", Color::Green, "allowed")
+            ("✓ ", self.theme.success, "allowed")
         } else {
-            ("✗ ", Color::Red, "denied")
+            ("✗ ", self.theme.error, "denied")
         };
         Text::from(Line::from(vec![
             Span::styled(glyph, Style::default().fg(color)),
@@ -199,13 +206,14 @@ impl HistoryCell for PermissionCell {
 /// failure, so it shouldn't read as one.
 pub struct NoticeCell {
     pub message: String,
+    pub theme: Theme,
 }
 
 impl HistoryCell for NoticeCell {
     fn as_text(&self) -> Text<'_> {
         Text::from(Line::from(Span::styled(
             self.message.clone(),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(self.theme.warning),
         )))
     }
 }
@@ -247,6 +255,7 @@ pub struct ExpandedToolOutputCell {
     pub name: String,
     pub is_error: bool,
     pub content: String,
+    pub theme: Theme,
 }
 
 /// Longest content this cell shows before truncating with a note — much
@@ -260,9 +269,9 @@ const EXPANDED_TOOL_OUTPUT_MAX_LINES: usize = 200;
 impl HistoryCell for ExpandedToolOutputCell {
     fn as_text(&self) -> Text<'_> {
         let (glyph, color) = if self.is_error {
-            ("✗ ", Color::Red)
+            ("✗ ", self.theme.error)
         } else {
-            ("✓ ", Color::Green)
+            ("✓ ", self.theme.success)
         };
         let mut lines = vec![Line::from(vec![
             Span::styled(glyph, Style::default().fg(color)),
@@ -285,7 +294,7 @@ impl HistoryCell for ExpandedToolOutputCell {
                     "… (+{} líneas más — ver el rollout log completo de la sesión)",
                     content_lines.len() - EXPANDED_TOOL_OUTPUT_MAX_LINES
                 ),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.theme.muted),
             )));
         }
 
@@ -326,7 +335,7 @@ mod tests {
 
     #[test]
     fn tool_call_cell_running_shows_the_name_with_a_running_glyph() {
-        let cell = ToolCallCell::running("read_file".to_string());
+        let cell = ToolCallCell::running("read_file".to_string(), Theme::dark());
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "▶ ");
         assert_eq!(text.lines[0].spans[1].content, "read_file");
@@ -334,7 +343,7 @@ mod tests {
 
     #[test]
     fn tool_call_cell_done_success_uses_a_check_glyph_and_summarizes_output() {
-        let cell = ToolCallCell::done("echo".to_string(), false, "echoed: hi");
+        let cell = ToolCallCell::done("echo".to_string(), false, "echoed: hi", Theme::dark());
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "✓ ");
         assert_eq!(text.lines[0].spans[1].content, "echo");
@@ -343,7 +352,7 @@ mod tests {
 
     #[test]
     fn tool_call_cell_done_error_uses_a_cross_glyph() {
-        let cell = ToolCallCell::done("read_file".to_string(), true, "file not found");
+        let cell = ToolCallCell::done("read_file".to_string(), true, "file not found", Theme::dark());
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "✗ ");
     }
@@ -366,6 +375,7 @@ mod tests {
     fn error_cell_prefixes_the_message() {
         let cell = ErrorCell {
             message: "boom".to_string(),
+            theme: Theme::dark(),
         };
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "error: boom");
@@ -376,6 +386,7 @@ mod tests {
         let cell = PermissionCell {
             description: "run `rm -rf /tmp/x`".to_string(),
             allowed: true,
+            theme: Theme::dark(),
         };
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "✓ ");
@@ -388,6 +399,7 @@ mod tests {
         let cell = PermissionCell {
             description: "run `rm -rf /tmp/x`".to_string(),
             allowed: false,
+            theme: Theme::dark(),
         };
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "✗ ");
@@ -398,6 +410,7 @@ mod tests {
     fn notice_cell_renders_the_message_verbatim() {
         let cell = NoticeCell {
             message: "interrupted by user".to_string(),
+            theme: Theme::dark(),
         };
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "interrupted by user");
@@ -429,6 +442,7 @@ mod tests {
             name: "read_file".to_string(),
             is_error: false,
             content: long_content.clone(),
+            theme: Theme::dark(),
         };
         let text = cell.as_text();
         let rendered: String = text
@@ -453,6 +467,7 @@ mod tests {
             name: "grep".to_string(),
             is_error: false,
             content,
+            theme: Theme::dark(),
         };
         let text = cell.as_text();
         let rendered: String = text
@@ -471,6 +486,7 @@ mod tests {
             name: "shell_exec".to_string(),
             is_error: true,
             content: "boom".to_string(),
+            theme: Theme::dark(),
         };
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "✗ ");
@@ -520,19 +536,19 @@ mod snapshot_tests {
 
     #[test]
     fn tool_call_cell_running() {
-        let cell = ToolCallCell::running("read_file".to_string());
+        let cell = ToolCallCell::running("read_file".to_string(), Theme::dark());
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
 
     #[test]
     fn tool_call_cell_done_success() {
-        let cell = ToolCallCell::done("echo".to_string(), false, "echoed: hi");
+        let cell = ToolCallCell::done("echo".to_string(), false, "echoed: hi", Theme::dark());
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
 
     #[test]
     fn tool_call_cell_done_error() {
-        let cell = ToolCallCell::done("read_file".to_string(), true, "file not found");
+        let cell = ToolCallCell::done("read_file".to_string(), true, "file not found", Theme::dark());
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
 
@@ -541,6 +557,7 @@ mod snapshot_tests {
         let cell = PermissionCell {
             description: "run `rm -rf /tmp/x`".to_string(),
             allowed: true,
+            theme: Theme::dark(),
         };
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
@@ -550,6 +567,7 @@ mod snapshot_tests {
         let cell = PermissionCell {
             description: "run `rm -rf /tmp/x`".to_string(),
             allowed: false,
+            theme: Theme::dark(),
         };
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
@@ -558,6 +576,7 @@ mod snapshot_tests {
     fn error_cell() {
         let cell = ErrorCell {
             message: "backend unreachable".to_string(),
+            theme: Theme::dark(),
         };
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
@@ -566,6 +585,7 @@ mod snapshot_tests {
     fn notice_cell() {
         let cell = NoticeCell {
             message: "⏸ interrupted by user".to_string(),
+            theme: Theme::dark(),
         };
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
@@ -581,6 +601,7 @@ mod snapshot_tests {
             name: "read_file".to_string(),
             is_error: false,
             content: "linea uno\nlinea dos".to_string(),
+            theme: Theme::dark(),
         };
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }

@@ -51,6 +51,8 @@ pub struct ConfigOverrides {
     pub mcp_servers: Option<Vec<McpServerConfigStub>>,
     #[serde(default)]
     pub best_of_n: Option<usize>,
+    #[serde(default)]
+    pub tui_theme: Option<String>,
 }
 
 impl ConfigOverrides {
@@ -147,6 +149,9 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.best_of_n = Some(parsed);
+                }
+                "TUI_THEME" => {
+                    overrides.tui_theme = Some(value.to_string());
                 }
                 _ => {} // unrecognized BRAZE_* var: ignore, forward-compatible
             }

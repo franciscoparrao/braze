@@ -683,12 +683,17 @@ imprescindibles).
 
 **Diferido (fase TUI 2)**: ~~slash commands con popup, @-menciones de
 archivos~~ (implementados 2026-07-05, ver § "Fase TUI 2 — slash commands
-+ @-menciones" más abajo), temas configurables, pager overlay del
-transcript completo (Ctrl+T), imágenes/clipboard, modo vim, inserción
-ANSI propia estilo Codex (`custom_terminal`), soporte especial Zellij,
-TUI como default, **celda de plan/todo editable antes de ejecutar**
-(descomposición interactiva de tareas — UIST 2024 — requiere soporte del
-engine para planes, no solo de la TUI) y **backtrack** (Esc-Esc para
++ @-menciones" más abajo), ~~temas configurables~~ (implementado
+2026-07-05 como preset picker dark/light/high-contrast, ver § "Fase TUI
+2 — temas configurables" más abajo), ~~pager overlay del transcript
+completo (Ctrl+T)~~ (implementado 2026-07-05 con alcance reducido — una
+celda que expande el output completo, no un overlay fullscreen real, ver
+§ "Fase TUI 2 — Ctrl+T expande el output completo de una tool call" más
+abajo), imágenes/clipboard, modo vim, inserción ANSI propia estilo Codex
+(`custom_terminal`), soporte especial Zellij, TUI como default, **celda
+de plan/todo editable antes de ejecutar** (descomposición interactiva de
+tareas — UIST 2024 — requiere soporte del engine para planes, no solo de
+la TUI) y **backtrack** (Esc-Esc para
 retroceder a un mensaje anterior y editarlo, como Codex).
 
 ### Riesgos conocidos (aceptados para el MVP)
@@ -1177,6 +1182,72 @@ truncarse e… (+N more lines)"), y que Ctrl+T commiteó
 `"✓ read_file (completo)"` seguido de las **5 líneas completas sin
 truncar** — el contenido íntegro llega correctamente desde el rollout
 log. Salida limpia con Ctrl+C.
+
+## Fase TUI 2 — temas configurables (2026-07-05)
+
+**Hallazgo previo a implementar, que cambió el marco del problema**:
+todos los colores que usa `braze-tui` ya son slots ANSI nombrados
+(`Color::Red/Green/Yellow/DarkGray`), nunca RGB literal — confirmado con
+`grep -rn "Color::Rgb\|Color::Indexed"` sin resultados. Eso significa
+que el problema que originalmente motivó "temas configurables" en
+Codex/Gemini (colores hardcodeados en RGB que chocan con el fondo del
+terminal) **no aplica acá**: el terminal del usuario ya decide el RGB
+real de cada color vía su propio esquema. Lo que un `Theme` sí aporta:
+dejar elegir un mapeo semántico distinto (p.ej. sacar el warning de
+amarillo puro, que se lee mal en fondo claro en terminales que no lo
+remapean) o bajar a una paleta de alto contraste — no "arreglar" un
+choque de RGB que no existe. Se lo planteó explícitamente al usuario
+antes de implementar (junto con la alternativa de soportar `NO_COLOR`,
+de costo mucho menor) — el usuario eligió seguir con el preset picker
+completo pese al costo mecánico mayor.
+
+**`theme.rs`** (nuevo): `struct Theme { success, error, warning, muted:
+Color }`, `Copy`. Tres presets: `dark()` (el default, colores idénticos
+a los que ya había hardcodeados — verificado porque los snapshots
+`insta` existentes no cambiaron ni un byte al migrar), `light()`
+(warning: Magenta en vez de Yellow — amarillo puro sobre fondo claro es
+el clásico combo de bajo contraste en terminales que no lo remapean),
+`high_contrast()` (muted: White en vez de DarkGray — un tono
+deliberadamente "apagado" contradice el propósito de un modo de alto
+contraste). `Theme::from_name(&str) -> Option<Theme>` para el mapeo
+nombre→preset.
+
+**Threading**: en vez de cambiar la firma del trait `HistoryCell::as_text(&self)`
+(que habría tocado cada test existente que llama `.as_text()`
+directamente), cada celda que usa color (`ToolCallCell`, `ErrorCell`,
+`PermissionCell`, `NoticeCell`, `ExpandedToolOutputCell` — 5 de los 8
+tipos; `UserCell`/`AssistantMarkdownCell`/`HelpCell` no usan `Color` en
+absoluto) gana un campo `theme: Theme` fijado al construirse, y
+`as_text()` lee `self.theme.X` en vez de la constante hardcodeada. Más
+mecánico por sitio de construcción, pero el trait público queda
+intacto. `App` gana un campo `theme: Theme` (resuelto una sola vez al
+arrancar, nunca cambia en la sesión) y lo pasa en cada construcción de
+celda; los dos usos de color directos en `draw()` (texto de hint,
+aviso de aprobación pendiente) también leen `self.theme` ahora.
+
+**Config**: `Config::tui_theme: String` (default `"dark"`), overridable
+vía `BRAZE_TUI_THEME` — mismo patrón exacto que `best_of_n`. No
+validado en `braze-config` (no depende de `braze-tui`); `braze-cli`
+resuelve `Theme::from_name(&config.tui_theme)` al arrancar y falla
+rápido con `CliError::Startup` si el nombre no es reconocido, antes de
+construir el engine o la sesión — mismo momento/patrón que la
+validación de `--backend`. Nuevo flag `braze chat --tui --theme
+<dark|light|high-contrast>`.
+
+**Tests**: 411 → 421 (6 nuevos en `theme.rs`: cada preset reconocido por
+nombre, nombre desconocido rechazado, default es `dark`, alto contraste
+nunca usa un tono apagado; más 1 en `braze-config` para el override vía
+env, y 3 tests movidos con el refactor mecánico de las 5 celdas
+themadas — mismo conteo, solo con `theme: Theme::dark()` agregado).
+`cargo build/test/clippy --workspace` verdes. Los snapshots `insta`
+existentes de las 5 celdas afectadas **no cambiaron** — confirma que
+`Theme::dark()` reproduce exactamente los colores que estaban
+hardcodeados antes del refactor.
+
+**Verificación manual**: `braze chat --tui --theme bogus` falla al
+arrancar con `"tema de TUI desconocido: 'bogus' (esperado 'dark',
+'light', o 'high-contrast')"`, antes de tocar el engine o la sesión;
+`braze chat --help` muestra el flag `--theme` documentado.
 
 ## Archivos críticos
 

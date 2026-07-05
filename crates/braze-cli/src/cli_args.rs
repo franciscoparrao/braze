@@ -44,6 +44,11 @@ pub enum Command {
         /// ships (oleada 4); the plain path still confirms interactively.
         #[arg(long)]
         tui: bool,
+        /// Color preset for `--tui`: `dark` (default), `light`, or
+        /// `high-contrast` — see `braze_tui::Theme`. Ignored without
+        /// `--tui`.
+        #[arg(long)]
+        theme: Option<String>,
     },
     /// One-shot: run a single prompt and exit.
     Run {
@@ -70,6 +75,15 @@ impl Command {
     pub fn model_override(&self) -> Option<&str> {
         match self {
             Command::Chat { model, .. } | Command::Run { model, .. } => model.as_deref(),
+        }
+    }
+
+    /// The `--theme` override, if any — `Chat`-only, `Run` never touches
+    /// `braze-tui` at all.
+    pub fn theme_override(&self) -> Option<&str> {
+        match self {
+            Command::Chat { theme, .. } => theme.as_deref(),
+            Command::Run { .. } => None,
         }
     }
 }

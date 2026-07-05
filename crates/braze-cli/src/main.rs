@@ -184,6 +184,12 @@ async fn run() -> Result<(), CliError> {
         };
         config.apply_overrides(overrides);
     }
+    if let Some(theme) = cli.command.theme_override() {
+        config.apply_overrides(braze_config::ConfigOverrides {
+            tui_theme: Some(theme.to_string()),
+            ..Default::default()
+        });
+    }
 
     let model: Box<dyn braze_model::ModelBackend> = match config.default_backend.as_str() {
         "anthropic" => {
@@ -269,6 +275,21 @@ async fn run() -> Result<(), CliError> {
     // `build_permission_guard`'s doc comment for why that changes which
     // `ConfirmationPrompt` gets built.
     let tui_mode = matches!(cli.command, Command::Chat { tui: true, .. });
+
+    // Resolved eagerly (fails fast on an unrecognized name, before any
+    // engine/session work) even though it's only ever consumed by the
+    // `tui: true` arm below — mirrors how `default_backend`/model
+    // resolution already fails at startup rather than partway through.
+    let tui_theme = if tui_mode {
+        braze_tui::Theme::from_name(&config.tui_theme).ok_or_else(|| {
+            CliError::Startup(format!(
+                "tema de TUI desconocido: '{}' (esperado 'dark', 'light', o 'high-contrast')",
+                config.tui_theme
+            ))
+        })?
+    } else {
+        braze_tui::Theme::default()
+    };
 
     // Constructed unconditionally (cheap) even for the plain path, where
     // it's simply never sent into a `ChannelConfirmationPrompt` and
@@ -423,6 +444,7 @@ async fn run() -> Result<(), CliError> {
                 std::sync::Arc::clone(&store),
                 approval_rx,
                 status_line,
+                tui_theme,
             )
             .await?;
         }
