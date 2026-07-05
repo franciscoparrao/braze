@@ -50,7 +50,7 @@ Es explícitamente un **ejercicio de experimentación**, no un compromiso de pro
 
 ### Diferido a Fase 2 (explícitamente fuera del MVP)
 
-`braze-sandbox-linux` (Landlock/seccomp), sandboxing multi-OS, `braze-otel` (export OTLP), `braze-skills` (paquetes de capacidades cargables), `braze-agent-graph` (multi-agente/grafo de threads), `braze-tui` (interfaz de pantalla completa — MVP es CLI de línea), `braze-hooks` (sistema de hooks plugueable — los puntos de hook del MVP van hardcodeados en `braze-engine`).
+`braze-sandbox-linux` (Landlock/seccomp), sandboxing multi-OS, `braze-otel` (export OTLP), `braze-skills` (paquetes de capacidades cargables), `braze-agent-graph` (multi-agente/grafo de threads), `braze-tui` (diseñado el 2026-07-05, ver § "Fase TUI — diseño" — MVP es CLI de línea), `braze-hooks` (sistema de hooks plugueable — los puntos de hook del MVP van hardcodeados en `braze-engine`).
 
 ### Grafo de dependencias
 
@@ -382,6 +382,214 @@ Implementa los 4 ítems concretos de `docs/AUDITORIA-2026-07.md` § "Grupo G —
 **Verificación**: `cargo build --workspace`, `cargo test --workspace` (344 tests + 1 doctest, todos verdes), `cargo clippy --workspace --all-targets -- -D warnings` (limpio). Verificación manual en vivo contra `openrouter:deepseek/deepseek-v4-flash` real con `RUST_LOG=braze_engine=debug`: confirmado el span `turn{session=...}` envolviendo cada línea del turno, `round completed round=0 n_tool_calls=1` seguido de `dispatching tool call tool=read_file id=...` y `tool call completed tool_call_id=... is_error=false` en un turno con una tool call real, y `round completed round=0 n_tool_calls=0` en un turno sin tool calls — sin fugar el texto del usuario en ningún campo del span.
 
 **Decisiones de diseño no completamente especificadas de antemano**: (1) A9 no agregó spans anidados por ronda/tool-call (una lectura literal de "spans por turno/ronda/tool-call" del resumen del Grupo G) — el detalle completo del hallazgo A9 en la auditoría pide explícitamente `info_span!("turn", %session)` (uno solo, por turno) más `debug!(round, n_tool_calls)`/`warn!` como líneas de log con campos, no spans anidados adicionales; anidar un span por ronda habría requerido extraer el cuerpo del loop a un método aparte (dado que mantener un `Span::enter()` a través de puntos `.await` en un runtime multi-hilo es el anti-patrón que la propia documentación de `tracing` advierte) — refactor de alcance mayor no justificado por lo que A9 realmente pedía. (2) El ítem 5 del grupo ("tests de edge cases A15/C16/D12/E7/F") se dejó fuera deliberadamente — cada hallazgo referenciado pertenece a un área temática distinta (permisos, MCP, robustez de red, etc.) sin relación directa con observabilidad, y closearlos de forma apropiada requeriría releer cada auditoría de área por separado en vez de ser una extensión natural de A9/C9/C10/C11.
+
+## Fase TUI — diseño (2026-07-05)
+
+Saca `braze-tui` de la lista de diferidos de Fase 2 y lo diseña como el
+siguiente incremento mayor. Basado en la investigación comparativa de las
+TUIs de Codex CLI (ratatui), Gemini CLI (fork de Ink) y opencode
+(Bubbletea→OpenTUI) — ver `docs/TUI-INVESTIGACION-2026-07.md` para los
+cuatro informes completos y las fuentes. **Aún no implementado.**
+
+### Decisiones fundamentales (las tres convergencias de la investigación)
+
+1. **Inline viewport + scrollback nativo, NO alternate screen.** La TUI
+   ocupa solo N filas al fondo del terminal (celda activa + composer +
+   status); el historial finalizado se escribe **una sola vez** al
+   scrollback nativo vía `Terminal::insert_before` con la feature
+   `scrolling-regions` de ratatui (imprescindible: sin ella,
+   `insert_before` con streaming produce el flickering documentado en
+   ratatui#584). El usuario conserva scroll/selección/copy nativos. Costo
+   de render O(viewport), no O(historial). Los tres proyectos
+   investigados convergieron en este patrón (Codex lo implementa a mano
+   con escapes ANSI — esa es nuestra ruta de madurez si el
+   resize/wrapping duele, no el punto de partida).
+2. **Streaming committeado por fronteras semánticas, no por token.** Los
+   deltas se acumulan en una celda activa mutable dentro del viewport;
+   solo se "sellan" líneas completas al scrollback (commit newline-gated,
+   patrón `MarkdownStreamCollector` de Codex). Nunca se redibuja por
+   token: un `FrameRequester` con canal de capacidad 1 coalesce los
+   redraws (los requests intermedios se dropean).
+3. **La TUI es consumidor puro de eventos del engine.** Nunca llama al
+   engine sincrónicamente ni mantiene estado agéntico propio — solo
+   estado de UI. El corte ya existe en braze (`braze-engine` emite
+   `AgentEvent` al store); lo único que falta es exponerlo **en vivo**
+   (hoy solo se persiste), ver la costura `TurnObserver` abajo.
+
+### Cambio previo en `braze-engine`: la costura `TurnObserver`
+
+`Engine::run_turn` hoy expone `on_text: &mut dyn FnMut(&str)` — un canal
+de deltas de texto y nada más. La TUI necesita el ciclo de vida completo
+del turno en vivo (tool call despachada/completada, compactación, usage).
+Generalización mínima:
+
+```rust
+// braze-engine (o braze-events): trait con defaults no-op
+pub trait TurnObserver: Send {
+    fn on_text_delta(&mut self, delta: &str) {}
+    fn on_event(&mut self, event: &AgentEvent) {}   // espejo en vivo de cada append al store
+}
+```
+
+- `run_turn` cambia `on_text: &mut dyn FnMut(&str)` →
+  `observer: &mut dyn TurnObserver`. `on_event` se invoca en los mismos
+  puntos donde hoy se hace `store.append(...)` (espejo, no reemplazo — la
+  persistencia no cambia).
+- **No toca ningún contrato congelado** (`ToolProvider`, `ModelBackend`,
+  `SessionStore` quedan intactos; `AgentEvent` solo se *reusa* como
+  vocabulario del observer, sin variantes nuevas). Sí rompe la firma
+  pública de `run_turn` → actualizar `braze-cli` (adapter trivial que
+  imprime deltas, `on_event` no-op) y `braze-bench` en el mismo commit.
+- Alternativa considerada y descartada: decorator `TeeStore` sobre
+  `SessionStore` que reenvíe appends por canal — cubre los eventos pero
+  no los deltas de streaming (que no son `AgentEvent`), así que habría
+  que mantener `on_text` igual; dos mecanismos a medias en vez de una
+  costura explícita.
+
+### Crate nuevo: `braze-tui` (nivel 4; `braze-cli` pasa a nivel 5)
+
+Depende de: `engine`, `events`, `types`, `permissions`, `session`,
+`config`. Deps externas: `ratatui` 0.30 (feature `scrolling-regions`),
+`crossterm` (features `event-stream`, `bracketed-paste`), `tui-textarea`
+(composer), `tui-markdown` (render markdown), `tokio`, `tracing`, `insta`
+(dev, snapshot tests).
+
+Estructura (archivo-por-módulo, convención del workspace):
+
+- `app.rs` — loop `tokio::select!` sobre {`crossterm::EventStream`
+  (teclado/paste/resize), `mpsc::Receiver` del `TurnObserver` del turno
+  en curso, frame requests}. El turno corre en un `tokio::spawn` cuyo
+  `JoinHandle` guarda la app (habilita interrupción, ver abajo).
+- `history_cell.rs` — trait `HistoryCell` (render a `Vec<Line>` dado un
+  ancho) + celdas tipadas: `UserCell`, `AssistantMarkdownCell`,
+  `ToolCallCell` (máquina de estados: pending → running →
+  success/error, glifo y color por estado, output truncado a N líneas),
+  `PermissionCell`, `CompactionCell`. Las celdas guardan el **modelo**
+  (texto fuente), no líneas pre-wrappeadas — el wrap se hace al ancho
+  vigente en render.
+- `chat_widget.rs` — transcript: celdas finalizadas → `insert_before`
+  (batcheadas, flusheadas una vez por draw) + `active_cell` mutable en el
+  viewport.
+- `markdown_stream.rs` — colector de deltas con commit newline-gated:
+  `commit_ready_lines()` devuelve solo las líneas completas nuevas; la
+  cola parcial se re-renderiza en la celda activa. Los code blocks
+  abiertos se retienen hasta cerrar (lección de Gemini:
+  `findLastSafeSplitPoint` — nunca sellar dentro de un code block).
+- `composer.rs` — `tui-textarea`: Enter envía, Ctrl+J newline (Shift+Enter
+  vía Kitty keyboard protocol donde el terminal lo soporte —
+  `PushKeyboardEnhancementFlags` de crossterm), Up/Down historial de
+  input, Ctrl+C/Ctrl+D salida con doble-tap.
+- `approval.rs` — `ChannelConfirmationPrompt`: implementa
+  `braze_permissions::ConfirmationPrompt` enviando
+  `(ActionDescriptor, oneshot::Sender<bool>)` por canal a la app y
+  esperando la respuesta. La app lo renderiza como overlay en el bottom
+  pane (reemplaza al composer mientras está pendiente, como
+  `DialogManager` de Gemini): `y` permitir, `n`/`Esc` denegar. Reusa la
+  persistencia `PermissionRequested`/`PermissionDecided` que ya hace
+  `TerminalConfirmationPrompt` (extraer esa lógica compartida o
+  duplicarla mínimamente — decidir en implementación). **El overlay
+  muestra el nivel de riesgo y la razón de la clasificación** que
+  `PermissionGuard`/el clasificador ya computan (Grupo 2), no solo el
+  comando pelado — la literatura de confianza calibrada (ver anexo
+  académico de `docs/TUI-INVESTIGACION-2026-07.md`) y la práctica de los
+  tres proyectos de referencia coinciden en mostrar el porqué.
+- `status_bar.rs` — línea inferior: backend/modelo, id de sesión, tokens
+  acumulados (de `AgentEvent::Usage`), spinner cuando hay turno corriendo.
+- `frame.rs` — `FrameRequester` (canal capacidad 1) + draw envuelto en
+  synchronized update (BSU/ESU) de crossterm.
+
+**Interrupción con Esc**: abortar el `JoinHandle` del turno. Es seguro
+gracias a la reparación de tool calls colgantes que `braze-engine` ya
+hace al cargar la sesión (el repair de `AssistantToolCall` sin
+`ToolCallCompleted` existente desde el Grupo 3) — un turno abortado a
+mitad de dispatch deja el log en un estado que el próximo turno ya sabe
+reparar.
+
+### Integración con `braze-cli`
+
+`braze chat --tui` opt-in en este incremento; el chat plano actual queda
+como default. Promover la TUI a default (con `--plain` como escape y
+fallback automático cuando stdout no es TTY) se decide **después** de la
+verificación manual, como incremento separado. `braze run` no cambia
+(one-shot, sin TUI). `braze-bench` no cambia (usa el adapter no-op).
+
+### Alcance del MVP de la fase
+
+**Incluido**: viewport inline + `insert_before` de stock; streaming con
+commit por líneas; las 5 celdas tipadas; composer multi-línea con
+historial; approval overlay; interrupción con Esc; status bar; snapshot
+tests `insta` de las celdas (render a buffer con ancho fijo — los dos
+proyectos de referencia tratan los snapshot tests de UI como
+imprescindibles).
+
+**Incluido además, por el ángulo académico** (ver anexo OpenAlex en
+`docs/TUI-INVESTIGACION-2026-07.md`):
+
+- **Recibo de turno** (`TurnSummaryCell`): al cerrar cada turno, una
+  celda compacta con qué archivos se tocaron y qué comandos se corrieron
+  (derivable de los `ToolCallCompleted` del turno, sin costo de modelo).
+  La evidencia (UIST 2024, CHI 2024 sobre carga metacognitiva) dice que
+  el cuello de botella del usuario es *verificar*, no leer el stream.
+- **Notificaciones de background no modales**: las completions de
+  `TaskNotifier` se muestran como cambio de status/toast, nunca robando
+  foco del composer — se materializan en fronteras seguras (estudio de
+  campo 2026 sobre receptividad a IA proactiva).
+- **Telemetría de UI vía `tracing`** (extensión natural del Grupo G):
+  tiempo hasta primer token, duración del approval overlay abierto,
+  turnos interrumpidos con Esc. Instrumenta los estados de interacción
+  donde se va el tiempo del usuario (taxonomía CUPS, CHI 2024).
+
+**Diferido (fase TUI 2)**: slash commands con popup, @-menciones de
+archivos, temas configurables, pager overlay del transcript completo
+(Ctrl+T), imágenes/clipboard, modo vim, inserción ANSI propia estilo
+Codex (`custom_terminal`), soporte especial Zellij, TUI como default,
+**celda de plan/todo editable antes de ejecutar** (descomposición
+interactiva de tareas — UIST 2024 — requiere soporte del engine para
+planes, no solo de la TUI) y **backtrack** (Esc-Esc para retroceder a un
+mensaje anterior y editarlo, como Codex).
+
+### Riesgos conocidos (aceptados para el MVP)
+
+- **Resize del viewport inline es el talón de Aquiles de ratatui**
+  (ratatui#984/#2086): resize horizontal puede corromper el render y el
+  texto ya insertado en el scrollback no re-wrappea. Aceptado — Codex
+  resuelve esto con re-flow propio del transcript; queda para fase TUI 2
+  si duele.
+- **`tui-markdown` puede quedar corto** para streaming (Codex terminó
+  escribiendo su markdown propio). Mitigación: `markdown_stream.rs` aísla
+  el colector del renderer — cambiar el renderer no toca el resto.
+- `insert_before` limitado a `u16::MAX` filas por inserción
+  (ratatui#1426) — irrelevante en la práctica con commits incrementales
+  por líneas.
+
+### Orden de implementación (oleadas)
+
+1. **COMPLETA (2026-07-05)** — Costura `TurnObserver` en `braze-engine` +
+   adaptación de `braze-cli` y `braze-bench` — workspace verde sin TUI
+   todavía. Implementación: el trait vive en `braze-events::observer`
+   (nivel 0, junto a `AgentEvent`, que es su vocabulario), con
+   `NoopObserver` (headless: bench, tests) y `TextDeltaObserver<F>`
+   (adapter que preserva la forma del viejo `on_text` para el chat plano)
+   incluidos. `Engine` ganó el helper privado `append_and_notify` (espejo
+   *después* del append exitoso — un frontend nunca puede mostrar un
+   evento que el rollout log no tiene) y el observer se threadea por
+   `run_turn` → `dispatch_tool_calls` / `load_messages` /
+   `repair_orphaned_tool_calls` / `attempt_final_summary_round`, cubriendo
+   los 12 sitios de persistencia (incluidos compactación y reparación de
+   huérfanos, que la TUI renderiza como celdas). Tests: 344 → 347 (2 de
+   los adapters en `braze-events`; 1 en `braze-engine` —
+   `the_observer_mirrors_every_persisted_event_in_order` — que verifica
+   contra el log persistido que el espejo ve exactamente los mismos
+   eventos, en el mismo orden, más los deltas). `cargo
+   build/test/clippy --workspace` verdes.
+2. Esqueleto `braze-tui`: loop `select!`, viewport inline, composer,
+   `UserCell` + texto plano del asistente streameando a la celda activa.
+3. `markdown_stream.rs` + `AssistantMarkdownCell` + `ToolCallCell` con
+   estados.
+4. `approval.rs` + interrupción con Esc + `status_bar.rs`.
+5. Snapshot tests `insta` + `cargo clippy -D warnings` + verificación
+   manual contra Ollama local y OpenRouter (streaming largo, tool calls
+   reales, denegación de permiso, resize suave).
 
 ## Archivos críticos
 

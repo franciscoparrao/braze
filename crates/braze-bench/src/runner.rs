@@ -110,7 +110,7 @@ pub async fn run_task(
     let started = Instant::now();
     let run_outcome = match tokio::time::timeout(
         timeout,
-        engine.run_turn(&session, &task.prompt, &mut |_text| {}),
+        engine.run_turn(&session, &task.prompt, &mut braze_events::NoopObserver),
     )
     .await
     {

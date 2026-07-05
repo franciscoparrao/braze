@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 
-use braze_events::{AgentEvent, BackgroundTask, TaskHandle, TaskNotifier};
+use braze_events::{AgentEvent, BackgroundTask, TaskHandle, TaskNotifier, TurnObserver};
 use braze_model::{CompletionEvent, CompletionRequest, ModelBackend};
 use braze_session::{ContextCompactor, DurableState, SessionError, SessionStore};
 use braze_tools_core::ToolRegistry;
@@ -114,11 +114,32 @@ impl Engine {
         self
     }
 
+    /// Persists `event` to the session store and mirrors it into the
+    /// turn's [`TurnObserver`] — the live seam frontends consume (see
+    /// PLAN.md § "Fase TUI — diseño"). Persistence stays the source of
+    /// truth: the observer is only notified *after* a successful append,
+    /// so a frontend can never display an event the rollout log doesn't
+    /// have.
+    async fn append_and_notify(
+        &self,
+        session: &SessionId,
+        event: &AgentEvent,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<(), EngineError> {
+        self.store.append(session, event).await?;
+        observer.on_event(event);
+        Ok(())
+    }
+
     /// Runs one complete turn: append the user's message, then loop
     /// model-completion <-> tool-dispatch rounds until the model responds
     /// with text and no further tool calls (or the safety cap is hit).
-    /// `on_text` is invoked with each text fragment as it streams in, for
-    /// real-time display by the caller (CLI/TUI/etc).
+    /// `observer` receives each text fragment as it streams in
+    /// ([`TurnObserver::on_text_delta`]) plus a live mirror of every
+    /// [`AgentEvent`] persisted during the turn
+    /// ([`TurnObserver::on_event`]) — the seam a frontend (plain CLI
+    /// today, `braze-tui` next) renders from. Headless callers pass
+    /// [`braze_events::NoopObserver`].
     ///
     /// A9 (docs/AUDITORIA-2026-07.md): `#[instrument]` wraps the whole
     /// call in an `info_span!`-equivalent "turn" span carrying `session`,
@@ -129,23 +150,23 @@ impl Engine {
     /// `RUST_LOG=debug` was previously impossible; this is what makes it
     /// possible without threading `session` through every log call by
     /// hand.
-    #[tracing::instrument(name = "turn", skip(self, user_input, on_text), fields(session = %session))]
+    #[tracing::instrument(name = "turn", skip(self, user_input, observer), fields(session = %session))]
     pub async fn run_turn(
         &self,
         session: &SessionId,
         user_input: &str,
-        on_text: &mut dyn FnMut(&str),
+        observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
-        self.store
-            .append(
-                session,
-                &AgentEvent::UserMessage {
-                    text: user_input.to_string(),
-                },
-            )
-            .await?;
+        self.append_and_notify(
+            session,
+            &AgentEvent::UserMessage {
+                text: user_input.to_string(),
+            },
+            observer,
+        )
+        .await?;
 
-        let mut messages = self.load_messages(session).await?;
+        let mut messages = self.load_messages(session, observer).await?;
 
         // Per-turn, per-tool-name retry counter for the "one round of
         // repair context" mechanism in `dispatch_tool_calls` below. Lives
@@ -180,7 +201,7 @@ impl Engine {
             while let Some(event) = stream.next().await {
                 match event {
                     Ok(CompletionEvent::TextDelta(delta)) => {
-                        on_text(&delta);
+                        observer.on_text_delta(&delta);
                         text_buffer.push_str(&delta);
                     }
                     Ok(CompletionEvent::ToolCallRequested {
@@ -260,16 +281,16 @@ impl Engine {
             // matter: it's audit-only and never rendered into a `Message`
             // (see `history::event_to_message`).
             if let Some((input_tokens, output_tokens, stop_reason)) = usage {
-                self.store
-                    .append(
-                        session,
-                        &AgentEvent::Usage {
-                            input_tokens,
-                            output_tokens,
-                            stop_reason,
-                        },
-                    )
-                    .await?;
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::Usage {
+                        input_tokens,
+                        output_tokens,
+                        stop_reason,
+                    },
+                    observer,
+                )
+                .await?;
             }
 
             // Fallback for models that don't emit a structured tool call —
@@ -299,9 +320,12 @@ impl Engine {
             if tool_calls.is_empty() {
                 // Final response: no further tool calls requested.
                 if !text_buffer.is_empty() {
-                    self.store
-                        .append(session, &AgentEvent::AssistantText { text: text_buffer })
-                        .await?;
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::AssistantText { text: text_buffer },
+                        observer,
+                    )
+                    .await?;
                 }
                 return Ok(());
             }
@@ -310,9 +334,12 @@ impl Engine {
             // first, preserving the order the model actually produced it
             // in, before the tool_use blocks that followed it.
             if !text_buffer.is_empty() {
-                self.store
-                    .append(session, &AgentEvent::AssistantText { text: text_buffer })
-                    .await?;
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::AssistantText { text: text_buffer },
+                    observer,
+                )
+                .await?;
             }
 
             self.dispatch_tool_calls(
@@ -321,13 +348,14 @@ impl Engine {
                 &tool_stubs,
                 &mut schema_retry_counts,
                 &mut seen_calls,
+                observer,
             )
             .await?;
 
-            messages = self.load_messages(session).await?;
+            messages = self.load_messages(session, observer).await?;
         }
 
-        self.attempt_final_summary_round(session, &messages, on_text)
+        self.attempt_final_summary_round(session, &messages, observer)
             .await
     }
 
@@ -345,7 +373,7 @@ impl Engine {
         &self,
         session: &SessionId,
         messages: &[Message],
-        on_text: &mut dyn FnMut(&str),
+        observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
         tracing::warn!(
             max_iterations = MAX_TURN_ITERATIONS,
@@ -374,7 +402,7 @@ impl Engine {
         while let Some(event) = stream.next().await {
             match event {
                 Ok(CompletionEvent::TextDelta(delta)) => {
-                    on_text(&delta);
+                    observer.on_text_delta(&delta);
                     text_buffer.push_str(&delta);
                 }
                 Ok(CompletionEvent::Done) => {
@@ -392,9 +420,12 @@ impl Engine {
         }
 
         if saw_done && !text_buffer.is_empty() {
-            self.store
-                .append(session, &AgentEvent::AssistantText { text: text_buffer })
-                .await?;
+            self.append_and_notify(
+                session,
+                &AgentEvent::AssistantText { text: text_buffer },
+                observer,
+            )
+            .await?;
             return Ok(());
         }
 
@@ -412,21 +443,22 @@ impl Engine {
         available_tools: &[ToolStub],
         retry_counts: &mut HashMap<String, u32>,
         seen_calls: &mut HashSet<(String, String)>,
+        observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
         let mut handle_to_id: HashMap<TaskHandle, String> = HashMap::new();
         let mut pending: HashSet<TaskHandle> = HashSet::new();
 
         for call in tool_calls {
-            self.store
-                .append(
-                    session,
-                    &AgentEvent::AssistantToolCall {
-                        id: call.id.clone(),
-                        name: call.name.clone(),
-                        arguments: call.arguments.clone(),
-                    },
-                )
-                .await?;
+            self.append_and_notify(
+                session,
+                &AgentEvent::AssistantToolCall {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: call.arguments.clone(),
+                },
+                observer,
+            )
+            .await?;
 
             // Exact repeat of a (name, arguments) pair already dispatched
             // earlier in this same turn — the dominant non-convergence
@@ -444,26 +476,26 @@ impl Engine {
                     tool = %call.name,
                     "model repeated an identical tool call this turn; nudging instead of re-dispatching"
                 );
-                self.store
-                    .append(
-                        session,
-                        &AgentEvent::ToolCallCompleted {
-                            id: call.id.clone(),
-                            result: ToolResult {
-                                tool_call_id: call.id.clone(),
-                                content: format!(
-                                    "You already called '{}' with these exact arguments \
-                                     earlier in this turn — the result has not changed. Do \
-                                     not repeat this call; either use the result you already \
-                                     have, or respond to the user with text instead of \
-                                     calling a tool.",
-                                    call.name
-                                ),
-                                is_error: true,
-                            },
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result: ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: format!(
+                                "You already called '{}' with these exact arguments \
+                                 earlier in this turn — the result has not changed. Do \
+                                 not repeat this call; either use the result you already \
+                                 have, or respond to the user with text instead of \
+                                 calling a tool.",
+                                call.name
+                            ),
+                            is_error: true,
                         },
-                    )
-                    .await?;
+                    },
+                    observer,
+                )
+                .await?;
                 continue;
             }
 
@@ -519,19 +551,19 @@ impl Engine {
                             "tool call arguments failed schema validation before dispatch"
                         );
 
-                        self.store
-                            .append(
-                                session,
-                                &AgentEvent::ToolCallCompleted {
-                                    id: call.id.clone(),
-                                    result: ToolResult {
-                                        tool_call_id: call.id.clone(),
-                                        content: repair_message,
-                                        is_error: true,
-                                    },
+                        self.append_and_notify(
+                            session,
+                            &AgentEvent::ToolCallCompleted {
+                                id: call.id.clone(),
+                                result: ToolResult {
+                                    tool_call_id: call.id.clone(),
+                                    content: repair_message,
+                                    is_error: true,
                                 },
-                            )
-                            .await?;
+                            },
+                            observer,
+                        )
+                        .await?;
 
                         continue;
                     }
@@ -553,23 +585,23 @@ impl Engine {
                         tool = %call.name,
                         "no provider advertises this tool; not dispatching"
                     );
-                    self.store
-                        .append(
-                            session,
-                            &AgentEvent::ToolCallCompleted {
-                                id: call.id.clone(),
-                                result: ToolResult {
-                                    tool_call_id: call.id.clone(),
-                                    content: format!(
-                                        "Unknown tool '{}'. Available tools are: {available}. \
-                                         Retry using one of these exact names.",
-                                        call.name
-                                    ),
-                                    is_error: true,
-                                },
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::ToolCallCompleted {
+                            id: call.id.clone(),
+                            result: ToolResult {
+                                tool_call_id: call.id.clone(),
+                                content: format!(
+                                    "Unknown tool '{}'. Available tools are: {available}. \
+                                     Retry using one of these exact names.",
+                                    call.name
+                                ),
+                                is_error: true,
                             },
-                        )
-                        .await?;
+                        },
+                        observer,
+                    )
+                    .await?;
                     continue;
                 }
                 Err(err) => {
@@ -588,16 +620,16 @@ impl Engine {
             // turn showed no tool-call activity whatsoever.
             tracing::debug!(tool = %call.name, id = %call.id, "dispatching tool call");
 
-            self.store
-                .append(
-                    session,
-                    &AgentEvent::ToolCallStarted {
-                        id: call.id.clone(),
-                        name: call.name.clone(),
-                        background: true,
-                    },
-                )
-                .await?;
+            self.append_and_notify(
+                session,
+                &AgentEvent::ToolCallStarted {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    background: true,
+                },
+                observer,
+            )
+            .await?;
 
             let tools = Arc::clone(&self.tools);
             let call_owned = call.clone();
@@ -656,9 +688,12 @@ impl Engine {
                         is_error = result.is_error,
                         "tool call completed"
                     );
-                    self.store
-                        .append(session, &AgentEvent::ToolCallCompleted { id, result })
-                        .await?;
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::ToolCallCompleted { id, result },
+                        observer,
+                    )
+                    .await?;
                 }
                 None => {
                     tracing::error!(
@@ -668,20 +703,20 @@ impl Engine {
                     );
                     for handle in pending.drain() {
                         let id = handle_to_id.remove(&handle).unwrap_or_default();
-                        self.store
-                            .append(
-                                session,
-                                &AgentEvent::ToolCallCompleted {
-                                    id: id.clone(),
-                                    result: ToolResult {
-                                        tool_call_id: id,
-                                        content: "tool call timed out waiting for completion"
-                                            .to_string(),
-                                        is_error: true,
-                                    },
+                        self.append_and_notify(
+                            session,
+                            &AgentEvent::ToolCallCompleted {
+                                id: id.clone(),
+                                result: ToolResult {
+                                    tool_call_id: id,
+                                    content: "tool call timed out waiting for completion"
+                                        .to_string(),
+                                    is_error: true,
                                 },
-                            )
-                            .await?;
+                            },
+                            observer,
+                        )
+                        .await?;
                     }
                 }
             }
@@ -714,14 +749,18 @@ impl Engine {
     /// two-word "ok" — so a caller targeting a small, fixed context
     /// window (e.g. Ollama's `num_ctx`) should also set
     /// `context_budget_tokens` via [`Engine::with_context_budget`].
-    async fn load_messages(&self, session: &SessionId) -> Result<Vec<Message>, EngineError> {
+    async fn load_messages(
+        &self,
+        session: &SessionId,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<Vec<Message>, EngineError> {
         let mut events = match self.store.load(session).await {
             Ok(events) => events,
             Err(SessionError::NotFound(_)) => Vec::new(),
             Err(err) => return Err(err.into()),
         };
 
-        self.repair_orphaned_tool_calls(session, &mut events)
+        self.repair_orphaned_tool_calls(session, &mut events, observer)
             .await?;
 
         let (durable, tactical) = self.compactor.split(&events);
@@ -750,15 +789,15 @@ impl Engine {
             let summary = self.compactor.compact_tactical(&tactical)?;
             let dropped_tokens_estimate = estimate_dropped_tokens(&tactical);
 
-            self.store
-                .append(
-                    session,
-                    &AgentEvent::CompactionOccurred {
-                        summary: summary.clone(),
-                        dropped_tokens_estimate,
-                    },
-                )
-                .await?;
+            self.append_and_notify(
+                session,
+                &AgentEvent::CompactionOccurred {
+                    summary: summary.clone(),
+                    dropped_tokens_estimate,
+                },
+                observer,
+            )
+            .await?;
 
             let effective_durable = merge_summary(durable, summary);
             let keep = KEEP_RAW_TAIL.min(tactical.len());
@@ -788,6 +827,7 @@ impl Engine {
         &self,
         session: &SessionId,
         events: &mut Vec<AgentEvent>,
+        observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
         let completed_ids: HashSet<String> = events
             .iter()
@@ -824,7 +864,7 @@ impl Engine {
                     is_error: true,
                 },
             };
-            self.store.append(session, &repair).await?;
+            self.append_and_notify(session, &repair, observer).await?;
             events.push(repair);
         }
 
@@ -908,6 +948,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
     use async_trait::async_trait;
+    use braze_events::{NoopObserver, TextDeltaObserver};
     use braze_model::ModelError;
     use braze_session::{FileSessionStore, SimpleContextCompactor};
     use braze_tools_core::{ToolError, ToolProvider, ToolSchema};
@@ -1131,7 +1172,7 @@ mod tests {
             1024,
         );
 
-        let result = engine.run_turn(&session, "hola", &mut |_| {}).await;
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
         assert!(
             matches!(result, Err(EngineError::Model(_))),
             "expected the stream error to propagate as EngineError::Model, got {result:?}"
@@ -1172,7 +1213,7 @@ mod tests {
 
         let mut streamed = String::new();
         engine
-            .run_turn(&session, "hola", &mut |chunk| streamed.push_str(chunk))
+            .run_turn(&session, "hola", &mut TextDeltaObserver(|chunk| streamed.push_str(chunk)))
             .await
             .expect("turn should succeed");
 
@@ -1213,7 +1254,7 @@ mod tests {
         );
 
         engine
-            .run_turn(&session, "hola", &mut |_| {})
+            .run_turn(&session, "hola", &mut NoopObserver)
             .await
             .expect("turn should succeed");
 
@@ -1273,9 +1314,11 @@ mod tests {
 
         let mut streamed = String::new();
         engine
-            .run_turn(&session, "please echo hi", &mut |chunk| {
-                streamed.push_str(chunk)
-            })
+            .run_turn(
+                &session,
+                "please echo hi",
+                &mut TextDeltaObserver(|chunk: &str| streamed.push_str(chunk)),
+            )
             .await
             .expect("turn should succeed");
 
@@ -1299,6 +1342,108 @@ mod tests {
             other => panic!("expected ToolCallCompleted, got {other:?}"),
         }
         assert!(matches!(events[4], AgentEvent::AssistantText { .. }));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Records everything the engine mirrors into it, for asserting the
+    /// live `TurnObserver` seam (PLAN.md § "Fase TUI — diseño", oleada 1)
+    /// sees exactly what gets persisted, in the same order.
+    struct RecordingObserver {
+        deltas: Vec<String>,
+        events: Vec<AgentEvent>,
+    }
+
+    impl TurnObserver for RecordingObserver {
+        fn on_text_delta(&mut self, delta: &str) {
+            self.deltas.push(delta.to_string());
+        }
+        fn on_event(&mut self, event: &AgentEvent) {
+            self.events.push(event.clone());
+        }
+    }
+
+    /// Variant name only — the mirror test cares about kind and order,
+    /// not payload equality.
+    fn event_kind(event: &AgentEvent) -> &'static str {
+        match event {
+            AgentEvent::UserMessage { .. } => "UserMessage",
+            AgentEvent::AssistantText { .. } => "AssistantText",
+            AgentEvent::AssistantToolCall { .. } => "AssistantToolCall",
+            AgentEvent::ToolCallStarted { .. } => "ToolCallStarted",
+            AgentEvent::ToolCallCompleted { .. } => "ToolCallCompleted",
+            AgentEvent::CompactionOccurred { .. } => "CompactionOccurred",
+            AgentEvent::Usage { .. } => "Usage",
+            _ => "Other",
+        }
+    }
+
+    /// The observer must receive a live mirror of every event the turn
+    /// persists, in persistence order, plus the raw text deltas — the
+    /// contract `braze-tui` will render from.
+    #[tokio::test]
+    async fn the_observer_mirrors_every_persisted_event_in_order() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("do".to_string()),
+                CompletionEvent::TextDelta("ne".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let mut observer = RecordingObserver {
+            deltas: Vec::new(),
+            events: Vec::new(),
+        };
+        engine
+            .run_turn(&session, "please echo hi", &mut observer)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(observer.deltas, vec!["do", "ne"]);
+
+        // The mirrored sequence must match the persisted log exactly —
+        // same kinds, same order, nothing extra and nothing missing.
+        let verify_store = FileSessionStore::new(dir.clone());
+        let persisted = verify_store.load(&session).await.expect("load events");
+        assert_eq!(
+            observer.events.iter().map(event_kind).collect::<Vec<_>>(),
+            persisted.iter().map(event_kind).collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            observer.events.iter().map(event_kind).collect::<Vec<_>>(),
+            vec![
+                "UserMessage",
+                "AssistantToolCall",
+                "ToolCallStarted",
+                "ToolCallCompleted",
+                "AssistantText",
+            ],
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -1350,7 +1495,7 @@ mod tests {
         );
 
         engine
-            .run_turn(&session, "please echo hi", &mut |_| {})
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
             .await
             .expect("turn should succeed");
 
@@ -1416,7 +1561,7 @@ mod tests {
         );
 
         engine
-            .run_turn(&session, "please echo hi", &mut |_| {})
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
             .await
             .expect("turn should succeed");
 
@@ -1503,7 +1648,7 @@ mod tests {
         );
 
         engine
-            .run_turn(&session, "please echo hi", &mut |_| {})
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
             .await
             .expect("turn should succeed");
 
@@ -1590,7 +1735,7 @@ mod tests {
         );
 
         engine
-            .run_turn(&session, "please echo hi twice", &mut |_| {})
+            .run_turn(&session, "please echo hi twice", &mut NoopObserver)
             .await
             .expect("turn should succeed");
 
@@ -1653,7 +1798,7 @@ mod tests {
         );
 
         engine
-            .run_turn(&session, "please read a file", &mut |_| {})
+            .run_turn(&session, "please read a file", &mut NoopObserver)
             .await
             .expect("turn should succeed");
 
@@ -1725,7 +1870,7 @@ mod tests {
 
         let mut streamed = String::new();
         engine
-            .run_turn(&session, "hola", &mut |chunk| streamed.push_str(chunk))
+            .run_turn(&session, "hola", &mut TextDeltaObserver(|chunk| streamed.push_str(chunk)))
             .await
             .expect("the turn should degrade gracefully instead of erroring");
 
@@ -1785,7 +1930,7 @@ mod tests {
         );
 
         let messages = engine
-            .load_messages(&session)
+            .load_messages(&session, &mut NoopObserver)
             .await
             .expect("load_messages should succeed");
 
@@ -1846,11 +1991,11 @@ mod tests {
         );
 
         engine
-            .load_messages(&session)
+            .load_messages(&session, &mut NoopObserver)
             .await
             .expect("first load_messages should repair the orphan");
         engine
-            .load_messages(&session)
+            .load_messages(&session, &mut NoopObserver)
             .await
             .expect("second load_messages should be a no-op repair-wise");
 
@@ -1915,7 +2060,7 @@ mod tests {
         );
 
         let messages = engine
-            .load_messages(&session)
+            .load_messages(&session, &mut NoopObserver)
             .await
             .expect("load_messages should succeed");
 
@@ -1982,7 +2127,7 @@ mod tests {
         .with_context_budget(1000); // ~4000 chars — the 20K-char event alone blows this.
 
         engine
-            .load_messages(&session)
+            .load_messages(&session, &mut NoopObserver)
             .await
             .expect("load_messages should succeed");
 
@@ -2028,7 +2173,7 @@ mod tests {
         );
 
         engine
-            .load_messages(&session)
+            .load_messages(&session, &mut NoopObserver)
             .await
             .expect("load_messages should succeed");
 
@@ -2152,7 +2297,7 @@ mod tests {
         );
 
         engine
-            .run_turn(&session, "please echo hi", &mut |_| {})
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
             .await
             .expect("turn should succeed");
 

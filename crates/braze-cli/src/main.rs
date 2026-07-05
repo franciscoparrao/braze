@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use tokio::io::AsyncBufReadExt;
 
-use braze_events::ChannelTaskNotifier;
+use braze_events::{ChannelTaskNotifier, TextDeltaObserver};
 use braze_types::SessionId;
 use cli_args::{Cli, Command};
 use error::CliError;
@@ -334,11 +334,15 @@ async fn run() -> Result<(), CliError> {
 
             let mut stdout = std::io::stdout();
             engine
-                .run_turn(&session, &prompt, &mut |text| {
-                    use std::io::Write;
-                    print!("{text}");
-                    let _ = stdout.flush();
-                })
+                .run_turn(
+                    &session,
+                    &prompt,
+                    &mut TextDeltaObserver(|text: &str| {
+                        use std::io::Write;
+                        print!("{text}");
+                        let _ = stdout.flush();
+                    }),
+                )
                 .await?;
             println!();
         }
@@ -365,11 +369,15 @@ async fn run() -> Result<(), CliError> {
 
                 let mut stdout = std::io::stdout();
                 let result = engine
-                    .run_turn(&session, trimmed, &mut |text| {
-                        use std::io::Write;
-                        print!("{text}");
-                        let _ = stdout.flush();
-                    })
+                    .run_turn(
+                        &session,
+                        trimmed,
+                        &mut TextDeltaObserver(|text: &str| {
+                            use std::io::Write;
+                            print!("{text}");
+                            let _ = stdout.flush();
+                        }),
+                    )
                     .await;
                 // A single failed turn (a transient backend error, the
                 // model exhausting its iteration cap, ...) must not kill

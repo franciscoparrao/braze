@@ -8,8 +8,10 @@ mod channel_notifier;
 mod error;
 mod event;
 mod notify;
+mod observer;
 
 pub use channel_notifier::ChannelTaskNotifier;
 pub use error::EventsError;
 pub use event::AgentEvent;
 pub use notify::{BackgroundTask, TaskHandle, TaskNotifier};
+pub use observer::{NoopObserver, TextDeltaObserver, TurnObserver};
