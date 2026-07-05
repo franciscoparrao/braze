@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditoría de braze — julio 2026</title>
+<style>
+  :root {
+    --bg: #0f1116; --bg-soft: #171a21; --bg-card: #1c2029; --border: #2a2f3a;
+    --fg: #e6e8ec; --fg-dim: #9aa2b1; --fg-faint: #6b7280;
+    --accent: #6ea8fe; --accent-soft: #2b3a55;
+    --crit: #ff6b6b; --crit-bg: #2c1618;
+    --high: #ffa94d; --high-bg: #2c2113;
+    --med: #ffd43b; --med-bg: #2a2810;
+    --low: #74c0fc; --low-bg: #14212e;
+    --good: #51cf66; --good-bg: #13251a;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f7f8fa; --bg-soft: #eef0f3; --bg-card: #ffffff; --border: #dfe3e9;
+      --fg: #1a1d23; --fg-dim: #55606f; --fg-faint: #8b95a3;
+      --accent: #1c6fd6; --accent-soft: #dbeafe;
+      --crit: #d63a3a; --crit-bg: #fdeaea;
+      --high: #d97a12; --high-bg: #fcf1e2;
+      --med: #b58900; --med-bg: #fbf6df;
+      --low: #1971c2; --low-bg: #e4f0fb;
+      --good: #2f9e44; --good-bg: #e6f4ea;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: var(--sans); line-height: 1.6; font-size: 16px;
+  }
+  .layout { display: flex; max-width: 1400px; margin: 0 auto; }
+  /* Sidebar */
+  nav.toc {
+    position: sticky; top: 0; align-self: flex-start; height: 100vh;
+    width: 280px; flex-shrink: 0; overflow-y: auto; padding: 24px 16px 48px;
+    border-right: 1px solid var(--border); background: var(--bg-soft);
+    font-size: 13.5px;
+  }
+  nav.toc h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--fg-faint); margin: 20px 0 8px; }
+  nav.toc a { display: block; color: var(--fg-dim); text-decoration: none;
+    padding: 3px 8px; border-radius: 6px; border-left: 2px solid transparent; }
+  nav.toc a:hover { color: var(--fg); background: var(--bg-card); }
+  nav.toc a.sub { padding-left: 18px; font-size: 12.5px; color: var(--fg-faint); }
+  nav.toc .brand { font-weight: 700; font-size: 15px; color: var(--fg); margin-bottom: 2px; }
+  nav.toc .brand span { color: var(--accent); }
+  /* Main */
+  main { flex: 1; min-width: 0; padding: 40px 48px 120px; max-width: 900px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -.01em; }
+  .subtitle { color: var(--fg-dim); font-size: 15px; margin-bottom: 4px; }
+  .meta-line { color: var(--fg-faint); font-size: 13px; font-family: var(--mono); margin-bottom: 28px; }
+  h2 { font-size: 22px; margin: 44px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border); scroll-margin-top: 20px; letter-spacing: -.01em; }
+  h3 { font-size: 15px; margin: 28px 0 10px; scroll-margin-top: 20px; }
+  h4 { font-size: 13.5px; color: var(--fg-dim); margin: 20px 0 8px; text-transform: uppercase; letter-spacing: .05em; }
+  p { margin: 10px 0; }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: .88em; background: var(--bg-soft);
+    padding: 1.5px 5px; border-radius: 4px; border: 1px solid var(--border); }
+  pre { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px;
+    line-height: 1.5; margin: 14px 0; }
+  pre code { background: none; border: none; padding: 0; }
+  blockquote { margin: 14px 0; padding: 10px 16px; border-left: 3px solid var(--accent);
+    background: var(--accent-soft); border-radius: 0 8px 8px 0; color: var(--fg);
+    font-size: 14.5px; }
+  blockquote strong { color: var(--accent); }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  /* Callout / hero */
+  .hero { background: linear-gradient(135deg, var(--bg-card), var(--bg-soft));
+    border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; margin: 24px 0; }
+  .hero h3 { margin-top: 0; color: var(--accent); font-size: 16px; }
+  /* Finding cards */
+  .finding { background: var(--bg-card); border: 1px solid var(--border);
+    border-left-width: 4px; border-radius: 8px; padding: 16px 18px; margin: 16px 0; scroll-margin-top: 20px; }
+  .finding.crit { border-left-color: var(--crit); }
+  .finding.high { border-left-color: var(--high); }
+  .finding.med { border-left-color: var(--med); }
+  .finding .fid { font-family: var(--mono); font-weight: 700; font-size: 14px; }
+  .finding .ftitle { font-weight: 600; }
+  .finding .loc { font-family: var(--mono); font-size: 12px; color: var(--fg-faint);
+    margin: 4px 0 10px; word-break: break-all; }
+  .finding p { font-size: 14.5px; margin: 8px 0; }
+  .fix { font-size: 13px; }
+  /* badges */
+  .badge { display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; padding: 2px 8px; border-radius: 20px; vertical-align: middle;
+    margin-right: 8px; }
+  .b-crit { background: var(--crit-bg); color: var(--crit); }
+  .b-high { background: var(--high-bg); color: var(--high); }
+  .b-med { background: var(--med-bg); color: var(--med); }
+  .b-low { background: var(--low-bg); color: var(--low); }
+  .b-good { background: var(--good-bg); color: var(--good); }
+  /* tables */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--fg-dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:hover td { background: var(--bg-soft); }
+  td code { font-size: 12px; }
+  /* stat grid */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }
+  .stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; text-align: center; }
+  .stat .n { font-size: 30px; font-weight: 800; line-height: 1; font-family: var(--mono); }
+  .stat.crit .n { color: var(--crit); } .stat.high .n { color: var(--high); }
+  .stat.med .n { color: var(--med); } .stat.low .n { color: var(--low); }
+  .stat .l { font-size: 11.5px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: .05em; margin-top: 6px; }
+  /* misc */
+  .tag { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 4px;
+    background: var(--bg-soft); border: 1px solid var(--border); color: var(--fg-dim); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
+  .pill-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  details { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 4px 16px; margin: 12px 0; }
+  details summary { cursor: pointer; padding: 10px 0; font-weight: 600; font-size: 14.5px; }
+  details[open] summary { border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+  .muted { color: var(--fg-dim); }
+  @media (max-width: 900px) {
+    nav.toc { display: none; }
+    main { padding: 24px 18px 80px; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+  <div class="brand"><span>braze</span> · auditoría</div>
+  <div class="muted" style="font-size:12px;">julio 2026 · commit 4ca193a</div>
+  <h2>Secciones</h2>
+  <a href="#metodo">0 · Cómo se hizo</a>
+  <a href="#resumen">1 · Resumen ejecutivo</a>
+  <a href="#raiz" class="sub">→ Por qué no convergen</a>
+  <a href="#top5" class="sub">→ Los 5 primeros fixes</a>
+  <a href="#criticos">2 · Hallazgos críticos</a>
+  <a href="#c-contexto" class="sub">Tubería de contexto</a>
+  <a href="#c-seg" class="sub">Seguridad</a>
+  <a href="#c-hist" class="sub">Corrección del historial</a>
+  <a href="#c-bench" class="sub">Bench inválido</a>
+  <a href="#altos">3 · Hallazgos altos</a>
+  <a href="#medios">4 · Medios y bajos</a>
+  <a href="#fortalezas">5 · Fortalezas</a>
+  <a href="#sota">6 · Estado del arte</a>
+  <a href="#roadmap">7 · Roadmap</a>
+  <a href="#sweep">8 · El sweep pendiente</a>
+</nav>
+
+<main>
+  <h1>Auditoría completa de <span style="color:var(--accent)">braze</span></h1>
+  <div class="subtitle">Camino para convertirlo en el mejor software agéntico para modelos pequeños locales</div>
+  <div class="meta-line">2026-07-04 · commit 4ca193a · 12 crates · ~11k líneas Rust · 7 auditorías paralelas + literatura</div>
+
+  <div class="hero">
+    <h3>El hallazgo transversal</h3>
+    <p style="margin-bottom:0">El síntoma que motivó el proyecto —<em>"los modelos pequeños no convergen y agotan las 20 iteraciones"</em>— <strong>no es debilidad del modelo: es la tubería de contexto de braze borrándole el suelo bajo los pies.</strong> Cuatro auditores independientes convergieron en la misma cadena causal, y la literatura de 2026 la confirma. Ninguno de los cuatro eslabones es del modelo.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat crit"><div class="n">12</div><div class="l">Críticos</div></div>
+    <div class="stat high"><div class="n">14</div><div class="l">Altos</div></div>
+    <div class="stat med"><div class="n">16</div><div class="l">Medios</div></div>
+    <div class="stat low"><div class="n">13</div><div class="l">Bajos</div></div>
+  </div>
+
+  <h2 id="metodo">0 · Cómo se hizo esta auditoría</h2>
+  <p>Se lanzaron <strong>siete auditorías independientes en paralelo</strong>, cada una con una lente distinta y sin ver el trabajo de las demás, más una revisión de literatura. Que hallazgos idénticos aparezcan en informes independientes es señal fuerte de que el problema es real y no un artefacto de una sola lectura.</p>
+  <table>
+    <thead><tr><th>#</th><th>Alcance</th><th>Crates</th></tr></thead>
+    <tbody>
+      <tr><td>A</td><td>Loop agéntico</td><td><code>braze-engine</code>, <code>braze-cli</code></td></tr>
+      <tr><td>B</td><td>Backends de modelo</td><td><code>braze-model</code></td></tr>
+      <tr><td>C</td><td>Sesión y compactación</td><td><code>braze-session</code>, <code>braze-events</code>, <code>braze-types</code></td></tr>
+      <tr><td>D</td><td>Tools y cliente MCP</td><td><code>braze-tools-core</code>, <code>braze-tools-local</code>, <code>braze-mcp-client</code></td></tr>
+      <tr><td>E</td><td>Permisos, config, CLI</td><td><code>braze-permissions</code>, <code>braze-config</code>, <code>braze-cli</code></td></tr>
+      <tr><td>F</td><td>Harness de evaluación</td><td><code>braze-bench</code></td></tr>
+      <tr><td>G</td><td>Estado del arte (web)</td><td>literatura + aider, goose, OpenHands, smolagents, nanocoder</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="resumen">1 · Resumen ejecutivo</h2>
+  <p><code>braze</code> es un MVP sólido y honesto: los contratos entre crates están bien diseñados, el diseño argv de las tools neutraliza la inyección de shell clásica, la carga diferida y el TTL de MCP están bien implementados, y la decisión de fondo —compactación diferencial determinística en vez de summarización con LLM— es <strong>exactamente la que la literatura de 2026 valida para modelos pequeños</strong>. El problema no es la arquitectura; son fallas de implementación concentradas en la tubería de contexto, más tres agujeros de seguridad puntuales.</p>
+
+  <h3 id="raiz">La cadena causal de la no-convergencia</h3>
+  <ol>
+    <li><strong>Ollama trunca el contexto en silencio.</strong> <code>braze-model</code> nunca envía <code>options.num_ctx</code>, así que Ollama usa su default (2048–4096 tokens) y <strong>descarta el inicio del prompt sin error</strong> — lo primero que se pierde es el system prompt y las tools. <span class="tag">B1 C3 F7</span></li>
+    <li><strong>La compactación borra el mensaje actual del usuario.</strong> Al cruzar el umbral, el prompt se construye con la ventana táctica <strong>vacía</strong>, reemplazada por un resumen que es puro conteo estadístico. <span class="tag">A1 C1</span></li>
+    <li><strong>La compactación no es idempotente.</strong> Los eventos huérfanos nunca salen de la táctica → se re-dispara en <strong>cada</strong> ronda, apilando digests duplicados en O(n²). "Modo compactación permanente". <span class="tag">A2 C2</span></li>
+    <li><strong>Sin tope de salida.</strong> <code>max_tokens</code> se ignora en Ollama → un loop de repetición genera sin límite, minutos de CPU. <span class="tag">B2 F3</span></li>
+  </ol>
+  <p>El resultado es un círculo vicioso: el modelo pierde contexto → repite tool calls → engorda el log → dispara más compactación → pierde más contexto. Arreglar esta tubería es la intervención de mayor impacto, y la mayoría son cambios pequeños y aditivos.</p>
+
+  <h3 id="top5">Las cinco cosas que hay que arreglar primero</h3>
+  <ol>
+    <li><strong>Configurar <code>num_ctx</code> + <code>num_predict</code> en Ollama</strong> — media hora, elimina la causa raíz #1.</li>
+    <li><strong>Preservar la cola viva de la ventana táctica al compactar</strong> — nunca descartar el mensaje del usuario ni el turno en curso.</li>
+    <li><strong>Hacer idempotente la compactación</strong> — un cursor en <code>CompactionOccurred</code>.</li>
+    <li><strong>Cerrar los tres agujeros de seguridad</strong> (<code>glob -delete</code>, RememberKey de shell, <code>env</code> en allowlist) — todos permiten hoy destrucción de datos sin confirmación.</li>
+    <li><strong>Arreglar el sandbox de <code>braze-bench</code> antes de correr el sweep</strong> — tal como está escribe en tu repo real y mide artefactos, no capacidad del modelo.</li>
+  </ol>
+
+  <h2 id="criticos">2 · Hallazgos críticos</h2>
+
+  <h3 id="c-contexto">La tubería de contexto</h3>
+
+  <div class="finding crit" id="B1">
+    <div><span class="badge b-crit">crítica</span><span class="fid">B1</span> · <span class="ftitle">Ollama no configura <code>num_ctx</code> → truncamiento silencioso</span></div>
+    <div class="loc">crates/braze-model/src/ollama_wire.rs:24-31,72-93</div>
+    <p>El body a <code>/api/chat</code> no lleva <code>options</code>. Ollama usa su default (2048–4096) y <strong>trunca el prompt del lado del servidor sin error</strong>. Con qwen2.5:3b, al tercer round el system prompt y las tools desaparecen y el modelo deja de converger. <code>prompt_eval_count</code> saturando sería la pista, pero nadie la compara.</p>
+    <div class="fix"><pre><code>struct OllamaOptions { num_ctx: u32, num_predict: i32, temperature: f32 }
+// + si prompt_eval_count &gt;= num_ctx - margen: warn! + compactar</code></pre></div>
+    <blockquote><strong>G§4:</strong> aider exige <code>num_ctx</code> explícito y documenta el descarte silencioso; OpenHands exige ≥22000 "porque con 4096 ni siquiera cabe el system prompt".</blockquote>
+  </div>
+
+  <div class="finding crit" id="B2">
+    <div><span class="badge b-crit">crítica</span><span class="fid">B2</span> · <span class="ftitle"><code>max_tokens</code> se descarta en Ollama → loops sin tope</span></div>
+    <div class="loc">crates/braze-model/src/ollama_wire.rs:72-93</div>
+    <p>Anthropic honra <code>max_tokens</code>; Ollama lo ignora por completo (<code>num_predict</code> nunca se envía). Un llama3.2:1b en loop de repetición genera sin tope hasta el default del modelo — minutos de CPU quemada por turno. <em>Fix:</em> mapear <code>req.max_tokens → options.num_predict</code>.</p>
+  </div>
+
+  <div class="finding crit" id="A1">
+    <div><span class="badge b-crit">crítica</span><span class="fid">A1 / C1</span> · <span class="ftitle">La compactación descarta la ventana táctica viva, incluido el mensaje del usuario</span></div>
+    <div class="loc">crates/braze-engine/src/engine.rs:399-417 + simple_compactor.rs:146-206</div>
+    <p>Con <code>tactical.len() &gt; 40</code>, el prompt se construye con <code>build_messages(&amp;durable, &amp;[])</code> — táctica vacía. El <code>UserMessage</code> recién apendeado es el evento más nuevo, así que se pliega en un resumen de conteos. <strong>El texto de la pregunta del usuario nunca llega al modelo.</strong></p>
+    <div class="fix"><pre><code>let keep = KEEP_RAW_TAIL.min(tactical.len()); // 6-10
+let (to_fold, live) = tactical.split_at(tactical.len() - keep);
+let summary = self.compactor.compact_tactical(to_fold)?;
+Ok(build_messages(&amp;merge_summary(durable, summary), live))</code></pre></div>
+  </div>
+
+  <div class="finding crit" id="A2">
+    <div><span class="badge b-crit">crítica</span><span class="fid">A2 / C2</span> · <span class="ftitle">Compactación no idempotente → "modo permanente" O(n²)</span></div>
+    <div class="loc">crates/braze-session/src/simple_compactor.rs:68-83,111-144</div>
+    <p>Los huérfanos (<code>UserMessage</code>, <code>AssistantText</code>, <code>Usage</code>, <code>ToolCallStarted</code>) nunca salen de la táctica. Cruzado el umbral, la compactación se re-dispara en <strong>cada</strong> ronda, apila un <code>CompactionOccurred</code> nuevo cada vez, y el summary se vuelve decenas de digests casi idénticos enviados en cada request. <em>Fix:</em> contar solo eventos renderizables + <code>CompactionOccurred { covers_up_to_index }</code> (aditivo) que <code>split</code> use para descartar lo ya resumido; conservar solo el último summary.</p>
+  </div>
+
+  <div class="finding crit" id="C3">
+    <div><span class="badge b-crit">crítica</span><span class="fid">C3</span> · <span class="ftitle">No existe presupuesto de tokens: se compacta por número de eventos</span></div>
+    <div class="loc">crates/braze-engine/src/engine.rs:23,399</div>
+    <p>El disparador es <code>tactical.len() &gt; 40</code> — un "ok" de 2 chars cuenta igual que un <code>tool_result</code> de 200 KB. La materia prima existe y se descarta: <code>Usage.input_tokens</code> se persiste pero nadie lo compara. <em>Fix:</em> disparador por presupuesto <code>num_ctx - max_tokens - margen</code>, calibrado con el usage real.</p>
+  </div>
+
+  <h3 id="c-seg">Seguridad</h3>
+
+  <div class="finding crit" id="D1">
+    <div><span class="badge b-crit">crítica</span><span class="fid">D1</span> · <span class="ftitle">Inyección de argv en <code>glob</code>: <code>path="-delete"</code> borra el cwd sin confirmación</span></div>
+    <div class="loc">crates/braze-tools-local/src/glob.rs:27-36</div>
+    <p><code>glob</code> arma <code>find &lt;path&gt; -type f -name &lt;pattern&gt;</code>. Con <code>path="-delete"</code> → <code>find -delete ...</code> <strong>borra recursivamente el cwd</strong>. Y <code>glob</code> es un "read" que <strong>no pasa por el guard</strong>. Encadena con D6 (descripciones MCP sin sanitizar): un server malicioso puede instruir el <code>glob path='-delete'</code>. <em>Fix:</em> rechazar <code>path</code> que empiece con <code>-</code>; en grep, <code>--</code> antes de posicionales.</p>
+  </div>
+
+  <div class="finding crit" id="E1">
+    <div><span class="badge b-crit">crítica</span><span class="fid">E1</span> · <span class="ftitle">RememberKey de shell colisiona: <code>rm -rf /tmp/x</code> aprueba <code>rm -rf /</code></span></div>
+    <div class="loc">crates/braze-permissions/src/guard.rs:35-42</div>
+    <p>La clave es solo <code>(command[0], command[1])</code>. Aprobar <code>["rm","-rf","/tmp/build"]</code> recuerda <code>Shell{rm,-rf}</code>; un <code>["rm","-rf","/"]</code> posterior → misma clave → <strong>se ejecuta sin preguntar</strong>. Igual con <code>git push --force</code> y <code>bash -c "rm -rf /"</code>. Se agrava: se re-siembra en cada <code>--resume</code>. <em>Fix:</em> clave sobre el argv completo (<code>argv_hash</code>).</p>
+  </div>
+
+  <div class="finding crit" id="E2">
+    <div><span class="badge b-crit">crítica</span><span class="fid">E2</span> · <span class="ftitle"><code>env</code> en el allowlist = bypass de ejecución arbitraria</span></div>
+    <div class="loc">crates/braze-permissions/src/classifier.rs:128</div>
+    <p><code>env</code> figura como read-only seguro, pero <code>env rm -rf /tmp/x</code> ejecuta el <code>rm</code> → <code>Reversible</code> → <strong>sin prompt</strong>. Cualquier destructivo prefijado con <code>env</code> (o <code>bash -c</code>) esquiva la capa 2. <em>Fix:</em> quitar <code>env</code> del allowlist + test adversarial.</p>
+  </div>
+
+  <div class="finding crit" id="E3">
+    <div><span class="badge b-crit">crítica</span><span class="fid">E3</span> · <span class="ftitle">Decisiones de permiso re-sembradas en <code>--resume</code> sin validar integridad</span></div>
+    <div class="loc">crates/braze-cli/src/main.rs:162-176</div>
+    <p>El replay siembra <code>PermissionDecided{allowed:true}</code> del log sin checksum. Si <code>HOME</code>/<code>XDG</code> no están, <code>session_dir</code> cae dentro del cwd — donde el propio modelo puede <code>write_file</code> (reversible, sin prompt) sobre el log y <strong>auto-aprobarse acciones irreversibles</strong>. Combinado con E1, cada entrada concede más de lo aprobado. <em>Fix:</em> validar el log + <code>session_dir</code> fuera del cwd.</p>
+  </div>
+
+  <h3 id="c-hist">Corrección del historial (corrupción permanente)</h3>
+
+  <div class="finding crit" id="A3">
+    <div><span class="badge b-crit">crítica</span><span class="fid">A3 / B4</span> · <span class="ftitle">El stream no tiene canal de error: texto truncado se persiste como respuesta final</span></div>
+    <div class="loc">crates/braze-engine/src/engine.rs:122-148 + anthropic.rs / ollama.rs</div>
+    <p><code>CompletionEvent</code> no es <code>Result</code>. Ante corte de red o JSON malformado, los backends loguean y <strong>terminan el stream en silencio</strong>; el engine no distingue "llegó <code>Done</code>" de "murió" y persiste el parcial. Un evento SSE <code>error</code> de Anthropic (<code>overloaded_error</code>) se convierte en <code>Done</code> — indistinguible de éxito, sin retry. <em>Fix:</em> <code>Stream&lt;Item=Result&lt;CompletionEvent&gt;&gt;</code> + <code>saw_done</code> en el engine.</p>
+  </div>
+
+  <div class="finding crit" id="A4">
+    <div><span class="badge b-crit">crítica</span><span class="fid">A4</span> · <span class="ftitle">Completion tardía post-timeout duplica <code>ToolCallCompleted</code> → 400 permanente</span></div>
+    <div class="loc">crates/braze-engine/src/engine.rs:342-378</div>
+    <p>El canal mpsc es compartido entre rondas. Un task que hizo timeout, al completar, entrega su resultado a la ronda siguiente; con el handle ajeno se rescata el id viejo → <strong>segundo <code>tool_result</code> para el mismo <code>tool_use_id</code></strong> → Anthropic responde 400 y todos los turnos siguientes quedan rotos (log append-only). <em>Fix:</em> descartar completions cuyo handle no esté en <code>pending</code>.</p>
+  </div>
+
+  <div class="finding crit" id="C4">
+    <div><span class="badge b-crit">crítica</span><span class="fid">C4</span> · <span class="ftitle"><code>tool_use</code> huérfano tras crash envenena el resume con 400 permanente</span></div>
+    <div class="loc">crates/braze-engine/src/engine.rs:209-336 + simple_compactor.rs:81</div>
+    <p><code>run_turn</code> persiste <code>AssistantToolCall</code> <strong>antes</strong> de despachar. Si el proceso muere antes del resultado, el log queda con un <code>tool_use</code> sin <code>tool_result</code>; al resumir contra Anthropic <strong>cada turno falla con 400</strong>. Peor: <code>is_settled_durable</code> lo migra a durable sin verificar el par. <em>Fix:</em> reparación al cargar (sintetizar <code>ToolCallCompleted{is_error:true}</code> por cada huérfano).</p>
+  </div>
+
+  <h3 id="c-bench">El harness de evaluación (invalida el sweep pendiente)</h3>
+
+  <div class="finding crit" id="F1">
+    <div><span class="badge b-crit">crítica</span><span class="fid">F1</span> · <span class="ftitle">El sandbox no es el cwd de las tools: aislamiento roto, tareas irresolubles, escritura en el repo real</span></div>
+    <div class="loc">crates/braze-bench/src/runner.rs:56-59 + braze-tools-local/*</div>
+    <p>El sandbox solo alimenta el allowlist. Ninguna tool resuelve rutas contra él (<code>shell_exec</code> sin <code>.current_dir()</code>). Resultado: <code>read_file_basic</code> es <strong>irresoluble</strong> (solo "pasa" si el modelo alucina el "3"); <code>write_file_basic</code> <strong>escribe en tu repo real</strong>; <code>glob/grep/shell</code> operan sobre el workspace braze real. <em>Fix:</em> inyectar <code>workdir</code>, resolver rutas, <code>.current_dir()</code>, comunicarlo en el system prompt.</p>
+  </div>
+
+  <div class="finding crit" id="F3">
+    <div><span class="badge b-crit">crítica</span><span class="fid">F3</span> · <span class="ftitle">N=1 por celda, sin temperature ni seed → la tabla es ruido</span></div>
+    <div class="loc">crates/braze-bench/src/main.rs:29-40</div>
+    <p>Cada (tarea, backend) corre una vez con T≈0.8. Para 1B-7B, 5/7 vs 4/7 con N=1 no distingue nada. <em>Fix:</em> <code>--repetitions N</code> (≥5), <code>temperature:0.0, seed:42</code>, intervalos de Wilson.</p>
+  </div>
+
+  <div class="finding crit" id="F2">
+    <div><span class="badge b-crit">crítica</span><span class="fid">F2</span> · <span class="ftitle">Sin timeout por tarea ni presupuesto del sweep</span></div>
+    <div class="loc">crates/braze-bench/src/runner.rs:81-86</div>
+    <p><code>run_turn</code> se awaitea sin <code>timeout</code>; la única cota es 20 rondas (no tiempo). Con &gt;20 min por tarea no-convergente, un sweep 7×4 quema horas. <em>Fix:</em> <code>timeout_secs</code> por tarea + causa estructurada.</p>
+  </div>
+
+  <blockquote><strong>Implicación operativa:</strong> F1+F2+F3 juntos significan que <strong>el sweep completo pendiente no debe correrse hasta arreglar el bench</strong>. Los números actuales medirían artefactos del harness más ruido de N=1, no capacidad de los modelos.</blockquote>
+
+  <h2 id="altos">3 · Hallazgos altos</h2>
+  <p class="muted">14 hallazgos. Los de mayor impacto para modelos pequeños:</p>
+
+  <div class="finding high">
+    <div><span class="badge b-high">alta</span><span class="fid">A5</span> · <span class="ftitle">Cero detección de loops/repetición</span></div>
+    <p>Nada detecta que el modelo pidió la misma tool con los mismos args — el patrón dominante de no-convergencia en 1B. <em>Fix:</em> <code>HashSet&lt;(name,args)&gt;</code> por turno + nudge sintético en repetición exacta.</p>
+    <blockquote><strong>G§5:</strong> fingerprint (tool, args) con umbral 3 supera a los caps genéricos; ~12% de repetición degenerada observada.</blockquote>
+  </div>
+  <div class="finding high">
+    <div><span class="badge b-high">alta</span><span class="fid">A6</span> · <span class="ftitle">El cap corta en seco y en <code>chat</code> el <code>?</code> mata el REPL</span></div>
+    <p>Agotar las 20 iteraciones devuelve <code>Err</code>; en <code>Command::Chat</code> el <code>?</code> mata el proceso entero. Un 429 transitorio también. <em>Fix:</em> ronda final sin tools + <code>match</code>/<code>continue</code> en el CLI.</p>
+  </div>
+  <div class="finding high">
+    <div><span class="badge b-high">alta</span><span class="fid">A7</span> · <span class="ftitle">Tool alucinada se despacha; el error no lista las tools válidas</span></div>
+    <p>El modelo recibe <code>"tool not found: read_files"</code> sin pista. Un 1B repetirá. <em>Fix:</em> nudge con los nombres disponibles + sugerencia por distancia de edición.</p>
+  </div>
+  <div class="finding high">
+    <div><span class="badge b-high">alta</span><span class="fid">B5</span> · <span class="ftitle">Sin fallback de tool calls emitidos como texto JSON</span></div>
+    <p>Modelos que emiten <code>{"name":...}</code> en <code>content</code> (o gemma3 sin soporte de tools) matan el loop en el primer paso. <em>Fix:</em> rescatar el JSON del texto; para gemma3, reintentar sin <code>tools</code>.</p>
+    <blockquote><strong>G§1:</strong> "la mitad de los fallos de modelos chicos son de parser, no del modelo".</blockquote>
+  </div>
+  <div class="finding high">
+    <div><span class="badge b-high">alta</span><span class="fid">D2</span> · <span class="ftitle">Cero truncamiento de outputs de tools</span></div>
+    <p>Un <code>read_file</code> de 300 KB o <code>grep -r</code> sobre <code>.git/target</code> desborda la ventana y dispara B1. <em>Fix:</em> tope por bytes/líneas con cola accionable, configurable por modelo.</p>
+  </div>
+  <div class="finding high">
+    <div><span class="badge b-high">alta</span><span class="fid">D3</span> · <span class="ftitle">Carga diferida de una vía: el schema real solo llega como castigo</span></div>
+    <p>El modelo ve <code>{additionalProperties:true}</code>; el schema real solo aparece tras fallar validación (un round-trip perdido, minutos en CPU). <em>Fix:</em> schema real de entrada para las 6 tools locales; stubs diferidos solo para MCP.</p>
+  </div>
+
+  <details>
+    <summary>Ver los 8 hallazgos altos restantes (A8, B6, C5, C6, C7, D4, F4–F8)</summary>
+    <ul>
+      <li><span class="badge b-high">alta</span><strong>A8</strong> · Un provider MCP que muere brickea todos los turnos (fail-fast de <code>all_stubs</code>). Fix: <code>all_stubs_lossy()</code>.</li>
+      <li><span class="badge b-high">alta</span><strong>B6</strong> · <code>stop_reason</code>/<code>done_reason</code> ignorados → truncamiento por <code>max_tokens</code> indetectable; el tool call se dropea en silencio.</li>
+      <li><span class="badge b-high">alta</span><strong>C5</strong> · Una línea JSONL parcial hace fallar <code>load()</code> completo. Fix: tolerar la última línea + <code>sync_data</code>.</li>
+      <li><span class="badge b-high">alta</span><strong>C6</strong> · El resumen de compactación es un conteo sin semántica. Fix: digest extractivo determinístico (user messages, tools tocadas, errores).</li>
+      <li><span class="badge b-high">alta</span><strong>C7</strong> · <code>durable_events</code> crece sin límite; los <code>arguments</code> de <code>write_file</code> (cuerpo del archivo) viven en el prompt para siempre. Fix: limpiar argumentos + tope de pares durables.</li>
+      <li><span class="badge b-high">alta</span><strong>D4</strong> · <code>dispatch</code> del registry anula el TTL de MCP forzando refetch en servers que no poseen la tool.</li>
+      <li><span class="badge b-high">alta</span><strong>F4</strong> · Verificación por proxy (nombre de tool) en vez de resultado — pasa con la tool fallida. Fix: aserciones de outcome sobre el sandbox.</li>
+      <li><span class="badge b-high">alta</span><strong>F5</strong> · Sin taxonomía de causa de fallo; los fallos del harness se omiten de la tabla (denominadores distintos por backend).</li>
+      <li><span class="badge b-high">alta</span><strong>F6</strong> · No se mide el número de rondas — la métrica diagnóstica central. El engine ya persiste un <code>Usage</code> por ronda.</li>
+      <li><span class="badge b-high">alta</span><strong>F7</strong> · El bench no fija <code>num_ctx</code> → mide un artefacto del harness, no el modelo.</li>
+      <li><span class="badge b-high">alta</span><strong>F8</strong> · La suite no tiene gradiente de dificultad; sin multi-step no ve el techo real (BFCL: single OK, multi-turn colapsa bajo 4B).</li>
+    </ul>
+  </details>
+
+  <h2 id="medios">4 · Hallazgos medios y bajos</h2>
+  <p class="muted">16 medios + 13 bajos. Todos reales y accionables; menor impacto o probabilidad. Detalle completo en el Markdown.</p>
+  <details>
+    <summary>Medios — observabilidad, seguridad secundaria, robustez</summary>
+    <ul>
+      <li><strong>A9</strong> · Observabilidad insuficiente: sin spans por turno/ronda/tool-call ni traza al compactar.</li>
+      <li><strong>A10</strong> · System prompt fijo de una línea, sin reglas anti-loop ni few-shot — la palanca más barata, sin usar. <em>(G§1: few-shot +21.5%, CoT breve gana.)</em></li>
+      <li><strong>A11</strong> · Respuesta final vacía tratada como éxito silencioso.</li>
+      <li><strong>D5</strong> · Sin namespacing de tools MCP: colisión <code>read_file</code> local vs MCP → 400.</li>
+      <li><strong>D6</strong> · Descripciones MCP entran al prompt sin sanitizar (secuestro por descripción).</li>
+      <li><strong>D7</strong> · Reads sin gate leen <code>~/.ssh/id_rsa</code>; con D6, exfiltración al contexto.</li>
+      <li><strong>D8</strong> · <code>shell_exec</code> sin timeout propio; procesos huérfanos nunca matados.</li>
+      <li><strong>E5</strong> · El prompt de permiso no muestra cwd, ruta resuelta ni motivo.</li>
+      <li><strong>E6</strong> · API key con <code>derive(Debug, Serialize)</code> sin redacción.</li>
+      <li><strong>B7</strong> · Sin timeouts HTTP (connect + read-idle, no total).</li>
+      <li><strong>B8</strong> · 429 sin <code>retry-after</code> ni backoff; 529 tratado como permanente.</li>
+      <li><strong>B9</strong> · Ollama sin <code>keep_alive</code> → recarga del modelo entre turnos.</li>
+      <li><strong>B10</strong> · tool_results sin <code>tool_name</code> → con 2+ calls, un 3B no sabe cuál es cuál.</li>
+      <li><strong>B11</strong> · Sin <code>temperature</code> en ningún backend.</li>
+      <li><strong>C8–C11</strong> · <code>CompactionOccurred</code> intra-ventana invisible; sin versionado de formato; ventana/umbral hardcodeados; re-split O(n²) del log por ronda.</li>
+      <li><strong>F9–F11</strong> · Arranque en frío contamina medias; <code>expect_text_contains</code> frágil; denegaciones contadas como fallo de ejecución.</li>
+    </ul>
+  </details>
+  <details>
+    <summary>Bajos — consistencia, mensajes de error, deuda menor</summary>
+    <ul>
+      <li><strong>A12–A15</strong> · <code>estimate_dropped_tokens</code> usa <code>Debug</code> repr; IDs de Ollama con contador global; timeout por <code>next_completed</code> no por ronda; tests faltantes del loop.</li>
+      <li><strong>D9–D12</strong> · <code>shell_exec</code> argv-only hostil para 1-3B; <code>read_file</code> sobre binario críptico; estampida de caché MCP; tests ausentes de argv-injection.</li>
+      <li><strong>B12–B16</strong> · Sin prompt caching; token accounting incompleto; <code>arguments</code> string JSON no manejado; cancelación sin API; fixtures no reales.</li>
+      <li><strong>C12–C16</strong> · Dup de A12; timeout con id vacío → 400; <code>flush</code> sin <code>sync_data</code>; mezcla de idiomas; cero tests del disparador de compactación.</li>
+      <li><strong>E7–E8</strong> · Tests adversariales faltantes; <code>Mutex</code> envenenado (fail-closed).</li>
+      <li><strong>F12–F14</strong> · Referencias muertas en PLAN.md; fuga de dir de sesión; confounder de idioma.</li>
+    </ul>
+  </details>
+
+  <h2 id="fortalezas">5 · Fortalezas (no tocar)</h2>
+  <div class="pill-list">
+    <span class="badge b-good">✓ argv, no sh -c</span>
+    <span class="badge b-good">✓ tools locales ejemplares para 1-3B</span>
+    <span class="badge b-good">✓ MutexGuard nunca cruza .await</span>
+    <span class="badge b-good">✓ parser SSE robusto</span>
+    <span class="badge b-good">✓ API nativa de Ollama</span>
+    <span class="badge b-good">✓ invariante de no-pérdida del split</span>
+    <span class="badge b-good">✓ event sourcing limpio</span>
+    <span class="badge b-good">✓ TTL de MCP bien testeado</span>
+    <span class="badge b-good">✓ default-deny real</span>
+    <span class="badge b-good">✓ bench mide el motor real</span>
+  </div>
+  <ul>
+    <li><strong>Diseño argv de las tools</strong>: neutraliza <code>;</code>, <code>&amp;&amp;</code>, <code>|</code>, subshells, <code>$()</code>. La decisión de seguridad más importante, y se sostiene (E1/E2 son reentradas puntuales).</li>
+    <li><strong>Las 6 tools locales</strong>: nombres cortos, schemas 100% planos, defaults sensatos, errores accionables en <code>edit_file</code> — justo lo que G§3 recomienda.</li>
+    <li><strong>La compactación diferencial determinística es la dirección que la literatura 2026 valida</strong> (G§4): la summarización con un 3B es cara y mala. El problema de C6 es <em>qué</em> extrae (nada), no la estrategia.</li>
+  </ul>
+
+  <h2 id="sota">6 · Estado del arte (julio 2026) y validación externa</h2>
+  <blockquote><strong>Techo honesto:</strong> 1-4B logran 90%+ de tool calls válidas <em>single-turn</em> con buen harness, pero el multi-turn complejo colapsa (BFCL: Qwen3-1.7B 17% multi-turn; ComplexFuncBench &lt;10B ≤8.4%). La conclusión estratégica: <strong>mover la planificación al harness</strong>, no hacer que el 3B planifique mejor. Es exactamente la tesis de braze.</blockquote>
+  <table>
+    <thead><tr><th>Técnica (fuente)</th><th>Hallazgo braze</th></tr></thead>
+    <tbody>
+      <tr><td>Constrained decoding solo sobre la tool call, two-stage (+33pp en 1.5B) <span class="tag">paper</span></td><td>Nuevo → Grupo F</td></tr>
+      <tr><td>≤10 tools/turno + router/tool-RAG <span class="tag">paper</span></td><td>D3</td></tr>
+      <tr><td>Fallback de parsing multi-formato <span class="tag">docs</span></td><td>B5</td></tr>
+      <tr><td>Loops por fingerprint + nudge clasificado <span class="tag">paper</span></td><td>A5, A7</td></tr>
+      <tr><td>2-3 few-shot como mensajes (+21.5%) <span class="tag">paper</span></td><td>A10</td></tr>
+      <tr><td>Modelos/templates por defecto (Qwen3.5-4B, xLAM-2-3B) <span class="tag">bench</span></td><td>Nuevo → docs/config</td></tr>
+      <tr><td><code>num_ctx</code> explícito siempre <span class="tag">docs</span></td><td><strong>B1 (crítico)</strong></td></tr>
+      <tr><td>Evicción estructurada, no summarización LLM <span class="tag">paper</span></td><td>C6 (validado)</td></tr>
+      <tr><td>Schemas planos, errores accionables <span class="tag">bench</span></td><td>Ya cumplido ✓</td></tr>
+      <tr><td>Best-of-n barato solo en la tool call + CoT breve <span class="tag">paper</span></td><td>Nuevo → futuro</td></tr>
+    </tbody>
+  </table>
+  <p class="muted"><strong>Comparables:</strong> aider usa formatos de edición textuales (no tool-calls nativas) por robustez; goose reporta 7-13B "no útiles para ingeniería real"; smolagents apuesta por CodeAgent (código &gt; JSON); nanocoder es el más cercano ideológicamente a braze.</p>
+
+  <h2 id="roadmap">7 · Roadmap de remediación priorizado</h2>
+  <p>Ordenado por <strong>(impacto en modelos pequeños) ÷ esfuerzo</strong>. Grupos independientes, commiteables por separado.</p>
+
+  <h3>Grupo A — Tubería de contexto <span class="badge b-crit">máxima prioridad</span></h3>
+  <p class="muted">Ataca la causa raíz. Sin esto, ninguna otra mejora se nota.</p>
+  <ul>
+    <li>B1 <code>num_ctx</code> + B2 <code>num_predict</code> + B11 <code>temperature</code> <span class="tag">½ día</span></li>
+    <li>A1/C1 preservar cola viva al compactar <span class="tag">½ día</span></li>
+    <li>A2/C2 compactación idempotente <span class="tag">1 día</span></li>
+    <li>C3 disparador por presupuesto de tokens <span class="tag">1 día</span></li>
+    <li>C6 digest extractivo determinístico <span class="tag">1 día</span></li>
+  </ul>
+  <h3>Grupo B — Seguridad <span class="badge b-crit">máxima prioridad</span></h3>
+  <ul>
+    <li>D1 rechazar <code>-</code> inicial en glob/grep <span class="tag">1 h</span></li>
+    <li>E1 RememberKey sobre argv completo <span class="tag">2 h</span></li>
+    <li>E2 quitar <code>env</code> del allowlist <span class="tag">1 h</span></li>
+    <li>E3 validar log de permisos + session_dir fuera del cwd <span class="tag">½ día</span></li>
+    <li>D7 gate de reads fuera del workdir <span class="tag">½ día</span></li>
+  </ul>
+  <h3>Grupo C — Corrección del historial <span class="badge b-high">alta</span></h3>
+  <ul>
+    <li>A3/B4 canal de error en el stream <span class="tag">1 día</span></li>
+    <li>A4 descartar completions stale <span class="tag">2 h</span></li>
+    <li>C4 reparación de <code>tool_use</code> huérfano <span class="tag">½ día</span></li>
+    <li>C5 tolerar línea JSONL parcial + <code>sync_data</code> <span class="tag">2 h</span></li>
+  </ul>
+  <h3>Grupo D — Robustez del loop <span class="badge b-high">alta</span></h3>
+  <ul>
+    <li>A5 detección de loops + nudge · A7 tool alucinada · A6 degradación con gracia</li>
+    <li>B5 fallback de tool calls textuales + gemma3 · B6 <code>stop_reason</code></li>
+    <li>D2 truncamiento de outputs · A10 system prompt configurable + few-shot</li>
+  </ul>
+  <h3>Grupo E — Arreglar braze-bench <span class="badge b-high">bloquea el sweep</span></h3>
+  <ul>
+    <li>F1 sandbox como cwd real · F2 timeout por tarea · F3 repeticiones + seed</li>
+    <li>F4 aserciones de outcome · F5 causa de fallo · F6 medir rondas · F8 gradiente de dificultad</li>
+    <li><strong>Después:</strong> correr el sweep completo con números que signifiquen algo.</li>
+  </ul>
+  <h3>Grupo F — SOTA nuevo <span class="badge b-med">media</span></h3>
+  <ul>
+    <li>Constrained decoding vía <code>format</code> de Ollama (two-stage)</li>
+    <li>Recomendación de modelos/templates por defecto</li>
+    <li>D3 carga diferida de dos vías · D5 namespacing MCP</li>
+  </ul>
+  <h3>Grupo G — Observabilidad y calidad <span class="badge b-med">media</span></h3>
+  <ul>
+    <li>A9 spans · C9 versionado de formato · C10 configurables · C11 caché en memoria · tests de edge cases</li>
+  </ul>
+
+  <h2 id="sweep">8 · Sobre el sweep pendiente</h2>
+  <div class="hero">
+    <p style="margin:0">El estado de sesión traía como pendiente <strong>"correr el sweep completo contra los 4 backends"</strong>. La auditoría concluye que <strong>ese sweep no debe correrse todavía</strong>: por F1 el harness escribiría en el repo real y mediría el cwd equivocado, por F7/B1 mediría el truncamiento de <code>num_ctx</code> en vez de capacidad, y por F3 N=1 con T=0.8 daría ruido. El orden correcto es <strong>Grupo E → luego el sweep</strong>. Arreglado el bench, el sweep no solo será válido sino que servirá como test de regresión de los Grupos A–D.</p>
+  </div>
+
+  <hr>
+  <p class="muted" style="font-size:13px">Generado el 2026-07-04 a partir de siete auditorías paralelas independientes + revisión de literatura. Los transcripts completos de cada auditoría (con todos los <code>archivo:línea</code> y sketches de código) son el respaldo de este documento. Versión Markdown: <code>AUDITORIA-2026-07.md</code>.</p>
+</main>
+</div>
+</body>
+</html>
