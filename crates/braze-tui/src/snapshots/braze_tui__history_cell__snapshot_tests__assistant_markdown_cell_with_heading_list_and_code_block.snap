@@ -1,0 +1,26 @@
+---
+source: crates/braze-tui/src/history_cell.rs
+expression: "render_to_buffer(&cell, 40)"
+---
+Buffer {
+    area: Rect { x: 0, y: 0, width: 40, height: 8 },
+    content: [
+        "# Titulo                                ",
+        "                                        ",
+        "- uno                                   ",
+        "- dos                                   ",
+        "                                        ",
+        "```rust                                 ",
+        "fn main() {}                            ",
+        "```                                     ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Reset, bg: Cyan, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 6, fg: Rgb(180, 142, 173), bg: Reset, underline: Reset, modifier: NONE,
+        x: 2, y: 6, fg: Rgb(192, 197, 206), bg: Reset, underline: Reset, modifier: NONE,
+        x: 3, y: 6, fg: Rgb(143, 161, 179), bg: Reset, underline: Reset, modifier: NONE,
+        x: 7, y: 6, fg: Rgb(192, 197, 206), bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

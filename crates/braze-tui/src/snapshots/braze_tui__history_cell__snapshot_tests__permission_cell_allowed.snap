@@ -1,0 +1,14 @@
+---
+source: crates/braze-tui/src/history_cell.rs
+expression: "render_to_buffer(&cell, 40)"
+---
+Buffer {
+    area: Rect { x: 0, y: 0, width: 40, height: 1 },
+    content: [
+        "✓ allowed: run `rm -rf /tmp/x`          ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 2, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

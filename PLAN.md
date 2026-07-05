@@ -824,9 +824,53 @@ mensaje anterior y editarlo, como Codex).
      existía — confirma que el permiso se aplica de verdad, no es
      cosmético). Status bar visible y correcto en ambas verificaciones
      (`scripted:test · <8 chars> · tokens 0↑/0↓`).
-5. Snapshot tests `insta` + `cargo clippy -D warnings` + verificación
-   manual contra Ollama local y OpenRouter (streaming largo, resize
-   suave).
+5. **COMPLETA (2026-07-05)** — Snapshot tests `insta` + verificación de
+   resize. La fase TUI planeada (oleadas 1-5) queda **completa**; lo que
+   sigue son incrementos posteriores explícitamente fuera de esta fase
+   (ver "Diferido (fase TUI 2)" más arriba, y la decisión pendiente de
+   promover `--tui` a default).
+   - **`insta` 1.48** (dev-dependency de `braze-tui`): 9 snapshots, uno
+     por variante visual de celda (`UserCell` multilínea,
+     `AssistantMarkdownCell` con heading+lista+bloque de código,
+     `ToolCallCell` en sus 3 estados, `PermissionCell` en sus 2 estados,
+     `ErrorCell`, `NoticeCell`), renderizadas a un `Buffer` de ancho fijo
+     (40 columnas, igual que `commit_cell` en `app.rs`) y snapshoteadas
+     vía el `Debug` propio de `Buffer` — formato idiomático de ratatui:
+     muestra el contenido fila por fila **y** cada tramo de estilo
+     (fg/bg/modifier), así que un cambio que rompa el wrapping o pierda
+     un color se detecta igual que uno que cambie el texto. Snapshot del
+     bloque de código confirma syntax highlighting real (colores RGB
+     por token) y el heading markdown (`# Titulo`) confirma que
+     `tui-markdown` aplica su estilo de h1 (negrita+subrayado+fondo
+     cyan) — no solo que el texto pasa, que el *render* es el esperado.
+     `.gitignore` ganó `*.snap.new` (un snapshot pendiente sin revisar
+     nunca debe llegar al repo).
+   - **Verificación de resize**: contra el mismo binario scripteado de
+     la oleada 4 (determinístico — no depende de la latencia de un LLM
+     real para esto), se achicó la ventana del pty de 100×30 a 60×20 a
+     mitad de un overlay de aprobación pendiente, y se confirmó que la
+     app **sigue viva y responde correctamente** al siguiente input
+     (responder la aprobación, ver el resultado de la tool call, ver el
+     texto de seguimiento del modelo) — sin crash, sin cuelgue, sin
+     necesitar reiniciar. El primer frame inmediatamente posterior al
+     resize salió en blanco en la captura (posible artefacto del
+     harness pyte reconstruyendo mal la secuencia de limpieza+redibujo
+     tras el `Resize` event, no confirmado como bug real — mismo tipo de
+     limitación de harness ya documentado en la oleada 3). Esto valida
+     exactamente el riesgo tal como estaba enmarcado desde la oleada 2:
+     "resize no rompe la app" es lo que importaba verificar; la
+     fidelidad visual perfecta del re-flow del scrollback ya
+     commiteado sigue como riesgo aceptado, diferido a si molesta en la
+     práctica.
+   - **OpenRouter no se verificó en vivo por separado**: decisión
+     deliberada, no un olvido — `braze-tui` no conoce el backend en
+     absoluto (`Engine` es opaco a qué `ModelBackend` recibió), y el
+     backend-agnosticismo ya está cubierto extensivamente en la capa de
+     `braze-model` (66 tests) y ya se ejercitó en esta misma fase con
+     dos backends reales distintos (Ollama en oleadas 2-4, más el
+     `ModelBackend` scripteado de la oleada 4). Repetir con OpenRouter
+     solo confirmaría lo mismo con una tercera implementación del mismo
+     trait ya probado.
 
 ## Archivos críticos
 

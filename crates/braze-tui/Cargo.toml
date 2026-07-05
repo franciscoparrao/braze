@@ -45,3 +45,9 @@ ratatui-textarea = { version = "0.9" }
 # `highlight-code` (syntect + ansi-to-tui) for syntax-highlighted code
 # blocks.
 tui-markdown = { version = "0.3" }
+
+[dev-dependencies]
+# Snapshot tests for `HistoryCell` rendering (PLAN.md § "Fase TUI —
+# diseño", oleada 5) — `Buffer`'s own `Debug` impl (content + styled
+# runs) is the idiomatic ratatui snapshot format.
+insta = { version = "1" }

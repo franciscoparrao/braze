@@ -1,0 +1,14 @@
+---
+source: crates/braze-tui/src/history_cell.rs
+expression: "render_to_buffer(&cell, 40)"
+---
+Buffer {
+    area: Rect { x: 0, y: 0, width: 40, height: 1 },
+    content: [
+        "⏸ interrupted by user                   ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Yellow, bg: Reset, underline: Reset, modifier: NONE,
+        x: 21, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

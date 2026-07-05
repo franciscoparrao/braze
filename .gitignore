@@ -2,6 +2,10 @@
 .env
 *.session.jsonl
 
+# insta snapshot tests (crates/braze-tui): a pending, not-yet-reviewed
+# snapshot never belongs in the repo — only an accepted `.snap` does.
+*.snap.new
+
 # Papers de referencia leídos durante auditorías/investigación — nunca se
 # suben al repo (son grandes y no son necesarios para nadie más).
 docs/*.pdf

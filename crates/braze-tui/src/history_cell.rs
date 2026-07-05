@@ -320,3 +320,97 @@ mod tests {
         assert_eq!(text.lines[0].spans[0].content, "interrupted by user");
     }
 }
+
+/// Snapshot tests (PLAN.md § "Fase TUI — diseño", oleada 5): each cell
+/// rendered to a fixed-width `Buffer` and snapshotted via `Buffer`'s own
+/// `Debug` impl — the idiomatic ratatui format, showing both content
+/// (as quoted per-row strings) and every styled run (fg/bg/modifier).
+/// Catches regressions in wrapping, glyphs, and styling together that a
+/// plain `as_text()` assertion on spans wouldn't (e.g. a cell that wraps
+/// one row too many, or loses a color, at a specific terminal width).
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::{Paragraph, Widget, Wrap};
+
+    /// Mirrors `app.rs`'s `commit_cell`: wrap to `width`, size the area
+    /// to exactly the wrapped line count, render.
+    fn render_to_buffer(cell: &dyn HistoryCell, width: u16) -> Buffer {
+        let paragraph = Paragraph::new(cell.as_text()).wrap(Wrap { trim: false });
+        let height = paragraph.line_count(width).max(1) as u16;
+        let area = Rect::new(0, 0, width, height);
+        let mut buffer = Buffer::empty(area);
+        paragraph.render(area, &mut buffer);
+        buffer
+    }
+
+    #[test]
+    fn user_cell_multiline() {
+        let cell = UserCell {
+            text: "primera linea\nsegunda linea mas larga que la primera".to_string(),
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn assistant_markdown_cell_with_heading_list_and_code_block() {
+        let cell = AssistantMarkdownCell {
+            markdown: "# Titulo\n\n- uno\n- dos\n\n```rust\nfn main() {}\n```\n".to_string(),
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn tool_call_cell_running() {
+        let cell = ToolCallCell::running("read_file".to_string());
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn tool_call_cell_done_success() {
+        let cell = ToolCallCell::done("echo".to_string(), false, "echoed: hi");
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn tool_call_cell_done_error() {
+        let cell = ToolCallCell::done("read_file".to_string(), true, "file not found");
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn permission_cell_allowed() {
+        let cell = PermissionCell {
+            description: "run `rm -rf /tmp/x`".to_string(),
+            allowed: true,
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn permission_cell_denied() {
+        let cell = PermissionCell {
+            description: "run `rm -rf /tmp/x`".to_string(),
+            allowed: false,
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn error_cell() {
+        let cell = ErrorCell {
+            message: "backend unreachable".to_string(),
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+
+    #[test]
+    fn notice_cell() {
+        let cell = NoticeCell {
+            message: "⏸ interrupted by user".to_string(),
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
+    }
+}
