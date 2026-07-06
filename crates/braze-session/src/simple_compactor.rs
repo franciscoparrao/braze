@@ -22,10 +22,14 @@ pub const DEFAULT_TACTICAL_WINDOW: usize = 20;
 ///    resolved permission decisions, and the `tool_use` requests that
 ///    precede them) are moved into `DurableState::durable_events` and
 ///    never re-summarized again.
-/// 3. Any prior `CompactionOccurred` summaries found among the older
-///    events are concatenated into `DurableState::summary`, so callers
+/// 3. Every `CompactionOccurred` summary found anywhere in the log —
+///    *including* one still inside the tactical window (N-3,
+///    docs/AUDITORIA-2026-07-v2.md; a `CompactionOccurred` never renders
+///    into a message on its own either way, so harvesting it early is
+///    free) — is concatenated into `DurableState::summary`, so callers
 ///    get a running plain-text digest of everything compacted so far
-///    without having to re-derive it from `durable_events`.
+///    without having to re-derive it from `durable_events`, and without a
+///    blackout window right after the compaction that produced it.
 ///
 /// ## The no-silent-loss invariant
 ///
@@ -165,7 +169,21 @@ impl ContextCompactor for SimpleContextCompactor {
         for (i, event) in events.iter().enumerate() {
             if i >= window_start {
                 // Inside the raw tactical window: always kept verbatim,
-                // regardless of type.
+                // regardless of type. A `CompactionOccurred` in here still
+                // needs its summary harvested now, not just once it ages
+                // out of the window (N-3, docs/AUDITORIA-2026-07-v2.md):
+                // `history::event_to_block`/`event_to_block_cleared` never
+                // render a `CompactionOccurred` into a message body either
+                // way (it's audit-only, matched by the same arm as
+                // `ToolCallStarted`/`Usage`), so without this, the summary
+                // text is invisible to the model for the entire window
+                // (~`tactical_window` events / several rounds) right after
+                // the compaction that produced it — including the very
+                // context (e.g. the user's original request) that
+                // compaction was supposed to preserve.
+                if let AgentEvent::CompactionOccurred { summary, .. } = event {
+                    summary_parts.push(summary.clone());
+                }
                 tactical.push(event.clone());
                 continue;
             }
@@ -451,6 +469,37 @@ mod tests {
             AgentEvent::CompactionOccurred { .. }
         ));
         assert_eq!(durable.summary, "summary of the above");
+    }
+
+    /// Regression test for N-3 (docs/AUDITORIA-2026-07-v2.md): a
+    /// `CompactionOccurred` still *inside* the tactical window (i.e. the
+    /// compaction that produced it just ran, or ran recently) must already
+    /// contribute its text to `durable.summary` — not just once it ages
+    /// out of the window. Before this fix, `summary_parts` was only
+    /// harvested for events older than the window, so for the next
+    /// `tactical_window` events (several rounds) after every compaction,
+    /// `durable.summary` stayed empty even though the compaction's digest
+    /// — including the user's original request — was sitting right there,
+    /// unrendered (`CompactionOccurred` never becomes a message either
+    /// way).
+    #[test]
+    fn a_compaction_still_inside_the_window_still_contributes_its_summary() {
+        // window of 3 keeps every one of these 3 events inside the window.
+        let compactor = SimpleContextCompactor::new(3);
+        let events = vec![
+            user("original request"),
+            compaction("resumen reciente"),
+            user("siguiente pregunta"),
+        ];
+
+        let (durable, tactical) = compactor.split(&events);
+
+        assert_eq!(durable.summary, "resumen reciente");
+        assert!(durable.durable_events.is_empty());
+        // The CompactionOccurred event itself still stays in tactical too
+        // (it's harmless there — it never renders into a message) — the
+        // no-silent-loss invariant is unaffected.
+        assert_eq!(tactical.len(), 3);
     }
 
     /// End-to-end idempotency: calling `split` repeatedly on a log that

@@ -188,6 +188,11 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   `CompactionOccurred` dentro de la ventana (manteniendo su render como
   `None`), o renderizar un `CompactionOccurred` táctico como su texto de
   resumen.
+- **✅ RESUELTO 2026-07-05.** `SimpleContextCompactor::split` ahora cosecha
+  el summary de todo `CompactionOccurred`, esté o no dentro de la ventana
+  (rama `i >= window_start`) — sin duplicar nada, porque un
+  `CompactionOccurred` nunca se renderiza como bloque de mensaje de todas
+  formas. Test `simple_compactor::tests::a_compaction_still_inside_the_window_still_contributes_its_summary`.
 
 #### N-4 · [ALTA→CRÍTICA] La reparación de huérfanos (fix C4) persiste el resultado *después* del `UserMessage` nuevo → orden inválido permanente
 - **Ubicación:** `crates/braze-engine/src/engine.rs:397-406` (orden en
@@ -229,6 +234,14 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   final de la última línea válida (`set_len`); o en `append` verificar que el
   archivo termine en `\n` (anteponer `\n` defensivo si el último byte no lo
   es).
+- **✅ RESUELTO 2026-07-05.** Al descartar la línea final truncada, `load`
+  ahora reescribe el archivo (`tokio::fs::write`) con solo las líneas
+  válidas — el siguiente `append` empieza limpio. Corre bajo el mismo
+  `write_lock` que N-7 introduce en `load` (ver abajo), así que la
+  reparación queda serializada frente a cualquier escritura concurrente.
+  Test `file_store::tests::load_repairs_the_file_after_a_truncated_final_line_not_just_tolerates_it`
+  (verifica el archivo en disco, no solo la vista en memoria, y que una
+  segunda reanudación con un tercer evento siga funcionando).
 
 #### N-6 · [ALTA] Modo compactación permanente reintroducido por el budget de tokens: el estimador cuenta payloads que el renderer limpia y la compactación no puede reducir `durable_events`
 - **Ubicación:** `crates/braze-engine/src/engine.rs:1109-1114` (estimador) vs
@@ -247,6 +260,17 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
 - **Fix:** estimar `durable_events` sobre la forma *renderizada* (resultado
   limpiado), y no disparar compactación cuando `tactical.len() <=
   KEEP_RAW_TAIL` o cuando plegar la táctica no puede reducir el estimado.
+- **✅ RESUELTO 2026-07-05.** Nuevo `history::render_durable_events`
+  (`pub(crate)`) renderiza `durable_events` a través de la misma lógica de
+  clearing que usa `build_messages`; `estimate_prompt_tokens` mide esa
+  forma renderizada en vez del `Debug` crudo. Además, `load_messages` ahora
+  exige `compaction_would_help = tactical.len() > KEEP_RAW_TAIL` junto a
+  los umbrales existentes — si `tactical` ya cabe entero en la cola cruda
+  que se conserva siempre, compactar no reduce nada y solo añadiría un
+  `CompactionOccurred` redundante en cada llamada. Tests:
+  `engine::tests::a_large_settled_tool_result_does_not_permanently_blow_the_token_budget`
+  (el caso de N-6) y `a_single_oversized_event_triggers_compaction_via_the_token_budget`
+  actualizado para seguir siendo significativo bajo el nuevo gate.
 
 #### N-7 · [ALTA] Carrera `load` (cache fría) vs `append` vía Ctrl+T → cache sembrada con lectura rasgada → repair duplica el `tool_result` → 400 permanente
 - **Ubicación:** `crates/braze-session/src/file_store.rs:126-181` (`load` no
@@ -261,6 +285,14 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   `tool_result` en disco → 400 permanente.
 - **Fix:** que el camino frío de `load` tome `write_lock` durante la lectura
   (y re-chequee la cache al adquirirlo).
+- **✅ RESUELTO 2026-07-05.** El camino frío de `load` ahora adquiere el
+  mismo `write_lock` que `append` sostiene durante toda su escritura, y
+  re-chequea la cache al adquirirlo (por si otro `load` la calentó
+  mientras esperaba). Costo cero para el camino caliente (la mayoría de
+  las llamadas retornan antes de tocar el lock). Test
+  `file_store::tests::cold_load_waits_for_an_in_flight_append_instead_of_racing_it`
+  — verificado que falla (`NotFound`) sin el fix revirtiéndolo
+  temporalmente, y pasa con él.
 
 ### Seguridad — capacidades destructivas enmascaradas de "read-only"
 
@@ -372,6 +404,14 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   `--resume`) entran al log append-only → dos `tool_use`/`tool_result` con el
   mismo id → 400 permanente. Corroborado por engine (×2), backends y sesión.
   *Fix:* verificar unicidad en `complete_once` y re-sufijar con nonce.
+  **✅ RESUELTO 2026-07-05.** `ensure_unique_tool_call_id` (en
+  `dispatch_tool_calls`, no en `complete_once` — más simple: es donde el
+  `ToolCall` ya se clona antes de persistir/despachar) re-sufija con
+  `-dupN` cualquier id que colisione contra `known_tool_call_ids`, sembrado
+  desde el historial de la sesión (`Engine::existing_tool_call_ids`) y
+  actualizado con cada id nuevo del turno. El estado per-turno se agrupó en
+  `TurnDispatchState` para no exceder el límite de argumentos de clippy.
+  Test `engine::tests::duplicate_tool_use_ids_in_one_round_are_renamed_to_stay_unique`.
 - **N-15 · [MEDIA] El rescate textual de tool calls (B5) ejecuta una tool que
   el modelo solo *mostraba* como ejemplo** (`engine.rs:274-283`): pedir
   "muéstrame el JSON para invocar write_file" hace que el modelo emita ese
@@ -600,20 +640,37 @@ cada hallazgo arriba. Resumen de los cambios:
   no-vacío con `summary` todavía vacío (fix de N-2).
 - `engine.rs`: `pair_aware_tail_start` hace el corte de `KEEP_RAW_TAIL`
   consciente de los pares (fix de N-1, complementario al de N-1b); `run_turn`
-  llama a `repair_session` (nuevo, factoriza `load_and_repair`) antes de
-  apendear el `UserMessage` del turno en vez de después (fix de N-4).
+  llama a `load_and_repair` (nuevo, factoriza el load+repair que antes vivía
+  inline en `load_messages`) antes de apendear el `UserMessage` del turno en
+  vez de después (fix de N-4), y su resultado siembra `known_tool_call_ids`
+  (fix de N-14).
 - Los 3 tests de regresión perdieron su `#[ignore]` y pasan en verde sin
   tocar sus aserciones originales; se sumó
   `history::tests::concurrent_tool_calls_in_one_round_group_into_one_message_each_role`
   como cobertura dedicada de N-1b. Workspace completo verde (0 failed, 0
   ignored), clippy limpio.
 
-**Pendientes de Grupo I:** `N-3, N-5, N-6, N-7, N-14`. N-3 (apagón del
-summary), N-6 (compactación permanente vía budget de tokens), N-5/N-7
-(corrupción de archivo de sesión) y N-14 (ids de tool_use duplicados) no son
-violaciones de *forma* del mensaje — el validador de protocolo no los cubre;
-necesitan tests dirigidos propios (de contenido/estado, no de shape) cuando
-se aborden.
+**N-3, N-5, N-6, N-7 y N-14 — ✅ RESUELTOS 2026-07-05.** Ver el detalle del
+fix en cada hallazgo arriba. Ninguno era una violación de *forma* del
+mensaje (el validador de protocolo no los cubre) — cada uno se verificó con
+un test dirigido de contenido/estado propio:
+- N-3: `SimpleContextCompactor::split` cosecha el summary de un
+  `CompactionOccurred` aunque siga dentro de la ventana.
+- N-6: `estimate_prompt_tokens` mide la forma renderizada/limpiada de
+  `durable_events` (`history::render_durable_events`, nuevo) en vez del
+  `Debug` crudo, y `load_messages` no recompacta cuando no puede ayudar
+  (`tactical.len() <= KEEP_RAW_TAIL`).
+- N-5: `load` repara el archivo en disco (no solo la vista en memoria) al
+  descartar una línea final truncada.
+- N-7: el camino frío de `load` toma el mismo `write_lock` que `append`,
+  serializando la lectura contra una escritura concurrente en vuelo.
+- N-14: `ensure_unique_tool_call_id` re-sufija cualquier id colisionante
+  antes de persistirlo/despacharlo.
+
+**Grupo I completo — ✅ CERRADO 2026-07-05.** Los 8 hallazgos originales
+(`N-1, N-1b, N-2, N-3, N-4, N-5, N-6, N-7, N-14` — 9 contando N-1b) están
+resueltos con test de regresión propio cada uno. Workspace completo verde,
+clippy limpio.
 
 ### Grupo J — Seguridad (máxima prioridad, esfuerzo bajo) — ✅ CERRADO 2026-07-05
 `N-8a, N-8b`. Cerrados los dos escapes del allowlist en
@@ -658,11 +715,18 @@ mensajes de ayuda/config desactualizados.
 
 ## 7. Nota sobre la próxima acción
 
-La verificación end-to-end contra Anthropic/Ollama reales (PLAN.md §
-"Verificación end-to-end (tras Fase 5)") **no debería ejecutarse como prueba de
-aceptación antes de cerrar el Grupo I**: los siete bugs de corrupción de sesión
-se dispararán justo en ese escenario y darán 400s que parecerán problemas de
-credenciales o de la API cuando en realidad son el orden del historial. El
-primer entregable recomendado es el backend de test validador del protocolo
-(precondición del Grupo I), porque convierte los siete en fallas de test
-reproducibles en CI en vez de sorpresas en vivo.
+**Actualización 2026-07-05: Grupo I e Grupo J están cerrados.** La condición
+que bloqueaba la verificación end-to-end contra Anthropic/Ollama reales
+(PLAN.md § "Verificación end-to-end (tras Fase 5)") ya no aplica — los 9
+hallazgos de corrupción permanente de sesión (`N-1, N-1b, N-2, N-3, N-4, N-5,
+N-6, N-7, N-14`) tienen fix y test de regresión propio, y los dos escapes de
+seguridad del allowlist (`N-8a, N-8b`) también. Recomendación: correr esa
+verificación end-to-end ahora es razonable como siguiente paso — cualquier
+400 que aparezca ya no debería originarse en el orden del historial.
+
+Quedan abiertos, fuera del alcance de esta sesión: Grupo K (robustez de
+backends — el más barato es N-9, argumentos vacíos dropeados en silencio),
+Grupo L (TUI Fase 2 — bracketed paste, walk de @-menciones, id de sesión en
+backtrack), y Grupo M (validez del bench). Y dentro de lo ya cubierto,
+`N-25` (crecimiento sin cota de `durable.summary`) sigue explícitamente fuera
+de alcance — mencionada como antecedente de N-6 pero no cerrada.

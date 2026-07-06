@@ -12,10 +12,10 @@ use braze_events::{AgentEvent, BackgroundTask, TaskHandle, TaskNotifier, TurnObs
 use braze_model::{CompletionEvent, CompletionRequest, ModelBackend};
 use braze_session::{ContextCompactor, DurableState, SessionError, SessionStore};
 use braze_tools_core::ToolRegistry;
-use braze_types::{Message, SessionId, ToolCall, ToolResult, ToolStub};
+use braze_types::{ContentBlock, Message, SessionId, ToolCall, ToolResult, ToolStub};
 
 use crate::error::EngineError;
-use crate::history::build_messages;
+use crate::history::{build_messages, render_durable_events};
 
 /// Default number of raw tactical events above which [`Engine::run_turn`]
 /// triggers a compaction pass before building the next model request. See
@@ -80,6 +80,24 @@ struct RoundOutcome {
     text_buffer: String,
     tool_calls: Vec<ToolCall>,
     usage: Option<(u32, u32, Option<String>)>,
+}
+
+/// Per-turn mutable state `dispatch_tool_calls` threads across every round
+/// of one `run_turn` call — bundled into one struct rather than a growing
+/// list of `&mut` parameters. Constructed fresh in `run_turn` and never
+/// persisted or reused across turns.
+struct TurnDispatchState {
+    /// Per-tool-name retry counter for the "one round of schema-repair
+    /// context" mechanism in `dispatch_tool_calls`.
+    schema_retry_counts: HashMap<String, u32>,
+    /// (tool name, canonical arguments) pairs already dispatched this
+    /// turn — see `dispatch_tool_calls`'s repetition check (A5,
+    /// docs/AUDITORIA-2026-07.md).
+    seen_calls: HashSet<(String, String)>,
+    /// Every `tool_use` id already in this session's history plus every
+    /// one minted so far this turn — see `ensure_unique_tool_call_id` and
+    /// N-14, docs/AUDITORIA-2026-07-v2.md.
+    known_tool_call_ids: HashSet<String>,
 }
 
 impl Engine {
@@ -402,7 +420,7 @@ impl Engine {
         // orphaned tool_use and its synthesized result, producing a
         // sequence Anthropic rejects with a permanent 400 (the repair
         // itself would be the thing making the session unresumable).
-        self.repair_session(session, observer).await?;
+        let existing_events = self.load_and_repair(session, observer).await?;
 
         self.append_and_notify(
             session,
@@ -415,19 +433,20 @@ impl Engine {
 
         let mut messages = self.load_messages(session, observer).await?;
 
-        // Per-turn, per-tool-name retry counter for the "one round of
-        // repair context" mechanism in `dispatch_tool_calls` below. Lives
-        // and dies with this `run_turn` call — it is not a field on
-        // `Engine` and never persists across turns.
-        let mut schema_retry_counts: HashMap<String, u32> = HashMap::new();
-
-        // Per-turn memory of (tool name, canonical arguments) pairs
-        // already dispatched — see `dispatch_tool_calls`'s repetition
-        // check. A small/local model re-issuing the exact same call it
-        // already got a result for is the dominant non-convergence
-        // pattern this is meant to catch (docs/AUDITORIA-2026-07.md,
-        // hallazgo A5).
-        let mut seen_calls: HashSet<(String, String)> = HashSet::new();
+        // Per-turn state threaded through `dispatch_tool_calls` across
+        // every round of this call — schema-repair retry counts, the
+        // repeated-call detector (A5), and the id-uniqueness guard (N-14,
+        // docs/AUDITORIA-2026-07-v2.md, seeded from this session's
+        // history so a collision with a *previous* turn — e.g. a
+        // backend's synthetic-id fallback restarting its counter after
+        // `--resume` — gets caught too, not just collisions within this
+        // turn). Lives and dies with this `run_turn` call — none of it is
+        // a field on `Engine` or persists across turns.
+        let mut dispatch_state = TurnDispatchState {
+            schema_retry_counts: HashMap::new(),
+            seen_calls: HashSet::new(),
+            known_tool_call_ids: Self::existing_tool_call_ids(&existing_events),
+        };
 
         for round in 0..MAX_TURN_ITERATIONS {
             let tool_stubs = self.tools.all_stubs().await?;
@@ -509,8 +528,7 @@ impl Engine {
                 session,
                 &tool_calls,
                 &tool_stubs,
-                &mut schema_retry_counts,
-                &mut seen_calls,
+                &mut dispatch_state,
                 observer,
             )
             .await?;
@@ -604,14 +622,36 @@ impl Engine {
         session: &SessionId,
         tool_calls: &[ToolCall],
         available_tools: &[ToolStub],
-        retry_counts: &mut HashMap<String, u32>,
-        seen_calls: &mut HashSet<(String, String)>,
+        state: &mut TurnDispatchState,
         observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
+        let TurnDispatchState {
+            schema_retry_counts: retry_counts,
+            seen_calls,
+            known_tool_call_ids,
+        } = state;
+
         let mut handle_to_id: HashMap<TaskHandle, String> = HashMap::new();
         let mut pending: HashSet<TaskHandle> = HashSet::new();
 
         for call in tool_calls {
+            // N-14 (docs/AUDITORIA-2026-07-v2.md): shadow `call` with an
+            // owned copy whose id is guaranteed unique against every id
+            // this session has ever used (history + this turn so far)
+            // *before* anything below persists or dispatches it — every
+            // remaining `call.id`/`call.clone()` use in this loop body
+            // is unchanged and now operates on the deduped id. Without
+            // this, a duplicate id (a backend's synthetic-id counter
+            // restarting after `--resume`, or two calls the model itself
+            // gave the same id) enters the append-only log as two
+            // `tool_use`/`tool_result` pairs sharing one id — Anthropic
+            // rejects that with a permanent 400 on every future request.
+            let call = ToolCall {
+                id: ensure_unique_tool_call_id(call.id.clone(), known_tool_call_ids),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+            };
+
             self.append_and_notify(
                 session,
                 &AgentEvent::AssistantToolCall {
@@ -890,12 +930,14 @@ impl Engine {
 
     /// Loads the full event log and repairs any orphaned tool_use left by
     /// a crashed/killed/power-lost previous run (see
-    /// [`Engine::repair_orphaned_tool_calls`]). Shared by
-    /// [`Engine::repair_session`] (called from `run_turn` *before* the
-    /// turn's `UserMessage` is appended — N-4,
-    /// docs/AUDITORIA-2026-07-v2.md) and [`Engine::load_messages`] (which
-    /// still needs the repair for any other caller, and is idempotent if
-    /// `repair_session` already ran this turn).
+    /// [`Engine::repair_orphaned_tool_calls`]). Called directly from
+    /// `run_turn` *before* the turn's `UserMessage` is appended (N-4,
+    /// docs/AUDITORIA-2026-07-v2.md) — the returned events also seed
+    /// `run_turn`'s `known_tool_call_ids` (N-14, via
+    /// [`Engine::existing_tool_call_ids`]) — and from
+    /// [`Engine::load_messages`] (which still needs the repair for any
+    /// other caller, and is idempotent if `run_turn` already ran it this
+    /// turn).
     async fn load_and_repair(
         &self,
         session: &SessionId,
@@ -913,18 +955,20 @@ impl Engine {
         Ok(events)
     }
 
-    /// Repairs orphaned tool calls in `session`'s log, if any — see
-    /// [`Engine::load_and_repair`]. Called from `run_turn` before it
-    /// appends the turn's `UserMessage`, so a repair (if needed) is always
-    /// persisted immediately after its orphaned `tool_use`, never after an
-    /// intervening message (N-4, docs/AUDITORIA-2026-07-v2.md).
-    async fn repair_session(
-        &self,
-        session: &SessionId,
-        observer: &mut dyn TurnObserver,
-    ) -> Result<(), EngineError> {
-        self.load_and_repair(session, observer).await?;
-        Ok(())
+    /// Collects the id of every `AssistantToolCall` already in `events` —
+    /// used to seed `run_turn`'s `known_tool_call_ids` so a
+    /// freshly-generated id (whether from the model or a backend's
+    /// synthetic-id fallback) that happens to collide with one already in
+    /// the session's history gets renamed instead of silently entering the
+    /// append-only log twice (N-14, docs/AUDITORIA-2026-07-v2.md).
+    fn existing_tool_call_ids(events: &[AgentEvent]) -> HashSet<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::AssistantToolCall { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Loads the full event log, splits it into durable/tactical via the
@@ -964,8 +1008,19 @@ impl Engine {
         let over_token_budget = self
             .context_budget_tokens
             .is_some_and(|budget| estimate_prompt_tokens(&durable, &tactical) > budget);
+        // N-6 (docs/AUDITORIA-2026-07-v2.md): compacting only ever folds
+        // `tactical` — it can't shrink `durable.summary` or
+        // `durable_events`. If `tactical` is already down to (or below)
+        // the raw tail every compaction keeps verbatim anyway, running
+        // `compact_tactical` again can't reduce the estimate at all: it
+        // would just append another near-empty `CompactionOccurred` and
+        // re-trigger on every subsequent `load_messages` forever — the
+        // exact "modo compactación permanente" pathology A2/C2 already
+        // fixed for the event-count trigger, reintroduced here via the
+        // token-budget one.
+        let compaction_would_help = tactical.len() > KEEP_RAW_TAIL;
 
-        if over_event_count_threshold || over_token_budget {
+        if (over_event_count_threshold || over_token_budget) && compaction_would_help {
             // A9 (docs/AUDITORIA-2026-07.md): previously this branch had
             // no log statement at all — the only trace of a compaction
             // having happened was the resulting `AgentEvent::CompactionOccurred`
@@ -1064,6 +1119,33 @@ impl Engine {
         }
 
         Ok(())
+    }
+}
+
+/// Returns `id` unchanged if it isn't already in `known_ids` (registering
+/// it there); otherwise mints `"{id}-dup{n}"` for the smallest `n` that
+/// isn't itself already known, registers *that*, and returns it — see the
+/// call site in `Engine::dispatch_tool_calls` (N-14,
+/// docs/AUDITORIA-2026-07-v2.md) for why a colliding id must never reach
+/// the append-only session log unchanged.
+fn ensure_unique_tool_call_id(id: String, known_ids: &mut HashSet<String>) -> String {
+    if known_ids.insert(id.clone()) {
+        return id;
+    }
+
+    let mut suffix = 1u32;
+    loop {
+        let candidate = format!("{id}-dup{suffix}");
+        if known_ids.insert(candidate.clone()) {
+            tracing::warn!(
+                original_id = %id,
+                renamed_id = %candidate,
+                "tool_use id collided with one already used in this session; \
+                 renaming to keep ids unique"
+            );
+            return candidate;
+        }
+        suffix += 1;
     }
 }
 
@@ -1203,11 +1285,37 @@ fn estimate_dropped_tokens(events: &[AgentEvent]) -> u32 {
 /// the prompt is approaching `context_budget_tokens`, since a raw event
 /// *count* alone can't tell a two-word `AssistantText` apart from a
 /// `ToolCallCompleted` carrying a 200KB file dump.
+///
+/// `durable_events` is measured through [`render_durable_events`] — the
+/// *cleared* form actually sent to the model — rather than the raw event
+/// payload (N-6, docs/AUDITORIA-2026-07-v2.md). `durable_events` never
+/// shrinks once settled (compaction only ever folds `tactical`), so
+/// over-counting it here means the estimate can never drop back under
+/// budget no matter how many times `load_messages` compacts — exactly the
+/// "modo compactación permanente" pathology A2/C2 already fixed for the
+/// event-count trigger, reachable again through this one.
 fn estimate_prompt_tokens(durable: &DurableState, tactical: &[AgentEvent]) -> u32 {
     let summary_tokens = (durable.summary.len() / 4) as u32;
-    summary_tokens
-        + estimate_dropped_tokens(&durable.durable_events)
-        + estimate_dropped_tokens(tactical)
+    let durable_events_tokens = estimate_message_tokens(&render_durable_events(&durable.durable_events));
+    summary_tokens + durable_events_tokens + estimate_dropped_tokens(tactical)
+}
+
+/// Rough token estimate (~4 chars/token) over already-rendered `Message`s
+/// — every `ContentBlock` variant's user-visible text, not a `Debug` dump
+/// of the whole struct (which would double-count field names/punctuation
+/// and, for `ToolUse`, the *raw* `serde_json::Value` rather than its
+/// compact string form).
+fn estimate_message_tokens(messages: &[Message]) -> u32 {
+    let chars: usize = messages
+        .iter()
+        .flat_map(|message| &message.content)
+        .map(|block| match block {
+            ContentBlock::Text { text } => text.len(),
+            ContentBlock::ToolUse { name, input, .. } => name.len() + input.to_string().len(),
+            ContentBlock::ToolResult { content, .. } => content.len(),
+        })
+        .sum();
+    (chars / 4) as u32
 }
 
 #[cfg(test)]
@@ -1704,6 +1812,83 @@ mod tests {
             .run_turn(&session, "please echo hi", &mut NoopObserver)
             .await
             .expect("turn should succeed and every request should pass protocol validation");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-14.
+    ///
+    /// Nothing previously checked that a `ToolCallRequested`'s id was
+    /// unique before persisting it as an `AssistantToolCall` — a model
+    /// that (accidentally or via a buggy backend's synthetic-id fallback)
+    /// issues two calls sharing one id would get two `tool_use`/
+    /// `tool_result` pairs with the same id in the append-only log,
+    /// which Anthropic rejects permanently on every future request.
+    #[tokio::test]
+    async fn duplicate_tool_use_ids_in_one_round_are_renamed_to_stay_unique() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ProtocolValidatingModel::new(ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "a" }),
+                },
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "b" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]));
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo two things", &mut NoopObserver)
+            .await
+            .expect("turn should succeed despite the duplicate id — and every \
+                     request built along the way must still pass protocol validation");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            2,
+            "both calls have different arguments, so both must dispatch \
+             (not be treated as an identical repeated call)"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let tool_use_ids: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::AssistantToolCall { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tool_use_ids.len(), 2);
+        assert_ne!(
+            tool_use_ids[0], tool_use_ids[1],
+            "the second call's id must have been renamed to stay unique"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -2636,8 +2821,14 @@ mod tests {
         let (store, dir) = temp_store();
         let session = SessionId::new();
 
-        // Just 2 events — nowhere near the default threshold of 40 — but
-        // one of them is enormous.
+        // The oversized event plus enough small filler events that the
+        // tactical tail (`KEEP_RAW_TAIL`) doesn't fully cover it — with 8
+        // tactical events total, compacting can actually exclude the huge
+        // one from the kept raw tail and fold it into the digest instead
+        // (see `compaction_would_help` in `load_messages`: with 2 events
+        // or fewer than `KEEP_RAW_TAIL`, the tail *is* the whole tactical
+        // slice, so compacting couldn't shrink anything and correctly
+        // wouldn't trigger at all).
         store
             .append(
                 &session,
@@ -2656,6 +2847,17 @@ mod tests {
             )
             .await
             .expect("seed oversized event");
+        for i in 0..6 {
+            store
+                .append(
+                    &session,
+                    &AgentEvent::UserMessage {
+                        text: format!("mensaje de relleno {i}"),
+                    },
+                )
+                .await
+                .expect("seed filler event");
+        }
 
         let engine = Engine::new(
             Box::new(ScriptedModel::new(vec![])),
@@ -2680,6 +2882,94 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
             "expected the token budget to trigger compaction despite the low event count"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-6.
+    ///
+    /// Once a large tool result has settled into `durable_events` (past
+    /// the compactor's tactical window), the token-budget estimate must
+    /// reflect the *cleared* render actually sent to the model — a short
+    /// "[tool result cleared: N chars removed...]" placeholder — not the
+    /// raw, uncleared payload. Before this fix, `estimate_prompt_tokens`
+    /// measured `durable_events` via `format!("{event:?}")` over the raw
+    /// event, so a 5000-char tool result kept counting as ~5000 chars
+    /// forever: since compacting only ever folds `tactical` (never
+    /// shrinks `durable_events`), `over_token_budget` would stay `true` on
+    /// every single `load_messages` call no matter how many times it
+    /// compacted — a `CompactionOccurred` appended on every round,
+    /// indefinitely, for content that was already small once rendered.
+    #[tokio::test]
+    async fn a_large_settled_tool_result_does_not_permanently_blow_the_token_budget() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        for event in [
+            AgentEvent::UserMessage {
+                text: "lee el archivo grande".to_string(),
+            },
+            AgentEvent::AssistantToolCall {
+                id: "call-1".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({ "path": "big.txt" }),
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "call-1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "call-1".to_string(),
+                    content: "x".repeat(5_000),
+                    is_error: false,
+                },
+            },
+            AgentEvent::AssistantText {
+                text: "ok, lo leí".to_string(),
+            },
+            AgentEvent::UserMessage {
+                text: "gracias".to_string(),
+            },
+            AgentEvent::AssistantText {
+                text: "de nada".to_string(),
+            },
+        ] {
+            store.append(&session, &event).await.expect("seed event");
+        }
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            // A small window (2) settles the tool call pair into
+            // `durable_events` immediately, exactly like a real session
+            // long past its first ~20 events.
+            Box::new(SimpleContextCompactor::new(2)),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        // Far below the 5000-char raw content, comfortably above the
+        // cleared render (a short placeholder plus a handful of small
+        // events) — this is the whole point: the *rendered* size is what
+        // must be compared against the budget.
+        .with_context_budget(100);
+
+        for _ in 0..3 {
+            engine
+                .load_messages(&session, &mut NoopObserver)
+                .await
+                .expect("load_messages should succeed");
+        }
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "the cleared render of the settled tool result is well under budget — \
+             compaction must not trigger (let alone repeatedly) just because the \
+             raw, already-settled payload is large"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

@@ -131,6 +131,30 @@ impl SessionStore for FileSessionStore {
             }
         }
 
+        // N-7 (docs/AUDITORIA-2026-07-v2.md): the cold-cache disk read
+        // below must not race a concurrent `append` — without holding the
+        // same `write_lock` `append` holds for its entire write, a `load`
+        // here could observe a half-written final line mid-`write_all`,
+        // silently discard it via the C5 tolerance further down, and warm
+        // the cache *without* an event that actually finished writing to
+        // disk moments later. The next `load_messages` would then see the
+        // matching `AssistantToolCall` with no result and synthesize a
+        // *second* `ToolCallCompleted` for the same id — two
+        // `tool_result`s for one `tool_use`, a permanent 400 on every
+        // future resume. Cheap in the common case: only a cold load ever
+        // reaches this point (the warm-cache check above already returned
+        // for every other call).
+        let _guard = self.write_lock.lock().await;
+
+        // Re-check: another `load` could have warmed the cache while this
+        // one waited for the lock.
+        {
+            let cache = self.cache.lock().await;
+            if let Some(events) = cache.get(session) {
+                return Ok(events.clone());
+            }
+        }
+
         let path = self.path_for(session);
         let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -164,6 +188,33 @@ impl SessionStore for FileSessionStore {
                             error = %e,
                             "discarding malformed final line in rollout log (likely a truncated write from a crash mid-append); session recovered up to this point"
                         );
+                        // N-5 (docs/AUDITORIA-2026-07-v2.md): C5 tolerated
+                        // this on *read*, but never repaired the file —
+                        // the next `append` would weld its event onto the
+                        // truncated fragment (nothing separates them; the
+                        // fragment itself ends in no newline), producing
+                        // one malformed line that is no longer the *last*
+                        // one after any further event is appended. `load`
+                        // on the *next* resume would then fail hard
+                        // instead of tolerating it — a one-turn hiccup
+                        // turning into a permanently unresumable session.
+                        // Truncating now, under the same lock `append`
+                        // uses, makes the on-disk file match exactly what
+                        // was just recovered, so the next `append` starts
+                        // clean.
+                        let valid_prefix = if line_no == 0 {
+                            String::new()
+                        } else {
+                            format!("{}\n", lines[..line_no].join("\n"))
+                        };
+                        if let Err(write_err) = tokio::fs::write(&path, &valid_prefix).await {
+                            tracing::warn!(
+                                path = ?path,
+                                error = %write_err,
+                                "failed to truncate rollout log after a truncated final line; \
+                                 the fragment will remain on disk until the next successful append"
+                            );
+                        }
                         break;
                     }
                     return Err(SessionError::Read(format!(
@@ -318,6 +369,129 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
         assert!(matches!(events[1], AgentEvent::AssistantText { .. }));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-5 (docs/AUDITORIA-2026-07-v2.md): C5 only
+    /// tolerated a truncated final line *in memory* — the file itself was
+    /// never repaired, so the next `append` would weld its event onto the
+    /// leftover fragment (nothing separates them), producing one
+    /// malformed line that's no longer the file's *last* line once a
+    /// further event is appended — `load` on the *next* resume would then
+    /// fail hard instead of tolerating it, turning a one-turn hiccup into
+    /// a permanently unresumable session.
+    #[tokio::test]
+    async fn load_repairs_the_file_after_a_truncated_final_line_not_just_tolerates_it() {
+        let (store, dir) = temp_store("truncated-final-line-repair");
+        let session = SessionId::new();
+
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "hola".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantText {
+                    text: "hola de vuelta".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let path = store.path_for(&session);
+        let mut raw = tokio::fs::read_to_string(&path).await.unwrap();
+        raw.push_str(r#"{"type":"user_message","text":"cor"#);
+        tokio::fs::write(&path, raw).await.unwrap();
+
+        // A fresh store (cold cache) pointed at the same directory, so
+        // `load` genuinely reads — and, if the fix works, repairs — the
+        // file on disk rather than serving from `store`'s own cache.
+        let fresh = FileSessionStore::new(dir.clone());
+        let events = fresh.load(&session).await.expect("load should not fail");
+        assert_eq!(events.len(), 2);
+
+        // The file on disk must now contain ONLY the two valid lines —
+        // the fragment must be gone, not merely skipped in memory.
+        let repaired_raw = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(
+            repaired_raw.lines().count(),
+            2,
+            "the truncated fragment must have been removed from disk, not just \
+             skipped while parsing: {repaired_raw:?}"
+        );
+
+        // Simulate the *next* resume (a brand new process/store instance):
+        // appending a third event and loading again must round-trip
+        // cleanly. Before the fix, the leftover fragment welded to this
+        // new event would fail to parse, and — being no longer the file's
+        // last line once a *fourth* event were appended — would error
+        // hard on some future resume instead of tolerating it.
+        fresh
+            .append(
+                &session,
+                &AgentEvent::AssistantText {
+                    text: "tercero".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let second_resume = FileSessionStore::new(dir.clone());
+        let events = second_resume
+            .load(&session)
+            .await
+            .expect("the second resume must still load cleanly");
+        assert_eq!(events.len(), 3);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-7 (docs/AUDITORIA-2026-07-v2.md): `load`'s
+    /// cold-cache disk read must not race a concurrent `append` — without
+    /// serializing on the same lock `append` holds for its entire write, a
+    /// `load` could observe a half-written file, silently tolerate it as
+    /// if it were a genuinely truncated crash artifact (C5), and warm the
+    /// cache without an event that finishes writing moments later.
+    #[tokio::test]
+    async fn cold_load_waits_for_an_in_flight_append_instead_of_racing_it() {
+        let (store, dir) = temp_store("cold-load-vs-append-race");
+        let session = SessionId::new();
+        let store = std::sync::Arc::new(store);
+
+        // Hold the same lock `append` would hold while writing, to
+        // simulate an in-flight append that hasn't finished yet.
+        let guard = store.write_lock.lock().await;
+
+        let store_clone = std::sync::Arc::clone(&store);
+        let load_task = tokio::spawn(async move { store_clone.load(&session).await });
+
+        // Give the spawned `load` a chance to reach (and block on) the
+        // lock before we "finish the write" and release it.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = store.path_for(&session);
+        tokio::fs::write(&path, "{\"type\":\"user_message\",\"text\":\"hola\"}\n")
+            .await
+            .unwrap();
+
+        drop(guard);
+
+        let events = load_task
+            .await
+            .unwrap()
+            .expect("load should succeed once the lock is released");
+        assert_eq!(
+            events.len(),
+            1,
+            "load must observe the fully-written content, not race ahead of it"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

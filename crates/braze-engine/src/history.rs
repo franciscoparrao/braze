@@ -54,6 +54,24 @@ pub fn build_messages(durable: &DurableState, tactical: &[AgentEvent]) -> Vec<Me
     build_messages_with_never_clear(durable, tactical, NEVER_CLEAR_TOOLS)
 }
 
+/// Renders `durable_events` alone — no leading summary placeholder, no
+/// tactical — through the exact same clearing logic [`build_messages`]
+/// applies to the durable side. Exposed so `Engine`'s token-budget
+/// estimator can size *what actually reaches the model* (an old
+/// `ToolCallCompleted`'s content replaced by a short "cleared" placeholder)
+/// instead of the raw, uncleared event payload (N-6,
+/// docs/AUDITORIA-2026-07-v2.md) — `durable_events` never shrinks once
+/// settled, so over-counting it means a budget-triggered compaction can
+/// never bring the estimate back under budget, re-triggering forever.
+pub(crate) fn render_durable_events(durable_events: &[AgentEvent]) -> Vec<Message> {
+    let tool_names = tool_names_by_id(durable_events);
+    let mut messages = Vec::with_capacity(durable_events.len());
+    push_grouped(&mut messages, durable_events, |event| {
+        event_to_block_cleared(event, &tool_names, NEVER_CLEAR_TOOLS)
+    });
+    messages
+}
+
 /// Implementation behind [`build_messages`], parameterized on the
 /// tool-result clearing exclusion list so tests can exercise both branches
 /// without mutating the production `NEVER_CLEAR_TOOLS` constant.
