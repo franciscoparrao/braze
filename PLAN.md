@@ -1448,6 +1448,88 @@ compactación) disparó durante el bench. Ahora instala el mismo
 subscriber que `braze-cli` (stderr, respeta `RUST_LOG`; los binarios y
 solo los binarios instalan subscribers, per convención del workspace).
 
+## Backlog post-revisiones — ítems 4-7 + extensión XML (2026-07-06)
+
+Cuatro préstamos de la revisión OSS (docs/SOTA-2026-07.md § Adenda)
+implementados en tanda, más la parte diferida del ítem 2 destrancada por
+el nodo Nitro. Commits: `5509c11` (4), `e4a1bf2` (5), `18c2d44` (7,
+knobs), `dc0df4d` (6), `bf4bc1e` (XML). Tests 569 → 597 acumulado.
+
+- **Ítem 4 — colapso ACI de observaciones** (`history.rs`): la i-ésima
+  observación táctica se colapsa a su primera línea (cap 160 chars) +
+  marcador cuando hay ≥5 observaciones más recientes
+  (`TACTICAL_FULL_OBSERVATIONS`, ACI Tabla 3: +3.0 pp). En render, no
+  destructivo; guard de no-op para contenido corto.
+- **Ítem 5 — guardrail `cargo check` post-edit** (`braze-tools-local/
+  post_edit_check.rs`): tras write/edit exitoso de un `.rs` (Cargo.toml
+  ancestro más cercano), los errores de `cargo check
+  --message-format=short` (timeout 60s, cap 2000 chars) vuelven en el
+  mismo tool result — solo en fallo, happy path gratis. Opt-out
+  `disable_post_edit_check`. cargo ausente/timeout: skip silencioso.
+- **Ítem 6 — `EscalatingBackend`** (`braze-model/escalation.rs`):
+  decorator lead/worker reactivo estilo Goose — lead abre
+  (`lead_turns=3`), 2 observaciones fallidas consecutivas al final del
+  historial lo traen de vuelta por 3 calls. Detección stateless por
+  request (la cola de `ToolResult is_error`): retries/best-of-n no
+  double-cuentan, un mensaje nuevo del usuario resetea. `--lead
+  <backend>[:modelo]` + `lead_backend`/`lead_model`, espejo de
+  `--planner` — proactivo (planner) y reactivo (lead) componen. A/B en
+  bench pendiente (falta sintaxis de spec con lead).
+- **Ítem 7 — knobs de sampling Ollama**: `with_top_p/with_top_k/
+  with_repeat_penalty` (None = defer al Modelfile) + `--top-p/--top-k/
+  --repeat-penalty` en braze-bench.
+- **Extensión ítem 2 — gramática XML qwen3-coder**: `<function=name>` +
+  `<parameter=key>` (valores verbatim como strings; solo `{...}`/`[...]`
+  se parsea como JSON), aceptada dentro del wrapper `<tool_call>` y
+  bare. Escalera final: estructurado → `<tool_call>` (JSON|XML) →
+  `<function=>` bare → JSON desnudo.
+
+### Sweep A/B de sampling (ítem 7) — veredicto
+
+g10-weak-skills, 3 reps, seed 42, `--no-ollama-stop`, **contra Nitro**
+(192.168.1.8, box dedicada — ver abajo). Config A = temp 0.2 (default
+del bench); config B = recomendación Qwen (temp 0.7 / top_p 0.8 /
+top_k 20 / repeat_penalty 1.05). JSONs en scratchpad de la sesión
+(`nitro-*.json`).
+
+| modelo | temp 0.2 | qwen-rec | mediana ms/tarea |
+|---|---|---|---|
+| qwen2.5:3b | 0/6 | **2/6** (distractor 2/3) | ~1.9k |
+| qwen3.5-coder | **6/6** | 5/6 | ~20-27k |
+
+- **Para qwen2.5:3b el sampling recomendado ayuda**: 0/6 → 2/6 en Nitro,
+  y la corrida local (contaminada por builds concurrentes, ver nota)
+  fue direccionalmente igual (0/6 → 3/6). N=6 por celda (±30pp), pero
+  consistente en dos entornos: para la familia Qwen chica conviene
+  correr con qwen-rec. El default 0.2 del bench no cambia (es el
+  neutral entre backends); usar los flags por sweep.
+- **error_recovery sigue 0/3 en qwen2.5:3b con ambos samplings** — esa
+  skill no es de sampling, es de capacidad/harness.
+- **qwen3.5-coder clava 6/6 en las skills débiles a temp 0.2** — primer
+  modelo local que satura g10; con qwen-rec 5/6 (ruido; a un modelo ya
+  saturado el sampling no le suma). Es modelo *thinking* (Ollama
+  devuelve campo `thinking` separado; con `num_predict` chico el
+  content puede salir vacío — presupuestar tokens acorde). **Nuevo
+  mejor modelo local del proyecto**, corre en Nitro a ~20-27s/tarea.
+- **0 activaciones de rescate textual en los 4 legs**
+  (`RUST_LOG=braze_engine=info`, ahora medible tras el subscriber de
+  braze-bench) — vía template nativo de Ollama no hay leak; ambos
+  formatos quedan como red de seguridad validada por unit tests.
+
+### Nota de metodología: benchear en Nitro, no en la máquina de trabajo
+
+La re-corrida local del baseline dio 0/6 donde la corrida de la mañana
+(misma config, mismo seed) había dado 2/6 — la diferencia más probable:
+los builds/tests que esta sesión corría en paralelo sobre una máquina
+CPU-bound contaminaron la inferencia. En Nitro, qwen2.5:3b corre el
+mismo bench ~50× más rápido (mediana ~1.9s vs ~90-100s por tarea) y sin
+competir con el trabajo interactivo. **Regla operativa**: sweeps de
+braze-bench van a Nitro (`BRAZE_OLLAMA_BASE_URL=http://192.168.1.8:11434`
++ `--no-ollama-stop` — el `ollama stop` del bench habla con el server
+local, no el remoto), y la TUI/CLI puede apuntar ahí con `--ollama-url`.
+Pendientes de infra que esto agrava: fijar la IP de Nitro en el router
+(hoy DHCP) y configurar `OLLAMA_KEEP_ALIVE` en el nodo.
+
 ## Split planificador/ejecutor (`with_planner`) — diseño (2026-07-06)
 
 > **Estado: diseño aprobado, implementación pendiente.** Primera pieza de
