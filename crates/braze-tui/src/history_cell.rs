@@ -232,6 +232,7 @@ impl HistoryCell for HelpCell {
             Line::from("Enter enviar · Ctrl+J salto de línea"),
             Line::from("Esc interrumpe el turno en curso (o deniega una aprobación pendiente)"),
             Line::from("Ctrl+T ver el output completo de la última tool call"),
+            Line::from("Esc Esc (dos veces, ocioso) retroceder a un mensaje anterior y editarlo"),
             Line::from("Ctrl+C / Ctrl+D (composer vacío) salir"),
             Line::from(""),
             Line::from(Span::styled("Comandos", heading_style)),
@@ -429,6 +430,7 @@ mod tests {
         assert!(rendered.contains("/quit"));
         assert!(rendered.contains("Ctrl+C"));
         assert!(rendered.contains("Ctrl+T"));
+        assert!(rendered.contains("Esc Esc"));
         assert!(rendered.contains('@'));
     }
 

@@ -690,11 +690,12 @@ completo (Ctrl+T)~~ (implementado 2026-07-05 con alcance reducido — una
 celda que expande el output completo, no un overlay fullscreen real, ver
 § "Fase TUI 2 — Ctrl+T expande el output completo de una tool call" más
 abajo), imágenes/clipboard, modo vim, inserción ANSI propia estilo Codex
-(`custom_terminal`), soporte especial Zellij, TUI como default, **celda
-de plan/todo editable antes de ejecutar** (descomposición interactiva de
-tareas — UIST 2024 — requiere soporte del engine para planes, no solo de
-la TUI) y **backtrack** (Esc-Esc para
-retroceder a un mensaje anterior y editarlo, como Codex).
+(`custom_terminal`), soporte especial Zellij, TUI como default, y
+**celda de plan/todo editable antes de ejecutar** (descomposición
+interactiva de tareas — UIST 2024 — requiere soporte del engine para
+planes, no solo de la TUI). ~~Backtrack~~ (Esc-Esc para retroceder a un
+mensaje anterior y editarlo, como Codex) implementado 2026-07-05 — ver
+§ "Fase TUI 2 — backtrack: Esc-Esc para retroceder y editar" más abajo.
 
 ### Riesgos conocidos (aceptados para el MVP)
 
@@ -1248,6 +1249,82 @@ hardcodeados antes del refactor.
 arrancar con `"tema de TUI desconocido: 'bogus' (esperado 'dark',
 'light', o 'high-contrast')"`, antes de tocar el engine o la sesión;
 `braze chat --help` muestra el flag `--theme` documentado.
+
+## Fase TUI 2 — backtrack: Esc-Esc para retroceder y editar (2026-07-05)
+
+**Investigación previa a implementar** (agente `Explore`, ver
+`crates/braze-session/src/store.rs`): el trait `SessionStore` es
+estrictamente append-only —
+
+```rust
+async fn append(&self, session: &SessionId, event: &AgentEvent) -> Result<(), SessionError>;
+async fn load(&self, session: &SessionId) -> Result<Vec<AgentEvent>, SessionError>;
+async fn list_sessions(&self) -> Result<Vec<SessionId>, SessionError>;
+```
+
+— sin ningún método `truncate`/`rewind`. `FileSessionStore` (única
+implementación) mantiene además un cache en memoria por sesión que
+`append` extiende — "reescribir el store con menos eventos" no es un
+patrón existente en absoluto (la compactación tampoco lo hace: genera
+un `AgentEvent::CompactionOccurred` **agregado** al final, nunca
+reemplaza nada). Truncar/rebobinar la sesión actual in-place habría
+significado ampliar uno de los tres traits "contrato congelado" del
+proyecto (`ToolProvider`, `ModelBackend`, `SessionStore`/
+`ContextCompactor` — ver PLAN.md) y reconciliar el cache de
+`FileSessionStore` — alcance mucho mayor al de un incremento de TUI.
+
+**Resolución adoptada — sin tocar el contrato congelado**: en vez de
+mutar la sesión existente, "retroceder" arma una **sesión nueva**:
+`Engine::run_turn` ya recarga el log completo del store en cada turno
+(`load_messages`, sin ningún estado de historial cacheado en el
+`Engine` mismo), así que reproducir el prefijo de eventos anterior al
+mensaje objetivo en un `SessionId::new()` — vía `store.append` en un
+loop, evento por evento — usando solo `append`/`load` (que ya existen)
+logra exactamente la semántica de "como si lo que pasó después nunca
+hubiera ocurrido", sin tocar el trait para nada. Ventaja adicional
+sobre mutar in-place: la sesión original queda intacta y sigue siendo
+`--resume`-able con su historial completo — nada se destruye, coherente
+con la cultura de este proyecto de "rollout log como fuente única de
+verdad" (Grupo G).
+
+**UI**: Esc-Esc (dos toques dentro de `DOUBLE_ESC_WINDOW` = 600ms,
+solo con `!turn_running` — un Esc con turno corriendo sigue
+interrumpiendo como antes) abre `ComposerPopup::Backtrack`, una
+variante nueva del mismo popup que ya usan `/`/`@` (reusa
+`POPUP_MAX_VISIBLE`, `move_popup_selection`, `draw_popup` — mismo
+patrón, sin viewport nuevo). Lista los últimos `AgentEvent::UserMessage`
+más recientes primero, cada uno resumido a su primera línea
+(`backtrack_preview`, mismo criterio de recorte que
+`summarize_tool_output`). Aceptar (Tab/Enter) no ejecuta nada por sí
+solo — mismo criterio que `/`/`@`: `backtrack_to` reproduce el prefijo
+en la sesión nueva, cambia `self.session`, y carga el texto del
+mensaje elegido en el composer para editar; un Enter aparte (con el
+popup ya cerrado) reenvía.
+
+**Bug encontrado y corregido antes de dar por bueno el incremento**:
+`refresh_popup` (que `on_key` llama incondicionalmente al final de
+cada tecla para re-evaluar triggers `/`/`@`) sobreescribía el popup de
+backtrack recién abierto en la MISMA tecla que lo abrió, porque no
+está condicionado a ningún trigger de cursor — el composer sigue vacío
+cuando se abre. Encontrado en la primera pasada de verificación en vivo
+(el popup nunca aparecía en el volcado de pantalla) antes de asumir que
+funcionaba. Fix: `refresh_popup` ahora retorna temprano si
+`self.popup` ya es `Backtrack` — solo `accept_popup_selection` o un Esc
+explícito lo cierran.
+
+**Tests**: 421 → 424 (3 nuevos para `backtrack_preview`, función pura).
+`cargo build/test/clippy --workspace` verdes.
+
+**Verificación manual en vivo** contra el binario de prueba (3 rondas
+scripteadas: `read_file` + texto, texto solo, texto solo): tras enviar
+dos mensajes ("leeme el archivo", "dame otra cosa"), Esc-Esc mostró el
+popup con "↩ dame otra cosa" y "↩ leeme el archivo" (más reciente
+primero); flecha abajo movió la selección; Enter cargó
+`"leeme el archivo"` en el composer, commiteó el aviso de backtrack, y
+**la barra de estado cambió el id de sesión corto** (confirmando que se
+creó una sesión nueva de verdad, no una mutación); editar el texto
+(`"leeme el archivo otra vez"`) y reenviar produjo un turno nuevo normal
+con la tercera ronda scripteada, sin errores. Salida limpia con Ctrl+C.
 
 ## Archivos críticos
 

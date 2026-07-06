@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use braze_engine::Engine;
 use braze_events::AgentEvent;
@@ -19,7 +20,7 @@ use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{CursorMove, TextArea};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -49,6 +50,11 @@ use crate::theme::Theme;
 /// matches than fit just aren't shown — typing another character
 /// narrows the query instead.
 const POPUP_MAX_VISIBLE: usize = 3;
+
+/// Longest gap between two Esc presses that still counts as one
+/// "Esc-Esc" (backtrack) rather than two unrelated single presses —
+/// matches typical double-tap conventions (double-click, etc.).
+const DOUBLE_ESC_WINDOW: Duration = Duration::from_millis(600);
 
 /// Drives the interactive TUI chat loop against an already-configured
 /// `Engine` for `session` until the user quits (Ctrl+C, or Ctrl+D on an
@@ -103,6 +109,18 @@ enum ComposerPopup {
         matches: Vec<String>,
         selected: usize,
     },
+    /// Esc-Esc (`handle_idle_escape`): prior user messages to jump back
+    /// to, most recent first. `(event index in the loaded log, message
+    /// text)` — the index is what `backtrack_to` slices the replayed
+    /// prefix at. Capped to `POPUP_MAX_VISIBLE`, same simplification as
+    /// `Slash`/`Mention` (no scrolling within the popup) — there's no
+    /// query to type here to narrow it further, so this caps to "the
+    /// last few messages", not an arbitrary point in a long
+    /// conversation.
+    Backtrack {
+        messages: Vec<(usize, String)>,
+        selected: usize,
+    },
 }
 
 struct App {
@@ -138,6 +156,13 @@ struct App {
     /// first `@` trigger and cached for the rest of the session — see
     /// `mentionable_files`.
     mentionable_files: Option<Vec<String>>,
+    /// When the last Esc was pressed while idle (`!turn_running`, no
+    /// popup already handling it) — `handle_idle_escape` compares this
+    /// against `Instant::now()` to detect a double-tap within
+    /// `DOUBLE_ESC_WINDOW` and open the backtrack popup. `None` once
+    /// consumed by a detected double-tap, or if the last Esc was long
+    /// enough ago (or this is the first one this session).
+    last_esc_at: Option<Instant>,
     turn_running: bool,
     /// The spawned turn's handle, so Esc can `abort()` it — see
     /// `interrupt_turn`. `None` whenever no turn is in flight.
@@ -177,6 +202,7 @@ impl App {
             composer: TextArea::default(),
             popup: None,
             mentionable_files: None,
+            last_esc_at: None,
             turn_running: false,
             current_turn: None,
             pending_approvals: VecDeque::new(),
@@ -263,7 +289,7 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::Tab | KeyCode::Enter => {
-                    self.accept_popup_selection();
+                    self.accept_popup_selection(terminal).await?;
                     return Ok(());
                 }
                 KeyCode::Esc => {
@@ -285,6 +311,14 @@ impl App {
             }
             (KeyCode::Esc, KeyModifiers::NONE) if self.turn_running => {
                 self.interrupt_turn(terminal)?;
+            }
+            // Idle Esc: not consumed by anything else above (no popup,
+            // no pending approval, no turn to interrupt) — arms or
+            // fires the Esc-Esc backtrack double-tap. A single idle Esc
+            // does nothing else, matching the "no-op" behavior this key
+            // already had here before backtrack existed.
+            (KeyCode::Esc, KeyModifiers::NONE) => {
+                self.handle_idle_escape(terminal).await?;
             }
             // Ctrl+J: literal newline, bypassing `TextArea::input`'s own
             // `Key::Enter` handling (which we deliberately never reach —
@@ -319,6 +353,15 @@ impl App {
     fn refresh_popup(&mut self) {
         if self.turn_running {
             self.popup = None;
+            return;
+        }
+        // A `Backtrack` popup isn't driven by a `/`/`@` cursor trigger at
+        // all (it opens from `handle_idle_escape`, with an empty
+        // composer) — re-deriving from cursor state on every key would
+        // immediately close it again the moment `on_key` calls this at
+        // the end of the very same keystroke that just opened it. Only
+        // `accept_popup_selection`/an explicit Esc close it.
+        if matches!(self.popup, Some(ComposerPopup::Backtrack { .. })) {
             return;
         }
 
@@ -379,20 +422,61 @@ impl App {
         let len = match popup {
             ComposerPopup::Slash { matches, .. } => matches.len(),
             ComposerPopup::Mention { matches, .. } => matches.len(),
+            ComposerPopup::Backtrack { messages, .. } => messages.len(),
         };
         if len == 0 {
             return;
         }
         let selected = match popup {
-            ComposerPopup::Slash { selected, .. } | ComposerPopup::Mention { selected, .. } => {
-                selected
-            }
+            ComposerPopup::Slash { selected, .. }
+            | ComposerPopup::Mention { selected, .. }
+            | ComposerPopup::Backtrack { selected, .. } => selected,
         };
         *selected = (*selected as isize + delta).rem_euclid(len as isize) as usize;
     }
 
+    /// Dispatches on the popup kind: `Slash`/`Mention` just autocomplete
+    /// the composer text (see `replace_trigger_token`), `Backtrack`
+    /// swaps `self.session` and loads the target message for editing
+    /// (see `backtrack_to`) — genuinely different actions, unlike
+    /// `move_popup_selection` which is the same index arithmetic for
+    /// every kind.
+    async fn accept_popup_selection(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        let Some(popup) = self.popup.take() else {
+            return Ok(());
+        };
+        match popup {
+            ComposerPopup::Slash {
+                query_len,
+                matches,
+                selected,
+            } => {
+                if let Some(cmd) = matches.get(selected) {
+                    self.replace_trigger_token(query_len, cmd.name);
+                }
+                Ok(())
+            }
+            ComposerPopup::Mention {
+                query_len,
+                matches,
+                selected,
+            } => {
+                if let Some(path) = matches.get(selected) {
+                    self.replace_trigger_token(query_len, path);
+                }
+                Ok(())
+            }
+            ComposerPopup::Backtrack { messages, selected } => {
+                let Some((event_index, text)) = messages.into_iter().nth(selected) else {
+                    return Ok(());
+                };
+                self.backtrack_to(event_index, text, terminal).await
+            }
+        }
+    }
+
     /// Replaces the `/query` or `@query` token behind the cursor with
-    /// the selected suggestion (plus a trailing space) — deletes exactly
+    /// `replacement` (plus a trailing space) — deletes exactly
     /// `query_len` characters backward (the query, not the `/`/`@`
     /// marker itself) then inserts the full replacement. Does not submit
     /// or execute anything by itself: accepting a `/help` suggestion
@@ -400,30 +484,136 @@ impl App {
     /// any other word — a separate Enter (now with the popup closed)
     /// actually submits/executes it, via `submit`'s own slash-command
     /// interception.
-    fn accept_popup_selection(&mut self) {
-        let Some(popup) = self.popup.take() else {
-            return;
-        };
-        let replacement = match popup {
-            ComposerPopup::Slash {
-                query_len,
-                matches,
-                selected,
-            } => matches.get(selected).map(|cmd| (query_len, cmd.name.to_string())),
-            ComposerPopup::Mention {
-                query_len,
-                matches,
-                selected,
-            } => matches.get(selected).map(|path| (query_len, path.clone())),
-        };
-        let Some((query_len, replacement)) = replacement else {
-            return;
-        };
+    fn replace_trigger_token(&mut self, query_len: usize, replacement: &str) {
         for _ in 0..query_len {
             self.composer.delete_char();
         }
-        self.composer.insert_str(&replacement);
+        self.composer.insert_str(replacement);
         self.composer.insert_str(" ");
+    }
+
+    /// Esc-Esc detection (`on_key`'s idle-Esc arm): the first Esc while
+    /// idle just arms the timer; a second one within
+    /// `DOUBLE_ESC_WINDOW` opens the backtrack popup. A single idle Esc
+    /// otherwise does nothing, same as before backtrack existed.
+    async fn handle_idle_escape(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        let now = Instant::now();
+        let is_double_tap = self
+            .last_esc_at
+            .is_some_and(|previous| now.duration_since(previous) < DOUBLE_ESC_WINDOW);
+        if !is_double_tap {
+            self.last_esc_at = Some(now);
+            return Ok(());
+        }
+        self.last_esc_at = None;
+        self.open_backtrack_popup(terminal).await
+    }
+
+    /// Reads the session's rollout log fresh (same seam as
+    /// `expand_last_tool_call`) and opens a `ComposerPopup::Backtrack`
+    /// listing the most recent `AgentEvent::UserMessage`s, most recent
+    /// first. A `NoticeCell` instead if the store can't be read, or if
+    /// there's no user message yet to backtrack to (a fresh session).
+    async fn open_backtrack_popup(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        let events = match self.store.load(&self.session).await {
+            Ok(events) => events,
+            Err(err) => {
+                return self.commit_cell(
+                    &NoticeCell {
+                        message: format!("no se pudo leer el historial de la sesión: {err}"),
+                        theme: self.theme,
+                    },
+                    terminal,
+                );
+            }
+        };
+
+        let messages: Vec<(usize, String)> = events
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| match event {
+                AgentEvent::UserMessage { text } => Some((index, text.clone())),
+                _ => None,
+            })
+            .rev()
+            .take(POPUP_MAX_VISIBLE)
+            .collect();
+
+        if messages.is_empty() {
+            return self.commit_cell(
+                &NoticeCell {
+                    message: "no hay ningún mensaje anterior al cual retroceder".to_string(),
+                    theme: self.theme,
+                },
+                terminal,
+            );
+        }
+
+        self.popup = Some(ComposerPopup::Backtrack {
+            messages,
+            selected: 0,
+        });
+        Ok(())
+    }
+
+    /// Rewinds to before the user message at `event_index`: replays
+    /// every event strictly before it (never `event_index` itself, nor
+    /// anything after) into a **brand-new session id**, switches
+    /// `self.session` to it, and loads `text` into the composer for
+    /// editing before resubmitting. A new session rather than mutating
+    /// the current one in place — `SessionStore` is append-only by
+    /// design (`braze-session`'s frozen contract has no
+    /// truncate/rewind, and adding one would mean reconciling
+    /// `FileSessionStore`'s in-memory cache too); replaying the prefix
+    /// into a fresh id needs nothing beyond `append`/`load`, which
+    /// already exist, and leaves the original session's full history
+    /// intact and still `--resume`-able. The scrollback keeps showing
+    /// everything that already happened — nothing is hidden — only
+    /// which session id future turns append to changes.
+    async fn backtrack_to(
+        &mut self,
+        event_index: usize,
+        text: String,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
+        let events = match self.store.load(&self.session).await {
+            Ok(events) => events,
+            Err(err) => {
+                return self.commit_cell(
+                    &NoticeCell {
+                        message: format!("no se pudo retroceder: {err}"),
+                        theme: self.theme,
+                    },
+                    terminal,
+                );
+            }
+        };
+
+        let new_session = SessionId::new();
+        for event in events.iter().take(event_index) {
+            if let Err(err) = self.store.append(&new_session, event).await {
+                return self.commit_cell(
+                    &NoticeCell {
+                        message: format!("no se pudo retroceder: {err}"),
+                        theme: self.theme,
+                    },
+                    terminal,
+                );
+            }
+        }
+        self.session = new_session;
+
+        self.composer = TextArea::from(text.lines());
+        self.composer.move_cursor(CursorMove::Bottom);
+        self.composer.move_cursor(CursorMove::End);
+
+        self.commit_cell(
+            &NoticeCell {
+                message: "↩ retrocediste a un mensaje anterior — edita y reenvia (nueva sesión, ver la barra de estado)".to_string(),
+                theme: self.theme,
+            },
+            terminal,
+        )
     }
 
     /// Executes a built-in `/command` — only ever called from `submit`
@@ -849,7 +1039,58 @@ fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
                 Line::from(Span::styled(format!("@{path}"), style))
             })
             .collect(),
+        ComposerPopup::Backtrack { messages, selected } => messages
+            .iter()
+            .enumerate()
+            .map(|(i, (_, text))| {
+                let style = if i == *selected {
+                    selected_style
+                } else {
+                    Style::default()
+                };
+                Line::from(Span::styled(backtrack_preview(text), style))
+            })
+            .collect(),
     };
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Longest single line shown per entry in the backtrack popup before
+/// truncating — a message's own first line stands in for the whole
+/// thing, same "keep it scannable" rationale as
+/// `history_cell::summarize_tool_output`'s ~80-char cap.
+const BACKTRACK_PREVIEW_MAX_CHARS: usize = 70;
+
+fn backtrack_preview(text: &str) -> String {
+    let first_line = text.lines().next().unwrap_or("").trim();
+    let truncated = first_line.chars().count() > BACKTRACK_PREVIEW_MAX_CHARS;
+    let mut preview: String = first_line.chars().take(BACKTRACK_PREVIEW_MAX_CHARS).collect();
+    if truncated {
+        preview.push('…');
+    }
+    format!("↩ {preview}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backtrack_preview_shows_only_the_first_line() {
+        assert_eq!(backtrack_preview("hola\nmundo"), "↩ hola");
+    }
+
+    #[test]
+    fn backtrack_preview_truncates_a_long_first_line() {
+        let long_line = "a".repeat(BACKTRACK_PREVIEW_MAX_CHARS + 10);
+        let preview = backtrack_preview(&long_line);
+        assert!(preview.ends_with('…'));
+        assert!(preview.chars().count() <= BACKTRACK_PREVIEW_MAX_CHARS + "↩ ".chars().count() + 1);
+    }
+
+    #[test]
+    fn backtrack_preview_leaves_a_short_message_untouched() {
+        assert_eq!(backtrack_preview("hola"), "↩ hola");
+    }
 }
