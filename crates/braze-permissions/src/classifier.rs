@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::action::ActionDescriptor;
 use crate::allowlist::WorkdirAllowlist;
 
@@ -42,6 +44,53 @@ impl DefaultClassifier {
     pub fn new(allowlist: WorkdirAllowlist) -> Self {
         Self { allowlist }
     }
+
+    /// Explicit allowlist of shell commands considered safe (read-only/
+    /// introspection utilities), plus a narrow set of non-mutating
+    /// `find`/`git` invocations. Anything not matched here falls through to
+    /// `Irreversible` in `classify` — this is the *only* way a
+    /// `ShellCommand` becomes Reversible (other than the
+    /// `is_git_push`/`is_rm_rf` check, which runs first and always wins the
+    /// other way).
+    ///
+    /// Content-reading commands (`cat`/`head`/`tail`/`grep`/`file`/`diff`/
+    /// `find`) additionally require every non-flag argument to resolve
+    /// inside the `WorkdirAllowlist` — see
+    /// [`Self::all_path_like_args_allowed`]. Without this, `shell_exec`
+    /// let any of these read an arbitrary path (`~/.ssh/id_rsa`,
+    /// `/etc/shadow`) with no confirmation, even though the same read via
+    /// `read_file`/`grep`/`glob` is gated by `ActionDescriptor::ReadPath`.
+    /// See docs/AUDITORIA-2026-07-v2.md hallazgo N-8b.
+    fn is_safe_shell_command(&self, command: &[String]) -> bool {
+        let Some(program) = command.first().map(String::as_str) else {
+            return false;
+        };
+        match program {
+            "ls" | "pwd" | "echo" | "wc" | "whoami" | "date" | "which" | "true" | "false" => true,
+            "cat" | "head" | "tail" | "file" | "diff" | "grep" => {
+                self.all_path_like_args_allowed(command)
+            }
+            "find" => is_safe_find(command) && self.all_path_like_args_allowed(command),
+            "git" => is_safe_git(command),
+            "env" => is_safe_env(command),
+            _ => false,
+        }
+    }
+
+    /// Every argument that doesn't look like a flag (doesn't start with
+    /// `-`) is treated as a candidate path and must resolve inside the
+    /// `WorkdirAllowlist`. This is deliberately conservative: a `grep`
+    /// pattern or a numeric flag value (e.g. the `5` in `head -n 5`) gets
+    /// checked too and always resolves harmlessly under cwd, so the only
+    /// effect is requiring confirmation for genuine out-of-sandbox reads
+    /// (`grep -r needle /home/user`, `cat /etc/shadow`) — never a missed
+    /// one.
+    fn all_path_like_args_allowed(&self, command: &[String]) -> bool {
+        command[1..]
+            .iter()
+            .filter(|arg| !arg.starts_with('-'))
+            .all(|arg| self.allowlist.is_allowed(Path::new(arg)))
+    }
 }
 
 impl ActionClassifier for DefaultClassifier {
@@ -59,7 +108,7 @@ impl ActionClassifier for DefaultClassifier {
             ActionDescriptor::ShellCommand { command } => {
                 if is_git_push(command) || is_rm_rf(command) {
                     Reversibility::Irreversible
-                } else if is_safe_shell_command(command) {
+                } else if self.is_safe_shell_command(command) {
                     Reversibility::Reversible
                 } else {
                     // Default-deny: anything not on the explicit safe
@@ -115,27 +164,6 @@ fn is_rm_rf(command: &[String]) -> bool {
     has_recursive && has_force
 }
 
-/// Explicit allowlist of shell commands considered safe regardless of
-/// their arguments (read-only/introspection utilities), plus a narrow set
-/// of non-mutating `find`/`git` invocations. Anything not matched here
-/// falls through to `Irreversible` in `DefaultClassifier::classify` —
-/// this function is the *only* way a `ShellCommand` becomes Reversible
-/// (other than the `is_git_push`/`is_rm_rf` check, which runs first and
-/// always wins the other way).
-fn is_safe_shell_command(command: &[String]) -> bool {
-    let Some(program) = command.first().map(String::as_str) else {
-        return false;
-    };
-    match program {
-        "ls" | "pwd" | "cat" | "echo" | "wc" | "diff" | "whoami" | "date" | "which" | "true"
-        | "false" | "head" | "tail" | "file" | "grep" => true,
-        "find" => is_safe_find(command),
-        "git" => is_safe_git(command),
-        "env" => is_safe_env(command),
-        _ => false,
-    }
-}
-
 /// `env` is only safe when it has no trailing command to execute — i.e.
 /// every argument after `env` is a `NAME=VALUE` assignment (or there are
 /// none at all, the "print the environment" form). `env <program> ...`
@@ -163,26 +191,41 @@ fn is_env_assignment(arg: &str) -> bool {
 
 /// `find` is safe unless any argument requests a mutating/side-effecting
 /// action: `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`,
-/// `-fprint0`, `-fprintf`. Same flag-scanning technique as `is_rm_rf`:
-/// walk every argument and look for the dangerous ones by exact match
-/// (these are all long-form `find` primaries, never combined into short
-/// clusters the way `rm -rf` is).
+/// `-fprint0`, `-fprintf`, `-fls`. Same flag-scanning technique as
+/// `is_rm_rf`: walk every argument and look for the dangerous ones by exact
+/// match (these are all long-form `find` primaries, never combined into
+/// short clusters the way `rm -rf` is).
+///
+/// `-fls FILE` was missing from the original list: like `-fprint`, it
+/// writes (truncating) an arbitrary file — `find . -fls /home/user/.git/config`
+/// silently clobbers it. See docs/AUDITORIA-2026-07-v2.md hallazgo N-8a.
 fn is_safe_find(command: &[String]) -> bool {
     const MUTATING_PRIMARIES: &[&str] = &[
-        "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf",
+        "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls",
     ];
     !command[1..]
         .iter()
         .any(|arg| MUTATING_PRIMARIES.contains(&arg.as_str()))
 }
 
-/// `git` is safe only for a narrow set of read-only subcommands:
-/// `status`, `diff`, `log`, `show` (any further arguments allowed), or a
-/// bare `git branch` with no arguments at all (`git branch -D foo`/
+/// `git` is safe only for a narrow set of read-only subcommands: `status`
+/// (any further arguments allowed), `diff`/`log`/`show` (any further
+/// arguments allowed *except* the write-capable ones below), or a bare
+/// `git branch` with no arguments at all (`git branch -D foo`/
 /// `git branch -m foo` mutate/delete branches and must NOT match).
+///
+/// `diff`/`log`/`show` share git's diff machinery, which accepts
+/// `-o`/`--output[=FILE]` to write its output to an arbitrary file
+/// (truncating it if it exists) and `--ext-diff` to shell out to whatever
+/// external diff driver is configured — both are write/exec primitives
+/// wearing a read-only mask, the same class of bug `env` was for the
+/// top-level allowlist. See docs/AUDITORIA-2026-07-v2.md hallazgo N-8a.
 fn is_safe_git(command: &[String]) -> bool {
     match command.get(1).map(String::as_str) {
-        Some("status") | Some("diff") | Some("log") | Some("show") => true,
+        Some("status") => true,
+        Some("diff") | Some("log") | Some("show") => !command[2..].iter().any(|arg| {
+            arg == "-o" || arg == "--output" || arg.starts_with("--output=") || arg == "--ext-diff"
+        }),
         Some("branch") => command.len() == 2,
         _ => false,
     }
@@ -473,6 +516,86 @@ mod tests {
                 classifier().classify(&shell(parts)),
                 Reversibility::Irreversible,
                 "expected {parts:?} to be Irreversible"
+            );
+        }
+    }
+
+    /// Regression test for hallazgo N-8a: `find -fls FILE` writes
+    /// (truncating) FILE — it must not slip through as Reversible the way
+    /// `-fprint`/`-delete` correctly don't.
+    #[test]
+    fn find_fls_is_irreversible() {
+        assert_eq!(
+            classifier().classify(&shell(&["find", ".", "-fls", "/tmp/out.txt"])),
+            Reversibility::Irreversible
+        );
+    }
+
+    /// Regression test for hallazgo N-8a: `git diff/log/show --output=FILE`
+    /// (or `-o`/`--output FILE`) writes to an arbitrary file; `--ext-diff`
+    /// shells out to a configured external diff driver. None of these may
+    /// be Reversible.
+    #[test]
+    fn git_diff_log_show_with_output_or_ext_diff_are_irreversible() {
+        for parts in [
+            &["git", "diff", "--output=/home/user/.bashrc"][..],
+            &["git", "diff", "--output", "/home/user/.bashrc"][..],
+            &["git", "diff", "-o", "/home/user/.bashrc"][..],
+            &["git", "log", "--output=/tmp/x"][..],
+            &["git", "show", "--output=/tmp/x"][..],
+            &["git", "diff", "--ext-diff"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Irreversible,
+                "expected {parts:?} to be Irreversible"
+            );
+        }
+    }
+
+    /// Regression test for hallazgo N-8b: reading an out-of-sandbox path
+    /// via a shell command must require confirmation, exactly like
+    /// `read_file`/`grep`/`glob` already do via `ActionDescriptor::ReadPath`.
+    /// Before this fix, `cat`/`grep`/`find`/`head`/`tail`/`file`/`diff`
+    /// were unconditionally Reversible regardless of what path they read.
+    #[test]
+    fn shell_read_commands_outside_workdir_are_irreversible() {
+        for parts in [
+            &["cat", "/etc/shadow"][..],
+            &["cat", "/home/other/.ssh/id_rsa"][..],
+            &["grep", "-r", "AWS_SECRET", "/home/other"][..],
+            &["find", "/home/other", "-name", "*.pem"][..],
+            &["head", "/etc/shadow"][..],
+            &["tail", "/etc/shadow"][..],
+            &["file", "/etc/shadow"][..],
+            &["diff", "/etc/passwd", "/dev/null"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Irreversible,
+                "expected {parts:?} to be Irreversible"
+            );
+        }
+    }
+
+    /// The same commands reading only inside the workdir must remain
+    /// Reversible — the fix must not regress the common case.
+    #[test]
+    fn shell_read_commands_inside_workdir_are_still_reversible() {
+        for parts in [
+            &["cat", "src/main.rs"][..],
+            &["cat", "/home/user/project/src/main.rs"][..],
+            &["grep", "-r", "needle", "."][..],
+            &["find", ".", "-name", "*.rs"][..],
+            &["head", "-n", "5", "file.txt"][..],
+            &["tail", "-f", "file.txt"][..],
+            &["file", "file.txt"][..],
+            &["diff", "a", "b"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Reversible,
+                "expected {parts:?} to be Reversible"
             );
         }
     }
