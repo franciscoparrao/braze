@@ -38,7 +38,7 @@ impl OpenRouterBackend {
         Self {
             api_key,
             model,
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_client(),
             base_url: OPENROUTER_DEFAULT_BASE_URL.to_string(),
         }
     }
@@ -49,7 +49,7 @@ impl OpenRouterBackend {
         Self {
             api_key,
             model,
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_client(),
             base_url,
         }
     }
@@ -76,10 +76,7 @@ impl ModelBackend for OpenRouterBackend {
             "starting openrouter completion turn"
         );
 
-        let url = format!(
-            "{}/chat/completions",
-            self.base_url.trim_end_matches('/')
-        );
+        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
         let response = self
             .client
@@ -413,8 +410,7 @@ mod tests {
     #[tokio::test]
     async fn connection_closed_before_done_is_a_stream_error() {
         // No finish_reason/usage/[DONE] — the connection simply ends here.
-        let sse_body =
-            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Voy a leer\"},\"finish_reason\":null}]}\n\n";
+        let sse_body = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Voy a leer\"},\"finish_reason\":null}]}\n\n";
 
         let addr = crate::test_support::spawn_canned_http_server(
             200,
@@ -450,8 +446,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_maps_429_to_rate_limited() {
-        let body =
-            br#"{"error":{"message":"slow down","type":"rate_limit_error"}}"#.to_vec();
+        let body = br#"{"error":{"message":"slow down","type":"rate_limit_error"}}"#.to_vec();
         let addr =
             crate::test_support::spawn_canned_http_server(429, "application/json", body).await;
 

@@ -363,10 +363,21 @@ impl Engine {
             }
         }
 
-        let total_input_tokens: u32 = candidates.iter().filter_map(|c| c.usage.as_ref()).map(|u| u.0).sum();
-        let total_output_tokens: u32 = candidates.iter().filter_map(|c| c.usage.as_ref()).map(|u| u.1).sum();
+        let total_input_tokens: u32 = candidates
+            .iter()
+            .filter_map(|c| c.usage.as_ref())
+            .map(|u| u.0)
+            .sum();
+        let total_output_tokens: u32 = candidates
+            .iter()
+            .filter_map(|c| c.usage.as_ref())
+            .map(|u| u.1)
+            .sum();
         let any_usage_reported = candidates.iter().any(|c| c.usage.is_some());
-        let winner_stop_reason = candidates[winner_index].usage.as_ref().and_then(|u| u.2.clone());
+        let winner_stop_reason = candidates[winner_index]
+            .usage
+            .as_ref()
+            .and_then(|u| u.2.clone());
 
         tracing::debug!(
             winner_index,
@@ -376,8 +387,11 @@ impl Engine {
         );
 
         let mut winner = candidates.swap_remove(winner_index);
-        winner.usage = any_usage_reported
-            .then_some((total_input_tokens, total_output_tokens, winner_stop_reason));
+        winner.usage = any_usage_reported.then_some((
+            total_input_tokens,
+            total_output_tokens,
+            winner_stop_reason,
+        ));
 
         if !winner.text_buffer.is_empty() {
             observer.on_text_delta(&winner.text_buffer);
@@ -1296,7 +1310,8 @@ fn estimate_dropped_tokens(events: &[AgentEvent]) -> u32 {
 /// event-count trigger, reachable again through this one.
 fn estimate_prompt_tokens(durable: &DurableState, tactical: &[AgentEvent]) -> u32 {
     let summary_tokens = (durable.summary.len() / 4) as u32;
-    let durable_events_tokens = estimate_message_tokens(&render_durable_events(&durable.durable_events));
+    let durable_events_tokens =
+        estimate_message_tokens(&render_durable_events(&durable.durable_events));
     summary_tokens + durable_events_tokens + estimate_dropped_tokens(tactical)
 }
 
@@ -1637,7 +1652,11 @@ mod tests {
 
         let mut streamed = String::new();
         engine
-            .run_turn(&session, "hola", &mut TextDeltaObserver(|chunk| streamed.push_str(chunk)))
+            .run_turn(
+                &session,
+                "hola",
+                &mut TextDeltaObserver(|chunk| streamed.push_str(chunk)),
+            )
             .await
             .expect("turn should succeed");
 
@@ -1865,8 +1884,10 @@ mod tests {
         engine
             .run_turn(&session, "please echo two things", &mut NoopObserver)
             .await
-            .expect("turn should succeed despite the duplicate id — and every \
-                     request built along the way must still pass protocol validation");
+            .expect(
+                "turn should succeed despite the duplicate id — and every \
+                     request built along the way must still pass protocol validation",
+            );
 
         assert_eq!(
             invocations.load(Ordering::SeqCst),
@@ -2597,7 +2618,11 @@ mod tests {
 
         let mut streamed = String::new();
         engine
-            .run_turn(&session, "hola", &mut TextDeltaObserver(|chunk| streamed.push_str(chunk)))
+            .run_turn(
+                &session,
+                "hola",
+                &mut TextDeltaObserver(|chunk| streamed.push_str(chunk)),
+            )
             .await
             .expect("the turn should degrade gracefully instead of erroring");
 
@@ -3364,7 +3389,10 @@ mod tests {
 
         let verify_store = FileSessionStore::new(dir.clone());
         let events = verify_store.load(&session).await.expect("load events");
-        match events.iter().find(|e| matches!(e, AgentEvent::Usage { .. })) {
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::Usage { .. }))
+        {
             Some(AgentEvent::Usage {
                 input_tokens,
                 output_tokens,

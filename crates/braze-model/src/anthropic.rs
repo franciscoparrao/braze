@@ -35,7 +35,7 @@ impl AnthropicBackend {
         Self {
             api_key,
             model,
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_client(),
             base_url: ANTHROPIC_API_URL.to_string(),
         }
     }
@@ -47,7 +47,7 @@ impl AnthropicBackend {
         Self {
             api_key,
             model,
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_client(),
             base_url,
         }
     }

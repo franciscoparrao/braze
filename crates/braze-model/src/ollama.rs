@@ -54,7 +54,7 @@ impl OllamaBackend {
         Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             model,
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_client(),
             num_ctx: DEFAULT_NUM_CTX,
             temperature: DEFAULT_TEMPERATURE,
         }
@@ -66,7 +66,7 @@ impl OllamaBackend {
         Self {
             base_url,
             model,
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_client(),
             num_ctx: DEFAULT_NUM_CTX,
             temperature: DEFAULT_TEMPERATURE,
         }

@@ -382,6 +382,12 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   el sweep porque las tools locales todas exigen args.
 - **Fix:** en ambos `finalize_tool_call`, `if buf.trim().is_empty() {
   arguments = json!({}) }`.
+- **✅ RESUELTO 2026-07-05 (Grupo K).** Ambos `finalize_tool_call` (Anthropic
+  y OpenRouter) tratan el buffer vacío/solo-whitespace como `{}` antes de
+  intentar parsearlo — un JSON genuinamente inválido (no vacío) sigue
+  fallando como antes. Tests
+  `anthropic_wire::tests::finalize_tool_call_treats_{an_empty,a_whitespace_only}_buffer_as_an_empty_object`,
+  `openrouter_wire::tests::finalize_tool_call_treats_empty_arguments_as_an_empty_object`.
 
 ### TUI (Fase 2) — código nuevo, no auditado antes
 
@@ -471,21 +477,43 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
 - **N-18 · [MEDIA] OpenRouter: `[DONE]` sin `finish_reason` previo descarta
   tool calls acumulados en silencio** (`openrouter_wire.rs:395-405`). Doble
   corroboración. *Fix:* drenar `finalize_tool_calls()` en `handle_done_sentinel`.
+  **✅ RESUELTO (Grupo K).** `handle_done_sentinel` drena `finalize_tool_calls()`
+  antes de emitir `Usage`/`Done`. Test
+  `done_sentinel_without_prior_finish_reason_still_emits_accumulated_tool_calls`.
 - **N-19 · [MEDIA] OpenRouter: `resize_with` con índice del proveedor sin
   cota** (`openrouter_wire.rs:341-347`): un chunk con `{"index":4e9}` fuerza
   una alocación de decenas de GB → abort. Anthropic usa `HashMap` y es inmune.
   Doble corroboración. *Fix:* cota (p.ej. 128) o `HashMap`.
+  **✅ RESUELTO (Grupo K).** `MAX_TOOL_CALL_INDEX = 128`; un fragmento con
+  índice mayor se ignora con `warn!` en vez de redimensionar. Test
+  `accumulate_tool_call_fragment_ignores_an_implausibly_large_index`.
 - **N-20 · [MEDIA] Sin timeouts HTTP en los tres backends** (`anthropic.rs`,
   `ollama.rs`, `openrouter.rs`: `reqwest::Client::new()` sin timeout): un
   servidor que acepta la conexión y luego se cuelga bloquea el agente para
   siempre. Doble corroboración. *Fix:* `connect_timeout` + timeout de idle por
   chunk (no total).
+  **✅ RESUELTO (Grupo K).** Nuevo `http_client.rs` compartido:
+  `connect_timeout=10s`, `read_timeout=600s` (se resetea en cada lectura
+  exitosa — no es un timeout total, no interrumpe una generación lenta pero
+  sana; 600s da margen sobre el peor caso documentado de Ollama CPU-only,
+  180-400s por turno). Los tres backends usan `crate::http_client::build_client()`
+  en vez de `reqwest::Client::new()`. Test
+  `a_connection_that_never_responds_is_cut_off_by_the_read_timeout` (con
+  duraciones cortas inyectables para no esperar los 600s reales).
 - **N-21 · [MEDIA] OpenRouter: tool call sin `id` → `id:""` → pairing roto**
   (`openrouter_wire.rs:373`, `unwrap_or_default()`). *Fix:* sintetizar id como
   Ollama.
+  **✅ RESUELTO (Grupo K).** `finalize_tool_calls` sintetiza
+  `openrouter-tool-call-{n}` (mismo patrón que `ollama_wire.rs`) cuando el id
+  es `None` o vacío. Test
+  `finalize_tool_calls_synthesizes_an_id_when_the_provider_never_sent_one`.
 - **N-22 · [MEDIA] OpenRouter: `finish_reason:"error"` se trata como parada
   normal** (`openrouter_wire.rs:332-335`) → texto parcial de una generación
   fallida persistido como respuesta final. *Fix:* setear `stream_error`.
+  **✅ RESUELTO (Grupo K).** `finish_reason == "error"` setea `stream_error`
+  en vez de `stop_reason` normal, y no finaliza tool calls como si la ronda
+  hubiese terminado con éxito. Test
+  `stream_state_finish_reason_error_sets_stream_error_not_a_normal_stop`.
 - **N-23 · [MEDIA] Ollama: tool result sin correlación en el caso no-error**
   (`ollama_wire.rs:181-193`): el `tool_use_id` solo se incrusta cuando
   `is_error`; con 2+ tool calls exitosas, el modelo recibe dos mensajes `tool`
@@ -741,10 +769,32 @@ Anthropic real.**
 workspace verde (`cargo test --workspace`, 0 failed) y
 `cargo clippy --workspace --all-targets -- -D warnings` limpio.
 
-### Grupo K — Robustez de backends (media, esfuerzo bajo-medio)
-`N-9` (arg vacío → `{}`, one-liner, rompe toda tool sin args en el backend
-primario), `N-18, N-19, N-20, N-21, N-22`. La mayoría son fixes localizados en
-`openrouter_wire.rs`/los constructores de `Client`.
+### Grupo K — Robustez de backends (media, esfuerzo bajo-medio) — ✅ CERRADO 2026-07-05
+`N-9, N-18, N-19, N-20, N-21, N-22`. Cerrados los 6:
+- `N-9`: buffer de argumentos vacío/whitespace → `{}` en vez de dropear el
+  tool call (Anthropic y OpenRouter).
+- `N-18`: `handle_done_sentinel` de OpenRouter drena los tool calls
+  acumulados antes de cerrar el stream.
+- `N-19`: `MAX_TOOL_CALL_INDEX=128` — un índice de fragmento implausible se
+  ignora en vez de forzar un `resize_with` de gigabytes.
+- `N-20`: nuevo `crates/braze-model/src/http_client.rs` compartido —
+  `connect_timeout=10s` + `read_timeout=600s` (se resetea por lectura, no es
+  un timeout total) en los tres backends, reemplazando `reqwest::Client::new()`.
+- `N-21`: OpenRouter sintetiza `openrouter-tool-call-{n}` cuando el
+  proveedor nunca manda un id.
+- `N-22`: `finish_reason:"error"` de OpenRouter setea `stream_error` en vez
+  de tratarse como parada normal.
+
+Los 6 con test de regresión propio (el de N-20 usa duraciones cortas
+inyectables para no esperar los 600s reales de producción). Workspace
+completo verde, clippy limpio, `cargo fmt` aplicado a los crates tocados
+(`braze-model`, `braze-engine`, `braze-session`) — el resto del workspace
+(`braze-tui`, `braze-cli`, `braze-mcp-client`) tiene drift de formato
+preexistente, no tocado por estar fuera de alcance de esta sesión.
+
+### Grupo L — TUI Fase 2 (media, esfuerzo medio)
+`N-10` (bracketed paste), `N-11` (walk symlink-aware / spawn_blocking), `N-12`
+(id de sesión vivo), luego `N-28..N-32`.
 
 ### Grupo L — TUI Fase 2 (media, esfuerzo medio)
 `N-10` (bracketed paste), `N-11` (walk symlink-aware / spawn_blocking), `N-12`

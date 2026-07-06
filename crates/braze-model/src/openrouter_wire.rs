@@ -16,6 +16,8 @@
 //! sentinel `data: [DONE]\n\n` (not a JSON payload) rather than a
 //! terminating event type.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use braze_types::{ContentBlock, Message, Role, ToolStub};
 use serde::Serialize;
 use serde_json::Value;
@@ -24,6 +26,17 @@ use crate::backend::{CompletionEvent, CompletionRequest, permissive_fallback_sch
 use crate::error::ModelError;
 
 pub(crate) const OPENROUTER_DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
+
+/// Upper bound on a tool-call fragment's provider-supplied `index` (N-19,
+/// docs/AUDITORIA-2026-07-v2.md) — real responses never have more than a
+/// handful of concurrent tool calls in one round, so any index beyond
+/// this is either a malformed/hostile chunk or a bug upstream, not a
+/// legitimate large tool-call count. Without a cap, `Vec::resize_with`
+/// takes the index verbatim from the wire and a single chunk with e.g.
+/// `"index": 4294967295` forces an allocation of hundreds of GB.
+const MAX_TOOL_CALL_INDEX: usize = 128;
+
+static TOOL_CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // ---------------------------------------------------------------------
 // Request body
@@ -330,8 +343,20 @@ impl OpenRouterStreamState {
         }
 
         if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
-            self.stop_reason = Some(reason.to_string());
-            events.extend(self.finalize_tool_calls());
+            if reason == "error" {
+                // N-22 (docs/AUDITORIA-2026-07-v2.md): OpenRouter
+                // normalizes an upstream generation failure to
+                // `finish_reason: "error"` rather than a top-level
+                // `error` object — treating it as an ordinary stop would
+                // persist whatever partial text/tool calls arrived as a
+                // successful final answer.
+                self.stream_error = Some(
+                    "openrouter: upstream generation failed (finish_reason: \"error\")".to_string(),
+                );
+            } else {
+                self.stop_reason = Some(reason.to_string());
+                events.extend(self.finalize_tool_calls());
+            }
         }
 
         events
@@ -342,6 +367,15 @@ impl OpenRouterStreamState {
             return;
         };
         let index = index as usize;
+        if index > MAX_TOOL_CALL_INDEX {
+            tracing::warn!(
+                index,
+                max = MAX_TOOL_CALL_INDEX,
+                "openrouter stream: ignoring a tool call fragment with an implausibly \
+                 large index (malformed or hostile chunk)"
+            );
+            return;
+        }
         if self.tool_calls.len() <= index {
             self.tool_calls.resize_with(index + 1, || None);
         }
@@ -370,7 +404,21 @@ impl OpenRouterStreamState {
             .into_iter()
             .flatten()
             .filter_map(|pending| {
-                let id = pending.id.unwrap_or_default();
+                // N-21 (docs/AUDITORIA-2026-07-v2.md): some upstreams
+                // behind OpenRouter never send an `id` fragment for a
+                // tool call at all — `unwrap_or_default()` alone would
+                // give every such call the same id (`""`), which the
+                // engine then persists and later echoes back as
+                // `tool_call_id: ""`; strict upstreams reject that, and
+                // two id-less calls in one round are indistinguishable.
+                // Synthesize a fallback id, same pattern `ollama_wire.rs`
+                // already uses for the analogous case.
+                let id = pending.id.filter(|id| !id.is_empty()).unwrap_or_else(|| {
+                    format!(
+                        "openrouter-tool-call-{}",
+                        TOOL_CALL_COUNTER.fetch_add(1, Ordering::Relaxed)
+                    )
+                });
                 let name = pending.name.unwrap_or_default();
                 match finalize_tool_call(id, name, &pending.arguments_buf) {
                     Ok(event) => Some(event),
@@ -394,14 +442,22 @@ impl OpenRouterStreamState {
     /// `ModelBackend` invariant (always end in `Done`) holds regardless.
     pub fn handle_done_sentinel(&mut self) -> Vec<CompletionEvent> {
         self.done = true;
-        vec![
-            CompletionEvent::Usage {
-                input_tokens: self.input_tokens,
-                output_tokens: self.output_tokens,
-                stop_reason: self.stop_reason.clone(),
-            },
-            CompletionEvent::Done,
-        ]
+        // N-18 (docs/AUDITORIA-2026-07-v2.md): normally `finalize_tool_calls`
+        // runs as soon as a chunk carries a non-null `finish_reason` — but
+        // some upstream providers behind OpenRouter's heterogeneous
+        // routing stream `tool_calls` fragments and then close with
+        // `[DONE]` without ever sending one. Without this drain, any
+        // fully-accumulated tool call sitting in `self.tool_calls` at that
+        // point is silently discarded — the round persists only the text
+        // (if any) as a "successful", tool-free final answer.
+        let mut events = self.finalize_tool_calls();
+        events.push(CompletionEvent::Usage {
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            stop_reason: self.stop_reason.clone(),
+        });
+        events.push(CompletionEvent::Done);
+        events
     }
 }
 
@@ -413,11 +469,23 @@ pub(crate) fn finalize_tool_call(
     name: String,
     arguments_buf: &str,
 ) -> Result<CompletionEvent, ModelError> {
-    let arguments: Value = serde_json::from_str(arguments_buf).map_err(|e| {
-        ModelError::Decode(format!(
-            "openrouter tool call arguments are not valid JSON ({e}): {arguments_buf:?}"
-        ))
-    })?;
+    // N-9 (docs/AUDITORIA-2026-07-v2.md): a no-parameter tool call routed
+    // through a heterogeneous OpenRouter upstream can emit `"arguments":
+    // ""` (empty string) instead of `"{}"` — not every provider behind
+    // OpenRouter normalizes this the way OpenAI's own API does. Without
+    // this, `serde_json::from_str("")` fails and the tool call is
+    // dropped silently: the round "converges" without ever executing the
+    // call the model actually requested.
+    let trimmed = arguments_buf.trim();
+    let arguments: Value = if trimmed.is_empty() {
+        Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str(trimmed).map_err(|e| {
+            ModelError::Decode(format!(
+                "openrouter tool call arguments are not valid JSON ({e}): {arguments_buf:?}"
+            ))
+        })?
+    };
     Ok(CompletionEvent::ToolCallRequested {
         id,
         name,
@@ -525,7 +593,10 @@ mod tests {
         assert_eq!(out.len(), 1);
         let serialized = serde_json::to_value(&out[0]).unwrap();
         let arguments = &serialized["tool_calls"][0]["function"]["arguments"];
-        assert!(arguments.is_string(), "expected a JSON string, got {arguments:?}");
+        assert!(
+            arguments.is_string(),
+            "expected a JSON string, got {arguments:?}"
+        );
         let parsed: Value = serde_json::from_str(arguments.as_str().unwrap()).unwrap();
         assert_eq!(parsed, serde_json::json!({"city": "Santiago"}));
     }
@@ -585,7 +656,11 @@ mod tests {
             serde_json::json!({"content": ", world"}),
             None,
         )));
-        all_events.extend(state.handle_chunk(&message_json(0, serde_json::json!({}), Some("stop"))));
+        all_events.extend(state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({}),
+            Some("stop"),
+        )));
         all_events.extend(state.handle_chunk(
             &serde_json::json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5}}),
         ));
@@ -635,7 +710,8 @@ mod tests {
             serde_json::json!({"tool_calls": [{"index": 0, "function": {"arguments": "ris\"}"}}]}),
             None,
         ));
-        let events = state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        let events =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
 
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -671,7 +747,8 @@ mod tests {
             ]}),
             None,
         ));
-        let events = state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        let events =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
 
         assert_eq!(events.len(), 2);
         let mut by_name: HashMap<String, Value> = HashMap::new();
@@ -729,6 +806,74 @@ mod tests {
         assert!(!state.done);
     }
 
+    /// Regression test for N-22 (docs/AUDITORIA-2026-07-v2.md): OpenRouter
+    /// normalizes an upstream generation failure to `finish_reason:
+    /// "error"` on an otherwise ordinary-looking chunk — this must set
+    /// `stream_error` (surfaced as a real stream error by `drive_stream`),
+    /// not be treated as a normal stop that finalizes tool calls / sets
+    /// `stop_reason`.
+    #[test]
+    fn stream_state_finish_reason_error_sets_stream_error_not_a_normal_stop() {
+        let mut state = OpenRouterStreamState::new();
+        let events = state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"content": "partial"}),
+            Some("error"),
+        ));
+        assert!(state.stream_error.is_some());
+        assert!(
+            state.stop_reason.is_none(),
+            "finish_reason: \"error\" must not be recorded as a normal stop_reason"
+        );
+        // The TextDelta from the same chunk may still be present (drive_stream
+        // yields the error immediately after, per A3/B4 — the engine
+        // never persists it), but no ToolCallRequested/tool finalization
+        // should have happened.
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, CompletionEvent::ToolCallRequested { .. }))
+        );
+    }
+
+    /// Regression test for N-19 (docs/AUDITORIA-2026-07-v2.md): a
+    /// malformed/hostile chunk with an implausibly large `index` must be
+    /// ignored, not turned into a multi-gigabyte `Vec::resize_with`.
+    #[test]
+    fn accumulate_tool_call_fragment_ignores_an_implausibly_large_index() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 4_294_967_295u64, "id": "call_1", "function": {"name": "x", "arguments": "{}"}}]}),
+            None,
+        ));
+        assert!(
+            state.tool_calls.is_empty(),
+            "an out-of-bounds index must not grow the tool_calls buffer at all"
+        );
+    }
+
+    /// Regression test for N-21 (docs/AUDITORIA-2026-07-v2.md): an
+    /// upstream that never sends an `id` fragment for a tool call must
+    /// not produce `tool_call_id: ""` — synthesize a fallback id instead,
+    /// same pattern `ollama_wire.rs` already uses.
+    #[test]
+    fn finalize_tool_calls_synthesizes_an_id_when_the_provider_never_sent_one() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "function": {"name": "pwd", "arguments": "{}"}}]}),
+            None,
+        ));
+        let events = state.finalize_tool_calls();
+        match &events[0] {
+            CompletionEvent::ToolCallRequested { id, .. } => {
+                assert!(!id.is_empty(), "expected a synthesized non-empty id");
+            }
+            other => panic!("expected a ToolCallRequested, got {other:?}"),
+        }
+    }
+
     #[test]
     fn finalize_tool_call_returns_decode_error_on_invalid_json() {
         let result = finalize_tool_call(
@@ -747,7 +892,47 @@ mod tests {
             serde_json::json!({"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "bad", "arguments": "{not valid"}}]}),
             None,
         ));
-        let events = state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        let events =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
         assert!(events.is_empty());
+    }
+
+    /// Regression test for N-9 (docs/AUDITORIA-2026-07-v2.md): a
+    /// heterogeneous upstream behind OpenRouter can emit `"arguments": ""`
+    /// for a no-parameter tool call instead of `"{}"` — this must resolve
+    /// to an empty object, not a dropped tool call.
+    #[test]
+    fn finalize_tool_call_treats_empty_arguments_as_an_empty_object() {
+        let result = finalize_tool_call("call_1".to_string(), "list_sessions".to_string(), "");
+        match result {
+            Ok(CompletionEvent::ToolCallRequested { arguments, .. }) => {
+                assert_eq!(arguments, serde_json::json!({}));
+            }
+            other => panic!("expected ToolCallRequested with empty arguments, got {other:?}"),
+        }
+    }
+
+    /// Regression test for N-18 (docs/AUDITORIA-2026-07-v2.md): if the
+    /// stream closes with `[DONE]` without any chunk ever carrying a
+    /// non-null `finish_reason` (real heterogeneity across OpenRouter's
+    /// upstreams), a fully-accumulated tool call must still be emitted —
+    /// not silently dropped along with the `tool_calls` buffer.
+    #[test]
+    fn done_sentinel_without_prior_finish_reason_still_emits_accumulated_tool_calls() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "pwd", "arguments": "{}"}}]}),
+            None,
+        ));
+        let events = state.handle_done_sentinel();
+        assert!(state.done);
+        assert!(
+            events.iter().any(
+                |e| matches!(e, CompletionEvent::ToolCallRequested { id, .. } if id == "call_1")
+            ),
+            "expected the accumulated tool call to survive the [DONE] sentinel, got: {events:?}"
+        );
+        assert!(matches!(events.last(), Some(CompletionEvent::Done)));
     }
 }

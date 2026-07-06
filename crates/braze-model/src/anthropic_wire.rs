@@ -432,11 +432,24 @@ pub(crate) fn finalize_tool_call(
     name: String,
     json_buf: &str,
 ) -> Result<CompletionEvent, ModelError> {
-    let arguments: Value = serde_json::from_str(json_buf).map_err(|e| {
-        ModelError::Decode(format!(
-            "anthropic tool_use input is not valid JSON ({e}): {json_buf:?}"
-        ))
-    })?;
+    // N-9 (docs/AUDITORIA-2026-07-v2.md): a `tool_use` block with no
+    // arguments streams `content_block_start {input:{}}` followed by
+    // *zero* `input_json_delta` fragments (or one with `partial_json:
+    // ""`) — the official Anthropic SDKs special-case an empty
+    // accumulated buffer as `{}` for exactly this reason. Without this,
+    // `serde_json::from_str("")` fails and the tool call is dropped
+    // silently: the round "converges" without ever executing the call
+    // the model actually requested.
+    let trimmed = json_buf.trim();
+    let arguments: Value = if trimmed.is_empty() {
+        Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str(trimmed).map_err(|e| {
+            ModelError::Decode(format!(
+                "anthropic tool_use input is not valid JSON ({e}): {json_buf:?}"
+            ))
+        })?
+    };
     Ok(CompletionEvent::ToolCallRequested {
         id,
         name,
@@ -685,6 +698,35 @@ mod tests {
             "{not valid json",
         );
         assert!(matches!(result, Err(ModelError::Decode(_))));
+    }
+
+    /// Regression test for N-9 (docs/AUDITORIA-2026-07-v2.md): a
+    /// no-argument tool call accumulates an empty `json_buf` (Anthropic
+    /// streams zero `input_json_delta` fragments for `input: {}`) — this
+    /// must resolve to `{}`, not a dropped tool call.
+    #[test]
+    fn finalize_tool_call_treats_an_empty_buffer_as_an_empty_object() {
+        let result = finalize_tool_call("toolu_01".to_string(), "list_sessions".to_string(), "");
+        match result {
+            Ok(CompletionEvent::ToolCallRequested { arguments, .. }) => {
+                assert_eq!(arguments, serde_json::json!({}));
+            }
+            other => panic!("expected ToolCallRequested with empty arguments, got {other:?}"),
+        }
+    }
+
+    /// Same as above, but for a buffer that's only whitespace — some
+    /// providers emit a single `partial_json: " "`-shaped fragment
+    /// instead of none at all.
+    #[test]
+    fn finalize_tool_call_treats_a_whitespace_only_buffer_as_an_empty_object() {
+        let result = finalize_tool_call("toolu_01".to_string(), "list_sessions".to_string(), "  ");
+        match result {
+            Ok(CompletionEvent::ToolCallRequested { arguments, .. }) => {
+                assert_eq!(arguments, serde_json::json!({}));
+            }
+            other => panic!("expected ToolCallRequested with empty arguments, got {other:?}"),
+        }
     }
 
     #[test]

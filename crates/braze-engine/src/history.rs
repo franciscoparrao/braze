@@ -178,10 +178,9 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         AgentEvent::UserMessage { text } => {
             Some((Role::User, ContentBlock::Text { text: text.clone() }))
         }
-        AgentEvent::AssistantText { text } => Some((
-            Role::Assistant,
-            ContentBlock::Text { text: text.clone() },
-        )),
+        AgentEvent::AssistantText { text } => {
+            Some((Role::Assistant, ContentBlock::Text { text: text.clone() }))
+        }
         AgentEvent::AssistantToolCall {
             id,
             name,
@@ -574,7 +573,11 @@ mod tests {
         assert_eq!(messages[0].role, Role::User);
         assert_eq!(messages[1].role, Role::Assistant);
         assert_eq!(messages[1].content.len(), 3);
-        for (block, expected_id) in messages[1].content.iter().zip(["call-1", "call-2", "call-3"]) {
+        for (block, expected_id) in messages[1]
+            .content
+            .iter()
+            .zip(["call-1", "call-2", "call-3"])
+        {
             match block {
                 ContentBlock::ToolUse { id, .. } => assert_eq!(id, expected_id),
                 other => panic!("expected a ToolUse block, got {other:?}"),
@@ -582,9 +585,15 @@ mod tests {
         }
         assert_eq!(messages[2].role, Role::User);
         assert_eq!(messages[2].content.len(), 3);
-        for (block, expected_id) in messages[2].content.iter().zip(["call-1", "call-2", "call-3"]) {
+        for (block, expected_id) in messages[2]
+            .content
+            .iter()
+            .zip(["call-1", "call-2", "call-3"])
+        {
             match block {
-                ContentBlock::ToolResult { tool_use_id, .. } => assert_eq!(tool_use_id, expected_id),
+                ContentBlock::ToolResult { tool_use_id, .. } => {
+                    assert_eq!(tool_use_id, expected_id)
+                }
                 other => panic!("expected a ToolResult block, got {other:?}"),
             }
         }

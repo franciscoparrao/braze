@@ -10,6 +10,7 @@ mod anthropic;
 mod anthropic_wire;
 mod backend;
 mod error;
+mod http_client;
 mod http_error;
 mod ollama;
 mod ollama_wire;
