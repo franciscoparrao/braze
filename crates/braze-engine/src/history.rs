@@ -2,14 +2,28 @@
 //! from a session's event log, split into durable state + tactical window
 //! by a [`braze_session::ContextCompactor`].
 //!
-//! **MVP simplification** (documented per PLAN.md Fase 5): this maps one
-//! [`AgentEvent`] to (at most) one [`Message`]. The real Anthropic API
-//! groups several consecutive `tool_use`/`tool_result` blocks produced by
-//! the same role into a single `Message` with multiple `ContentBlock`s.
-//! Emitting one `Message` per event instead is a coarser shape, but it is
-//! still a *valid* sequence of alternating-enough roles that the wire
-//! format accepts — it just doesn't pack as tightly. Revisit if/when
-//! request-size or strict role-alternation becomes a real constraint.
+//! Most events map one-to-one to a `Message` (`UserMessage`/`AssistantText`
+//! each get their own). `AssistantToolCall`/`ToolCallCompleted` are the
+//! exception: consecutive events of the same kind are *grouped* into a
+//! single `Message` carrying multiple `ContentBlock`s — matching how the
+//! real Anthropic API represents one assistant turn requesting several
+//! tools at once (one message, several `tool_use` blocks) and one user
+//! turn answering all of them (one message, several `tool_result` blocks).
+//!
+//! This grouping isn't cosmetic: `dispatch_tool_calls` persists every
+//! round's `AssistantToolCall`s consecutively (all of them, before
+//! dispatching any), then their `ToolCallCompleted`s consecutively (in
+//! whatever order the underlying tools finish). Emitting one `Message` per
+//! event for a round with 2+ concurrent tool calls would put `tool_use`
+//! blocks for different calls in *separate* consecutive `Assistant`
+//! messages — Anthropic requires each `tool_use`'s matching `tool_result`
+//! to be in the message immediately following it, so anything but the
+//! last of those `tool_use` messages would have no answer in its very
+//! next message and get rejected with a `400`. Grouping into one message
+//! per role-run removes the ambiguity entirely instead of relying on an
+//! assumption about how strictly the wire format is checked. See
+//! `push_block`/`push_grouped` below and
+//! docs/AUDITORIA-2026-07-v2.md (Grupo I, hallazgo N-1).
 
 use std::collections::HashMap;
 
@@ -50,27 +64,75 @@ fn build_messages_with_never_clear(
 ) -> Vec<Message> {
     let mut messages = Vec::with_capacity(durable.durable_events.len() + tactical.len() + 1);
 
+    // N-2 (docs/AUDITORIA-2026-07-v2.md): `durable_events` can be
+    // non-empty before any `CompactionOccurred` summary has ever been
+    // produced — `SimpleContextCompactor::split` moves settled events out
+    // of the tactical window purely by age, independent of when
+    // `Engine`'s `tactical_compaction_threshold` last triggered a real
+    // compaction. Without a leading `User` message in that case, whatever
+    // `durable_events` renders to first (often an `Assistant` tool_use)
+    // would become the very first message in the request, and Anthropic
+    // rejects any request whose first message isn't `role: user`.
     if !durable.summary.is_empty() {
         messages.push(Message::text(
             Role::User,
             format!("[Resumen de contexto previo]\n{}", durable.summary),
         ));
+    } else if !durable.durable_events.is_empty() {
+        messages.push(Message::text(
+            Role::User,
+            "[Contexto previo] Lo siguiente son eventos ya resueltos (llamadas a \
+             herramientas completadas) de una parte anterior de esta sesión."
+                .to_string(),
+        ));
     }
 
     let tool_names = tool_names_by_id(&durable.durable_events);
-    for event in &durable.durable_events {
-        if let Some(message) = event_to_message_cleared(event, &tool_names, never_clear) {
-            messages.push(message);
-        }
-    }
-
-    for event in tactical {
-        if let Some(message) = event_to_message(event) {
-            messages.push(message);
-        }
-    }
+    push_grouped(&mut messages, &durable.durable_events, |event| {
+        event_to_block_cleared(event, &tool_names, never_clear)
+    });
+    push_grouped(&mut messages, tactical, event_to_block);
 
     messages
+}
+
+/// Appends every event's rendered block to `messages`, grouping
+/// consecutive `ToolUse`/`ToolResult` blocks of the same kind into one
+/// `Message` instead of emitting a separate `Message` per event — see the
+/// module doc comment for why this specific grouping is load-bearing, not
+/// cosmetic. Plain `Text` blocks (`UserMessage`/`AssistantText`) are never
+/// grouped: each keeps its own `Message`, preserving the exact shape
+/// existing callers already depend on.
+fn push_grouped<'a>(
+    messages: &mut Vec<Message>,
+    events: impl IntoIterator<Item = &'a AgentEvent>,
+    render: impl Fn(&AgentEvent) -> Option<(Role, ContentBlock)>,
+) {
+    for event in events {
+        let Some((role, block)) = render(event) else {
+            continue;
+        };
+
+        let same_kind_run = matches!(block, ContentBlock::ToolUse { .. })
+            || matches!(block, ContentBlock::ToolResult { .. });
+
+        if same_kind_run
+            && let Some(last) = messages.last_mut()
+            && last.role == role
+            && last
+                .content
+                .last()
+                .is_some_and(|prev| std::mem::discriminant(prev) == std::mem::discriminant(&block))
+        {
+            last.content.push(block);
+            continue;
+        }
+
+        messages.push(Message {
+            role,
+            content: vec![block],
+        });
+    }
 }
 
 /// Resolves a `tool_use_id` to the name of the tool that issued it, built
@@ -88,33 +150,40 @@ fn tool_names_by_id(events: &[AgentEvent]) -> HashMap<&str, &str> {
         .collect()
 }
 
-/// Maps a single [`AgentEvent`] to the [`Message`] it contributes to model
-/// history, or `None` for events that are audit/metadata only and never
-/// appear in the conversation the model sees.
-fn event_to_message(event: &AgentEvent) -> Option<Message> {
+/// Maps a single [`AgentEvent`] to the `(Role, ContentBlock)` it
+/// contributes to model history, or `None` for events that are
+/// audit/metadata only and never appear in the conversation the model
+/// sees. [`push_grouped`] is what turns a sequence of these into
+/// `Message`s, grouping consecutive `ToolUse`/`ToolResult` blocks.
+fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
     match event {
-        AgentEvent::UserMessage { text } => Some(Message::text(Role::User, text.clone())),
-        AgentEvent::AssistantText { text } => Some(Message::text(Role::Assistant, text.clone())),
+        AgentEvent::UserMessage { text } => {
+            Some((Role::User, ContentBlock::Text { text: text.clone() }))
+        }
+        AgentEvent::AssistantText { text } => Some((
+            Role::Assistant,
+            ContentBlock::Text { text: text.clone() },
+        )),
         AgentEvent::AssistantToolCall {
             id,
             name,
             arguments,
-        } => Some(Message {
-            role: Role::Assistant,
-            content: vec![ContentBlock::ToolUse {
+        } => Some((
+            Role::Assistant,
+            ContentBlock::ToolUse {
                 id: id.clone(),
                 name: name.clone(),
                 input: arguments.clone(),
-            }],
-        }),
-        AgentEvent::ToolCallCompleted { id, result } => Some(Message {
-            role: Role::User,
-            content: vec![ContentBlock::ToolResult {
+            },
+        )),
+        AgentEvent::ToolCallCompleted { id, result } => Some((
+            Role::User,
+            ContentBlock::ToolResult {
                 tool_use_id: id.clone(),
                 content: result.content.clone(),
                 is_error: result.is_error,
-            }],
-        }),
+            },
+        )),
         // Metadata / audit-only — never part of conversational content.
         // `Unknown` (C9's forward-compat catch-all) belongs here too:
         // this binary has no definition for it, so there is nothing
@@ -128,7 +197,7 @@ fn event_to_message(event: &AgentEvent) -> Option<Message> {
     }
 }
 
-/// Like [`event_to_message`], but for events already settled into
+/// Like [`event_to_block`], but for events already settled into
 /// `DurableState::durable_events`: mirrors Anthropic's
 /// `clear_tool_uses_20250919` by replacing an old `ToolCallCompleted`'s
 /// `tool_result` content with a short placeholder, unless the tool that
@@ -143,11 +212,11 @@ fn event_to_message(event: &AgentEvent) -> Option<Message> {
 /// defensively — the event is treated as *not* exempt and gets cleared:
 /// it's safer to over-clear than to let an unbounded payload through on
 /// an uncovered edge case.
-fn event_to_message_cleared(
+fn event_to_block_cleared(
     event: &AgentEvent,
     tool_names: &HashMap<&str, &str>,
     never_clear: &[&str],
-) -> Option<Message> {
+) -> Option<(Role, ContentBlock)> {
     match event {
         AgentEvent::ToolCallCompleted { id, result } => {
             let is_exempt = tool_names
@@ -164,14 +233,14 @@ fn event_to_message_cleared(
                 )
             };
 
-            Some(Message {
-                role: Role::User,
-                content: vec![ContentBlock::ToolResult {
+            Some((
+                Role::User,
+                ContentBlock::ToolResult {
                     tool_use_id: id.clone(),
                     content,
                     is_error: result.is_error,
-                }],
-            })
+                },
+            ))
         }
         // Already folded into `durable.summary` by the compactor —
         // rendering it again here would duplicate that content as a
@@ -180,7 +249,7 @@ fn event_to_message_cleared(
         // Every other type (including `AssistantToolCall`, which is
         // always preserved in full) behaves identically to the tactical
         // path.
-        other => event_to_message(other),
+        other => event_to_block(other),
     }
 }
 
@@ -350,8 +419,12 @@ mod tests {
 
         let messages = build_messages(&durable, &[]);
 
-        assert_eq!(messages.len(), 2);
-        match &messages[0].content[0] {
+        // N-2 fix: a leading placeholder `User` message is now prepended
+        // whenever `durable_events` is non-empty and `summary` is still
+        // empty, so the real content shifts from indices [0, 1] to [1, 2].
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, Role::User);
+        match &messages[1].content[0] {
             ContentBlock::ToolUse { id, name, input } => {
                 assert_eq!(id, "call-1");
                 assert_eq!(name, "read_file");
@@ -359,7 +432,7 @@ mod tests {
             }
             other => panic!("expected a ToolUse block, got {other:?}"),
         }
-        match &messages[1].content[0] {
+        match &messages[2].content[0] {
             ContentBlock::ToolResult {
                 content,
                 tool_use_id,
@@ -397,8 +470,11 @@ mod tests {
 
         let messages = build_messages_with_never_clear(&durable, &[], &["keep_me"]);
 
-        assert_eq!(messages.len(), 4);
-        match &messages[1].content[0] {
+        // N-2 fix: leading placeholder shifts real content from [0..4) to
+        // [1..5).
+        assert_eq!(messages.len(), 5);
+        assert_eq!(messages[0].role, Role::User);
+        match &messages[2].content[0] {
             ContentBlock::ToolResult { content, .. } => {
                 assert!(
                     content.contains("cleared"),
@@ -407,7 +483,7 @@ mod tests {
             }
             other => panic!("expected a ToolResult block, got {other:?}"),
         }
-        match &messages[3].content[0] {
+        match &messages[4].content[0] {
             ContentBlock::ToolResult { content, .. } => {
                 assert_eq!(content, "contenido que debe conservarse");
             }
@@ -429,6 +505,74 @@ mod tests {
             }
             other => panic!("expected a ToolResult block, got {other:?}"),
         }
+    }
+
+    /// Regression test for the deeper issue N-1's investigation surfaced
+    /// (docs/AUDITORIA-2026-07-v2.md): `dispatch_tool_calls` persists every
+    /// round's `AssistantToolCall`s consecutively (all of them, before
+    /// dispatching any), then their `ToolCallCompleted`s consecutively (in
+    /// completion order) — so a round with 2+ concurrent tool calls
+    /// *always* produces this exact `[ATC, ATC, ATC, TCC, TCC, TCC]` shape
+    /// in the raw event log, with or without any compaction/tail-cut ever
+    /// happening. Before grouping, this rendered as three separate
+    /// `Assistant` messages (one `tool_use` each) followed by three
+    /// separate `User` messages (one `tool_result` each) — the first
+    /// `tool_use`'s very next message was *another* `tool_use` message,
+    /// not the `tool_result` answering it, which Anthropic rejects.
+    #[test]
+    fn concurrent_tool_calls_in_one_round_group_into_one_message_each_role() {
+        let tactical = vec![
+            AgentEvent::UserMessage {
+                text: "please echo three things".to_string(),
+            },
+            tool_call_event("call-1", "echo"),
+            AgentEvent::ToolCallStarted {
+                id: "call-1".to_string(),
+                name: "echo".to_string(),
+                background: false,
+            },
+            tool_call_event("call-2", "echo"),
+            AgentEvent::ToolCallStarted {
+                id: "call-2".to_string(),
+                name: "echo".to_string(),
+                background: false,
+            },
+            tool_call_event("call-3", "echo"),
+            AgentEvent::ToolCallStarted {
+                id: "call-3".to_string(),
+                name: "echo".to_string(),
+                background: false,
+            },
+            tool_completed_event("call-1", "ok-1"),
+            tool_completed_event("call-2", "ok-2"),
+            tool_completed_event("call-3", "ok-3"),
+        ];
+
+        let messages = build_messages(&empty_durable(), &tactical);
+
+        // [user text, one Assistant message with 3 ToolUse blocks, one
+        // User message with 3 ToolResult blocks] — not 7 separate messages.
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, Role::User);
+        assert_eq!(messages[1].role, Role::Assistant);
+        assert_eq!(messages[1].content.len(), 3);
+        for (block, expected_id) in messages[1].content.iter().zip(["call-1", "call-2", "call-3"]) {
+            match block {
+                ContentBlock::ToolUse { id, .. } => assert_eq!(id, expected_id),
+                other => panic!("expected a ToolUse block, got {other:?}"),
+            }
+        }
+        assert_eq!(messages[2].role, Role::User);
+        assert_eq!(messages[2].content.len(), 3);
+        for (block, expected_id) in messages[2].content.iter().zip(["call-1", "call-2", "call-3"]) {
+            match block {
+                ContentBlock::ToolResult { tool_use_id, .. } => assert_eq!(tool_use_id, expected_id),
+                other => panic!("expected a ToolResult block, got {other:?}"),
+            }
+        }
+
+        crate::protocol_check::check_anthropic_message_protocol(&messages)
+            .expect("grouped concurrent tool calls must be a protocol-valid sequence");
     }
 
     #[test]
@@ -508,14 +652,17 @@ mod tests {
     /// once it passes ~20 events (`DEFAULT_TACTICAL_WINDOW`), well before
     /// the compaction threshold (default 40) ever triggers.
     ///
-    /// Currently red: un-ignore once Grupo I's N-2 fix lands (render in
-    /// log order instead of durable-then-tactical).
+    /// Fixed: `build_messages_with_never_clear` now prepends a placeholder
+    /// `User` message whenever `durable_events` is non-empty, even if
+    /// `summary` is still empty — see the block right after the doc
+    /// comment at the top of [`build_messages_with_never_clear`]. This
+    /// doesn't reorder `durable_events` relative to `tactical` (that
+    /// would need `ContextCompactor::split` — a frozen trait per
+    /// PLAN.md — to preserve positional info it currently discards); it
+    /// guarantees the one concrete rule this hallazgo actually violated
+    /// (first message must be `role: user`) without touching that
+    /// contract.
     #[test]
-    #[ignore = "N-2 (docs/AUDITORIA-2026-07-v2.md): build_messages renders \
-                durable_events before tactical regardless of log order, so an \
-                old settled tool call can render before the UserMessage that \
-                preceded it — first message ends up Assistant, which \
-                Anthropic rejects with 400. Un-ignore once fixed."]
     fn build_messages_keeps_log_order_even_when_summary_is_still_empty() {
         // No CompactionOccurred has ever run — summary is empty — but the
         // tool call pair already aged out of the tactical window into

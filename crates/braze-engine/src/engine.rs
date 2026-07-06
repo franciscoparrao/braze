@@ -394,6 +394,16 @@ impl Engine {
         user_input: &str,
         observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
+        // N-4 (docs/AUDITORIA-2026-07-v2.md): repair any tool_use orphaned
+        // by a crash/kill/power-loss in a *previous* run *before* this
+        // turn's `UserMessage` is appended — `load_messages` also repairs
+        // (so a direct caller of it still gets the invariant), but by
+        // then the new `UserMessage` would already sit between the
+        // orphaned tool_use and its synthesized result, producing a
+        // sequence Anthropic rejects with a permanent 400 (the repair
+        // itself would be the thing making the session unresumable).
+        self.repair_session(session, observer).await?;
+
         self.append_and_notify(
             session,
             &AgentEvent::UserMessage {
@@ -878,6 +888,45 @@ impl Engine {
         Ok(())
     }
 
+    /// Loads the full event log and repairs any orphaned tool_use left by
+    /// a crashed/killed/power-lost previous run (see
+    /// [`Engine::repair_orphaned_tool_calls`]). Shared by
+    /// [`Engine::repair_session`] (called from `run_turn` *before* the
+    /// turn's `UserMessage` is appended — N-4,
+    /// docs/AUDITORIA-2026-07-v2.md) and [`Engine::load_messages`] (which
+    /// still needs the repair for any other caller, and is idempotent if
+    /// `repair_session` already ran this turn).
+    async fn load_and_repair(
+        &self,
+        session: &SessionId,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<Vec<AgentEvent>, EngineError> {
+        let mut events = match self.store.load(session).await {
+            Ok(events) => events,
+            Err(SessionError::NotFound(_)) => Vec::new(),
+            Err(err) => return Err(err.into()),
+        };
+
+        self.repair_orphaned_tool_calls(session, &mut events, observer)
+            .await?;
+
+        Ok(events)
+    }
+
+    /// Repairs orphaned tool calls in `session`'s log, if any — see
+    /// [`Engine::load_and_repair`]. Called from `run_turn` before it
+    /// appends the turn's `UserMessage`, so a repair (if needed) is always
+    /// persisted immediately after its orphaned `tool_use`, never after an
+    /// intervening message (N-4, docs/AUDITORIA-2026-07-v2.md).
+    async fn repair_session(
+        &self,
+        session: &SessionId,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<(), EngineError> {
+        self.load_and_repair(session, observer).await?;
+        Ok(())
+    }
+
     /// Loads the full event log, splits it into durable/tactical via the
     /// compactor, and — if the tactical window has grown past
     /// `tactical_compaction_threshold` **or** the estimated prompt size has
@@ -907,14 +956,7 @@ impl Engine {
         session: &SessionId,
         observer: &mut dyn TurnObserver,
     ) -> Result<Vec<Message>, EngineError> {
-        let mut events = match self.store.load(session).await {
-            Ok(events) => events,
-            Err(SessionError::NotFound(_)) => Vec::new(),
-            Err(err) => return Err(err.into()),
-        };
-
-        self.repair_orphaned_tool_calls(session, &mut events, observer)
-            .await?;
+        let events = self.load_and_repair(session, observer).await?;
 
         let (durable, tactical) = self.compactor.split(&events);
 
@@ -953,8 +995,8 @@ impl Engine {
             .await?;
 
             let effective_durable = merge_summary(durable, summary);
-            let keep = KEEP_RAW_TAIL.min(tactical.len());
-            let live_tail = &tactical[tactical.len() - keep..];
+            let start = pair_aware_tail_start(&tactical, KEEP_RAW_TAIL);
+            let live_tail = &tactical[start..];
             Ok(build_messages(&effective_durable, live_tail))
         } else {
             Ok(build_messages(&durable, &tactical))
@@ -1022,6 +1064,61 @@ impl Engine {
         }
 
         Ok(())
+    }
+}
+
+/// Finds the earliest index into `tactical` that keeps at least
+/// `min_keep` trailing events *and* never splits an `AssistantToolCall`
+/// from its matching `ToolCallCompleted` — the tail cut used for the raw
+/// live window kept verbatim after a compaction (N-1,
+/// docs/AUDITORIA-2026-07-v2.md).
+///
+/// A blind `tactical.len() - min_keep` cut can land between a tool call
+/// and its result: `AssistantToolCall`/`ToolCallCompleted` always appear
+/// in that relative order (dispatch persists the former before the
+/// latter), so if a `ToolCallCompleted` ends up inside the kept tail
+/// while its `AssistantToolCall` falls just before the cut, the resulting
+/// request has a `tool_result` with no matching `tool_use` — Anthropic
+/// rejects that outright. The reverse (a `tool_use` kept without its
+/// result) can't happen from this cut alone, since a result's index is
+/// always *after* its call's, so keeping the call end never excludes an
+/// already-included result.
+///
+/// Extends `start` backward, re-scanning after every extension, until no
+/// `AssistantToolCall` before `start` has its `ToolCallCompleted` at or
+/// after `start` — i.e. until the cut point falls on a pair boundary.
+/// `tactical` here is always the small in-memory raw window between
+/// compactions (bounded well below `tactical_compaction_threshold`), so
+/// the worst-case quadratic re-scan is negligible in practice.
+fn pair_aware_tail_start(tactical: &[AgentEvent], min_keep: usize) -> usize {
+    let mut start = tactical.len().saturating_sub(min_keep);
+
+    loop {
+        let completed_ids_in_tail: std::collections::HashSet<&str> = tactical[start..]
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::ToolCallCompleted { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        let earliest_required = tactical[..start]
+            .iter()
+            .enumerate()
+            .filter_map(|(i, event)| match event {
+                AgentEvent::AssistantToolCall { id, .. }
+                    if completed_ids_in_tail.contains(id.as_str()) =>
+                {
+                    Some(i)
+                }
+                _ => None,
+            })
+            .min();
+
+        match earliest_required {
+            Some(new_start) if new_start < start => start = new_start,
+            _ => return start,
+        }
     }
 }
 
@@ -1627,14 +1724,10 @@ mod tests {
     /// exactly what `ProtocolValidatingModel` is built to catch, and it
     /// persists to disk — every future resume repeats it.
     ///
-    /// Currently red: un-ignore once Grupo I's N-4 fix lands (repair the
-    /// orphan before appending the turn's `UserMessage`, not after).
+    /// Fixed: `run_turn` now calls `repair_session` (which repairs and
+    /// persists, discarding the loaded events) *before* appending the
+    /// turn's `UserMessage` — see `Engine::run_turn`/`Engine::repair_session`.
     #[tokio::test]
-    #[ignore = "N-4 (docs/AUDITORIA-2026-07-v2.md): repair_orphaned_tool_calls \
-                runs inside load_messages, which run_turn only calls *after* \
-                appending the new turn's UserMessage — the synthesized \
-                ToolCallCompleted ends up after that UserMessage instead of \
-                immediately after its tool_use. Un-ignore once fixed."]
     async fn resuming_after_a_crash_with_an_orphaned_tool_call_stays_protocol_valid() {
         let (store, dir) = temp_store();
         let session = SessionId::new();
@@ -1707,13 +1800,17 @@ mod tests {
     /// compactor's window). `TCC1`/`TCC2` still render as `tool_result`
     /// blocks with no matching `tool_use` anywhere in the request.
     ///
-    /// Currently red: un-ignore once Grupo I's N-1 fix lands (make the tail
-    /// cut pair-aware).
+    /// Fixed by two complementary changes: `pair_aware_tail_start` (below)
+    /// extends the cut backward so it never *excludes* a `tool_use` whose
+    /// `tool_result` survived into the tail; and `history::push_grouped`
+    /// groups consecutive `tool_use`/`tool_result` events into one
+    /// `Message` each (matching how Anthropic itself represents one
+    /// assistant turn requesting several tools), so a concurrent-dispatch
+    /// round's naturally-non-adjacent `[ToolUse, ToolUse, ToolUse]` /
+    /// `[ToolResult, ToolResult, ToolResult]` shape is never actually
+    /// invalid to begin with — the tail cut alone couldn't have fixed
+    /// that half on its own.
     #[tokio::test]
-    #[ignore = "N-1 (docs/AUDITORIA-2026-07-v2.md): KEEP_RAW_TAIL cuts the \
-                tactical tail blind to tool_use/tool_result pairing, so a \
-                completion whose request got cut can render as an orphaned \
-                tool_result. Un-ignore once the tail cut is made pair-aware."]
     async fn compaction_tail_cut_can_orphan_a_tool_result() {
         let (store, dir) = temp_store();
         let session = SessionId::new();

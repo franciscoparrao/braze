@@ -49,18 +49,21 @@ por debajo de todos los umbrales de compactación).
 
 ### Lo que hay que arreglar primero (bloqueantes de Fase 6)
 
-1. **N-2 · Reordenamiento durable/táctico → 400 en toda sesión media** (el
-   más impactante; golpea cada sesión Anthropic de 21-40 eventos).
-2. **N-1 · Corte `KEEP_RAW_TAIL` parte pares tool_use/result → 400 al
-   compactar** en mitad de una ronda multi-tool.
-3. **N-4 · La reparación de huérfanos apendea el resultado *después* del
-   `UserMessage` nuevo → orden inválido persistido → 400 permanente.**
+1. ~~**N-2 · Reordenamiento durable/táctico → 400 en toda sesión media**~~ —
+   ✅ resuelto 2026-07-05.
+2. ~~**N-1 · Corte `KEEP_RAW_TAIL` parte pares tool_use/result → 400 al
+   compactar**~~ — ✅ resuelto 2026-07-05 (junto con N-1b, un hallazgo más
+   profundo descubierto al implementar este fix).
+3. ~~**N-4 · La reparación de huérfanos apendea el resultado *después* del
+   `UserMessage` nuevo → orden inválido persistido → 400 permanente.**~~ —
+   ✅ resuelto 2026-07-05.
 4. **N-3 · "Apagón" del summary: el `CompactionOccurred` recién creado es
    invisible ~20 eventos → desaparece la pregunta original del usuario.**
+   Pendiente.
 5. **N-6 · Modo compactación permanente reintroducido por el budget de
-   tokens** (Ollama, activo por default).
+   tokens** (Ollama, activo por default). Pendiente.
 6. **N-9 · Tool calls sin argumentos se dropean en silencio** (Anthropic +
-   OpenRouter) → el agente "converge" sin ejecutar la llamada.
+   OpenRouter) → el agente "converge" sin ejecutar la llamada. Pendiente.
 
 ---
 
@@ -87,6 +90,51 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
 - **Fix:** hacer el corte del tail *pair-aware* — extender el slice hacia
   atrás hasta incluir el `AssistantToolCall` de todo `ToolCallCompleted`
   presente en el tail, o excluir del tail el resultado huérfano.
+- **✅ RESUELTO 2026-07-05.** `pair_aware_tail_start` (`engine.rs`, cerca de
+  `merge_summary`) extiende `start` hacia atrás en un loop de punto fijo
+  hasta que ningún `AssistantToolCall` anterior al corte tenga su
+  `ToolCallCompleted` dentro de la cola — ver su doc comment para el
+  análisis de por qué una sola pasada no basta (la extensión puede arrastrar
+  más pares). Combinado con el fix de N-1b (abajo). Test
+  `engine::tests::compaction_tail_cut_can_orphan_a_tool_result` pasó de rojo
+  a verde sin tocar su aserción.
+
+#### N-1b · [ALTA, hallazgo nuevo descubierto al implementar el fix de N-1] Cualquier ronda con 2+ tool calls concurrentes ya renderiza `tool_use`/`tool_result` no-adyacentes, con o sin compactación
+- **Ubicación:** `crates/braze-engine/src/engine.rs` (`dispatch_tool_calls`,
+  el loop que apendea `AssistantToolCall`/`ToolCallStarted` de **todas** las
+  llamadas del round antes de despachar ninguna) + `history.rs` (mapeo
+  1-evento-1-mensaje original).
+- **Cómo se descubrió:** al implementar el fix de N-1 y correr el test de
+  regresión contra el validador de protocolo (`protocol_check.rs`, la
+  precondición del Grupo I), el pair-aware tail cut por sí solo dejó de
+  producir `OrphanedToolResult` pero empezó a fallar con
+  `ToolResultNotAdjacent` — el `tool_result` de `call-1` no era el mensaje
+  inmediatamente siguiente a su `tool_use`, porque entre medio había OTROS
+  `tool_use` (call-2, call-3) del mismo round.
+- **Escenario:** `dispatch_tool_calls` persiste, para un round con 3 tool
+  calls, `[ATC1,TCS1,ATC2,TCS2,ATC3,TCS3]` (todas las llamadas) **antes** de
+  despachar ninguna, y recién después las `ToolCallCompleted` llegan en
+  orden de finalización — este shape existe siempre, no solo cuando
+  compacta. Con el mapeo histórico (un evento → un mensaje), esto renderiza
+  como 3 mensajes `Assistant` separados (uno por `tool_use`) seguidos de 3
+  mensajes `User` separados (uno por `tool_result`) — el mensaje
+  inmediatamente después del primer `tool_use` es *otro* `tool_use`, no su
+  respuesta, y Anthropic rechaza eso. El propio comentario de diseño de
+  `history.rs` (Fase 5) ya reconocía esto como una asunción sin verificar
+  ("MVP simplification... still a valid sequence... revisit if strict
+  role-alternation becomes a real constraint") — la auditoría de tres
+  agentes independientes convergiendo en "el tool_result debe ser el
+  mensaje inmediatamente siguiente" indica que la asunción era optimista.
+- **Fix — ✅ RESUELTO 2026-07-05:** `history.rs` agrupa ahora eventos
+  `ToolUse`/`ToolResult` consecutivos del mismo tipo en un solo `Message`
+  con múltiples `ContentBlock`s (`push_grouped`/`event_to_block`), en vez de
+  un mensaje por evento — exactamente como el propio comentario de diseño
+  describía el formato real de Anthropic. Esto elimina la ambigüedad de raíz
+  para cualquier round concurrente, con o sin compactación de por medio. Los
+  mensajes de texto plano (`UserMessage`/`AssistantText`) NO se agrupan —
+  conservan su semántica 1:1 existente, sin afectar tests previos salvo
+  ajustes de índice donde corresponde. Nuevo test de regresión:
+  `history::tests::concurrent_tool_calls_in_one_round_group_into_one_message_each_role`.
 
 #### N-2 · [ALTA→CRÍTICA] `split`+`build_messages` reordenan: durables por encima de tácticos más viejos → primer mensaje `assistant` → 400 en la banda 21-40 eventos
 - **Ubicación:** `crates/braze-session/src/simple_compactor.rs:165-191` +
@@ -110,6 +158,19 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   los huérfanos previos al primer durable). Agregar un test que construya el
   request de una sesión de 25 eventos con tool call temprana y asserte que el
   primer mensaje es `user`.
+- **✅ RESUELTO 2026-07-05, con un fix más acotado que el propuesto.**
+  Reordenar `durable_events` vs `tactical` en orden de log real requeriría
+  que `ContextCompactor::split` — un trait congelado — expusiera índices
+  posicionales que hoy descarta; en vez de tocar ese contrato,
+  `build_messages_with_never_clear` antepone un mensaje `User` placeholder
+  ("[Contexto previo] ...") siempre que `durable_events` sea no-vacío,
+  incluso con `summary` vacío — garantiza la única regla que este hallazgo
+  realmente violaba (primer mensaje `role: user`) sin reordenar nada. Test
+  `history::tests::build_messages_keeps_log_order_even_when_summary_is_still_empty`
+  pasó de rojo a verde; dos tests preexistentes
+  (`durable_tool_result_is_cleared_but_tool_use_is_preserved`,
+  `never_clear_list_exempts_only_the_named_tool`) se actualizaron para
+  reflejar el mensaje adicional (índices +1).
 
 #### N-3 · [ALTA] "Apagón" del summary: el `CompactionOccurred` recién persistido es invisible mientras está en la ventana táctica
 - **Ubicación:** `crates/braze-session/src/simple_compactor.rs:165-177` +
@@ -145,6 +206,13 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   orden), por eso pasan.
 - **Fix:** ejecutar la reparación **antes** de apendear el `UserMessage` del
   turno (cargar+reparar, luego apendear el mensaje del usuario).
+- **✅ RESUELTO 2026-07-05.** `run_turn` ahora llama a `Engine::repair_session`
+  (nuevo método, factoriza el load+repair que antes vivía inline en
+  `load_messages` en un helper compartido `load_and_repair`) **antes** de
+  apendear el `UserMessage` del turno; `load_messages` sigue reparando
+  también (idempotente) para cualquier otro caller directo. Test
+  `engine::tests::resuming_after_a_crash_with_an_orphaned_tool_call_stays_protocol_valid`
+  pasó de rojo (`ToolResultNotAdjacent{expected:#2, actual:#3}`) a verde.
 
 #### N-5 · [ALTA] El fix C5 tolera la línea truncada al leer pero nunca repara el archivo → el siguiente `append` la pega al fragmento → corrupción dura permanente
 - **Ubicación:** `crates/braze-session/src/file_store.rs:149-175` (tolerancia
@@ -519,29 +587,33 @@ en `engine.rs`'s `mod tests`) que envuelve cualquier backend de test
 delegar — convierte lo que sería un 400 en producción en un panic inmediato y
 preciso justo en el sitio donde se construyó la secuencia inválida.
 
-Con esta infraestructura se escribieron 3 tests de regresión que **reproducen
-N-1, N-2 y N-4 como fallas rojas** (marcados `#[ignore = "..."]` para que
-`cargo test --workspace` siga verde; se corren explícitamente con
-`--ignored` y hoy fallan tal como se predijo):
-- `history::tests::build_messages_keeps_log_order_even_when_summary_is_still_empty`
-  (N-2) → `FirstMessageNotUser { got: Assistant }`.
-- `engine::tests::resuming_after_a_crash_with_an_orphaned_tool_call_stays_protocol_valid`
-  (N-4) → `ToolResultNotAdjacent { expected_message_index: 2, actual_message_index: 3 }`.
-- `engine::tests::compaction_tail_cut_can_orphan_a_tool_result`
-  (N-1) → `OrphanedToolResult { tool_use_id: "call-1", message_index: 2 }`.
+Con esta infraestructura se escribieron 3 tests de regresión que
+reprodujeron N-1, N-2 y N-4 como fallas rojas antes de arreglarlos.
 
-Más un test verde de humo
-(`engine::tests::run_turn_with_a_tool_call_passes_protocol_validation`) que
-prueba que el validador no da falsos positivos en un intercambio normal, y 7
-tests unitarios puros del validador mismo.
+**N-1, N-1b, N-2 y N-4 — ✅ RESUELTOS 2026-07-05.** Ver el detalle del fix en
+cada hallazgo arriba. Resumen de los cambios:
+- `history.rs`: `build_messages` agrupa `tool_use`/`tool_result` consecutivos
+  del mismo tipo en un solo `Message` multi-bloque (fix de N-1b, el hallazgo
+  más profundo que surgió al perseguir N-1 — cualquier round con 2+ tool
+  calls concurrentes producía mensajes no-adyacentes con o sin
+  compactación); y antepone un `User` placeholder cuando `durable_events` es
+  no-vacío con `summary` todavía vacío (fix de N-2).
+- `engine.rs`: `pair_aware_tail_start` hace el corte de `KEEP_RAW_TAIL`
+  consciente de los pares (fix de N-1, complementario al de N-1b); `run_turn`
+  llama a `repair_session` (nuevo, factoriza `load_and_repair`) antes de
+  apendear el `UserMessage` del turno en vez de después (fix de N-4).
+- Los 3 tests de regresión perdieron su `#[ignore]` y pasan en verde sin
+  tocar sus aserciones originales; se sumó
+  `history::tests::concurrent_tool_calls_in_one_round_group_into_one_message_each_role`
+  como cobertura dedicada de N-1b. Workspace completo verde (0 failed, 0
+  ignored), clippy limpio.
 
-N-3/N-6/N-5/N-7/N-14 no son violaciones de *forma* del mensaje (son
-desaparición de contenido, thrashing de compactación, corrupción de archivo o
-ids duplicados) — este validador no los cubre; necesitan tests dirigidos
-propios cuando se aborden. **Siguiente paso:** implementar los fixes de N-1,
-N-2 y N-4 y sacarles el `#[ignore]` a estos tres tests (deben pasar de rojo a
-verde sin tocar sus aserciones), luego escribir tests equivalentes para
-N-3/N-5/N-6/N-7/N-14 antes de cerrarlos.
+**Pendientes de Grupo I:** `N-3, N-5, N-6, N-7, N-14`. N-3 (apagón del
+summary), N-6 (compactación permanente vía budget de tokens), N-5/N-7
+(corrupción de archivo de sesión) y N-14 (ids de tool_use duplicados) no son
+violaciones de *forma* del mensaje — el validador de protocolo no los cubre;
+necesitan tests dirigidos propios (de contenido/estado, no de shape) cuando
+se aborden.
 
 ### Grupo J — Seguridad (máxima prioridad, esfuerzo bajo) — ✅ CERRADO 2026-07-05
 `N-8a, N-8b`. Cerrados los dos escapes del allowlist en
