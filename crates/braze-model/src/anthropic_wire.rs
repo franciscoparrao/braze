@@ -19,7 +19,6 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::backend::{CompletionEvent, CompletionRequest, permissive_fallback_schema};
-use crate::error::ModelError;
 
 pub(crate) const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 pub(crate) const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -265,7 +264,7 @@ pub(crate) struct AnthropicStreamState {
     /// The caller (`drive_stream` in `anthropic.rs`) checks this after
     /// every `handle_event` call and, if set, yields it as
     /// `Err(ModelError::StreamError)` instead of silently ending the
-    /// stream — see [`ModelError::StreamError`]'s doc comment for why
+    /// stream — see [`crate::ModelError::StreamError`]'s doc comment for why
     /// this used to be indistinguishable from a normal completion.
     pub stream_error: Option<String>,
 }
@@ -424,53 +423,42 @@ impl AnthropicStreamState {
         match state {
             BlockState::Text => Vec::new(),
             BlockState::ToolUse { id, name, json_buf } => {
-                match finalize_tool_call(id, name, &json_buf) {
-                    Ok(event) => vec![event],
-                    Err(err) => {
-                        tracing::error!(
-                            error = %err,
-                            "anthropic stream: dropping tool call with unparseable arguments"
-                        );
-                        Vec::new()
-                    }
-                }
+                vec![finalize_tool_call(id, name, &json_buf)]
             }
         }
     }
 }
 
 /// Parses the fully-accumulated `input_json_delta` fragments for one
-/// `tool_use` block into a [`CompletionEvent::ToolCallRequested`]. Pure and
-/// directly unit-tested — returns [`ModelError::Decode`] on invalid JSON,
-/// never panics.
-pub(crate) fn finalize_tool_call(
-    id: String,
-    name: String,
-    json_buf: &str,
-) -> Result<CompletionEvent, ModelError> {
-    // N-9 (docs/AUDITORIA-2026-07-v2.md): a `tool_use` block with no
-    // arguments streams `content_block_start {input:{}}` followed by
-    // *zero* `input_json_delta` fragments (or one with `partial_json:
-    // ""`) — the official Anthropic SDKs special-case an empty
-    // accumulated buffer as `{}` for exactly this reason. Without this,
-    // `serde_json::from_str("")` fails and the tool call is dropped
-    // silently: the round "converges" without ever executing the call
-    // the model actually requested.
-    let trimmed = json_buf.trim();
-    let arguments: Value = if trimmed.is_empty() {
-        Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_str(trimmed).map_err(|e| {
-            ModelError::Decode(format!(
-                "anthropic tool_use input is not valid JSON ({e}): {json_buf:?}"
-            ))
-        })?
-    };
-    Ok(CompletionEvent::ToolCallRequested {
+/// `tool_use` block into a [`CompletionEvent::ToolCallRequested`]. Pure,
+/// directly unit-tested, and **infallible** (ítem 3 del backlog
+/// 2026-07-06): a malformed buffer goes through the shared repair ladder
+/// (`args_repair`) — truncation gets completed, garbage collapses to
+/// `{}` — instead of the previous "drop the call silently", which made a
+/// round "converge" without executing what the model requested. A
+/// dispatched call with wrong/empty arguments fails schema validation or
+/// the tool itself, and *that* error is fed back to the model as a
+/// visible retry signal.
+///
+/// The empty-buffer → `{}` normalization (N-9,
+/// docs/AUDITORIA-2026-07-v2.md — a no-argument `tool_use` streams zero
+/// `input_json_delta` fragments; the official SDKs special-case it the
+/// same way) is the ladder's first rung.
+pub(crate) fn finalize_tool_call(id: String, name: String, json_buf: &str) -> CompletionEvent {
+    let (arguments, outcome) = crate::args_repair::parse_arguments_with_repair(json_buf);
+    if outcome != crate::args_repair::ArgumentsOutcome::Parsed {
+        tracing::warn!(
+            tool = %name,
+            ?outcome,
+            buffer = %json_buf,
+            "anthropic stream: tool call arguments were not valid JSON — repaired/collapsed instead of dropping the call"
+        );
+    }
+    CompletionEvent::ToolCallRequested {
         id,
         name,
         arguments,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -719,14 +707,42 @@ mod tests {
         assert_eq!(state.stream_error.as_deref(), Some("Overloaded"));
     }
 
+    /// Ítem 3 del backlog (2026-07-06): irreparable arguments collapse
+    /// to `{}` and the call still dispatches — the previous behavior
+    /// (return a Decode error, caller drops the call silently) made the
+    /// round "converge" without executing what the model asked for.
     #[test]
-    fn finalize_tool_call_returns_decode_error_on_invalid_json() {
-        let result = finalize_tool_call(
+    fn finalize_tool_call_collapses_irreparable_arguments_instead_of_failing() {
+        let event = finalize_tool_call(
             "toolu_01".to_string(),
             "get_weather".to_string(),
             "{not valid json",
         );
-        assert!(matches!(result, Err(ModelError::Decode(_))));
+        match event {
+            CompletionEvent::ToolCallRequested { name, arguments, .. } => {
+                assert_eq!(name, "get_weather");
+                assert_eq!(arguments, serde_json::json!({}));
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
+        }
+    }
+
+    /// Ítem 3: a buffer cut off mid-string (the stream died) is repaired
+    /// rather than collapsed — the arguments the model actually produced
+    /// survive.
+    #[test]
+    fn finalize_tool_call_repairs_a_truncated_buffer() {
+        let event = finalize_tool_call(
+            "toolu_01".to_string(),
+            "read_file".to_string(),
+            "{\"path\": \"src/mai",
+        );
+        match event {
+            CompletionEvent::ToolCallRequested { arguments, .. } => {
+                assert_eq!(arguments, serde_json::json!({"path": "src/mai"}));
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
+        }
     }
 
     /// Regression test for N-9 (docs/AUDITORIA-2026-07-v2.md): a
@@ -735,9 +751,9 @@ mod tests {
     /// must resolve to `{}`, not a dropped tool call.
     #[test]
     fn finalize_tool_call_treats_an_empty_buffer_as_an_empty_object() {
-        let result = finalize_tool_call("toolu_01".to_string(), "list_sessions".to_string(), "");
-        match result {
-            Ok(CompletionEvent::ToolCallRequested { arguments, .. }) => {
+        let event = finalize_tool_call("toolu_01".to_string(), "list_sessions".to_string(), "");
+        match event {
+            CompletionEvent::ToolCallRequested { arguments, .. } => {
                 assert_eq!(arguments, serde_json::json!({}));
             }
             other => panic!("expected ToolCallRequested with empty arguments, got {other:?}"),
@@ -749,17 +765,20 @@ mod tests {
     /// instead of none at all.
     #[test]
     fn finalize_tool_call_treats_a_whitespace_only_buffer_as_an_empty_object() {
-        let result = finalize_tool_call("toolu_01".to_string(), "list_sessions".to_string(), "  ");
-        match result {
-            Ok(CompletionEvent::ToolCallRequested { arguments, .. }) => {
+        let event = finalize_tool_call("toolu_01".to_string(), "list_sessions".to_string(), "  ");
+        match event {
+            CompletionEvent::ToolCallRequested { arguments, .. } => {
                 assert_eq!(arguments, serde_json::json!({}));
             }
             other => panic!("expected ToolCallRequested with empty arguments, got {other:?}"),
         }
     }
 
+    /// Ítem 3 (2026-07-06): a broken block used to be dropped — now it
+    /// survives with collapsed (`{}`) arguments, so the engine dispatches
+    /// it and the schema/tool error becomes the model's retry signal.
     #[test]
-    fn stream_state_drops_tool_call_with_invalid_json_without_panicking() {
+    fn stream_state_keeps_a_tool_call_with_invalid_json_with_collapsed_arguments() {
         let mut state = AnthropicStreamState::new();
         state.handle_event(&serde_json::json!({
             "type": "content_block_start",
@@ -773,7 +792,13 @@ mod tests {
         }));
         let events =
             state.handle_event(&serde_json::json!({"type": "content_block_stop", "index": 0}));
-        // No panic, and no ToolCallRequested emitted for the broken block.
-        assert!(events.is_empty());
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CompletionEvent::ToolCallRequested { id, arguments, .. } => {
+                assert_eq!(id, "toolu_01");
+                assert_eq!(arguments, &serde_json::json!({}));
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
+        }
     }
 }

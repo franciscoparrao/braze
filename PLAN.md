@@ -1448,6 +1448,42 @@ compactación) disparó durante el bench. Ahora instala el mismo
 subscriber que `braze-cli` (stderr, respeta `RUST_LOG`; los binarios y
 solo los binarios instalan subscribers, per convención del workspace).
 
+## Backlog post-revisiones — ítem 3: hardening de streaming (2026-07-06)
+
+Último ítem del backlog rankeado (cierra el backlog completo, 1-7).
+Préstamo del StreamingToolCallParser de OpenCode (docs/SOTA-2026-07.md §
+Adenda) — fallas reales de proveedores en el ensamblaje de tool calls
+por streaming:
+
+- **Escalera de reparación de argumentos** (`braze-model/args_repair.rs`,
+  compartida por los wires de Anthropic y OpenRouter): parse directo →
+  reparación de truncamiento (cerrar string abierta con cuidado del `\`
+  colgante, quitar coma colgante, balancear `{}`/`[]` — solo repara
+  cortes, no daño estructural previo) → colapso a `{}`. Los
+  `finalize_tool_call` de ambos wires pasan de "dropear la call en
+  silencio" (la ronda 'convergía' sin ejecutar lo pedido) a infalibles:
+  la call se despacha y el error de schema/tool que produzca es la señal
+  de reintento visible para el modelo.
+- **Remap de colisión index/id** (OpenRouter): un upstream que reusa
+  `index: 0` para varias calls secuenciales (re-anunciando otro id) ya
+  no corrompe el buffer fusionando dos calls — la anterior se desplaza a
+  `displaced_tool_calls` y se emite primero, en orden de llegada.
+- **Fragmentos sin `index`** (upstreams estilo LM Studio): antes se
+  descartaban enteros; ahora un fragmento con id/name anuncia una call
+  nueva (call completa en un solo chunk) y uno solo-argumentos continúa
+  la última.
+- **`finish_reason` duplicado** (OpenRouter): ya era inocuo por el
+  `mem::take` del drain — ahora está pineado por test.
+- El quinto modo de la lista ("XML crudo en streaming", LM Studio) lo
+  cubre el rescate textual del engine (ítem 2 + gramática XML), no el
+  wire.
+
+**Tests**: 597 → 612 (9 de la escalera + nuevos de colisión/sin-index/
+duplicado en openrouter_wire + semántica infalible en ambos wires).
+Verificación en vivo del happy path: `braze run` contra OpenRouter real
+(gpt-4o-mini) con tool call `read_file` — streaming, dispatch y
+respuesta correctos.
+
 ## Backlog post-revisiones — ítems 4-7 + extensión XML (2026-07-06)
 
 Cuatro préstamos de la revisión OSS (docs/SOTA-2026-07.md § Adenda)

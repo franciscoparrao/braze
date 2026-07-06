@@ -23,7 +23,6 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::backend::{CompletionEvent, CompletionRequest, permissive_fallback_schema};
-use crate::error::ModelError;
 
 pub(crate) const OPENROUTER_DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 
@@ -290,6 +289,14 @@ struct PendingToolCall {
 /// backends.
 pub(crate) struct OpenRouterStreamState {
     tool_calls: Vec<Option<PendingToolCall>>,
+    /// Calls displaced by an index/id collision (ítem 3 del backlog
+    /// 2026-07-06): some providers behind OpenRouter reuse `index: 0`
+    /// for *several sequential* tool calls, re-announcing id/name on the
+    /// same index. Without the remap, the second call's id/name
+    /// overwrote the first's and both argument buffers concatenated
+    /// into one corrupt call. Displaced calls wait here, in arrival
+    /// order, until `finalize_tool_calls` drains them first.
+    displaced_tool_calls: Vec<PendingToolCall>,
     input_tokens: u32,
     output_tokens: u32,
     stop_reason: Option<String>,
@@ -306,6 +313,7 @@ impl OpenRouterStreamState {
     pub fn new() -> Self {
         Self {
             tool_calls: Vec::new(),
+            displaced_tool_calls: Vec::new(),
             input_tokens: 0,
             output_tokens: 0,
             stop_reason: None,
@@ -389,10 +397,30 @@ impl OpenRouterStreamState {
     }
 
     fn accumulate_tool_call_fragment(&mut self, fragment: &Value) {
-        let Some(index) = fragment.get("index").and_then(Value::as_u64) else {
-            return;
+        // Ítem 3 del backlog (2026-07-06): a fragment with no `index` at
+        // all is a real provider behavior, not garbage — LM Studio-style
+        // upstreams send each tool call *whole* in a single delta entry
+        // (id + name + complete arguments), and strict-OpenAI clients
+        // are the only ones guaranteed the field. Dropping it (the old
+        // behavior) lost the entire call. Routing: a fragment carrying
+        // an `id` or `name` announces a new call (append at the end);
+        // one carrying only arguments continues the most recent call.
+        let index = match fragment.get("index").and_then(Value::as_u64) {
+            Some(index) => index as usize,
+            None => {
+                let announces_new_call = fragment.get("id").and_then(Value::as_str).is_some()
+                    || fragment
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(Value::as_str)
+                        .is_some();
+                if announces_new_call || self.tool_calls.is_empty() {
+                    self.tool_calls.len()
+                } else {
+                    self.tool_calls.len() - 1
+                }
+            }
         };
-        let index = index as usize;
         if index > MAX_TOOL_CALL_INDEX {
             tracing::warn!(
                 index,
@@ -405,9 +433,31 @@ impl OpenRouterStreamState {
         if self.tool_calls.len() <= index {
             self.tool_calls.resize_with(index + 1, || None);
         }
+
+        // Index/id collision remap (ítem 3): a fragment that re-announces
+        // a *different*, non-empty id on an index that already holds an
+        // identified call is the next sequential call, not a
+        // continuation — displace the finished one instead of merging
+        // the two into one corrupt buffer.
+        let incoming_id = fragment.get("id").and_then(Value::as_str);
+        if let Some(slot) = &self.tool_calls[index]
+            && let (Some(existing), Some(incoming)) = (slot.id.as_deref(), incoming_id)
+            && !incoming.is_empty()
+            && existing != incoming
+        {
+            tracing::debug!(
+                index,
+                existing_id = existing,
+                incoming_id = incoming,
+                "openrouter stream: index reused for a new tool call — displacing the completed one"
+            );
+            if let Some(displaced) = self.tool_calls[index].take() {
+                self.displaced_tool_calls.push(displaced);
+            }
+        }
         let slot = self.tool_calls[index].get_or_insert_with(PendingToolCall::default);
 
-        if let Some(id) = fragment.get("id").and_then(Value::as_str) {
+        if let Some(id) = incoming_id {
             slot.id = Some(id.to_string());
         }
         if let Some(function) = fragment.get("function") {
@@ -420,16 +470,17 @@ impl OpenRouterStreamState {
         }
     }
 
-    /// Drains all pending tool calls, parsing each one's accumulated
-    /// argument fragments into a [`CompletionEvent::ToolCallRequested`].
-    /// A tool call whose `arguments_buf` isn't valid JSON is logged and
-    /// dropped, same precedent as `AnthropicStreamState::on_content_block_stop`
-    /// — it does not fail the whole stream.
+    /// Drains all pending tool calls — the ones displaced by an index/id
+    /// collision first (they arrived earlier), then the live slots —
+    /// parsing each one's accumulated argument fragments into a
+    /// [`CompletionEvent::ToolCallRequested`]. Malformed arguments go
+    /// through the shared repair ladder (see [`finalize_tool_call`])
+    /// instead of dropping the call.
     fn finalize_tool_calls(&mut self) -> Vec<CompletionEvent> {
-        std::mem::take(&mut self.tool_calls)
+        std::mem::take(&mut self.displaced_tool_calls)
             .into_iter()
-            .flatten()
-            .filter_map(|pending| {
+            .chain(std::mem::take(&mut self.tool_calls).into_iter().flatten())
+            .map(|pending| {
                 // N-21 (docs/AUDITORIA-2026-07-v2.md): some upstreams
                 // behind OpenRouter never send an `id` fragment for a
                 // tool call at all — `unwrap_or_default()` alone would
@@ -453,16 +504,7 @@ impl OpenRouterStreamState {
                     )
                 });
                 let name = pending.name.unwrap_or_default();
-                match finalize_tool_call(id, name, &pending.arguments_buf) {
-                    Ok(event) => Some(event),
-                    Err(err) => {
-                        tracing::error!(
-                            error = %err,
-                            "openrouter stream: dropping tool call with unparseable arguments"
-                        );
-                        None
-                    }
-                }
+                finalize_tool_call(id, name, &pending.arguments_buf)
             })
             .collect()
     }
@@ -495,35 +537,30 @@ impl OpenRouterStreamState {
 }
 
 /// Parses one tool call's fully-accumulated `arguments` fragments into a
-/// [`CompletionEvent::ToolCallRequested`]. Pure and directly unit-tested —
-/// returns [`ModelError::Decode`] on invalid JSON, never panics.
-pub(crate) fn finalize_tool_call(
-    id: String,
-    name: String,
-    arguments_buf: &str,
-) -> Result<CompletionEvent, ModelError> {
-    // N-9 (docs/AUDITORIA-2026-07-v2.md): a no-parameter tool call routed
-    // through a heterogeneous OpenRouter upstream can emit `"arguments":
-    // ""` (empty string) instead of `"{}"` — not every provider behind
-    // OpenRouter normalizes this the way OpenAI's own API does. Without
-    // this, `serde_json::from_str("")` fails and the tool call is
-    // dropped silently: the round "converges" without ever executing the
-    // call the model actually requested.
-    let trimmed = arguments_buf.trim();
-    let arguments: Value = if trimmed.is_empty() {
-        Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_str(trimmed).map_err(|e| {
-            ModelError::Decode(format!(
-                "openrouter tool call arguments are not valid JSON ({e}): {arguments_buf:?}"
-            ))
-        })?
-    };
-    Ok(CompletionEvent::ToolCallRequested {
+/// [`CompletionEvent::ToolCallRequested`]. Pure, directly unit-tested,
+/// and **infallible** (ítem 3 del backlog 2026-07-06): malformed
+/// arguments go through the shared repair ladder (`args_repair` —
+/// truncation completed, garbage collapsed to `{}`) instead of the
+/// previous "drop the call silently"; the dispatched call's schema/tool
+/// error is the model's visible retry signal. The empty-buffer → `{}`
+/// normalization (N-9, docs/AUDITORIA-2026-07-v2.md: heterogeneous
+/// upstreams emit `"arguments": ""` for no-parameter calls) is the
+/// ladder's first rung.
+pub(crate) fn finalize_tool_call(id: String, name: String, arguments_buf: &str) -> CompletionEvent {
+    let (arguments, outcome) = crate::args_repair::parse_arguments_with_repair(arguments_buf);
+    if outcome != crate::args_repair::ArgumentsOutcome::Parsed {
+        tracing::warn!(
+            tool = %name,
+            ?outcome,
+            buffer = %arguments_buf,
+            "openrouter stream: tool call arguments were not valid JSON — repaired/collapsed instead of dropping the call"
+        );
+    }
+    CompletionEvent::ToolCallRequested {
         id,
         name,
         arguments,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -944,18 +981,46 @@ mod tests {
         }
     }
 
+    /// Ítem 3 del backlog (2026-07-06): irreparable arguments collapse
+    /// to `{}` and the call still dispatches — the previous behavior
+    /// (Decode error, caller drops the call) made a round "converge"
+    /// without executing what the model asked for.
     #[test]
-    fn finalize_tool_call_returns_decode_error_on_invalid_json() {
-        let result = finalize_tool_call(
+    fn finalize_tool_call_collapses_irreparable_arguments_instead_of_failing() {
+        let event = finalize_tool_call(
             "call_1".to_string(),
             "get_weather".to_string(),
             "{not valid json",
         );
-        assert!(matches!(result, Err(ModelError::Decode(_))));
+        match event {
+            CompletionEvent::ToolCallRequested { arguments, .. } => {
+                assert_eq!(arguments, serde_json::json!({}));
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
+        }
     }
 
+    /// Ítem 3: a buffer cut mid-string (stream died) is repaired, not
+    /// collapsed — the arguments the model produced survive.
     #[test]
-    fn finalize_tool_call_drops_unparseable_arguments_without_panicking() {
+    fn finalize_tool_call_repairs_a_truncated_buffer() {
+        let event = finalize_tool_call(
+            "call_1".to_string(),
+            "read_file".to_string(),
+            "{\"path\": \"src/mai",
+        );
+        match event {
+            CompletionEvent::ToolCallRequested { arguments, .. } => {
+                assert_eq!(arguments, serde_json::json!({"path": "src/mai"}));
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
+        }
+    }
+
+    /// Ítem 3: what used to be dropped now survives with collapsed
+    /// arguments through the streaming path too.
+    #[test]
+    fn stream_state_keeps_unparseable_arguments_as_a_collapsed_call() {
         let mut state = OpenRouterStreamState::new();
         state.handle_chunk(&message_json(
             0,
@@ -964,7 +1029,115 @@ mod tests {
         ));
         let events =
             state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
-        assert!(events.is_empty());
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CompletionEvent::ToolCallRequested { id, arguments, .. } => {
+                assert_eq!(id, "call_1");
+                assert_eq!(arguments, &serde_json::json!({}));
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
+        }
+    }
+
+    /// Ítem 3: index/id collision remap — a provider that reuses
+    /// `index: 0` for two sequential calls (re-announcing a different
+    /// id) must produce two distinct calls, not one merged corrupt one.
+    #[test]
+    fn an_index_reused_with_a_new_id_yields_two_distinct_calls() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "id": "call_a", "function": {"name": "read_file", "arguments": "{\"path\": \"a\"}"}}]}),
+            None,
+        ));
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "id": "call_b", "function": {"name": "read_file", "arguments": "{\"path\": \"b\"}"}}]}),
+            None,
+        ));
+        let events =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        assert_eq!(events.len(), 2, "expected two distinct calls, got {events:?}");
+        match (&events[0], &events[1]) {
+            (
+                CompletionEvent::ToolCallRequested { id: id_a, arguments: args_a, .. },
+                CompletionEvent::ToolCallRequested { id: id_b, arguments: args_b, .. },
+            ) => {
+                assert_eq!(id_a, "call_a");
+                assert_eq!(args_a, &serde_json::json!({"path": "a"}));
+                assert_eq!(id_b, "call_b");
+                assert_eq!(args_b, &serde_json::json!({"path": "b"}));
+            }
+            other => panic!("expected two ToolCallRequested, got {other:?}"),
+        }
+    }
+
+    /// Ítem 3: a fragment with no `index` carrying a whole call (LM
+    /// Studio-style upstreams) must not be dropped.
+    #[test]
+    fn a_whole_tool_call_in_one_indexless_fragment_is_kept() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"id": "call_1", "function": {"name": "pwd", "arguments": "{}"}}]}),
+            None,
+        ));
+        let events =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CompletionEvent::ToolCallRequested { id, name, .. } => {
+                assert_eq!(id, "call_1");
+                assert_eq!(name, "pwd");
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
+        }
+    }
+
+    /// Ítem 3: indexless argument-only fragments continue the most
+    /// recent call instead of being dropped.
+    #[test]
+    fn indexless_argument_fragments_continue_the_last_call() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"id": "call_1", "function": {"name": "read_file", "arguments": "{\"pa"}}]}),
+            None,
+        ));
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"function": {"arguments": "th\": \"x\"}"}}]}),
+            None,
+        ));
+        let events =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CompletionEvent::ToolCallRequested { arguments, .. } => {
+                assert_eq!(arguments, &serde_json::json!({"path": "x"}));
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
+        }
+    }
+
+    /// Ítem 3: OpenRouter can send the `finish_reason` chunk twice —
+    /// the second finalization must not re-emit (duplicate) the calls.
+    #[test]
+    fn a_duplicated_finish_reason_chunk_does_not_double_emit_calls() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "pwd", "arguments": "{}"}}]}),
+            None,
+        ));
+        let first = state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        let second =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        assert_eq!(first.len(), 1);
+        assert!(
+            second.is_empty(),
+            "a duplicated finish_reason must not re-emit the calls: {second:?}"
+        );
     }
 
     /// Regression test for N-9 (docs/AUDITORIA-2026-07-v2.md): a
@@ -973,9 +1146,9 @@ mod tests {
     /// to an empty object, not a dropped tool call.
     #[test]
     fn finalize_tool_call_treats_empty_arguments_as_an_empty_object() {
-        let result = finalize_tool_call("call_1".to_string(), "list_sessions".to_string(), "");
-        match result {
-            Ok(CompletionEvent::ToolCallRequested { arguments, .. }) => {
+        let event = finalize_tool_call("call_1".to_string(), "list_sessions".to_string(), "");
+        match event {
+            CompletionEvent::ToolCallRequested { arguments, .. } => {
                 assert_eq!(arguments, serde_json::json!({}));
             }
             other => panic!("expected ToolCallRequested with empty arguments, got {other:?}"),

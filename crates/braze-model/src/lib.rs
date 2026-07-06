@@ -8,6 +8,7 @@
 
 mod anthropic;
 mod anthropic_wire;
+mod args_repair;
 mod backend;
 mod error;
 mod escalation;
