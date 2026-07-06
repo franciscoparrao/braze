@@ -1,0 +1,223 @@
+Corriendo 5 repetición(es) por (tarea, backend) — timeout 180s por intento.
+-> ollama:qwen2.5:3b :: read_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: read_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: read_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: read_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: read_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 1/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 2/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 3/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 4/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 5/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 1/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 2/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 3/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 4/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 5/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 4/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 1/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 2/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 3/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 4/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: read_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: grep_basic (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: glob_basic (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: write_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: edit_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: shell_exec_basic (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: no_tool_qa (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: multi_step_read_count_write (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: error_recovery_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 1/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 2/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 3/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 4/5)
+-> ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash :: distractor_selection_among_files (rep 5/5)
+
+== Resultados por tarea ==
+[PASS] read_file_basic          ollama:qwen2.5:3b     75193ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1726 tokens_out=33
+[FAIL] read_file_basic          ollama:qwen2.5:3b    (rep 2)  67254ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=823 tokens_out=21 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[PASS] read_file_basic          ollama:qwen2.5:3b    (rep 3)  73637ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1726 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b    (rep 4)  75676ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1726 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b    (rep 5)  74294ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1726 tokens_out=33
+[PASS] grep_basic               ollama:qwen2.5:3b     78416ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1731 tokens_out=57
+[PASS] grep_basic               ollama:qwen2.5:3b    (rep 2)  78485ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1731 tokens_out=55
+[PASS] grep_basic               ollama:qwen2.5:3b    (rep 3)  71780ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1731 tokens_out=55
+[PASS] grep_basic               ollama:qwen2.5:3b    (rep 4)  81204ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1752 tokens_out=54
+[PASS] grep_basic               ollama:qwen2.5:3b    (rep 5)  72712ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1731 tokens_out=55
+[PASS] glob_basic               ollama:qwen2.5:3b     89341ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1766 tokens_out=92
+[PASS] glob_basic               ollama:qwen2.5:3b    (rep 2)  86378ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1767 tokens_out=92
+[PASS] glob_basic               ollama:qwen2.5:3b    (rep 3)  86457ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1767 tokens_out=92
+[PASS] glob_basic               ollama:qwen2.5:3b    (rep 4)  79901ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1767 tokens_out=44
+[PASS] glob_basic               ollama:qwen2.5:3b    (rep 5)  72829ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1767 tokens_out=42
+[PASS] write_file_basic         ollama:qwen2.5:3b     82639ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1766 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b    (rep 2)  85388ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1766 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b    (rep 3)  79603ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1766 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b    (rep 4)  74726ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1766 tokens_out=52
+[PASS] write_file_basic         ollama:qwen2.5:3b    (rep 5)  82236ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1766 tokens_out=54
+[PASS] edit_file_basic          ollama:qwen2.5:3b     81723ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1770 tokens_out=68
+[PASS] edit_file_basic          ollama:qwen2.5:3b    (rep 2)  84235ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1770 tokens_out=70
+[PASS] edit_file_basic          ollama:qwen2.5:3b    (rep 3)  78580ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1770 tokens_out=70
+[PASS] edit_file_basic          ollama:qwen2.5:3b    (rep 4)  79411ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1770 tokens_out=70
+[PASS] edit_file_basic          ollama:qwen2.5:3b    (rep 5) 124162ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1770 tokens_out=70
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b    109786ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=825 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b    (rep 2) 100751ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=825 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b    (rep 3)  98410ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=825 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b    (rep 4) 100376ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=825 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[PASS] shell_exec_basic         ollama:qwen2.5:3b    (rep 5) 126250ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1736 tokens_out=44
+[PASS] no_tool_qa               ollama:qwen2.5:3b    102369ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=830 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b    (rep 2)  99337ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=830 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b    (rep 3)  93315ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=830 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b    (rep 4)  98168ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=830 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b    (rep 5)  90138ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=830 tokens_out=2
+[FAIL] multi_step_read_count_write ollama:qwen2.5:3b    116261ms  rounds=2 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=2056 tokens_out=96 [AssertionFiles]
+[FAIL] multi_step_read_count_write ollama:qwen2.5:3b    (rep 2) 126373ms  rounds=2 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=2056 tokens_out=96 [AssertionFiles]
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b    (rep 3) 163453ms  rounds=3 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=3341 tokens_out=174
+[FAIL] multi_step_read_count_write ollama:qwen2.5:3b    (rep 4) 180001ms  rounds=1 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=853 tokens_out=74 [Timeout] (error: task exceeded its time budget)
+[FAIL] multi_step_read_count_write ollama:qwen2.5:3b    (rep 5) 133471ms  rounds=2 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=2056 tokens_out=94 [AssertionFiles]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    106478ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=1804 tokens_out=95 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 2)  95444ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=1804 tokens_out=62 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 3)  96682ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=1804 tokens_out=64 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 4)  92226ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=1804 tokens_out=91 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 5) 149878ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=5235 tokens_out=281 [AssertionText]
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b     94962ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1769 tokens_out=63 [AssertionText]
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b    (rep 2)  95684ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1811 tokens_out=47
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b    (rep 3)  85926ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1811 tokens_out=46
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b    (rep 4)  89162ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1765 tokens_out=51 [AssertionText]
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b    (rep 5)  84013ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1811 tokens_out=56 [AssertionText]
+[FAIL] read_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash  76842ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1271 tokens_out=155 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[PASS] read_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2)  86834ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2182 tokens_out=129
+[FAIL] read_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  74144ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1262 tokens_out=139 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] read_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4)  71124ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1258 tokens_out=115 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] read_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5)  69101ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1268 tokens_out=420 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] grep_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash  86586ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2204 tokens_out=203 [AssertionToolCall]
+[PASS] grep_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2)  88819ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2227 tokens_out=236
+[FAIL] grep_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  85919ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1255 tokens_out=314 [AssertionToolCall]
+[PASS] grep_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4)  94933ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2211 tokens_out=260
+[FAIL] grep_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5) 180001ms  rounds=6 tool_calls=5  schema_fail=3  exec_fail=1  denied=1  tokens_in=6235 tokens_out=413 [Timeout] (error: task exceeded its time budget)
+[PASS] glob_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash  98888ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=144
+[PASS] glob_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2)  88759ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2185 tokens_out=297
+[PASS] glob_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  94469ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=230
+[PASS] glob_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4) 117151ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2208 tokens_out=156
+[PASS] glob_basic               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5)  97587ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2222 tokens_out=111
+[PASS] write_file_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash  98852ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2191 tokens_out=127
+[PASS] write_file_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2)  99843ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2191 tokens_out=83
+[PASS] write_file_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  89446ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2208 tokens_out=83
+[PASS] write_file_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4)  81835ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2205 tokens_out=127
+[PASS] write_file_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5) 107658ms  rounds=4 tool_calls=2  schema_fail=1  exec_fail=0  denied=0  tokens_in=3258 tokens_out=173
+[PASS] edit_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash  92441ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2204 tokens_out=314
+[PASS] edit_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2)  97990ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2208 tokens_out=339
+[PASS] edit_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  94827ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2196 tokens_out=149
+[PASS] edit_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4)  94627ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2212 tokens_out=315
+[PASS] edit_file_basic          ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5)  90824ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2202 tokens_out=143
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash  97880ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2198 tokens_out=116
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2) 111197ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2187 tokens_out=104
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  79107ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1243 tokens_out=59 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4) 122190ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2182 tokens_out=165
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5)  98284ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2185 tokens_out=151
+[FAIL] no_tool_qa               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash  79915ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1231 tokens_out=48 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] no_tool_qa               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2)  88031ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1231 tokens_out=78 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] no_tool_qa               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  90118ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1231 tokens_out=70 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] no_tool_qa               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4)  78546ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1231 tokens_out=54 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] no_tool_qa               ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5)  76717ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1231 tokens_out=55 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] multi_step_read_count_write ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash 123360ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2356 tokens_out=273 [AssertionFiles]
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2) 117085ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3436 tokens_out=209
+[FAIL] multi_step_read_count_write ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3) 180001ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=1  tokens_in=1350 tokens_out=928 [Timeout] (error: task exceeded its time budget)
+[FAIL] multi_step_read_count_write ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4) 138568ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3532 tokens_out=554 [AssertionFiles]
+[FAIL] multi_step_read_count_write ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5) 180000ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=1  tokens_in=1351 tokens_out=582 [Timeout] (error: task exceeded its time budget)
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash  87431ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1349 tokens_out=230 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2)  79869ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1357 tokens_out=235 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  83137ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1346 tokens_out=166 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4)  89842ms  rounds=2 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1331 tokens_out=78 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5) 180001ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=1  tokens_in=4784 tokens_out=513 [Timeout] (error: task exceeded its time budget)
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash 180001ms  rounds=3 tool_calls=2  schema_fail=2  exec_fail=0  denied=0  tokens_in=2426 tokens_out=472 [Timeout] (error: task exceeded its time budget)
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 2)  90724ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2350 tokens_out=290
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 3)  97169ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2411 tokens_out=345
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 4) 132293ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=3709 tokens_out=335
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash (rep 5) 122011ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3680 tokens_out=367
+
+== Comparación por backend ==
+backend                   pass_rate(±95%) avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err
+ollama:qwen2.5:3b           33/50 (±13pp)      1.9        94903      87810           1678               58                 0              6          0            0
+ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash    27/50 (±13pp)      2.9       103260      94548           2168              233                 6              5          4            0
+
+== Comparación por skill ==
+backend                  skill                   pass_rate
+ollama:qwen2.5:3b        single_tool                 25/30
+ollama:qwen2.5:3b        no_tool                      5/5 
+ollama:qwen2.5:3b        multi_step                   1/5 
+ollama:qwen2.5:3b        error_recovery               0/5 
+ollama:qwen2.5:3b        distractor_selection         2/5 
+ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash single_tool                 22/30
+ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash no_tool                      0/5 
+ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash multi_step                   1/5 
+ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash error_recovery               0/5 
+ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash distractor_selection         4/5 
+
+Resultados JSON escritos en docs/sweep-planner-ab.json

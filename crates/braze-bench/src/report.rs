@@ -287,6 +287,7 @@ mod tests {
             run_error: None,
             failure_cause: None,
             tool_calls_total: 0,
+            planned: false,
             schema_validation_failures: 0,
             tool_execution_failures: 0,
             permission_denials: 0,

@@ -94,6 +94,20 @@ pub enum AgentEvent {
         #[serde(default)]
         stop_reason: Option<String>,
     },
+    /// A plan produced by the optional planner model before the turn's
+    /// first executor round — PLAN.md § "Split planificador/ejecutor
+    /// (`with_planner`)". Persisted as a first-class event (not a
+    /// side-channel) so it survives `--resume`, gets digested by
+    /// compaction, reaches the TUI via `TurnObserver`, and lets
+    /// `braze-bench` tell planned turns apart from unplanned ones.
+    /// Rendered into model history as an *assistant* text block
+    /// (`braze-engine::history`) — the "model follows its own plan"
+    /// framing is deliberate. Additive amendment to the frozen contract,
+    /// same precedent as `AssistantToolCall`/`Usage`: an older binary
+    /// reading a log with this event deserializes it as [`Self::Unknown`].
+    PlanCreated {
+        plan: String,
+    },
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only
@@ -166,6 +180,25 @@ mod tests {
         match event {
             AgentEvent::PermissionDecided { key, .. } => assert_eq!(key, None),
             other => panic!("expected PermissionDecided, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plan_created_round_trips_through_json() {
+        let event = AgentEvent::PlanCreated {
+            plan: "1. leer el archivo\n2. responder".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"plan_created\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        match decoded {
+            AgentEvent::PlanCreated { plan } => {
+                assert_eq!(plan, "1. leer el archivo\n2. responder");
+            }
+            other => panic!("expected PlanCreated, got {other:?}"),
         }
     }
 

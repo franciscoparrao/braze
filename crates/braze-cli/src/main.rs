@@ -100,6 +100,81 @@ fn build_permission_guard(
     guard
 }
 
+/// Builds one `ModelBackend` by name from the already-resolved config —
+/// the primary (executor) backend and, when the planner/executor split is
+/// enabled, the planner too (PLAN.md § "Split planificador/ejecutor") go
+/// through this same constructor, so both get identical credential
+/// resolution and error messages. `model_override` takes precedence over
+/// the backend's configured model; the primary passes `None` because its
+/// `--model` override was already folded into `config` via
+/// `apply_overrides`.
+fn build_model_backend(
+    config: &braze_config::Config,
+    backend: &str,
+    model_override: Option<&str>,
+) -> Result<Box<dyn braze_model::ModelBackend>, CliError> {
+    match backend {
+        "anthropic" => {
+            let api_key = config.anthropic_api_key.clone().ok_or_else(|| {
+                CliError::Startup(
+                    "falta ANTHROPIC_API_KEY (config file, BRAZE_ANTHROPIC_API_KEY, o --backend anthropic sin key configurada)"
+                        .to_string(),
+                )
+            })?;
+            let model_name = model_override
+                .map(str::to_string)
+                .or_else(|| config.anthropic_model.clone())
+                .ok_or_else(|| {
+                    CliError::Startup(
+                        "falta --model o BRAZE_ANTHROPIC_MODEL para el backend anthropic"
+                            .to_string(),
+                    )
+                })?;
+            Ok(Box::new(braze_model::AnthropicBackend::new(
+                api_key.expose_secret().to_string(),
+                model_name,
+            )))
+        }
+        "ollama" => {
+            let model_name = model_override
+                .map(str::to_string)
+                .unwrap_or_else(|| config.ollama_model.clone());
+            Ok(Box::new(
+                braze_model::OllamaBackend::with_base_url(
+                    model_name,
+                    config.ollama_base_url.clone(),
+                )
+                .with_num_ctx(config.ollama_num_ctx),
+            ))
+        }
+        "openrouter" => {
+            let api_key = config.openrouter_api_key.clone().ok_or_else(|| {
+                CliError::Startup(
+                    "falta OPENROUTER_API_KEY (config file, BRAZE_OPENROUTER_API_KEY, o --backend openrouter sin key configurada)"
+                        .to_string(),
+                )
+            })?;
+            let model_name = model_override
+                .map(str::to_string)
+                .or_else(|| config.openrouter_model.clone())
+                .ok_or_else(|| {
+                    CliError::Startup(
+                        "falta --model o BRAZE_OPENROUTER_MODEL para el backend openrouter"
+                            .to_string(),
+                    )
+                })?;
+            Ok(Box::new(braze_model::OpenRouterBackend::with_base_url(
+                api_key.expose_secret().to_string(),
+                model_name,
+                config.openrouter_base_url.clone(),
+            )))
+        }
+        other => Err(CliError::Startup(format!(
+            "unknown backend '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
+        ))),
+    }
+}
+
 async fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
@@ -159,55 +234,27 @@ async fn run() -> Result<(), CliError> {
         });
     }
 
-    let model: Box<dyn braze_model::ModelBackend> = match config.default_backend.as_str() {
-        "anthropic" => {
-            let api_key = config.anthropic_api_key.clone().ok_or_else(|| {
-                CliError::Startup(
-                    "falta ANTHROPIC_API_KEY (config file, BRAZE_ANTHROPIC_API_KEY, o --backend anthropic sin key configurada)"
-                        .to_string(),
-                )
-            })?;
-            let model_name = config.anthropic_model.clone().ok_or_else(|| {
-                CliError::Startup(
-                    "falta --model o BRAZE_ANTHROPIC_MODEL para el backend anthropic".to_string(),
-                )
-            })?;
-            Box::new(braze_model::AnthropicBackend::new(
-                api_key.expose_secret().to_string(),
-                model_name,
-            ))
+    let model = build_model_backend(&config, &config.default_backend, None)?;
+
+    // Planner/executor split (PLAN.md § "Split planificador/ejecutor"):
+    // `--planner` wins over `planner_backend`/`planner_model` from
+    // config/env. Resolved here (not where the engine is built) so an
+    // invalid spec fails at startup with a clear error, before anything
+    // else happens.
+    let planner_spec: Option<(String, Option<String>)> = match cli.command.planner_override() {
+        Some((backend, model_override)) => {
+            Some((backend.to_string(), model_override.map(str::to_string)))
         }
-        "ollama" => Box::new(
-            braze_model::OllamaBackend::with_base_url(
-                config.ollama_model.clone(),
-                config.ollama_base_url.clone(),
-            )
-            .with_num_ctx(config.ollama_num_ctx),
-        ),
-        "openrouter" => {
-            let api_key = config.openrouter_api_key.clone().ok_or_else(|| {
-                CliError::Startup(
-                    "falta OPENROUTER_API_KEY (config file, BRAZE_OPENROUTER_API_KEY, o --backend openrouter sin key configurada)"
-                        .to_string(),
-                )
-            })?;
-            let model_name = config.openrouter_model.clone().ok_or_else(|| {
-                CliError::Startup(
-                    "falta --model o BRAZE_OPENROUTER_MODEL para el backend openrouter".to_string(),
-                )
-            })?;
-            Box::new(braze_model::OpenRouterBackend::with_base_url(
-                api_key.expose_secret().to_string(),
-                model_name,
-                config.openrouter_base_url.clone(),
-            ))
-        }
-        other => {
-            return Err(CliError::Startup(format!(
-                "unknown backend '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
-            )));
-        }
+        None => config
+            .planner_backend
+            .clone()
+            .map(|backend| (backend, config.planner_model.clone())),
     };
+    let planner = planner_spec
+        .map(|(backend, model_override)| {
+            build_model_backend(&config, &backend, model_override.as_deref())
+        })
+        .transpose()?;
 
     // `store` is built here, as an `Arc`, so it can be shared between the
     // permission guards (which persist `PermissionRequested`/
@@ -413,6 +460,10 @@ async fn run() -> Result<(), CliError> {
         let budget =
             braze_config::ollama_context_budget_tokens(config.ollama_num_ctx, config.max_tokens);
         engine = engine.with_context_budget(budget);
+    }
+
+    if let Some(planner) = planner {
+        engine = engine.with_planner(planner);
     }
 
     match cli.command {

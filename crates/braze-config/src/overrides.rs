@@ -56,6 +56,10 @@ pub struct ConfigOverrides {
     pub tui_theme: Option<String>,
     #[serde(default)]
     pub disable_textual_tool_call_rescue: Option<bool>,
+    #[serde(default)]
+    pub planner_backend: Option<String>,
+    #[serde(default)]
+    pub planner_model: Option<String>,
 }
 
 impl ConfigOverrides {
@@ -156,6 +160,8 @@ impl ConfigOverrides {
                 "TUI_THEME" => {
                     overrides.tui_theme = Some(value.to_string());
                 }
+                "PLANNER_BACKEND" => overrides.planner_backend = Some(value.to_string()),
+                "PLANNER_MODEL" => overrides.planner_model = Some(value.to_string()),
                 "DISABLE_TEXTUAL_TOOL_CALL_RESCUE" => {
                     let parsed =
                         value
@@ -272,6 +278,20 @@ mod tests {
         assert_eq!(
             overrides.openrouter_base_url.as_deref(),
             Some("http://example:5555/api/v1")
+        );
+    }
+
+    #[test]
+    fn from_env_parses_planner_fields() {
+        let vars = [
+            ("BRAZE_PLANNER_BACKEND", "openrouter"),
+            ("BRAZE_PLANNER_MODEL", "deepseek/deepseek-v4-flash"),
+        ];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(overrides.planner_backend.as_deref(), Some("openrouter"));
+        assert_eq!(
+            overrides.planner_model.as_deref(),
+            Some("deepseek/deepseek-v4-flash")
         );
     }
 

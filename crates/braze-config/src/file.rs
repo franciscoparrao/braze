@@ -29,6 +29,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "best_of_n",
     "tui_theme",
     "disable_textual_tool_call_rescue",
+    "planner_backend",
+    "planner_model",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

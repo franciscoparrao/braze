@@ -85,8 +85,18 @@ pub struct TaskResult {
     /// comment). The central diagnostic for small models: converging in 2
     /// rounds vs. 14 is exactly the difference this harness exists to
     /// surface, and it's invisible in wall-time alone (which conflates it
-    /// with raw inference speed).
+    /// with raw inference speed). NOTE: on a planned run (`planned:
+    /// true`), the planner's own `Usage` counts as one round too —
+    /// deliberate, it IS a model round and its cost belongs in the
+    /// comparison (PLAN.md § "Split planificador/ejecutor").
     pub rounds: u32,
+    /// Whether a `PlanCreated` event was persisted during this run —
+    /// distinguishes planned turns from unplanned ones in the JSON
+    /// output for A/B analysis (PLAN.md § "Split planificador/ejecutor").
+    /// Note this reflects what actually *happened*, not what was
+    /// configured: a `+plan:` spec whose planner degraded (error/
+    /// truncated/empty) yields `planned: false` for that run.
+    pub planned: bool,
     pub expected_tool_called: Option<bool>,
     pub expected_text_found: Option<bool>,
     pub expected_files_found: Option<bool>,
@@ -121,6 +131,7 @@ pub fn harness_error_result(
         tool_execution_failures: 0,
         permission_denials: 0,
         rounds: 0,
+        planned: false,
         expected_tool_called: None,
         expected_text_found: None,
         expected_files_found: None,
@@ -199,6 +210,10 @@ pub fn compute_metrics(
         .iter()
         .filter(|event| matches!(event, AgentEvent::Usage { .. }))
         .count() as u32;
+
+    let planned = events
+        .iter()
+        .any(|event| matches!(event, AgentEvent::PlanCreated { .. }));
 
     let final_text = events
         .iter()
@@ -283,6 +298,7 @@ pub fn compute_metrics(
         tool_execution_failures,
         permission_denials,
         rounds,
+        planned,
         expected_tool_called,
         expected_text_found,
         expected_files_found,
@@ -533,6 +549,35 @@ mod tests {
         let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
         assert_eq!(result.input_tokens, 25);
         assert_eq!(result.output_tokens, 5);
+    }
+
+    /// PLAN.md § "Split planificador/ejecutor", oleada 4: `planned`
+    /// reflects what actually happened (a `PlanCreated` in the log), not
+    /// what the spec configured — a degraded planner yields `false`.
+    #[test]
+    fn planned_reflects_the_presence_of_a_plan_created_event() {
+        let unplanned = metrics(
+            &task(None, false, None),
+            &[AgentEvent::AssistantText {
+                text: "hola".to_string(),
+            }],
+            RunOutcome::Converged,
+        );
+        assert!(!unplanned.planned);
+
+        let planned = metrics(
+            &task(None, false, None),
+            &[
+                AgentEvent::PlanCreated {
+                    plan: "1. responder".to_string(),
+                },
+                AgentEvent::AssistantText {
+                    text: "hola".to_string(),
+                },
+            ],
+            RunOutcome::Converged,
+        );
+        assert!(planned.planned);
     }
 
     #[test]

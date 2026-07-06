@@ -248,6 +248,36 @@ impl HistoryCell for NoticeCell {
     }
 }
 
+/// The planner's plan for the current turn (`AgentEvent::PlanCreated`,
+/// PLAN.md § "Split planificador/ejecutor") — a header line plus the
+/// plan's own lines, all in the muted tone: it's context the user may
+/// want to glance at, not primary conversation content (that's the
+/// executor's streamed output). Multi-line by construction (one
+/// `Line` per plan line) — a numbered plan inside a single `Span` would
+/// render its newlines as garbage.
+pub struct PlanCell {
+    pub plan: String,
+    pub theme: Theme,
+}
+
+impl HistoryCell for PlanCell {
+    fn as_text(&self) -> Text<'_> {
+        let mut lines = vec![Line::from(Span::styled(
+            "◆ plan",
+            Style::default()
+                .fg(self.theme.muted)
+                .add_modifier(Modifier::BOLD),
+        ))];
+        lines.extend(self.plan.lines().map(|line| {
+            Line::from(Span::styled(
+                format!("  {line}"),
+                Style::default().fg(self.theme.muted),
+            ))
+        }));
+        Text::from(lines)
+    }
+}
+
 /// The `/help` command's output — "fase TUI 2" (PLAN.md). Static
 /// (doesn't reflect current app state, e.g. `turn_running`) — a
 /// deliberate simplification for a command whose whole purpose is
@@ -409,6 +439,21 @@ mod tests {
     #[test]
     fn summarize_tool_output_of_a_single_short_line_is_left_untouched() {
         assert_eq!(summarize_tool_output("echoed: hi"), "echoed: hi");
+    }
+
+    /// PLAN.md § "Split planificador/ejecutor", oleada 1: a multi-line
+    /// plan renders as one header line plus one `Line` per plan line —
+    /// newlines inside a single `Span` would render as garbage.
+    #[test]
+    fn plan_cell_renders_a_header_plus_one_line_per_plan_line() {
+        let cell = PlanCell {
+            plan: "1. leer\n2. editar\n3. verificar".to_string(),
+            theme: Theme::default(),
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines.len(), 4);
+        assert_eq!(text.lines[0].spans[0].content, "◆ plan");
+        assert_eq!(text.lines[2].spans[0].content, "  2. editar");
     }
 
     /// Regression test for the "ANSI/tabs en tool output se ven como

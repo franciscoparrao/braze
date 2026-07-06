@@ -122,6 +122,20 @@ pub struct Config {
     /// `braze_engine::Engine::with_textual_rescue_enabled`.
     #[serde(default)]
     pub disable_textual_tool_call_rescue: bool,
+    /// Backend for the optional planner model (PLAN.md § "Split
+    /// planificador/ejecutor"): `"anthropic"`, `"ollama"` or
+    /// `"openrouter"`. `None` (the default) disables the split entirely.
+    /// Like `default_backend`, the name is validated by `braze-cli` at
+    /// startup, not at this layer.
+    #[serde(default)]
+    pub planner_backend: Option<String>,
+    /// Model name for the planner backend. `None` falls back to the same
+    /// per-backend model resolution the primary backend uses
+    /// (`anthropic_model`/`ollama_model`/`openrouter_model`) — so
+    /// `planner_backend = "openrouter"` alone plans with the configured
+    /// OpenRouter model.
+    #[serde(default)]
+    pub planner_model: Option<String>,
 }
 
 impl Default for Config {
@@ -151,6 +165,8 @@ impl Default for Config {
             best_of_n: 1,
             tui_theme: "dark".to_string(),
             disable_textual_tool_call_rescue: false,
+            planner_backend: None,
+            planner_model: None,
         }
     }
 }
@@ -289,6 +305,12 @@ impl Config {
         }
         if let Some(v) = overrides.disable_textual_tool_call_rescue {
             self.disable_textual_tool_call_rescue = v;
+        }
+        if let Some(v) = overrides.planner_backend {
+            self.planner_backend = Some(v);
+        }
+        if let Some(v) = overrides.planner_model {
+            self.planner_model = Some(v);
         }
     }
 }

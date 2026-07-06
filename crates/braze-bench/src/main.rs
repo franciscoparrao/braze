@@ -146,7 +146,10 @@ async fn run() -> Result<(), BenchError> {
             temperature: cli.temperature,
             seed: cli.seed,
         };
-        if let Err(err) = spec.build(&config, probe_sampling) {
+        if let Err(err) = spec
+            .build(&config, probe_sampling)
+            .and(spec.build_planner(&config, probe_sampling))
+        {
             eprintln!("braze-bench: omitiendo backend '{raw_spec}' ({display_name}): {err}");
             continue;
         }
@@ -195,13 +198,14 @@ async fn run() -> Result<(), BenchError> {
             }
         }
 
-        // Release the model this backend just loaded before the next
-        // backend spec builds its own — see the `no_ollama_stop` doc
-        // comment above for why this isn't just tidiness.
-        if !cli.no_ollama_stop
-            && let Some(model) = spec.ollama_model(&config)
-        {
-            stop_ollama_model(&model).await;
+        // Release every local model this backend row loaded (executor
+        // and/or a local planner) before the next backend spec builds its
+        // own — see the `no_ollama_stop` doc comment above for why this
+        // isn't just tidiness.
+        if !cli.no_ollama_stop {
+            for model in spec.ollama_models(&config) {
+                stop_ollama_model(&model).await;
+            }
         }
     }
 

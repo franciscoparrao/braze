@@ -41,6 +41,14 @@ const TOOL_COMPLETION_TIMEOUT: Duration = Duration::from_secs(120);
 /// contained no trace of what was actually being asked.
 const KEEP_RAW_TAIL: usize = 6;
 
+/// Cap on the planning round's `max_tokens` (PLAN.md § "Split
+/// planificador/ejecutor") — plans are short numbered lists; letting the
+/// planner spend the executor's full `max_tokens` budget would just be
+/// cost with no benefit. The effective value is
+/// `min(self.max_tokens, PLANNER_MAX_TOKENS)`, so a caller with a
+/// *smaller* overall budget is still respected.
+const PLANNER_MAX_TOKENS: u32 = 1024;
+
 /// The agentic loop. Orchestrates model calls, tool dispatch (via
 /// background tasks + push notification), differential context
 /// compaction, and session persistence.
@@ -93,6 +101,12 @@ pub struct Engine {
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
     textual_rescue_enabled: bool,
+    /// Optional planner backend (PLAN.md § "Split planificador/ejecutor"):
+    /// a stronger model that produces a one-shot plan before the turn's
+    /// first executor round, persisted as [`AgentEvent::PlanCreated`].
+    /// `None` (the default) means zero behavior change — see
+    /// [`Engine::with_planner`] and [`Engine::attempt_planning_round`].
+    planner: Option<Box<dyn ModelBackend>>,
 }
 
 /// The resolved outcome of one full model completion — everything the
@@ -190,6 +204,7 @@ impl Engine {
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
             turn_in_progress: std::sync::atomic::AtomicBool::new(false),
             textual_rescue_enabled: true,
+            planner: None,
         }
     }
 
@@ -243,6 +258,17 @@ impl Engine {
         self
     }
 
+    /// Enables the planner/executor split (PLAN.md § "Split
+    /// planificador/ejecutor"): `planner` — typically a stronger/cloud
+    /// model — produces a one-shot plan at the start of every turn, which
+    /// the executor (`self.model`) then follows. Purely additive: without
+    /// this call the turn loop is byte-identical to before the feature
+    /// existed. Chainable, same shape as [`Engine::with_context_budget`].
+    pub fn with_planner(mut self, planner: Box<dyn ModelBackend>) -> Self {
+        self.planner = Some(planner);
+        self
+    }
+
     /// Persists `event` to the session store and mirrors it into the
     /// turn's [`TurnObserver`] — the live seam frontends consume (see
     /// PLAN.md § "Fase TUI — diseño"). Persistence stays the source of
@@ -279,7 +305,23 @@ impl Engine {
         observer: &mut dyn TurnObserver,
         emit_deltas: bool,
     ) -> Result<RoundOutcome, EngineError> {
-        let mut stream = self.model.complete(req).await?;
+        self.complete_once_with(self.model.as_ref(), req, observer, emit_deltas)
+            .await
+    }
+
+    /// [`Engine::complete_once`], parameterized on which backend answers
+    /// — the executor (`self.model`) on the normal path, or the optional
+    /// planner (`self.planner`) for the planning round (PLAN.md § "Split
+    /// planificador/ejecutor"). Everything else (stream consumption,
+    /// truncation flag, textual rescue) is identical by construction.
+    async fn complete_once_with(
+        &self,
+        model: &dyn ModelBackend,
+        req: CompletionRequest,
+        observer: &mut dyn TurnObserver,
+        emit_deltas: bool,
+    ) -> Result<RoundOutcome, EngineError> {
+        let mut stream = model.complete(req).await?;
 
         let mut text_buffer = String::new();
         let mut tool_calls: Vec<ToolCall> = Vec::new();
@@ -562,6 +604,19 @@ impl Engine {
 
         let mut messages = self.load_messages(session, observer).await?;
 
+        // PLAN.md § "Split planificador/ejecutor": optional one-shot
+        // planning round before the executor loop. Doesn't count against
+        // `MAX_TURN_ITERATIONS`, and can only *add* a persisted
+        // `PlanCreated` (in which case messages are reloaded so the plan
+        // reaches the executor's first request) — every planner failure
+        // mode degrades to an unplanned turn instead of failing it.
+        if self
+            .attempt_planning_round(session, &messages, observer)
+            .await?
+        {
+            messages = self.load_messages(session, observer).await?;
+        }
+
         // Per-turn state threaded through `dispatch_tool_calls` across
         // every round of this call — schema-repair retry counts, the
         // repeated-call detector (A5), and the id-uniqueness guard (N-14,
@@ -689,6 +744,109 @@ impl Engine {
 
         self.attempt_final_summary_round(session, &messages, observer)
             .await
+    }
+
+    /// The optional planning round (PLAN.md § "Split
+    /// planificador/ejecutor"): asks `self.planner` — if configured — for
+    /// a short plan of the turn, persists it as
+    /// [`AgentEvent::PlanCreated`], and returns whether a plan was
+    /// actually persisted (so `run_turn` knows to reload messages).
+    ///
+    /// Tools are *inlined as text* in the planning system prompt
+    /// (name + summary from the stubs), with `tool_stubs` left empty on
+    /// the request: the planner needs tool *awareness*, never invocation
+    /// — the same only-names-in-context philosophy as deferred loading.
+    ///
+    /// Degradation, never failure (same philosophy as N-13's best-of-n
+    /// fix — an optional enhancement must not kill the turn):
+    /// 1. planner call errors ⇒ warn, proceed without a plan;
+    /// 2. planner attempted tool calls ⇒ ignored with a warn, its text
+    ///    is still used;
+    /// 3. response truncated by the token budget ⇒ plan discarded (a
+    ///    cut-off plan can mislead mid-step — espíritu N-24);
+    /// 4. empty/whitespace text ⇒ plan discarded.
+    ///
+    /// The planner's `Usage` is persisted even when the plan is
+    /// discarded — the cost was real either way, and hiding it would
+    /// skew exactly the A/B accounting this feature exists to enable.
+    ///
+    /// Only `Err` for session-store failures (persisting `Usage`/
+    /// `PlanCreated`) — those are real turn failures, not planner ones.
+    async fn attempt_planning_round(
+        &self,
+        session: &SessionId,
+        messages: &[Message],
+        observer: &mut dyn TurnObserver,
+    ) -> Result<bool, EngineError> {
+        let Some(planner) = &self.planner else {
+            return Ok(false);
+        };
+
+        let tool_stubs = self.tools.all_stubs_lossy().await;
+        let req = CompletionRequest {
+            messages: messages.to_vec(),
+            tool_stubs: Vec::new(),
+            system_prompt: planning_system_prompt(&self.system_prompt, &tool_stubs),
+            max_tokens: self.max_tokens.min(PLANNER_MAX_TOKENS),
+        };
+
+        // `emit_deltas: false`: the plan reaches frontends once, as the
+        // `PlanCreated` event mirror — streaming its text live too would
+        // render it twice in the TUI (markdown preview + PlanCell).
+        let outcome = match self
+            .complete_once_with(planner.as_ref(), req, observer, false)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "planner call failed; proceeding without a plan"
+                );
+                return Ok(false);
+            }
+        };
+
+        if let Some((input_tokens, output_tokens, stop_reason)) = outcome.usage {
+            self.append_and_notify(
+                session,
+                &AgentEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    stop_reason,
+                },
+                observer,
+            )
+            .await?;
+        }
+
+        if !outcome.tool_calls.is_empty() {
+            tracing::warn!(
+                n_tool_calls = outcome.tool_calls.len(),
+                "planner attempted tool calls despite the planning prompt; ignoring them"
+            );
+        }
+        if outcome.truncated {
+            tracing::warn!(
+                "planner response was truncated by the token budget; discarding the partial plan"
+            );
+            return Ok(false);
+        }
+        let plan = outcome.text_buffer.trim();
+        if plan.is_empty() {
+            tracing::warn!("planner returned no usable text; proceeding without a plan");
+            return Ok(false);
+        }
+
+        self.append_and_notify(
+            session,
+            &AgentEvent::PlanCreated {
+                plan: plan.to_string(),
+            },
+            observer,
+        )
+        .await?;
+        Ok(true)
     }
 
     /// Called once the main loop exhausts [`MAX_TURN_ITERATIONS`] without
@@ -1482,6 +1640,33 @@ fn try_parse_textual_tool_call(text: &str) -> Option<ToolCall> {
     })
 }
 
+/// System prompt for the planning round (PLAN.md § "Split
+/// planificador/ejecutor"): the base prompt plus planning instructions
+/// and the tool list inlined as text — the planner sees the same working
+/// context the executor will, plus what tools exist (names + summaries
+/// only, deferred-loading style), minus the ability to call any of them.
+/// The triviality clause keeps `no_tool`/`single_tool` requests from
+/// being inflated with overhead plans.
+fn planning_system_prompt(base: &str, stubs: &[ToolStub]) -> String {
+    let mut tools_list = String::new();
+    for stub in stubs {
+        tools_list.push_str(&format!("- {}: {}\n", stub.name, stub.summary));
+    }
+    if tools_list.is_empty() {
+        tools_list.push_str("(none)\n");
+    }
+    format!(
+        "{base}\n\n\
+         You are the planning step for this turn. Do NOT call any tool — none are \
+         available in this request. Write a short numbered plan (3-7 steps) for how \
+         to fulfill the user's latest request, naming the concrete tools you would \
+         use from the list below and their key arguments where possible. If the \
+         request is trivial (a single obvious action, or directly answerable), \
+         reply with just that single step.\n\n\
+         Available tools:\n{tools_list}"
+    )
+}
+
 /// Rough token estimate (~4 chars/token) for the tactical events about to
 /// be dropped from raw context by a compaction pass — mirrors the same
 /// heuristic `SimpleContextCompactor::compact_tactical` already uses
@@ -1506,6 +1691,7 @@ fn estimate_dropped_tokens(events: &[AgentEvent]) -> u32 {
 fn event_text_len(event: &AgentEvent) -> usize {
     match event {
         AgentEvent::UserMessage { text } | AgentEvent::AssistantText { text } => text.len(),
+        AgentEvent::PlanCreated { plan } => plan.len(),
         AgentEvent::AssistantToolCall {
             name, arguments, ..
         } => name.len() + arguments.to_string().len(),
@@ -1747,6 +1933,34 @@ mod tests {
                     req.messages
                 );
             }
+            self.inner.complete(req).await
+        }
+    }
+
+    /// Wraps any `ModelBackend` and records every `CompletionRequest` it
+    /// receives — lets a test assert on what a backend was actually
+    /// *asked* (e.g. that the executor's first request contains the
+    /// plan the planner produced), which `ScriptedModel` alone can't:
+    /// it ignores its request entirely.
+    struct RequestCapturingModel<M> {
+        inner: M,
+        requests: Arc<std::sync::Mutex<Vec<CompletionRequest>>>,
+    }
+
+    #[async_trait]
+    impl<M: ModelBackend> ModelBackend for RequestCapturingModel<M> {
+        fn name(&self) -> &str {
+            self.inner.name()
+        }
+
+        async fn complete(
+            &self,
+            req: CompletionRequest,
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
+            self.requests.lock().unwrap().push(req.clone());
             self.inner.complete(req).await
         }
     }
@@ -2878,6 +3092,372 @@ mod tests {
             invocations.load(Ordering::SeqCst),
             (TURNS * 2) as u32,
             "every tool call across every turn must have actually dispatched"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// PLAN.md § "Split planificador/ejecutor", oleada 1: the shape a
+    /// planned turn produces — `UserMessage`, `PlanCreated`, then the
+    /// first round's tool calls — must render into a request the real
+    /// Anthropic API accepts. The plan becomes an assistant Text message
+    /// immediately before the round's assistant tool_use message
+    /// (consecutive assistant messages — already the exact shape a
+    /// text-before-tools round produces today), and the tool_use/result
+    /// pairing must survive the plan sitting in between.
+    #[tokio::test]
+    async fn a_planned_turn_shape_renders_protocol_valid_messages() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        for event in [
+            AgentEvent::UserMessage {
+                text: "haz tres cosas".to_string(),
+            },
+            AgentEvent::PlanCreated {
+                plan: "1. echo a\n2. echo b\n3. responder".to_string(),
+            },
+            AgentEvent::AssistantToolCall {
+                id: "call-1".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({ "text": "a" }),
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "call-1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "call-1".to_string(),
+                    content: "echoed: a".to_string(),
+                    is_error: false,
+                },
+            },
+            AgentEvent::AssistantText {
+                text: "listo".to_string(),
+            },
+        ] {
+            store.append(&session, &event).await.expect("seed event");
+        }
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let messages = engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        crate::protocol_check::check_anthropic_message_protocol(&messages)
+            .expect("a planned turn's rendered request must be protocol-valid");
+
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.role == braze_types::Role::Assistant
+                    && m.content.iter().any(
+                        |b| matches!(b, ContentBlock::Text { text } if text.starts_with("Plan:\n"))
+                    )),
+            "the plan must actually reach the rendered request, got: {messages:#?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- oleada 2: Engine::with_planner (PLAN.md § "Split planificador/ejecutor") ---
+
+    /// End-to-end happy path: the planner's text is persisted as
+    /// `PlanCreated` (with its `Usage` before it), the executor's first
+    /// request actually contains the rendered plan, and the whole planned
+    /// turn stays protocol-valid.
+    #[tokio::test]
+    async fn a_planned_turn_persists_the_plan_and_the_executor_sees_it() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("1. echo hi\n2. responder".to_string()),
+            CompletionEvent::Usage {
+                input_tokens: 50,
+                output_tokens: 12,
+                stop_reason: Some("end_turn".to_string()),
+            },
+            CompletionEvent::Done,
+        ]]);
+
+        let executor_requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let executor = RequestCapturingModel {
+            inner: ProtocolValidatingModel::new(ScriptedModel::new(vec![
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({ "text": "hi" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ])),
+            requests: Arc::clone(&executor_requests),
+        };
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "haz echo de hi", &mut NoopObserver)
+            .await
+            .expect("planned turn should succeed");
+
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
+        match &events[1] {
+            AgentEvent::Usage { input_tokens, .. } => assert_eq!(*input_tokens, 50),
+            other => panic!("expected the planner's Usage first, got {other:?}"),
+        }
+        match &events[2] {
+            AgentEvent::PlanCreated { plan } => {
+                assert_eq!(plan, "1. echo hi\n2. responder");
+            }
+            other => panic!("expected PlanCreated, got {other:?}"),
+        }
+
+        {
+            let requests = executor_requests.lock().unwrap();
+            assert!(
+                requests[0].messages.iter().any(|m| m.content.iter().any(
+                    |b| matches!(b, ContentBlock::Text { text } if text.starts_with("Plan:\n1. echo hi"))
+                )),
+                "the executor's first request must contain the rendered plan"
+            );
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Degradation rule 1: a planner whose call fails must not fail the
+    /// turn — it proceeds unplanned.
+    #[tokio::test]
+    async fn a_failing_planner_degrades_to_an_unplanned_turn() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(ErroringModel));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("the turn must survive a failing planner");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. })),
+            "no plan must be persisted when the planner fails"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { text } if text == "hola")),
+            "the executor's answer must still be persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Degradation rule 3 (espíritu N-24): a plan truncated by the token
+    /// budget is discarded — a cut-off plan can mislead mid-step — but
+    /// its `Usage` is still persisted: the cost was real.
+    #[tokio::test]
+    async fn a_truncated_plan_is_discarded_but_its_usage_is_persisted() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("1. paso cortado a mit".to_string()),
+            CompletionEvent::Usage {
+                input_tokens: 40,
+                output_tokens: 1024,
+                stop_reason: Some("max_tokens".to_string()),
+            },
+            CompletionEvent::Done,
+        ]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("the turn must survive a truncated plan");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. })),
+            "a truncated plan must be discarded"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::Usage {
+                    input_tokens: 40,
+                    ..
+                }
+            )),
+            "the planner's Usage must be persisted even when its plan is discarded"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Degradation rule 4: an empty planner response degrades to an
+    /// unplanned turn (contrast with the *executor*, where an empty
+    /// completion is a hard `EmptyModelResponse` error).
+    #[tokio::test]
+    async fn an_empty_planner_response_degrades_to_an_unplanned_turn() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![CompletionEvent::Done]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("the turn must survive an empty planner response");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. }))
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Degradation rule 2: a planner that attempts tool calls despite the
+    /// planning prompt has them ignored — never dispatched — while its
+    /// text is still used as the plan.
+    #[tokio::test]
+    async fn a_planner_that_attempts_tool_calls_has_them_ignored_but_its_text_used() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::ToolCallRequested {
+                id: "planner-call".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({ "text": "should never run" }),
+            },
+            CompletionEvent::TextDelta("1. hacer echo de hi".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            0,
+            "the planner's tool call must never be dispatched"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::PlanCreated { plan } if plan == "1. hacer echo de hi"
+            )),
+            "the planner's text must still be used as the plan"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

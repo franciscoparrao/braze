@@ -4,6 +4,15 @@
 //! `braze_config::Config` already resolved for the API key / base URL —
 //! same construction logic `braze-cli/src/main.rs` uses, just
 //! parameterized per spec instead of per process.
+//!
+//! Planner/executor split (PLAN.md § "Split planificador/ejecutor"): a
+//! spec may carry a planner sub-spec after the literal `"+plan:"` — e.g.
+//! `ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash` — so a
+//! sweep can put the baseline and the planned variant side by side in the
+//! same run, apples-to-apples. The `"+plan:"` token was chosen over a
+//! bare separator character because model ids legitimately contain `:`
+//! (Ollama tags) and `/` (OpenRouter), and `,` is already `--backends`'
+//! entry delimiter.
 
 use braze_config::Config;
 use braze_model::{AnthropicBackend, ModelBackend, OllamaBackend, OpenRouterBackend};
@@ -18,18 +27,47 @@ enum Provider {
 }
 
 /// One `--backends` entry, already split into provider + optional model
-/// override.
+/// override — plus, when the entry carried a `"+plan:"` suffix, the
+/// planner sub-spec (never itself nested: one planner per entry).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendSpec {
     provider: Provider,
     model_override: Option<String>,
+    planner: Option<Box<BackendSpec>>,
 }
 
 impl BackendSpec {
-    /// Parses one comma-separated entry, e.g. `"ollama:qwen2.5:3b"` — the
+    /// Parses one comma-separated entry: `"ollama:qwen2.5:3b"`, or a
+    /// planned variant like
+    /// `"ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash"` —
+    /// the executor half before the literal `"+plan:"`, the planner half
+    /// after it (see the module doc comment for why that token).
+    pub fn parse(spec: &str) -> Result<Self, BenchError> {
+        match spec.split_once("+plan:") {
+            Some((executor, planner)) => {
+                if executor.is_empty() || planner.is_empty() {
+                    return Err(BenchError::Startup(format!(
+                        "invalid '+plan:' spec '{spec}': expected \
+                         '<executor>+plan:<planner>' with both halves non-empty"
+                    )));
+                }
+                if planner.contains("+plan:") {
+                    return Err(BenchError::Startup(format!(
+                        "invalid spec '{spec}': only one '+plan:' planner per entry"
+                    )));
+                }
+                let mut parsed = Self::parse_single(executor)?;
+                parsed.planner = Some(Box::new(Self::parse_single(planner)?));
+                Ok(parsed)
+            }
+            None => Self::parse_single(spec),
+        }
+    }
+
+    /// Parses one plain (planner-free) `provider[:model]` spec — the
     /// model name may itself contain colons (Ollama tags do), so only the
     /// *first* colon splits provider from model.
-    pub fn parse(spec: &str) -> Result<Self, BenchError> {
+    fn parse_single(spec: &str) -> Result<Self, BenchError> {
         let (provider_str, model_override) = match spec.split_once(':') {
             Some((provider, model)) => (provider, Some(model.to_string())),
             None => (spec, None),
@@ -47,14 +85,24 @@ impl BackendSpec {
         Ok(Self {
             provider,
             model_override,
+            planner: None,
         })
     }
 
-    /// Name shown in the comparison report, e.g. `"ollama:qwen2.5:3b"` or
-    /// `"anthropic"` (falls back to the configured model when there's no
-    /// override, so the report never shows a bare, ambiguous provider
-    /// name).
+    /// Name shown in the comparison report, e.g. `"ollama:qwen2.5:3b"`,
+    /// `"anthropic"`, or — for a planned variant —
+    /// `"ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash"`
+    /// (falls back to the configured model when there's no override, so
+    /// the report never shows a bare, ambiguous provider name).
     pub fn display_name(&self, config: &Config) -> String {
+        let base = self.display_name_single(config);
+        match &self.planner {
+            Some(planner) => format!("{base}+plan:{}", planner.display_name_single(config)),
+            None => base,
+        }
+    }
+
+    fn display_name_single(&self, config: &Config) -> String {
         let provider = match self.provider {
             Provider::Anthropic => "anthropic",
             Provider::Ollama => "ollama",
@@ -75,18 +123,49 @@ impl BackendSpec {
         }
     }
 
-    /// Resolves the local Ollama model this spec would load, if it names an
-    /// Ollama backend — `None` for `anthropic` specs, which hold nothing in
-    /// local memory to release between backends.
-    pub fn ollama_model(&self, config: &Config) -> Option<String> {
-        match self.provider {
-            Provider::Ollama => Some(
-                self.model_override
-                    .clone()
-                    .unwrap_or_else(|| config.ollama_model.clone()),
-            ),
-            Provider::Anthropic | Provider::OpenRouter => None,
+    /// Every local Ollama model this spec would load — executor and/or
+    /// planner — so the sweep can `ollama stop` all of them before the
+    /// next backend row starts (memory contention shows up as [Timeout],
+    /// not as a reasoning failure — see `main.rs`'s `no_ollama_stop`).
+    /// Empty for specs that touch no local model.
+    pub fn ollama_models(&self, config: &Config) -> Vec<String> {
+        let mut models = Vec::new();
+        let mut push_if_ollama = |spec: &BackendSpec| {
+            if spec.provider == Provider::Ollama {
+                models.push(
+                    spec.model_override
+                        .clone()
+                        .unwrap_or_else(|| config.ollama_model.clone()),
+                );
+            }
+        };
+        push_if_ollama(self);
+        if let Some(planner) = &self.planner {
+            push_if_ollama(planner);
         }
+        models.dedup();
+        models
+    }
+
+    /// Whether the *executor* half of this spec is a local Ollama model —
+    /// what `runner` keys the Ollama context budget on (N-36), mirroring
+    /// how production keys it on `default_backend`.
+    pub fn executor_is_ollama(&self) -> bool {
+        self.provider == Provider::Ollama
+    }
+
+    /// Builds the planner backend, if this spec carries one — same
+    /// `sampling` as the executor (N-34: one sampling regime per sweep,
+    /// planner included).
+    pub fn build_planner(
+        &self,
+        config: &Config,
+        sampling: SamplingSpec,
+    ) -> Result<Option<Box<dyn ModelBackend>>, BenchError> {
+        self.planner
+            .as_ref()
+            .map(|planner| planner.build(config, sampling))
+            .transpose()
     }
 
     /// Builds the `ModelBackend` this spec names, with `sampling` applied
@@ -260,13 +339,104 @@ mod tests {
         let spec = BackendSpec::parse("openrouter:openai/gpt-4o-mini").unwrap();
         assert_eq!(spec.provider, Provider::OpenRouter);
         assert_eq!(spec.model_override.as_deref(), Some("openai/gpt-4o-mini"));
-        assert_eq!(spec.ollama_model(&config()), None);
+        assert!(spec.ollama_models(&config()).is_empty());
     }
 
     #[test]
     fn build_openrouter_backend_without_api_key_is_a_startup_error() {
         let spec = BackendSpec::parse("openrouter:openai/gpt-4o-mini").unwrap();
         let result = spec.build(&config(), sampling());
+        assert!(matches!(result, Err(BenchError::Startup(_))));
+    }
+
+    // --- specs con planner (PLAN.md § "Split planificador/ejecutor", oleada 4) ---
+
+    #[test]
+    fn parses_a_plan_spec_into_executor_and_planner_halves() {
+        let spec =
+            BackendSpec::parse("ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash")
+                .unwrap();
+        assert_eq!(spec.provider, Provider::Ollama);
+        assert_eq!(spec.model_override.as_deref(), Some("qwen2.5:3b"));
+        let planner = spec.planner.as_deref().expect("planner half expected");
+        assert_eq!(planner.provider, Provider::OpenRouter);
+        assert_eq!(
+            planner.model_override.as_deref(),
+            Some("deepseek/deepseek-v4-flash")
+        );
+    }
+
+    #[test]
+    fn display_name_of_a_plan_spec_shows_both_halves() {
+        let spec =
+            BackendSpec::parse("ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash")
+                .unwrap();
+        assert_eq!(
+            spec.display_name(&config()),
+            "ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash"
+        );
+    }
+
+    #[test]
+    fn a_plan_spec_with_an_empty_half_is_a_startup_error() {
+        assert!(matches!(
+            BackendSpec::parse("+plan:openrouter:x"),
+            Err(BenchError::Startup(_))
+        ));
+        assert!(matches!(
+            BackendSpec::parse("ollama:x+plan:"),
+            Err(BenchError::Startup(_))
+        ));
+    }
+
+    #[test]
+    fn a_spec_with_two_planners_is_a_startup_error() {
+        assert!(matches!(
+            BackendSpec::parse("ollama:x+plan:ollama:y+plan:ollama:z"),
+            Err(BenchError::Startup(_))
+        ));
+    }
+
+    #[test]
+    fn ollama_models_reports_executor_and_local_planner() {
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b+plan:ollama:qwen2.5:7b").unwrap();
+        assert_eq!(
+            spec.ollama_models(&config()),
+            vec!["qwen2.5:3b".to_string(), "qwen2.5:7b".to_string()]
+        );
+
+        let remote_planner =
+            BackendSpec::parse("ollama:qwen2.5:3b+plan:openrouter:deepseek/x").unwrap();
+        assert_eq!(
+            remote_planner.ollama_models(&config()),
+            vec!["qwen2.5:3b".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_planner_is_none_for_a_plain_spec_and_some_for_a_plan_spec() {
+        let plain = BackendSpec::parse("ollama:qwen2.5:3b").unwrap();
+        assert!(
+            plain
+                .build_planner(&config(), sampling())
+                .expect("plain spec must not error")
+                .is_none()
+        );
+
+        // An Ollama planner needs no credentials — must build.
+        let planned = BackendSpec::parse("ollama:qwen2.5:3b+plan:ollama:qwen2.5:7b").unwrap();
+        assert!(
+            planned
+                .build_planner(&config(), sampling())
+                .expect("ollama planner must build without credentials")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn build_planner_without_credentials_is_a_startup_error() {
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b+plan:openrouter:deepseek/x").unwrap();
+        let result = spec.build_planner(&config(), sampling());
         assert!(matches!(result, Err(BenchError::Startup(_))));
     }
 }

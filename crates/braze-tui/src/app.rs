@@ -29,7 +29,7 @@ use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len}
 use crate::error::TuiError;
 use crate::history_cell::{
     AssistantMarkdownCell, ErrorCell, ExpandedToolOutputCell, HelpCell, HistoryCell, NoticeCell,
-    PermissionCell, ToolCallCell, UserCell,
+    PermissionCell, PlanCell, ToolCallCell, UserCell,
 };
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::mentions::{list_files, matching_files};
@@ -1044,6 +1044,10 @@ impl App {
                 if let Some(tail) = self.markdown.finish() {
                     self.commit_cell(&AssistantMarkdownCell { markdown: tail }, terminal)?;
                 }
+            }
+            TuiUpdate::Event(AgentEvent::PlanCreated { plan }) => {
+                let theme = self.theme;
+                self.commit_cell(&PlanCell { plan, theme }, terminal)?;
             }
             TuiUpdate::Event(AgentEvent::AssistantToolCall { id, name, .. }) => {
                 self.pending_tool_names.insert(id, name);

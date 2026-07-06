@@ -285,6 +285,7 @@ impl ContextCompactor for SimpleContextCompactor {
         let mut tool_calls = Vec::new();
         let mut tool_errors = Vec::new();
         let mut last_assistant_reply = None;
+        let mut last_plan = None;
         let mut tool_names_by_id: std::collections::HashMap<&str, &str> =
             std::collections::HashMap::new();
 
@@ -311,6 +312,15 @@ impl ContextCompactor for SimpleContextCompactor {
                         .unwrap_or("unknown_tool");
                     tool_errors.push(format!("{name} -> {}", truncate_words(&result.content, 12)));
                 }
+                // The plan is exactly the context worth surviving a
+                // compaction that fires mid-way through a long planned
+                // turn — the executor keeps a compass instead of losing
+                // the plan with the rest of the folded backlog (PLAN.md
+                // § "Split planificador/ejecutor", oleada 1). Only the
+                // most recent one: plans are per-turn state.
+                AgentEvent::PlanCreated { plan } => {
+                    last_plan = Some(truncate_words(plan, 40));
+                }
                 AgentEvent::ToolCallCompleted { .. }
                 | AgentEvent::ToolCallStarted { .. }
                 | AgentEvent::CompactionOccurred { .. }
@@ -334,6 +344,10 @@ impl ContextCompactor for SimpleContextCompactor {
                     .join("; "),
             );
             out.push('\n');
+        }
+
+        if let Some(plan) = last_plan {
+            out.push_str(&format!("- Plan: \"{plan}\"\n"));
         }
 
         if !tool_calls.is_empty() {
@@ -644,6 +658,35 @@ mod tests {
                 .contains(&format!("digest number {}", MAX_SUMMARIES_KEPT * 3 - 1))
         );
         assert!(!durable.summary.contains("digest number 0"));
+    }
+
+    /// PLAN.md § "Split planificador/ejecutor", oleada 1: a compaction
+    /// firing mid-way through a long planned turn must carry the plan
+    /// into the digest — it's exactly the compass the executor needs to
+    /// keep following after the raw backlog gets folded.
+    #[test]
+    fn compact_tactical_extracts_the_most_recent_plan() {
+        let compactor = SimpleContextCompactor::default();
+        let tactical = vec![
+            user("haz tres cosas"),
+            AgentEvent::PlanCreated {
+                plan: "plan viejo".to_string(),
+            },
+            AgentEvent::PlanCreated {
+                plan: "1. leer 2. editar 3. verificar".to_string(),
+            },
+        ];
+
+        let digest = compactor.compact_tactical(&tactical).expect("digest");
+
+        assert!(
+            digest.contains("- Plan: \"1. leer 2. editar 3. verificar\""),
+            "got: {digest}"
+        );
+        assert!(
+            !digest.contains("plan viejo"),
+            "only the most recent plan belongs in the digest, got: {digest}"
+        );
     }
 
     #[test]

@@ -148,12 +148,22 @@ pub async fn run_task(
 
     // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget
     // — without it, a bench pass rate for an Ollama backend measured a
-    // context-management regime production never actually uses.
-    if spec.ollama_model(config).is_some() {
+    // context-management regime production never actually uses. Keyed on
+    // the *executor* being Ollama (`ollama_models` also reports a local
+    // planner, but the budget protects the executor's context window —
+    // production keys it on `default_backend` the same way).
+    if spec.executor_is_ollama() {
         engine = engine.with_context_budget(braze_config::ollama_context_budget_tokens(
             config.ollama_num_ctx,
             config.max_tokens,
         ));
+    }
+
+    // PLAN.md § "Split planificador/ejecutor", oleada 4: a spec with a
+    // `+plan:` suffix runs the same engine with the planner attached —
+    // baseline and planned variant differ in exactly one thing.
+    if let Some(planner) = spec.build_planner(config, sampling)? {
+        engine = engine.with_planner(planner);
     }
 
     let started = Instant::now();

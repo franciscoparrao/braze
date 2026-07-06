@@ -181,6 +181,19 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         AgentEvent::AssistantText { text } => {
             Some((Role::Assistant, ContentBlock::Text { text: text.clone() }))
         }
+        // The planner's plan renders as the assistant's *own* text — the
+        // "model follows its own plan" framing (PLAN.md § "Split
+        // planificador/ejecutor"). This produces an assistant Text
+        // message right before the first round's tool_use message —
+        // consecutive assistant messages, which is already the exact
+        // shape a text-before-tools round produces today (verified live
+        // against the real Anthropic API), not a new protocol risk.
+        AgentEvent::PlanCreated { plan } => Some((
+            Role::Assistant,
+            ContentBlock::Text {
+                text: format!("Plan:\n{plan}"),
+            },
+        )),
         AgentEvent::AssistantToolCall {
             id,
             name,
@@ -402,6 +415,34 @@ mod tests {
 
         let messages = build_messages(&empty_durable(), &tactical);
         assert!(messages.is_empty());
+    }
+
+    /// PLAN.md § "Split planificador/ejecutor", oleada 1: `PlanCreated`
+    /// renders as the assistant's own text block, prefixed so the model
+    /// (and anyone reading the raw request) can tell it apart from an
+    /// ordinary reply.
+    #[test]
+    fn plan_created_renders_as_assistant_text_with_a_plan_prefix() {
+        let tactical = vec![
+            AgentEvent::UserMessage {
+                text: "haz tres cosas".to_string(),
+            },
+            AgentEvent::PlanCreated {
+                plan: "1. leer\n2. editar\n3. verificar".to_string(),
+            },
+        ];
+
+        let messages = build_messages(&empty_durable(), &tactical);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].role, Role::Assistant);
+        match &messages[1].content[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.starts_with("Plan:\n"), "got: {text}");
+                assert!(text.contains("2. editar"));
+            }
+            other => panic!("expected a Text block, got {other:?}"),
+        }
     }
 
     fn tool_call_event(id: &str, name: &str) -> AgentEvent {

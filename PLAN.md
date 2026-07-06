@@ -1338,6 +1338,222 @@ creó una sesión nueva de verdad, no una mutación); editar el texto
 (`"leeme el archivo otra vez"`) y reenviar produjo un turno nuevo normal
 con la tercera ronda scripteada, sin errores. Salida limpia con Ctrl+C.
 
+## Split planificador/ejecutor (`with_planner`) — diseño (2026-07-06)
+
+> **Estado: diseño aprobado, implementación pendiente.** Primera pieza de
+> la reorientación "maestro en modelos pequeños": un modelo grande
+> planifica una vez por turno, un modelo chico ejecuta el volumen de
+> rondas de tool-calling.
+
+### Motivación y pre-commitment de medición
+
+El sweep de `braze-bench` (2026-07-04/05, ver `docs/AUDITORIA-2026-07.md`
+§ G10) mostró el patrón exacto que este split ataca: `qwen2.5:3b`/`7b`
+rinden razonablemente en `single_tool` pero colapsan en las skills que
+requieren razonamiento multi-paso (`error_recovery` y
+`distractor_selection` en 0/5 pre-G10; `multi_step` débil). La hipótesis:
+el costo de una única llamada de planificación a un modelo fuerte
+(OpenRouter/Anthropic) es marginal frente al volumen de rondas del
+ejecutor, y un plan explícito le quita al modelo chico justo la parte en
+la que falla.
+
+**Cautela obligatoria**: `docs/SOTA-2026-07.md` § hallazgo 5 registra una
+señal débil (arXiv 2511.00872, no verificada a fondo) de que
+arquitecturas multi-agente rinden *peor* que un agente secuencial en
+tareas de código. Este split es más simple que multi-agente real
+(traspaso unidireccional, sin negociación), pero la lección aplica: **la
+técnica se adopta solo si el sweep A/B la valida** (criterio abajo). Si
+no mejora, se documenta como técnica rechazada y se elimina — mismo
+pre-commitment que el resto de la metodología de auditoría.
+
+### Decisión de arquitectura: engine-level, no decorator
+
+Dos opciones evaluadas:
+
+- **(A) Decorator `PlannerExecutorBackend`** implementando `ModelBackend`
+  sobre dos backends internos — cero cambios al engine. Fue la sugerencia
+  inicial en conversación; **se descarta tras análisis**: el plan viviría
+  en un side-channel invisible al log de sesión — se pierde en `--resume`,
+  la compactación no lo conoce (contexto contradictorio post-compact), la
+  TUI no puede mostrarlo, y el bench no puede distinguir turnos
+  planificados. Además el decorator tendría que inferir límites de turno
+  desde la forma de los mensajes (frágil ante reparaciones de huérfanos y
+  resúmenes de compactación). Contradice el principio central del diseño:
+  el event log es la fuente de verdad.
+- **(B) Soporte opt-in en `Engine` (elegida)**: el plan es un
+  `AgentEvent` persistido como cualquier otro — sobrevive resume, la
+  compactación lo digiere, la TUI lo espeja vía `TurnObserver`, el bench
+  lo cuenta.
+
+### Contrato
+
+- **`AgentEvent::PlanCreated { plan: String }`** — enmienda aditiva al
+  contrato congelado, mismo precedente que `AssistantToolCall` (Fase 5),
+  `Usage` (Grupo G) y `Unknown` (C9). Binarios viejos leyendo un log con
+  este evento deserializan a `Unknown` sin romper `load()` (mecanismo C9
+  ya verificado). Agregar la variante obliga a tocar todos los `match`
+  exhaustivos (`history::event_to_block*`, compactor, `event_text_len`,
+  TUI) — el compilador guía; es el mismo costo que pagó `Usage`.
+- **`Engine::with_planner(Box<dyn ModelBackend>)`** — campo
+  `planner: Option<Box<dyn ModelBackend>>`, `None` por default (cero
+  cambio de comportamiento sin opt-in), chainable como
+  `with_best_of_n`/`with_context_budget`.
+- **Config**: `planner_backend: Option<String>` +
+  `planner_model: Option<String>` (`#[serde(default)]`, env
+  `BRAZE_PLANNER_BACKEND`/`BRAZE_PLANNER_MODEL`, flag `--planner
+  <backend:modelo>` en `chat`/`run`). Validación del nombre de backend en
+  `braze-cli`, igual que `default_backend`.
+
+### Flujo en `run_turn`
+
+Pre-loop, después de `load_and_repair` + append del `UserMessage` +
+primer `load_messages`; **no cuenta contra `MAX_TURN_ITERATIONS`**:
+
+1. Request al planner: mismos `messages`, `tool_stubs` **vacío** — las
+   herramientas van inlined como texto (name + summary de los stubs) en
+   el system prompt de planificación. Razón: queremos *conciencia* de
+   herramientas sin riesgo de invocación, y es exactamente la filosofía
+   de carga diferida (solo nombres/resúmenes en contexto).
+   `max_tokens` capped a `PLANNER_MAX_TOKENS = 1024` (los planes son
+   cortos; control de costo).
+2. System prompt de planning = prompt base + instrucciones: "no llames
+   herramientas; escribe un plan numerado corto (3-7 pasos) usando las
+   herramientas disponibles, con nombres concretos; si la petición es
+   trivial, responde con el único paso". La cláusula de trivialidad evita
+   inflar `no_tool`/`single_tool` con planes-overhead.
+3. Degradación, nunca fallo: error del planner ⇒ `warn!` y el turno
+   procede sin plan (misma filosofía que N-13 — un enhancement opcional
+   jamás mata el turno). Respuesta con tool_calls ⇒ se ignoran con
+   `warn!` y se usa el texto. Respuesta `truncated` (espíritu N-24) o
+   vacía ⇒ plan descartado con `warn!`.
+4. Persistir `PlanCreated` vía `append_and_notify` + persistir el
+   `Usage` del planner como evento normal (costo visible; el conteo de
+   `rounds` del bench incluirá la ronda de plan — documentado, es honesto:
+   ES una ronda de modelo). Recargar `messages` y entrar al loop normal.
+
+### Render en history y protocolo
+
+`PlanCreated` → bloque `Text` con rol `Assistant`, contenido
+`"Plan:\n{plan}"`. El framing "el modelo sigue su propio plan" es
+deliberado (mejor adherencia que un plan inyectado como user). Sobre
+mensajes assistant consecutivos (plan seguido del `tool_use` de la ronda
+1): **ya es la forma existente** — `push_grouped` no fusiona `Text` con
+`ToolUse`, así que un round con texto-antes-de-tools ya produce hoy dos
+mensajes assistant consecutivos, verificado en vivo contra Anthropic real
+(sweep + N-2b re-test). Aun así, oleada 1 incluye test con
+`ProtocolValidatingModel` del shape plan→tool_use→tool_result.
+
+En el compactor: tipo *orphan* (no settled — un plan es estado por-turno,
+no durable), y `compact_tactical` extrae el plan al digest (es
+exactamente el contexto que quieres que sobreviva una compactación a
+mitad de un turno largo).
+
+### Interacciones
+
+- **best_of_n (G10)**: ortogonal — aplica solo a las rondas del ejecutor.
+  Best-of-n de planes: diferido.
+- **Replanning**: fuera del MVP. Política futura candidata: replan tras K
+  fallos consecutivos de tools. Se decide con datos del sweep, no antes.
+- **N-34/N-36**: el planner del bench se construye vía el mismo
+  `BackendSpec::build(config, sampling)` — misma temperatura/seed y mismo
+  system prompt base que producción.
+- **TUI**: `PlanCreated` llega por el espejo de `TurnObserver`; oleada 1
+  lo renderiza como celda simple (texto muted con prefijo "plan"); pulido
+  visual diferido.
+
+### Bench A/B — el criterio de éxito
+
+- Sintaxis de spec: `<executor-spec>+plan:<planner-spec>` (split en el
+  literal `"+plan:"`, inambiguo frente a los `:` de los tags de Ollama).
+  Ej.: `--backends
+  ollama:qwen2.5:3b,ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash`
+  — baseline y variante planificada en el mismo sweep, apples-to-apples.
+- `TaskResult` gana `planned: bool` (derivado de la presencia de
+  `PlanCreated` en el log del run) para el análisis del JSON.
+- **Criterio (pre-comprometido)**: con `--seed`/`--temperature` fijos y
+  ≥5 repeticiones, la variante planificada debe mejorar el pass rate de
+  `multi_step` + `error_recovery` **fuera del intervalo de Wilson del
+  baseline** (no dentro del ruido de ±5pp), sin degradar
+  `no_tool`/`single_tool`/`distractor_selection`. El costo extra de
+  tokens del planner queda registrado por las sumas de `Usage` y entra al
+  veredicto. Si no cumple: técnica rechazada, se documenta y se remueve.
+
+### Oleadas
+
+1. **Evento y render**: `PlanCreated` en `braze-events`; arms en
+   `history::event_to_block`/`event_to_block_cleared`, clasificación
+   orphan + extracción al digest en `simple_compactor`, `event_text_len`
+   en el engine, celda simple en la TUI. Tests unitarios + test de
+   protocolo (`ProtocolValidatingModel`, shape plan→tools).
+2. **`Engine::with_planner`**: campo + builder, llamada de planning
+   pre-loop con las 4 reglas de degradación, prompt de planning, tests
+   con `ScriptedModel` como planner y ejecutor (incluye: planner que
+   falla ⇒ turno procede; planner truncado ⇒ plan descartado).
+3. **Config/CLI**: campos + env + `--planner`, validación, wiring en
+   `braze-cli::main`.
+4. **Bench + veredicto**: sintaxis `+plan:`, wiring en `runner`,
+   `planned` en `TaskResult`, y el sweep real (qwen2.5:3b solo vs
+   +plan:deepseek-v4-flash, 5 reps, seed fijo) → decisión adoptar/rechazar
+   documentada aquí.
+
+### Veredicto del sweep A/B (2026-07-06) — RECHAZADA en su forma actual
+
+Sweep real (`docs/sweep-planner-ab.json`/`.log`): 10 tareas × 5 reps ×
+2 filas, `--seed 42`, temperatura 0.2, planner deepseek-v4-flash sobre
+ejecutor qwen2.5:3b. Los 50 runs planificados persistieron plan
+(`planned: true` en los 50 — cero degradaciones del planner).
+
+**Contra el criterio pre-comprometido: falla decisivamente.**
+
+| skill | baseline | +plan | Δ |
+|---|---|---|---|
+| single_tool | 25/30 | 22/30 | −3 |
+| no_tool | 5/5 | **0/5** | −5 |
+| multi_step | 1/5 | 1/5 | 0 |
+| error_recovery | 0/5 | 0/5 | 0 |
+| distractor_selection | 2/5 | 4/5 | +2 |
+| **total** | **33/50 (66%)** | **27/50 (54%)** | **−12pp** |
+
+Las skills objetivo (`multi_step`+`error_recovery`) no se movieron un
+milímetro (1/10 vs 1/10); `no_tool` colapsó por completo; y el costo fue
+real: +29% tokens de entrada, 4× tokens de salida, +1 ronda por turno.
+
+**Diagnóstico del colapso (verificado en el JSON, no especulado)**: los
+5 fallos de `no_tool` y 4-5 de `single_tool` son todos
+`EmptyModelResponse` — el ejecutor ve el plan renderizado como mensaje
+*assistant* ("Plan:\n1. responder X"), lo interpreta como que ya
+respondió, y emite una completion vacía (que la estrictez nueva del
+Grupo N convierte correctamente en error en vez de éxito silencioso).
+El framing "el modelo sigue su propio plan" — elegido deliberadamente en
+el diseño — **se vuelve en contra en tareas triviales**: un plan con rol
+assistant que contiene la respuesta lee como conversación terminada
+para un 3B. La cláusula de trivialidad del prompt de planning resultó
+insuficiente como mitigación. Señal secundaria: la fila planificada
+produjo 6 schema_fails (vs 0) y 4 denegaciones de permiso (vs 0) — el
+plan vuelve al ejecutor chico *más* errático en tareas simples, no
+menos.
+
+**Lo único que mejoró**: `distractor_selection` 2/5 → 4/5 — consistente
+con la hipótesis de que el plan ayuda a *seleccionar* (el planner
+identifica el archivo correcto), aunque con n=5 está dentro del ruido.
+
+**Calibraciones externas pertinentes** (revisiones del mismo día,
+`docs/SOTA-2026-07.md`): Aider observó +3-4pp con architect/editor — la
+ganancia esperable era chica; y su lección "si el split no rinde, el
+primer sospechoso es el formato de edición del ejecutor" sigue en pie
+para `multi_step` (el plan correcto no sirve si el 3B no puede
+materializar la edición).
+
+**Decisión**: conforme al pre-commitment, la técnica queda **rechazada
+en su forma actual** — `with_planner` permanece en el código como
+opt-in (default `None`, cero efecto sin activarlo) pero NO se
+recomienda ni se promueve a default. Queda registrada la opción de UNA
+iteración acotada y pre-registrada atacando el artefacto diagnosticado
+(descartar planes de un solo paso en vez de persistirlos, y/o render
+del plan con rol user como contexto en vez de assistant) con el mismo
+criterio A/B; si tampoco mueve `multi_step`/`error_recovery`, remoción
+completa.
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace
