@@ -36,9 +36,15 @@ pub fn all_stubs(source: &str) -> Vec<ToolStub> {
 fn summary_for(name: &str) -> &'static str {
     match name {
         "read_file" => "Read the full text contents of a file at a given path.",
-        "write_file" => "Create or overwrite a file with the given content.",
+        "write_file" => {
+            "Create or overwrite a file with the given content. Also the preferred way to \
+             modify a file when you are not certain of its exact current text: write the \
+             complete updated content."
+        }
         "edit_file" => {
-            "Replace one exact, unambiguous occurrence of old_string with new_string in a file."
+            "Replace one unambiguous occurrence of old_string with new_string in a file. \
+             Matching tolerates small whitespace differences. If unsure of the exact current \
+             text, prefer write_file with the complete updated content."
         }
         "shell_exec" => "Run an argv-style command and capture its stdout, stderr, and exit code.",
         "grep" => {
@@ -89,7 +95,7 @@ pub fn schema_for(name: &str) -> Option<ToolSchema> {
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "Exact text to replace. Must appear exactly once in the file, or the edit is rejected as ambiguous."
+                    "description": "Text to replace, copied from the file. Must match exactly once (small whitespace differences are tolerated), or the edit is rejected as ambiguous. Include enough surrounding lines to make it unique."
                 },
                 "new_string": {
                     "type": "string",
