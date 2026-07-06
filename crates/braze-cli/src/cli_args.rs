@@ -63,6 +63,15 @@ pub enum Command {
         /// `planner_backend`/`planner_model` from config/env.
         #[arg(long)]
         planner: Option<String>,
+        /// Enable reactive lead/worker escalation for this run (estilo
+        /// Goose, docs/SOTA-2026-07.md): `<backend>` or
+        /// `<backend>:<modelo>`. The lead opens the session and comes
+        /// back whenever the primary backend strings together failed
+        /// tool observations; the primary handles everything else.
+        /// Overrides `lead_backend`/`lead_model` from config/env.
+        /// Composes with `--planner` (proactive vs reactive).
+        #[arg(long)]
+        lead: Option<String>,
     },
     /// One-shot: run a single prompt and exit.
     Run {
@@ -82,6 +91,10 @@ pub enum Command {
         /// as `chat --planner`.
         #[arg(long)]
         planner: Option<String>,
+        /// Enable reactive lead/worker escalation — same syntax as
+        /// `chat --lead`.
+        #[arg(long)]
+        lead: Option<String>,
     },
 }
 
@@ -132,6 +145,18 @@ impl Command {
             None => (raw, None),
         })
     }
+
+    /// The `--lead` override, if any, common to both subcommands — same
+    /// `<backend>[:<modelo>]` syntax and first-`:` split as `--planner`.
+    pub fn lead_override(&self) -> Option<(&str, Option<&str>)> {
+        let raw = match self {
+            Command::Chat { lead, .. } | Command::Run { lead, .. } => lead.as_deref()?,
+        };
+        Some(match raw.split_once(':') {
+            Some((backend, model)) => (backend, Some(model)),
+            None => (raw, None),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -147,6 +172,7 @@ mod tests {
             tui: false,
             theme: None,
             planner: planner.map(str::to_string),
+            lead: None,
         }
     }
 

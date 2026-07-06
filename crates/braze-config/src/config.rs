@@ -145,6 +145,17 @@ pub struct Config {
     /// OpenRouter model.
     #[serde(default)]
     pub planner_model: Option<String>,
+    /// Backend for the reactive lead/worker escalation (estilo Goose,
+    /// ítem 6 del backlog 2026-07-06): the lead opens the session and
+    /// returns while the primary backend strings failed observations
+    /// together. `None` (the default) disables the decorator. Same
+    /// validation posture as `planner_backend`.
+    #[serde(default)]
+    pub lead_backend: Option<String>,
+    /// Model name for the lead backend — same fallback semantics as
+    /// `planner_model`.
+    #[serde(default)]
+    pub lead_model: Option<String>,
 }
 
 impl Default for Config {
@@ -177,6 +188,8 @@ impl Default for Config {
             disable_post_edit_check: false,
             planner_backend: None,
             planner_model: None,
+            lead_backend: None,
+            lead_model: None,
         }
     }
 }
@@ -324,6 +337,12 @@ impl Config {
         }
         if let Some(v) = overrides.planner_model {
             self.planner_model = Some(v);
+        }
+        if let Some(v) = overrides.lead_backend {
+            self.lead_backend = Some(v);
+        }
+        if let Some(v) = overrides.lead_model {
+            self.lead_model = Some(v);
         }
     }
 }

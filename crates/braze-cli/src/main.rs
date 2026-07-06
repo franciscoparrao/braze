@@ -215,16 +215,29 @@ fn model_override_for(
 /// mid-session rebuild preserves exactly the planner the run started
 /// with. Reads `live_session` fresh for the approval replay, so a rebuild
 /// after a TUI backtrack seeds from the session the user is actually on.
+#[allow(clippy::too_many_arguments)] // the composition root: one param per resolved collaborator
 async fn build_engine(
     config: &braze_config::Config,
     planner_spec: Option<(String, Option<String>)>,
+    lead_spec: Option<(String, Option<String>)>,
     live_session: std::sync::Arc<std::sync::Mutex<braze_types::SessionId>>,
     store: std::sync::Arc<dyn braze_session::SessionStore>,
     approval_tx: tokio::sync::mpsc::UnboundedSender<braze_tui::ApprovalRequest>,
     tui_mode: bool,
     cwd: &std::path::Path,
 ) -> Result<(braze_engine::Engine, String), CliError> {
-    let model = build_model_backend(config, &config.default_backend, None)?;
+    let mut model = build_model_backend(config, &config.default_backend, None)?;
+
+    // Reactive lead/worker escalation (estilo Goose, ítem 6 del backlog
+    // 2026-07-06): the primary backend becomes the *worker*; the lead
+    // opens the session and returns whenever the worker strings failed
+    // observations together. A decorator around `ModelBackend`, invisible
+    // to the engine — and composable with the planner below (proactive
+    // model change by phase vs reactive by observed failure).
+    if let Some((backend, model_override)) = &lead_spec {
+        let lead = build_model_backend(config, backend, model_override.as_deref())?;
+        model = Box::new(braze_model::EscalatingBackend::new(lead, model));
+    }
 
     let planner = planner_spec
         .map(|(backend, model_override)| {
@@ -448,6 +461,18 @@ async fn run() -> Result<(), CliError> {
             .clone()
             .map(|backend| (backend, config.planner_model.clone())),
     };
+    // Reactive lead/worker escalation — resolved exactly like the
+    // planner: `--lead` wins over `lead_backend`/`lead_model` from
+    // config/env, and an invalid spec fails at startup.
+    let lead_spec: Option<(String, Option<String>)> = match cli.command.lead_override() {
+        Some((backend, model_override)) => {
+            Some((backend.to_string(), model_override.map(str::to_string)))
+        }
+        None => config
+            .lead_backend
+            .clone()
+            .map(|backend| (backend, config.lead_model.clone())),
+    };
 
     // `store` is built here, as an `Arc`, so it can be shared between the
     // permission guards (which persist `PermissionRequested`/
@@ -519,6 +544,7 @@ async fn run() -> Result<(), CliError> {
     let (engine, status_line) = build_engine(
         &config,
         planner_spec.clone(),
+        lead_spec.clone(),
         std::sync::Arc::clone(&live_session),
         std::sync::Arc::clone(&store),
         approval_tx.clone(),
@@ -582,6 +608,7 @@ async fn run() -> Result<(), CliError> {
             // (Ollama tags and OpenRouter ids carry their own `:`/`/`).
             let factory_config = config.clone();
             let factory_planner_spec = planner_spec.clone();
+            let factory_lead_spec = lead_spec.clone();
             let factory_live_session = std::sync::Arc::clone(&live_session);
             let factory_store = std::sync::Arc::clone(&store);
             let factory_approval_tx = approval_tx.clone();
@@ -589,6 +616,7 @@ async fn run() -> Result<(), CliError> {
             let engine_factory: braze_tui::EngineFactory = Box::new(move |spec: String| {
                 let mut config = factory_config.clone();
                 let planner_spec = factory_planner_spec.clone();
+                let lead_spec = factory_lead_spec.clone();
                 let live_session = std::sync::Arc::clone(&factory_live_session);
                 let store = std::sync::Arc::clone(&factory_store);
                 let approval_tx = factory_approval_tx.clone();
@@ -610,6 +638,7 @@ async fn run() -> Result<(), CliError> {
                     build_engine(
                         &config,
                         planner_spec,
+                        lead_spec,
                         live_session,
                         store,
                         approval_tx,

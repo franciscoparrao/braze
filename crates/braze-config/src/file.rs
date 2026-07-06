@@ -32,6 +32,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "disable_post_edit_check",
     "planner_backend",
     "planner_model",
+    "lead_backend",
+    "lead_model",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

@@ -62,6 +62,10 @@ pub struct ConfigOverrides {
     pub planner_backend: Option<String>,
     #[serde(default)]
     pub planner_model: Option<String>,
+    #[serde(default)]
+    pub lead_backend: Option<String>,
+    #[serde(default)]
+    pub lead_model: Option<String>,
 }
 
 impl ConfigOverrides {
@@ -164,6 +168,8 @@ impl ConfigOverrides {
                 }
                 "PLANNER_BACKEND" => overrides.planner_backend = Some(value.to_string()),
                 "PLANNER_MODEL" => overrides.planner_model = Some(value.to_string()),
+                "LEAD_BACKEND" => overrides.lead_backend = Some(value.to_string()),
+                "LEAD_MODEL" => overrides.lead_model = Some(value.to_string()),
                 "DISABLE_TEXTUAL_TOOL_CALL_RESCUE" => {
                     let parsed =
                         value
