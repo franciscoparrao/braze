@@ -1396,6 +1396,58 @@ zombie sin cosechar responde como vivo) — y los asserts van sobre las
 celdas commiteadas al scrollback, no sobre el render diffeado del popup
 (ratatui intercala escapes de posicionamiento dentro del texto).
 
+## Rescate textual por formato nativo Qwen `<tool_call>` (2026-07-06)
+
+Ítem 2 del backlog post-revisiones (docs/SOTA-2026-07.md § Adenda,
+"Rescate textual por familia de modelo" — la palanca [S] de máxima
+evidencia según el TR de Qwen: los modelos chicos sobreajustan a su
+tool-template de entrenamiento, y matchear el rescate a lo que la
+familia emite nativamente es la palanca de confiabilidad más respaldada).
+
+**Qué se agregó** (`crates/braze-engine/src/engine.rs`):
+
+- `extract_tagged_tool_calls`: reconoce el formato nativo Qwen/Hermes
+  `<tool_call>\n{"name": ..., "arguments": ...}\n</tool_call>`. A
+  diferencia del rescate B5 (JSON desnudo que debe ser la respuesta
+  *completa* — sin marcadores, la prosa alrededor es demasiado ambigua),
+  los tags explícitos permiten: **prosa alrededor preservada** como texto
+  de la ronda (run_turn ya persiste texto antes de los tool calls),
+  **varios bloques** por respuesta (Qwen emite un par de tags por call
+  paralela), y JSON interno opcionalmente fenceado. Un bloque taggeado
+  con JSON malformado queda *visible en el texto* en vez de tragarse
+  (claramente era un intento de call, pero inventar una reparación
+  arriesga ejecutar algo que el modelo no dijo); un tag sin cerrar
+  (ronda cortada a media emisión) no rescata nada.
+- Escalera en `complete_once`, de lo más específico a lo más ambiguo:
+  (1) tool calls estructurados del backend, (2) formato taggeado,
+  (3) JSON desnudo (B5). Aplicada por intento (no post-voto best-of-n),
+  igual que B5. Helpers compartidos `parse_tool_call_json` /
+  `trim_json_fences` para que ambos formatos no deriven.
+- **Diferido**: la gramática XML `<function=...><parameter=...>` de
+  qwen3-coder — no hay modelo de esa familia instalado contra el cual
+  validarla (ver SOTA § Adenda).
+
+**Tests**: 558 → 569 (10 unitarios del extractor + 1 integración con
+`ScriptedModel`: dispatch real del call taggeado, prosa persistida como
+`AssistantText`, tags/JSON fuera de la conversación).
+`cargo build/test/clippy --workspace` verdes.
+
+**Validación con bench real** (g10-weak-skills, ollama:qwen2.5:3b, 3
+reps, seed 42): pass 2/6 vs 1/6 del baseline pre-cambio — dentro del
+ruido (±30pp) y **no atribuible al rescate**: en este sweep el formato
+taggeado no apareció (qwen2.5 vía el template nativo de Ollama emite
+calls estructurados normalmente; el formato taggeado es el modo de
+falla documentado por el TR — template sin tools, truncación, otros
+serving stacks — no el caso común local). El rescate es una red de
+seguridad con costo cero cuando no dispara, validada por unit tests.
+
+**Hallazgo colateral (arreglado)**: `braze-bench` no instalaba
+subscriber de tracing, así que `RUST_LOG=info` sobre un sweep no
+mostraba nada — imposible saber si una palanca del engine (rescates,
+compactación) disparó durante el bench. Ahora instala el mismo
+subscriber que `braze-cli` (stderr, respeta `RUST_LOG`; los binarios y
+solo los binarios instalan subscribers, per convención del workspace).
+
 ## Split planificador/ejecutor (`with_planner`) — diseño (2026-07-06)
 
 > **Estado: diseño aprobado, implementación pendiente.** Primera pieza de

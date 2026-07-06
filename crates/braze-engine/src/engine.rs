@@ -407,24 +407,36 @@ impl Engine {
 
         // Fallback for models that don't emit a structured tool call —
         // small/local models, or a template without native tool-call
-        // support — but instead write the call out as JSON in plain
-        // text (optionally fenced in ```json). Rescuing it here beats
-        // treating it as the model's final answer, which would end the
-        // turn having silently ignored what was clearly meant to be a
-        // tool call. See docs/AUDITORIA-2026-07.md hallazgo B5. Applied
-        // per-attempt (not after best-of-n voting) so a textually
-        // described tool call counts as a real candidate signature for
-        // the vote too.
-        if self.textual_rescue_enabled
-            && tool_calls.is_empty()
-            && let Some(rescued) = try_parse_textual_tool_call(&text_buffer)
-        {
-            tracing::info!(
-                tool = %rescued.name,
-                "rescued a tool call the model emitted as plain text instead of a structured tool_calls entry"
-            );
-            tool_calls.push(rescued);
-            text_buffer.clear();
+        // support — but instead write the call out in plain text.
+        // Rescuing it here beats treating it as the model's final
+        // answer, which would end the turn having silently ignored what
+        // was clearly meant to be a tool call. See
+        // docs/AUDITORIA-2026-07.md hallazgo B5. Applied per-attempt
+        // (not after best-of-n voting) so a textually described tool
+        // call counts as a real candidate signature for the vote too.
+        //
+        // Escalera, most-specific first: (1) the `<tool_call>{json}
+        // </tool_call>` tagged format Qwen/Hermes models emit natively
+        // (explicit markers — admits surrounding prose and several
+        // calls per response), then (2) a bare JSON object that is the
+        // entire response (optionally ```json-fenced).
+        if self.textual_rescue_enabled && tool_calls.is_empty() {
+            let (tagged, remaining_text) = extract_tagged_tool_calls(&text_buffer);
+            if !tagged.is_empty() {
+                tracing::info!(
+                    count = tagged.len(),
+                    "rescued tool call(s) emitted in the <tool_call> tagged format (Qwen/Hermes) instead of structured tool_calls entries"
+                );
+                tool_calls.extend(tagged);
+                text_buffer = remaining_text;
+            } else if let Some(rescued) = try_parse_textual_tool_call(&text_buffer) {
+                tracing::info!(
+                    tool = %rescued.name,
+                    "rescued a tool call the model emitted as plain text instead of a structured tool_calls entry"
+                );
+                tool_calls.push(rescued);
+                text_buffer.clear();
+            }
         }
 
         Ok(RoundOutcome {
@@ -1612,18 +1624,36 @@ fn candidate_signature(outcome: &RoundOutcome) -> Vec<(String, String)> {
 /// "arguments": {"path": "x.txt"}}`, optionally wrapped in a ```json
 /// fence. Returns `None` (not an error) for anything that doesn't parse as
 /// such — most final text responses legitimately aren't JSON at all, and
-/// this must never mistake prose for a tool call.
+/// this must never mistake prose for a tool call. The *whole* response
+/// must be the JSON (modulo fences): with no explicit markers, prose
+/// around a JSON-looking fragment is too ambiguous to touch. For the
+/// explicitly tagged variant that does admit surrounding prose, see
+/// [`extract_tagged_tool_calls`].
+fn try_parse_textual_tool_call(text: &str) -> Option<ToolCall> {
+    parse_tool_call_json(trim_json_fences(text))
+}
+
+/// Strips an optional ```json / ``` fence (and surrounding whitespace)
+/// from a candidate JSON fragment — shared by both textual-rescue
+/// formats: some models fence the bare-JSON variant, and some fence the
+/// JSON *inside* their `<tool_call>` tags too.
+fn trim_json_fences(text: &str) -> &str {
+    text.trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
+}
+
+/// The shared shape check for every textual-rescue format: a JSON object
+/// with a string `name` and an object `arguments` (or `parameters`, the
+/// synonym some templates use). `None` for anything else — never an
+/// error, since the caller treats "doesn't parse" as "not a tool call".
 ///
 /// The synthesized id only needs to be unique within this session's event
 /// log (for `tool_use`/`tool_result` correlation) — a real backend id
 /// never applies here since none was ever assigned.
-fn try_parse_textual_tool_call(text: &str) -> Option<ToolCall> {
-    let candidate = text
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
+fn parse_tool_call_json(candidate: &str) -> Option<ToolCall> {
     let value: serde_json::Value = serde_json::from_str(candidate).ok()?;
     let name = value.get("name")?.as_str()?.to_string();
     let arguments = value
@@ -1638,6 +1668,58 @@ fn try_parse_textual_tool_call(text: &str) -> Option<ToolCall> {
         name,
         arguments,
     })
+}
+
+/// Rescue for the tagged textual format the Qwen family (and other
+/// Hermes-template models) emits natively when its tool-calling template
+/// isn't honored end-to-end: `<tool_call>\n{"name": ..., "arguments":
+/// ...}\n</tool_call>` — per the Qwen technical report, this is the
+/// single highest-leverage textual format for small local models
+/// (docs/SOTA-2026-07.md, técnica G6). Unlike the bare-JSON rescue, the
+/// explicit tags make surrounding prose unambiguous, so this admits (and
+/// preserves) text around the blocks and accepts *several* blocks in one
+/// response (Qwen emits one pair of tags per call for parallel calls).
+///
+/// Returns the parsed calls plus the response text with the parsed
+/// blocks removed — the model's surrounding prose is still its text for
+/// the round (`run_turn` already persists round text before its tool
+/// calls). A tagged block whose inner JSON doesn't parse as a tool call
+/// stays in the text verbatim rather than being swallowed; an empty
+/// `Vec` means no rescue at all, and the caller must leave the text
+/// untouched.
+fn extract_tagged_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
+    const OPEN_TAG: &str = "<tool_call>";
+    const CLOSE_TAG: &str = "</tool_call>";
+
+    let mut calls = Vec::new();
+    let mut remaining = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(OPEN_TAG) {
+        let after_open = &rest[start + OPEN_TAG.len()..];
+        let Some(inner_len) = after_open.find(CLOSE_TAG) else {
+            // Unclosed tag (e.g. the round got cut off mid-block): stop
+            // scanning; the final push below keeps everything from the
+            // dangling tag onward in the text, visible instead of lost.
+            break;
+        };
+        let block_end = start + OPEN_TAG.len() + inner_len + CLOSE_TAG.len();
+        match parse_tool_call_json(trim_json_fences(&after_open[..inner_len])) {
+            Some(call) => {
+                calls.push(call);
+                remaining.push_str(&rest[..start]);
+            }
+            // Malformed inner JSON: keep the whole tagged block in the
+            // text — clearly *meant* as a tool call, but inventing a
+            // repair here risks running something the model didn't say.
+            None => remaining.push_str(&rest[..block_end]),
+        }
+        rest = &rest[block_end..];
+    }
+    if calls.is_empty() {
+        return (calls, text.to_string());
+    }
+    remaining.push_str(rest);
+    (calls, remaining.trim().to_string())
 }
 
 /// System prompt for the planning round (PLAN.md § "Split
@@ -4517,6 +4599,102 @@ mod tests {
         assert_ne!(a.id, b.id);
     }
 
+    // --- extract_tagged_tool_calls (formato nativo Qwen/Hermes, ítem 2
+    // del backlog 2026-07-06) ---
+
+    #[test]
+    fn extracts_a_single_qwen_tagged_tool_call() {
+        let text = "<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"x.txt\"}}\n</tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read_file");
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "x.txt"}));
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn extracts_several_tagged_calls_from_one_response() {
+        // Qwen emits one pair of tags per call for parallel calls.
+        let text = concat!(
+            "<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"a\"}}\n</tool_call>\n",
+            "<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"b\"}}\n</tool_call>",
+        );
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "a"}));
+        assert_eq!(calls[1].arguments, serde_json::json!({"path": "b"}));
+        assert!(remaining.is_empty());
+        assert_ne!(calls[0].id, calls[1].id);
+    }
+
+    #[test]
+    fn prose_around_a_tagged_call_is_preserved_as_the_round_text() {
+        let text = "Voy a leer el archivo.\n<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"x\"}}\n</tool_call>\nListo.";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(remaining, "Voy a leer el archivo.\n\nListo.");
+    }
+
+    #[test]
+    fn a_fenced_json_inside_the_tags_still_parses() {
+        let text =
+            "<tool_call>```json\n{\"name\": \"echo\", \"arguments\": {}}\n```</tool_call>";
+        let (calls, _) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "echo");
+    }
+
+    #[test]
+    fn a_malformed_tagged_block_stays_in_the_text_instead_of_being_swallowed() {
+        let text = "<tool_call>\n{\"name\": \"echo\", \"arguments\": no-es-json}\n</tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn a_malformed_block_next_to_a_valid_one_keeps_only_the_malformed_text() {
+        let text = concat!(
+            "<tool_call>{broken</tool_call>",
+            "<tool_call>{\"name\": \"echo\", \"arguments\": {}}</tool_call>",
+        );
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(remaining, "<tool_call>{broken</tool_call>");
+    }
+
+    #[test]
+    fn an_unclosed_tag_rescues_nothing_and_keeps_the_text_intact() {
+        // E.g. a round cut off mid-block: better visible than lost.
+        let text = "algo de texto <tool_call>\n{\"name\": \"echo\"";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn a_valid_block_followed_by_an_unclosed_tag_keeps_the_dangling_tail() {
+        let text = "<tool_call>{\"name\": \"echo\", \"arguments\": {}}</tool_call> y <tool_call>{\"na";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(remaining, "y <tool_call>{\"na");
+    }
+
+    #[test]
+    fn plain_prose_without_tags_is_not_rescued_by_the_tagged_extractor() {
+        let (calls, remaining) = extract_tagged_tool_calls("El archivo tiene 3 lineas.");
+        assert!(calls.is_empty());
+        assert_eq!(remaining, "El archivo tiene 3 lineas.");
+    }
+
+    #[test]
+    fn tagged_extraction_accepts_parameters_as_a_synonym_for_arguments() {
+        let text = "<tool_call>{\"name\": \"echo\", \"parameters\": {\"text\": \"hi\"}}</tool_call>";
+        let (calls, _) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments, serde_json::json!({"text": "hi"}));
+    }
+
     // --- synthesize_orphan_repairs (N-26, docs/AUDITORIA-2026-07-v2.md) ---
 
     #[test]
@@ -4622,6 +4800,79 @@ mod tests {
                 AgentEvent::AssistantText { text } if text.contains("\"name\"")
             )),
             "the raw JSON must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Ítem 2 del backlog (2026-07-06): a model emitting its native
+    /// Qwen/Hermes `<tool_call>{json}</tool_call>` tagged format — with
+    /// prose around it — must have the call dispatched, the prose kept
+    /// as the round's text, and the tags/JSON stripped from what's
+    /// persisted as conversation.
+    #[tokio::test]
+    async fn a_qwen_tagged_tool_call_with_surrounding_prose_is_rescued_and_dispatched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("Voy a usar echo.\n<tool_call>\n".to_string()),
+                CompletionEvent::TextDelta(
+                    r#"{"name": "echo", "arguments": {"text": "hi"}}"#.to_string(),
+                ),
+                CompletionEvent::TextDelta("\n</tool_call>".to_string()),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "the tagged call must actually reach the real tool"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallCompleted { result, .. } if result.content == "echoed: hi")),
+        );
+        // The prose survives as round text; the tags and JSON don't.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("Voy a usar echo.")
+            )),
+            "the surrounding prose must be persisted as the round's text"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("<tool_call>") || text.contains("\"name\"")
+            )),
+            "the tagged block must not be persisted as conversational text"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

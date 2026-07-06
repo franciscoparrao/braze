@@ -83,6 +83,18 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // Same posture as `braze-cli`: binaries (and only binaries) install
+    // the tracing subscriber, respecting `RUST_LOG`, writing to stderr
+    // so it never interleaves with the report on stdout. Without this, a
+    // sweep run with `RUST_LOG=info` silently showed nothing — e.g. the
+    // engine's textual-rescue events, the signal that tells whether a
+    // reliability lever actually fired during the bench (found while
+    // validating the Qwen `<tool_call>` rescue, 2026-07-06).
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
+
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
