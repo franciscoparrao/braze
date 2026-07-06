@@ -20,3 +20,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# Advisory cross-process file locking (N-27, docs/AUDITORIA-2026-07-v2.md)
+# — small, extremely stable (used by Cargo itself for its own lock files),
+# no transitive dependencies beyond libc on Unix. Added locally, doesn't
+# touch the root manifest.
+fs2 = "0.4"

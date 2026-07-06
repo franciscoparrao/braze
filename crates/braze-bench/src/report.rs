@@ -4,14 +4,29 @@
 use std::path::Path;
 
 use crate::error::BenchError;
-use crate::metrics::TaskResult;
+use crate::metrics::{FailureCause, TaskResult};
 
 /// One backend's aggregated row in the printed table.
 struct BackendSummary {
     backend: String,
     total: u32,
     passed: u32,
+    /// Rows excluded from every other field below (N-37,
+    /// docs/AUDITORIA-2026-07-v2.md) — reported here, not silently
+    /// dropped, per the "no silent caps" principle: a harness-level
+    /// failure (sandbox setup, reading back the session log, ...) isn't
+    /// a model-capability result at all, and always carries
+    /// `wall_time_ms: 0`/zeroed tokens, so folding it into the pass-rate
+    /// denominator or the averages dilutes both with rows that measure
+    /// nothing about the model.
+    harness_errors: u32,
     avg_wall_time_ms: f64,
+    /// Median wall-clock time, alongside the average (N-37,
+    /// docs/AUDITORIA-2026-07-v2.md) — a handful of slow outliers (a
+    /// model stuck near the timeout on one task) skew the average far
+    /// more than the median, which is what most repetitions actually
+    /// looked like.
+    median_wall_time_ms: f64,
     avg_input_tokens: f64,
     avg_output_tokens: f64,
     /// Average number of model completion rounds per task — the central
@@ -26,6 +41,16 @@ struct BackendSummary {
     /// small local model's pass rate is mostly noise, not signal — this
     /// makes the uncertainty visible instead of implying false precision.
     /// See docs/AUDITORIA-2026-07.md hallazgo F3.
+    ///
+    /// Known remaining limitation (N-37, docs/AUDITORIA-2026-07-v2.md):
+    /// this treats each repetition of the same task as an independent
+    /// Bernoulli draw, but repeated runs of one task against one backend
+    /// are correlated (the same prompt, same tools, same failure modes),
+    /// not i.i.d. — the true interval is wider than what's shown here.
+    /// Left as-is rather than attempting a clustered/cluster-robust
+    /// correction, which is a larger statistical change than the rest of
+    /// this fix; likewise full percentiles (p90/p99) beyond the median
+    /// added here are deferred.
     pass_rate_interval_pp: f64,
 }
 
@@ -50,27 +75,57 @@ fn wilson_interval(passed: u32, total: u32) -> (f64, f64) {
     (center, half_width)
 }
 
+/// Middle value of an already-sorted slice — the mean of the two middle
+/// elements for an even length. `0.0` for an empty slice (mirrors
+/// `wilson_interval`'s `total == 0` handling).
+fn median(sorted: &[u128]) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let mid = sorted.len() / 2;
+    if sorted.len().is_multiple_of(2) {
+        (sorted[mid - 1] as f64 + sorted[mid] as f64) / 2.0
+    } else {
+        sorted[mid] as f64
+    }
+}
+
 fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
-    let total = results.len() as u32;
-    let passed = results.iter().filter(|r| r.passed).count() as u32;
-    let sum_wall_time: u128 = results.iter().map(|r| r.wall_time_ms).sum();
-    let sum_input: u64 = results.iter().map(|r| r.input_tokens as u64).sum();
-    let sum_output: u64 = results.iter().map(|r| r.output_tokens as u64).sum();
-    let sum_rounds: u64 = results.iter().map(|r| r.rounds as u64).sum();
+    let harness_errors = results
+        .iter()
+        .filter(|r| r.failure_cause == Some(FailureCause::HarnessError))
+        .count() as u32;
+    // N-37: excluded from every field below — see `BackendSummary::harness_errors`.
+    let counted: Vec<&&TaskResult> = results
+        .iter()
+        .filter(|r| r.failure_cause != Some(FailureCause::HarnessError))
+        .collect();
+
+    let total = counted.len() as u32;
+    let passed = counted.iter().filter(|r| r.passed).count() as u32;
+    let sum_wall_time: u128 = counted.iter().map(|r| r.wall_time_ms).sum();
+    let sum_input: u64 = counted.iter().map(|r| r.input_tokens as u64).sum();
+    let sum_output: u64 = counted.iter().map(|r| r.output_tokens as u64).sum();
+    let sum_rounds: u64 = counted.iter().map(|r| r.rounds as u64).sum();
     let n = total.max(1) as f64;
     let (_center, half_width) = wilson_interval(passed, total);
+
+    let mut wall_times: Vec<u128> = counted.iter().map(|r| r.wall_time_ms).collect();
+    wall_times.sort_unstable();
 
     BackendSummary {
         backend: backend.to_string(),
         total,
         passed,
+        harness_errors,
         avg_wall_time_ms: sum_wall_time as f64 / n,
+        median_wall_time_ms: median(&wall_times),
         avg_input_tokens: sum_input as f64 / n,
         avg_output_tokens: sum_output as f64 / n,
         avg_rounds: sum_rounds as f64 / n,
-        schema_validation_failures: results.iter().map(|r| r.schema_validation_failures).sum(),
-        tool_execution_failures: results.iter().map(|r| r.tool_execution_failures).sum(),
-        permission_denials: results.iter().map(|r| r.permission_denials).sum(),
+        schema_validation_failures: counted.iter().map(|r| r.schema_validation_failures).sum(),
+        tool_execution_failures: counted.iter().map(|r| r.tool_execution_failures).sum(),
+        permission_denials: counted.iter().map(|r| r.permission_denials).sum(),
         pass_rate_interval_pp: half_width * 100.0,
     }
 }
@@ -119,17 +174,24 @@ pub fn print_table(results: &[TaskResult]) {
     }
 
     println!("\n== Comparación por backend ==");
+    // N-37 (docs/AUDITORIA-2026-07-v2.md): `pass_rate`/`avg_*`/`median_ms`
+    // exclude `harness_err` rows from their denominator — printed as its
+    // own column instead of silently dropped, since a harness-level
+    // failure isn't a model result at all (see
+    // `BackendSummary::harness_errors`'s doc comment).
     println!(
-        "{:<24} {:>16} {:>8} {:>12} {:>14} {:>16} {:>17} {:>14} {:>10}",
+        "{:<24} {:>16} {:>8} {:>12} {:>10} {:>14} {:>16} {:>17} {:>14} {:>10} {:>12}",
         "backend",
         "pass_rate(±95%)",
         "avg_rounds",
         "avg_ms",
+        "median_ms",
         "avg_tok_in",
         "avg_tok_out",
         "schema_fail",
         "exec_fail",
-        "denied"
+        "denied",
+        "harness_err"
     );
     for backend in backend_order {
         let rows: Vec<&TaskResult> = results.iter().filter(|r| r.backend == backend).collect();
@@ -139,16 +201,18 @@ pub fn print_table(results: &[TaskResult]) {
             summary.passed, summary.total, summary.pass_rate_interval_pp
         );
         println!(
-            "{:<24} {:>16} {:>8.1} {:>12.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10}",
+            "{:<24} {:>16} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12}",
             summary.backend,
             pass_rate_cell,
             summary.avg_rounds,
             summary.avg_wall_time_ms,
+            summary.median_wall_time_ms,
             summary.avg_input_tokens,
             summary.avg_output_tokens,
             summary.schema_validation_failures,
             summary.tool_execution_failures,
             summary.permission_denials,
+            summary.harness_errors,
         );
     }
 
@@ -303,5 +367,62 @@ mod tests {
             narrow_at_50 < narrow_at_5,
             "expected the interval to narrow with more repetitions: n=5 -> {narrow_at_5}, n=50 -> {narrow_at_50}"
         );
+    }
+
+    #[test]
+    fn median_of_an_odd_length_slice_is_the_middle_value() {
+        assert_eq!(median(&[10, 20, 30]), 20.0);
+    }
+
+    #[test]
+    fn median_of_an_even_length_slice_averages_the_two_middle_values() {
+        assert_eq!(median(&[10, 20, 30, 40]), 25.0);
+    }
+
+    #[test]
+    fn median_of_an_empty_slice_is_zero() {
+        assert_eq!(median(&[]), 0.0);
+    }
+
+    /// Regression test for N-37 (docs/AUDITORIA-2026-07-v2.md): a
+    /// `HarnessError` row (sandbox setup failed, session log unreadable,
+    /// ...) isn't a model-capability result — it must not count toward
+    /// the pass-rate denominator or dilute the wall-time/token averages
+    /// with its always-zeroed fields.
+    #[test]
+    fn summarize_excludes_harness_errors_from_denominator_and_averages() {
+        let a = result(true, 100, 10, 2);
+        let b = result(true, 300, 30, 6);
+        let mut harness_failure = result(false, 0, 0, 0);
+        harness_failure.failure_cause = Some(crate::metrics::FailureCause::HarnessError);
+        let rows = vec![&a, &b, &harness_failure];
+
+        let summary = summarize("ollama:x", &rows);
+
+        assert_eq!(
+            summary.total, 2,
+            "the harness-error row must not count toward total"
+        );
+        assert_eq!(summary.passed, 2);
+        assert_eq!(summary.harness_errors, 1);
+        assert_eq!(
+            summary.avg_wall_time_ms, 200.0,
+            "a harness-error row's wall_time_ms:0 must not drag the average down"
+        );
+    }
+
+    #[test]
+    fn summarize_computes_a_median_wall_time_alongside_the_average() {
+        // One slow outlier (900ms) skews the average far more than the
+        // median — this is the whole point of reporting both.
+        let a = result(true, 100, 0, 0);
+        let b = result(true, 100, 0, 0);
+        let c = result(true, 900, 0, 0);
+        let rows = vec![&a, &b, &c];
+
+        let summary = summarize("ollama:x", &rows);
+
+        assert_eq!(summary.median_wall_time_ms, 100.0);
+        assert!(summary.avg_wall_time_ms > summary.median_wall_time_ms);
     }
 }

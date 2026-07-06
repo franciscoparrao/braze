@@ -28,6 +28,9 @@ pub struct AnthropicBackend {
     /// test-only constructor below so tests can point at a local fake
     /// server without touching the wire format.
     base_url: String,
+    /// `None` (the default) leaves Anthropic's own provider default
+    /// (~1.0) in effect. See [`AnthropicBackend::with_temperature`].
+    temperature: Option<f32>,
 }
 
 impl AnthropicBackend {
@@ -37,6 +40,7 @@ impl AnthropicBackend {
             model,
             client: crate::http_client::build_client(),
             base_url: ANTHROPIC_API_URL.to_string(),
+            temperature: None,
         }
     }
 
@@ -49,7 +53,19 @@ impl AnthropicBackend {
             model,
             client: crate::http_client::build_client(),
             base_url,
+            temperature: None,
         }
+    }
+
+    /// Overrides the sampling temperature sent to Anthropic — e.g. so
+    /// `braze-bench` can give every backend in a sweep the same value
+    /// instead of comparing Anthropic at its provider default against
+    /// Ollama pinned to a fixed low temperature (N-34,
+    /// docs/AUDITORIA-2026-07-v2.md). Chainable, mirrors
+    /// `OllamaBackend::with_temperature`.
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(temperature);
+        self
     }
 }
 
@@ -68,7 +84,7 @@ impl ModelBackend for AnthropicBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let body = build_request(&req, &self.model);
+        let body = build_request(&req, &self.model, self.temperature);
         tracing::info!(
             tool_count = body.tools.len(),
             "starting anthropic completion turn"

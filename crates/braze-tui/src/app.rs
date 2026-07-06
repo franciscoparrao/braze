@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::approval::ApprovalRequest;
-use crate::composer_trigger::{ComposerTrigger, detect_trigger};
+use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len};
 use crate::error::TuiError;
 use crate::history_cell::{
     AssistantMarkdownCell, ErrorCell, ExpandedToolOutputCell, HelpCell, HistoryCell, NoticeCell,
@@ -34,7 +34,7 @@ use crate::history_cell::{
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::mentions::{list_files, matching_files};
 use crate::observer::{ChannelObserver, TuiUpdate};
-use crate::slash_commands::{SLASH_COMMANDS, SlashCommand, matching_commands};
+use crate::slash_commands::{SlashCommand, matching_commands};
 use crate::status_bar;
 use crate::terminal::{ACTIVE_ROWS, Backend};
 use crate::theme::Theme;
@@ -101,11 +101,20 @@ enum ComposerPopup {
         /// the `/`) — `accept_popup_selection` deletes exactly this many
         /// characters backward before inserting the full command name.
         query_len: usize,
+        /// Characters still typed *after* the cursor within the same
+        /// token (e.g. cursor mid-word) — deleted forward too, so
+        /// accepting a completion never strands a leftover suffix right
+        /// after the inserted replacement (bajo,
+        /// docs/AUDITORIA-2026-07-v2.md, "replace_trigger_token deja
+        /// residuo con el cursor a mitad de token"). See
+        /// `composer_trigger::token_suffix_len`.
+        suffix_len: usize,
         matches: Vec<&'static SlashCommand>,
         selected: usize,
     },
     Mention {
         query_len: usize,
+        suffix_len: usize,
         matches: Vec<String>,
         selected: usize,
     },
@@ -316,6 +325,13 @@ impl App {
             match key.code {
                 KeyCode::Char('y' | 'Y') => self.answer_pending_approval(true, terminal)?,
                 KeyCode::Char('n' | 'N') | KeyCode::Esc => {
+                    // Bajo (docs/AUDITORIA-2026-07-v2.md, "last_esc_at no
+                    // se limpia cuando otro handler consume el Esc"): this
+                    // Esc is answering an approval, not arming/completing
+                    // the idle Esc-Esc backtrack double-tap — a stale
+                    // timestamp here could make a later, unrelated single
+                    // idle Esc misread as the second tap.
+                    self.last_esc_at = None;
                     self.answer_pending_approval(false, terminal)?
                 }
                 // Ignore everything else while a decision is pending —
@@ -351,6 +367,11 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::Esc => {
+                    // Bajo (docs/AUDITORIA-2026-07-v2.md, "last_esc_at no
+                    // se limpia cuando otro handler consume el Esc"): see
+                    // the identical note on the pending-approval Esc arm
+                    // above.
+                    self.last_esc_at = None;
                     self.popup = None;
                     return Ok(());
                 }
@@ -372,6 +393,10 @@ impl App {
                 self.should_quit = true;
             }
             (KeyCode::Esc, KeyModifiers::NONE) if self.turn_running => {
+                // Bajo (docs/AUDITORIA-2026-07-v2.md, "last_esc_at no se
+                // limpia cuando otro handler consume el Esc"): see the
+                // identical note on the pending-approval Esc arm above.
+                self.last_esc_at = None;
                 self.interrupt_turn(terminal)?;
             }
             // Idle Esc: not consumed by anything else above (no popup,
@@ -461,6 +486,7 @@ impl App {
             return;
         };
 
+        let suffix_len = token_suffix_len(line, cursor.1);
         self.popup = match detect_trigger(line, cursor.1, is_first_line) {
             Some(ComposerTrigger::Slash(query)) => {
                 let matches: Vec<&'static SlashCommand> = matching_commands(&query)
@@ -469,6 +495,7 @@ impl App {
                     .collect();
                 (!matches.is_empty()).then(|| ComposerPopup::Slash {
                     query_len: query.chars().count(),
+                    suffix_len,
                     matches,
                     selected: 0,
                 })
@@ -484,6 +511,7 @@ impl App {
                 };
                 (!matches.is_empty()).then(|| ComposerPopup::Mention {
                     query_len: query.chars().count(),
+                    suffix_len,
                     matches,
                     selected: 0,
                 })
@@ -540,21 +568,23 @@ impl App {
         match popup {
             ComposerPopup::Slash {
                 query_len,
+                suffix_len,
                 matches,
                 selected,
             } => {
                 if let Some(cmd) = matches.get(selected) {
-                    self.replace_trigger_token(query_len, cmd.name);
+                    self.replace_trigger_token(query_len, suffix_len, cmd.name);
                 }
                 Ok(())
             }
             ComposerPopup::Mention {
                 query_len,
+                suffix_len,
                 matches,
                 selected,
             } => {
                 if let Some(path) = matches.get(selected) {
-                    self.replace_trigger_token(query_len, path);
+                    self.replace_trigger_token(query_len, suffix_len, path);
                 }
                 Ok(())
             }
@@ -567,18 +597,25 @@ impl App {
         }
     }
 
-    /// Replaces the `/query` or `@query` token behind the cursor with
-    /// `replacement` (plus a trailing space) — deletes exactly
-    /// `query_len` characters backward (the query, not the `/`/`@`
-    /// marker itself) then inserts the full replacement. Does not submit
-    /// or execute anything by itself: accepting a `/help` suggestion
-    /// only autocompletes the composer to `"/help "`, same as accepting
-    /// any other word — a separate Enter (now with the popup closed)
-    /// actually submits/executes it, via `submit`'s own slash-command
-    /// interception.
-    fn replace_trigger_token(&mut self, query_len: usize, replacement: &str) {
+    /// Replaces the whole `/query` or `@query` token around the cursor
+    /// with `replacement` (plus a trailing space): deletes exactly
+    /// `query_len` characters backward (the query, not the `/`/`@` marker
+    /// itself) and `suffix_len` characters forward (whatever was still
+    /// typed after the cursor within the same token — bajo,
+    /// docs/AUDITORIA-2026-07-v2.md, "replace_trigger_token deja residuo
+    /// con el cursor a mitad de token"; see
+    /// `composer_trigger::token_suffix_len`), then inserts the full
+    /// replacement. Does not submit or execute anything by itself:
+    /// accepting a `/help` suggestion only autocompletes the composer to
+    /// `"/help "`, same as accepting any other word — a separate Enter
+    /// (now with the popup closed) actually submits/executes it, via
+    /// `submit`'s own slash-command interception.
+    fn replace_trigger_token(&mut self, query_len: usize, suffix_len: usize, replacement: &str) {
         for _ in 0..query_len {
             self.composer.delete_char();
+        }
+        if suffix_len > 0 {
+            self.composer.delete_str(suffix_len);
         }
         self.composer.insert_str(replacement);
         self.composer.insert_str(" ");
@@ -668,6 +705,15 @@ impl App {
     /// intact and still `--resume`-able. The scrollback keeps showing
     /// everything that already happened — nothing is hidden — only
     /// which session id future turns append to changes.
+    ///
+    /// Known accepted limitation (bajo, docs/AUDITORIA-2026-07-v2.md,
+    /// "replay de backtrack fallido deja archivo de sesión huérfano"): if
+    /// replaying the prefix fails partway (disk full, permission error),
+    /// the new session's partially-written file is left on disk,
+    /// unreferenced by any live state. `SessionStore` (frozen contract)
+    /// has no delete method, and adding one for this rare, harmless
+    /// (nothing points to the orphan; it's never read back) cleanup case
+    /// isn't proportionate to the fix.
     async fn backtrack_to(
         &mut self,
         event_index: usize,
@@ -688,8 +734,26 @@ impl App {
         };
 
         let new_session = SessionId::new();
-        for event in events.iter().take(event_index) {
+        let prefix = &events[..event_index.min(events.len())];
+        for event in prefix {
             if let Err(err) = self.store.append(&new_session, event).await {
+                return self.commit_cell(
+                    &NoticeCell {
+                        message: format!("no se pudo retroceder: {err}"),
+                        theme: self.theme,
+                    },
+                    terminal,
+                );
+            }
+        }
+        // N-26 (docs/AUDITORIA-2026-07-v2.md): the replicated prefix can
+        // end with an orphaned tool_use whose repair (if any existed at
+        // all) lives *after* the cut point in the original log — repair
+        // it here too, exactly as `Engine::run_turn` does for a
+        // crash-orphaned tool_use, so the new session doesn't inherit a
+        // permanently-unresumable one.
+        for repair in braze_engine::synthesize_orphan_repairs(prefix) {
+            if let Err(err) = self.store.append(&new_session, &repair).await {
                 return self.commit_cell(
                     &NoticeCell {
                         message: format!("no se pudo retroceder: {err}"),
@@ -724,12 +788,19 @@ impl App {
     }
 
     /// Executes a built-in `/command` — only ever called from `submit`
-    /// after confirming `command` exactly matches a `SLASH_COMMANDS`
-    /// entry, so the wildcard arm here is unreachable in practice, not a
+    /// after `parse_slash_command` confirms `command` is a registered
+    /// name, so the wildcard arm here is unreachable in practice, not a
     /// silent fallback for a typo.
     fn run_slash_command(
         &mut self,
         command: &str,
+        // Accepted (not yet used by any built-in command) so a command
+        // name with trailing text after it is recognized as that command
+        // with an argument, instead of falling through to `submit`'s
+        // "not a recognized command" branch and being sent to the model
+        // verbatim — bajo (docs/AUDITORIA-2026-07-v2.md, "slash command
+        // con argumentos (/quit ahora) se manda al modelo").
+        _args: Option<&str>,
         terminal: &mut Terminal<Backend>,
     ) -> Result<(), TuiError> {
         match command {
@@ -751,16 +822,18 @@ impl App {
 
         // Built-in slash commands are handled entirely client-side and
         // never reach `Engine::run_turn` — the engine has no notion of
-        // them at all (see `slash_commands`'s doc comment). Only an
-        // exact match (post-autocomplete) counts; a message that merely
-        // starts with `/` but isn't a recognized command name is sent
-        // to the model as ordinary text instead.
-        if let Some(command) = trimmed.strip_prefix('/')
-            && SLASH_COMMANDS.iter().any(|c| c.name == command)
+        // them at all (see `slash_commands`'s doc comment). Only the
+        // first whitespace-delimited token needs to match a registered
+        // command name (not the whole string) so a recognized command
+        // followed by trailing text (e.g. "/quit ahora") is still
+        // recognized as that command instead of falling through to be
+        // sent to the model as ordinary text.
+        if let Some(rest) = trimmed.strip_prefix('/')
+            && let Some((command, args)) = crate::slash_commands::parse_slash_command(rest)
         {
             self.composer = TextArea::default();
             self.popup = None;
-            return self.run_slash_command(command, terminal);
+            return self.run_slash_command(command, args, terminal);
         }
 
         let user_text = trimmed.to_string();
@@ -1249,16 +1322,32 @@ fn clamp_height(line_count: usize) -> u16 {
     line_count.clamp(1, usize::from(u16::MAX)) as u16
 }
 
-/// Caps `text` to at most `max_chars` characters, appending a visible
-/// "…" marker if anything had to be cut — N-31, docs/AUDITORIA-2026-07-v2.md.
-/// Character-count (not byte-length) so multi-byte UTF-8 is never split
-/// mid-codepoint.
+/// Caps `text` to at most `max_chars` terminal display *columns*,
+/// appending a visible "…" marker if anything had to be cut — N-31,
+/// docs/AUDITORIA-2026-07-v2.md. Budgets by display width
+/// (`unicode_width`), not `chars().count()` (bajo,
+/// docs/AUDITORIA-2026-07-v2.md, "truncación por char-count vs. ancho de
+/// display (CJK)"): a CJK/emoji character occupies ~2 columns, so a
+/// char-count budget could let the result overflow the terminal width
+/// this is meant to fit — exactly the y/n approval hint line N-31 exists
+/// to keep visible.
 fn truncate_for_display(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+    if text.width() <= max_chars {
         return text.to_string();
     }
     let budget = max_chars.saturating_sub(1); // leave room for the marker itself
-    let mut truncated: String = text.chars().take(budget).collect();
+    let mut truncated = String::new();
+    let mut width_so_far = 0;
+    for c in text.chars() {
+        let w = c.width().unwrap_or(0);
+        if width_so_far + w > budget {
+            break;
+        }
+        width_so_far += w;
+        truncated.push(c);
+    }
     truncated.push('…');
     truncated
 }
@@ -1311,6 +1400,27 @@ mod tests {
         let truncated = truncate_for_display(&text, 5);
         assert_eq!(truncated.chars().count(), 5);
         assert!(truncated.ends_with('…'));
+    }
+
+    /// Regression test for the "truncación por char-count vs. ancho de
+    /// display (CJK)" bajo (docs/AUDITORIA-2026-07-v2.md): each CJK
+    /// character occupies 2 display columns, so a budget in columns must
+    /// keep far fewer *characters* than the same budget in a Latin
+    /// string would.
+    #[test]
+    fn truncate_for_display_budgets_by_display_width_not_char_count() {
+        use unicode_width::UnicodeWidthStr;
+
+        let cjk = "文".repeat(20); // each char is 2 columns wide
+        let truncated = truncate_for_display(&cjk, 10);
+        assert!(
+            truncated.width() <= 10,
+            "expected the result to fit within 10 display columns, got width {} ({truncated:?})",
+            truncated.width()
+        );
+        // 9 columns of budget (10 minus the marker's 1 column) / 2
+        // columns per char = 4 full characters, plus the marker.
+        assert_eq!(truncated, "文文文文…");
     }
 
     /// Regression test for N-32 (docs/AUDITORIA-2026-07-v2.md): a bare

@@ -16,7 +16,7 @@ use braze_permissions::{
 use braze_session::{FileSessionStore, SessionStore, SimpleContextCompactor};
 use braze_types::SessionId;
 
-use crate::backend_spec::BackendSpec;
+use crate::backend_spec::{BackendSpec, SamplingSpec};
 use crate::error::BenchError;
 use crate::metrics::{RunOutcome, TaskResult, compute_metrics};
 use crate::sandbox::TaskSandbox;
@@ -30,30 +30,58 @@ use crate::task::TaskDef;
 /// it is. See docs/AUDITORIA-2026-07.md hallazgo F2.
 pub const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// Builds the system prompt for one task run, including the sandbox path
-/// so the model knows where relative paths resolve to — without this, a
-/// model has no way to know its working directory isn't wherever it might
-/// otherwise assume.
-fn system_prompt(sandbox_path: &std::path::Path) -> String {
-    format!(
-        "You are braze, an experimental agentic CLI assistant. Working directory: {}.",
-        sandbox_path.display()
-    )
+/// Always denies, after persisting the same `PermissionRequested`/
+/// `PermissionDecided` pair the real confirmation prompts do (see
+/// `braze-cli::TerminalConfirmationPrompt`, `braze-tui::approval`) —
+/// without this, a denial never shows up in the session log, so
+/// `metrics::compute_metrics`'s `permission_denials` count stays stuck at
+/// 0 and the denial gets miscounted as a `tool_execution_failures`
+/// instead (the engine already appended `ToolCallStarted` before the
+/// tool's own dispatch path rejects it). See N-35,
+/// docs/AUDITORIA-2026-07-v2.md.
+///
+/// Combined with a `WorkdirAllowlist` scoped to a throwaway sandbox
+/// directory, this means: safe/reversible actions (reads, writes inside
+/// the sandbox, allowlisted shell commands) proceed exactly as they would
+/// interactively, while anything the classifier flags `Irreversible` — a
+/// hallucinated `dd`/`curl`/`mv`, a write outside the sandbox — is
+/// refused before it ever runs for real.
+struct DenyAll {
+    session: SessionId,
+    store: Arc<dyn SessionStore>,
 }
-
-/// Always denies. Combined with a `WorkdirAllowlist` scoped to a
-/// throwaway sandbox directory, this means: safe/reversible actions
-/// (reads, writes inside the sandbox, allowlisted shell commands) proceed
-/// exactly as they would interactively, while anything the classifier
-/// flags `Irreversible` — a hallucinated `dd`/`curl`/`mv`, a write
-/// outside the sandbox — is refused before it ever runs for real. See
-/// `braze_tools_local::test_support::AlwaysDeny` for the identical
-/// `#[cfg(test)]`-only shape this mirrors.
-struct DenyAll;
 
 #[async_trait]
 impl ConfirmationPrompt for DenyAll {
-    async fn confirm(&self, _action: &ActionDescriptor) -> bool {
+    async fn confirm(&self, action: &ActionDescriptor) -> bool {
+        let key = braze_permissions::derive_permission_key(action);
+
+        // Best-effort, same as the real prompts: a session-store hiccup
+        // here must not change the (always-deny) decision itself.
+        let _ = self
+            .store
+            .append(
+                &self.session,
+                &braze_events::AgentEvent::PermissionRequested {
+                    action: action.to_string(),
+                    reversible: false,
+                    key: key.clone(),
+                },
+            )
+            .await;
+
+        let _ = self
+            .store
+            .append(
+                &self.session,
+                &braze_events::AgentEvent::PermissionDecided {
+                    action: action.to_string(),
+                    allowed: false,
+                    key,
+                },
+            )
+            .await;
+
         false
     }
 }
@@ -69,20 +97,9 @@ pub async fn run_task(
     task: &TaskDef,
     repetition: u32,
     timeout: Duration,
+    sampling: SamplingSpec,
 ) -> Result<TaskResult, BenchError> {
     let sandbox = TaskSandbox::new(task)?;
-
-    let allowlist = WorkdirAllowlist::new(sandbox.path());
-    let classifier = DefaultClassifier::new(WorkdirAllowlist::new(sandbox.path()));
-    let guard = PermissionGuard::new(allowlist, Box::new(classifier), Box::new(DenyAll));
-    // `with_workdir`, not `new`: the bench binary's own process cwd is
-    // wherever it happened to be launched from, not this task's sandbox —
-    // using `new` (which defaults to the process cwd) would silently
-    // decouple the guard's `WorkdirAllowlist` (scoped to the sandbox
-    // above) from where the tools' actual I/O lands. See
-    // docs/AUDITORIA-2026-07.md hallazgo F1.
-    let tools_provider = braze_tools_local::LocalToolsProvider::with_workdir(guard, sandbox.path());
-    let tools = braze_tools_core::ToolRegistry::new(vec![Box::new(tools_provider)]);
 
     let session_dir = std::env::temp_dir().join(format!(
         "braze-bench-session-{}-{}",
@@ -92,21 +109,52 @@ pub async fn run_task(
     let store: Arc<dyn SessionStore> = Arc::new(FileSessionStore::new(session_dir.clone()));
     let session = SessionId::new();
 
-    let model = spec.build(config)?;
+    let allowlist = WorkdirAllowlist::new(sandbox.path());
+    let classifier = DefaultClassifier::new(WorkdirAllowlist::new(sandbox.path()));
+    let deny_all = DenyAll {
+        session,
+        store: Arc::clone(&store),
+    };
+    let guard = PermissionGuard::new(allowlist, Box::new(classifier), Box::new(deny_all));
+    // `with_workdir`, not `new`: the bench binary's own process cwd is
+    // wherever it happened to be launched from, not this task's sandbox —
+    // using `new` (which defaults to the process cwd) would silently
+    // decouple the guard's `WorkdirAllowlist` (scoped to the sandbox
+    // above) from where the tools' actual I/O lands. See
+    // docs/AUDITORIA-2026-07.md hallazgo F1.
+    let tools_provider = braze_tools_local::LocalToolsProvider::with_workdir(guard, sandbox.path());
+    let tools = braze_tools_core::ToolRegistry::new(vec![Box::new(tools_provider)]);
+
+    let model = spec.build(config, sampling)?;
     // C10 (docs/AUDITORIA-2026-07.md): mirrors braze-cli's wiring, so a
     // bench run measures the same tactical window/threshold/best_of_n
     // behavior a real `braze` invocation with this config would use.
-    let engine = braze_engine::Engine::new(
+    let mut engine = braze_engine::Engine::new(
         model,
         tools,
         Arc::clone(&store),
         Box::new(SimpleContextCompactor::new(config.tactical_window)),
         Box::new(braze_events::ChannelTaskNotifier::new()),
-        system_prompt(sandbox.path()),
+        // N-36 (docs/AUDITORIA-2026-07-v2.md): the exact same anti-loop
+        // system prompt `braze chat`/`braze run` build by default — a
+        // bare one-line prompt with no tool-use guidance measured a
+        // different (worse) system than the one users actually run.
+        braze_config::default_system_prompt(sandbox.path()),
         config.max_tokens,
     )
     .with_tactical_compaction_threshold(config.tactical_compaction_threshold)
-    .with_best_of_n(config.best_of_n);
+    .with_best_of_n(config.best_of_n)
+    .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue);
+
+    // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget
+    // — without it, a bench pass rate for an Ollama backend measured a
+    // context-management regime production never actually uses.
+    if spec.ollama_model(config).is_some() {
+        engine = engine.with_context_budget(braze_config::ollama_context_budget_tokens(
+            config.ollama_num_ctx,
+            config.max_tokens,
+        ));
+    }
 
     let started = Instant::now();
     let run_outcome = match tokio::time::timeout(
@@ -162,4 +210,52 @@ pub async fn run_task(
         run_outcome,
         expected_files_found,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use braze_events::AgentEvent;
+    use braze_permissions::ActionDescriptor;
+
+    fn temp_store() -> (Arc<dyn SessionStore>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "braze-bench-runner-test-{}-{}",
+            std::process::id(),
+            SessionId::new()
+        ));
+        (Arc::new(FileSessionStore::new(dir.clone())), dir)
+    }
+
+    /// Regression test for N-35 (docs/AUDITORIA-2026-07-v2.md): `DenyAll`
+    /// must persist the same `PermissionRequested`/`PermissionDecided`
+    /// pair the real confirmation prompts do — otherwise a bench run's
+    /// denials never show up in the session log, and
+    /// `metrics::compute_metrics`'s `permission_denials` count (which
+    /// scans exactly those events) is stuck at 0 no matter how many
+    /// actions actually got refused.
+    #[tokio::test]
+    async fn deny_all_persists_the_denial_before_returning_false() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let deny_all = DenyAll {
+            session,
+            store: Arc::clone(&store),
+        };
+
+        let action = ActionDescriptor::DeleteFile {
+            path: std::path::PathBuf::from("/tmp/x"),
+        };
+        let allowed = deny_all.confirm(&action).await;
+        assert!(!allowed);
+
+        let events = store.load(&session).await.expect("load events");
+        assert!(matches!(events[0], AgentEvent::PermissionRequested { .. }));
+        match &events[1] {
+            AgentEvent::PermissionDecided { allowed, .. } => assert!(!allowed),
+            other => panic!("expected PermissionDecided, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
 }

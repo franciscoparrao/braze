@@ -42,8 +42,11 @@ struct Cli {
     /// Cuántas veces correr cada (tarea, backend). Con modelos locales
     /// chicos la varianza corrida-a-corrida es alta — un pass_rate con
     /// repetitions=1 es ruido, no señal. Recomendado >=5 para comparar
-    /// backends Ollama en serio.
-    #[arg(long, default_value_t = 1)]
+    /// backends Ollama en serio. `0` se rechaza explícitamente (bajo,
+    /// docs/AUDITORIA-2026-07-v2.md, "--repetitions 0 acepta
+    /// silenciosamente") — antes producía un sweep vacío con exit 0 y
+    /// ningún aviso de que no se probó nada.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
     repetitions: u32,
     /// Presupuesto de tiempo por intento de tarea, en segundos. Un modelo
     /// que no converge puede tardar mucho más que uno que sí (se ha
@@ -53,6 +56,20 @@ struct Cli {
     /// útil) que es.
     #[arg(long, default_value_t = runner::DEFAULT_TASK_TIMEOUT.as_secs())]
     task_timeout_secs: u64,
+    /// Temperatura de sampling aplicada por igual a los tres backends
+    /// (N-34, docs/AUDITORIA-2026-07-v2.md) — sin esto, comparar Ollama
+    /// fijado a una temperatura baja contra Anthropic/OpenRouter en su
+    /// default de proveedor (~1.0) compara regímenes de sampling
+    /// distintos, no modelos distintos.
+    #[arg(long, default_value_t = 0.2)]
+    temperature: f32,
+    /// Seed base para sampling reproducible en Ollama/OpenRouter (la API
+    /// de Anthropic no tiene parámetro de seed). Cada repetición usa
+    /// `seed + repetición` para no colapsar `--repetitions` en copias
+    /// idénticas. Sin este flag (default), cada corrida usa el sampling
+    /// no determinístico normal del proveedor.
+    #[arg(long)]
+    seed: Option<u64>,
     /// No ejecutar 'ollama stop <modelo>' al terminar con un backend Ollama.
     /// Por defecto el sweep sí lo hace: en esta máquina (38GB RAM, ~1.4GB
     /// libres bajo carga) un modelo grande que queda residente mientras
@@ -87,6 +104,22 @@ async fn run() -> Result<(), BenchError> {
         )));
     }
 
+    // Bajo (docs/AUDITORIA-2026-07-v2.md, "--output se valida recién tras
+    // el sweep entero"): validated *before* the (possibly very slow)
+    // sweep runs, not only when `report::write_json` finally tries to
+    // create the file — a typo'd output directory used to lose the
+    // whole sweep's results (still visible on stdout, but never written
+    // out) instead of failing fast.
+    if let Some(output_path) = &cli.output
+        && let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        return Err(BenchError::Startup(format!(
+            "el directorio de --output {parent:?} no existe"
+        )));
+    }
+
     let specs: Vec<(String, BackendSpec)> = cli
         .backends
         .iter()
@@ -109,7 +142,11 @@ async fn run() -> Result<(), BenchError> {
         let display_name = spec.display_name(&config);
         // A backend that can't even build (Ollama down, no API key, ...)
         // is skipped, not fatal — the rest of the comparison still runs.
-        if let Err(err) = spec.build(&config) {
+        let probe_sampling = backend_spec::SamplingSpec {
+            temperature: cli.temperature,
+            seed: cli.seed,
+        };
+        if let Err(err) = spec.build(&config, probe_sampling) {
             eprintln!("braze-bench: omitiendo backend '{raw_spec}' ({display_name}): {err}");
             continue;
         }
@@ -126,7 +163,18 @@ async fn run() -> Result<(), BenchError> {
                 } else {
                     println!("-> {display_name} :: {}", task.id);
                 }
-                match runner::run_task(spec, &config, task, repetition, task_timeout).await {
+                // A fixed base seed offset by `repetition` keeps sweeps
+                // reproducible across separate invocations while still
+                // giving `--repetitions` genuine variance to measure
+                // within one sweep — the same base seed on every
+                // repetition would collapse them into identical copies.
+                let sampling = backend_spec::SamplingSpec {
+                    temperature: cli.temperature,
+                    seed: cli.seed.map(|s| s.wrapping_add(u64::from(repetition))),
+                };
+                match runner::run_task(spec, &config, task, repetition, task_timeout, sampling)
+                    .await
+                {
                     Ok(result) => results.push(result),
                     Err(err) => {
                         // A harness-level failure (sandbox setup, reading

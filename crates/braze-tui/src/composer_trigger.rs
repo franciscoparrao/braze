@@ -53,6 +53,25 @@ pub fn detect_trigger(line: &str, col: usize, is_first_line: bool) -> Option<Com
     None
 }
 
+/// Length (in chars) of whatever remains typed *after* the cursor, within
+/// the same whitespace-delimited token `detect_trigger` found behind it —
+/// bajo (docs/AUDITORIA-2026-07-v2.md, "replace_trigger_token deja
+/// residuo con el cursor a mitad de token"): `detect_trigger` only scans
+/// backward from the cursor, so accepting a completion with the cursor
+/// mid-token (e.g. `@fo|o.txt`, cursor at `|`) left the "o.txt" suffix
+/// stranded right after the inserted replacement. Scans forward from
+/// `col` (char-indexed, same convention as `detect_trigger`) to the next
+/// whitespace or end of line.
+pub fn token_suffix_len(line: &str, col: usize) -> usize {
+    let chars: Vec<char> = line.chars().collect();
+    let col = col.min(chars.len());
+    let mut end = col;
+    while end < chars.len() && !chars[end].is_whitespace() {
+        end += 1;
+    }
+    end - col
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +137,27 @@ mod tests {
             detect_trigger("/help", 3, true),
             Some(ComposerTrigger::Slash("he".to_string()))
         );
+    }
+
+    #[test]
+    fn token_suffix_len_finds_the_remainder_up_to_whitespace() {
+        // "@fo|o.txt" — cursor at column 3 (after "@fo"), "o.txt" (5
+        // chars) still follows before the next whitespace/end.
+        assert_eq!(token_suffix_len("@foo.txt", 3), 5);
+    }
+
+    #[test]
+    fn token_suffix_len_is_zero_at_the_end_of_the_token() {
+        assert_eq!(token_suffix_len("@help", 5), 0);
+    }
+
+    #[test]
+    fn token_suffix_len_stops_at_the_next_whitespace() {
+        assert_eq!(token_suffix_len("@src/main resto", 4), 5);
+    }
+
+    #[test]
+    fn token_suffix_len_is_zero_on_an_empty_line() {
+        assert_eq!(token_suffix_len("", 0), 0);
     }
 }

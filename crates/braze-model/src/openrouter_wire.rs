@@ -51,6 +51,18 @@ pub(crate) struct OpenRouterRequest {
     pub stream: bool,
     pub max_tokens: u32,
     pub stream_options: OpenRouterStreamOptions,
+    /// `None` omits the field, leaving whichever underlying model
+    /// OpenRouter routes to at its own default. See
+    /// [`OpenRouterBackend::with_temperature`](crate::openrouter::OpenRouterBackend::with_temperature).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    /// Standard OpenAI-compatible `seed` field — best-effort reproducibility
+    /// support that varies per underlying provider OpenRouter routes to,
+    /// but still worth forwarding when set (N-34,
+    /// docs/AUDITORIA-2026-07-v2.md). See
+    /// [`OpenRouterBackend::with_seed`](crate::openrouter::OpenRouterBackend::with_seed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
 }
 
 /// Requesting `include_usage` is what makes an OpenAI-compatible streaming
@@ -112,7 +124,12 @@ pub(crate) struct OpenRouterFunctionDef {
 /// Like Ollama (and unlike Anthropic), OpenAI-compatible APIs have no
 /// separate top-level "system" field — the system prompt is just the first
 /// message in the array, with `role: "system"`.
-pub(crate) fn build_request(req: &CompletionRequest, model: &str) -> OpenRouterRequest {
+pub(crate) fn build_request(
+    req: &CompletionRequest,
+    model: &str,
+    temperature: Option<f32>,
+    seed: Option<u64>,
+) -> OpenRouterRequest {
     let mut messages = Vec::new();
 
     if !req.system_prompt.is_empty() {
@@ -136,6 +153,8 @@ pub(crate) fn build_request(req: &CompletionRequest, model: &str) -> OpenRouterR
         stream_options: OpenRouterStreamOptions {
             include_usage: true,
         },
+        temperature,
+        seed,
     }
 }
 
@@ -298,7 +317,14 @@ impl OpenRouterStreamState {
     /// Processes one parsed chunk (never the `[DONE]` sentinel — that's
     /// [`Self::handle_done_sentinel`]). Never panics.
     pub fn handle_chunk(&mut self, json: &Value) -> Vec<CompletionEvent> {
-        if let Some(error) = json.get("error") {
+        // `.filter(|e| !e.is_null())`: some gateways (LiteLLM/vLLM)
+        // always include the `"error"` key, `null` on a healthy chunk —
+        // without this, `Value::Null.get("message")`/`.as_str()` both
+        // yield `None`, `unwrap_or("unknown error")` fires, and a
+        // perfectly healthy stream gets killed (bajo,
+        // docs/AUDITORIA-2026-07-v2.md, "OpenRouter \"error\":null en un
+        // chunk mata el stream").
+        if let Some(error) = json.get("error").filter(|e| !e.is_null()) {
             let message = error
                 .get("message")
                 .and_then(Value::as_str)
@@ -414,8 +440,15 @@ impl OpenRouterStreamState {
                 // Synthesize a fallback id, same pattern `ollama_wire.rs`
                 // already uses for the analogous case.
                 let id = pending.id.filter(|id| !id.is_empty()).unwrap_or_else(|| {
+                    // `crate::synth_id::process_nonce()`: without it, a
+                    // fresh process's counter restarting at 0 after
+                    // `--resume` can synthesize an id identical to one
+                    // already persisted by an earlier run of the same
+                    // session (bajo, docs/AUDITORIA-2026-07-v2.md, "ids
+                    // de tool call con contador global de proceso").
                     format!(
-                        "openrouter-tool-call-{}",
+                        "openrouter-tool-call-{}-{}",
+                        crate::synth_id::process_nonce(),
                         TOOL_CALL_COUNTER.fetch_add(1, Ordering::Relaxed)
                     )
                 });
@@ -517,7 +550,7 @@ mod tests {
             system_prompt: "be terse".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "openai/gpt-4o-mini");
+        let wire = build_request(&req, "openai/gpt-4o-mini", None, None);
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
         assert_eq!(wire.messages[0].content.as_deref(), Some("be terse"));
@@ -525,6 +558,24 @@ mod tests {
         assert!(wire.stream);
         assert!(wire.stream_options.include_usage);
         assert_eq!(wire.max_tokens, 100);
+        assert_eq!(wire.temperature, None);
+        assert_eq!(wire.seed, None);
+    }
+
+    /// Regression test for N-34 (docs/AUDITORIA-2026-07-v2.md): explicit
+    /// temperature/seed must actually reach the wire request — what makes
+    /// an OpenRouter run comparable and reproducible across sweeps.
+    #[test]
+    fn build_request_forwards_explicit_temperature_and_seed() {
+        let req = CompletionRequest {
+            messages: vec![Message::text(Role::User, "hi")],
+            tool_stubs: vec![],
+            system_prompt: String::new(),
+            max_tokens: 100,
+        };
+        let wire = build_request(&req, "openai/gpt-4o-mini", Some(0.2), Some(42));
+        assert_eq!(wire.temperature, Some(0.2));
+        assert_eq!(wire.seed, Some(42));
     }
 
     #[test]
@@ -804,6 +855,25 @@ mod tests {
         assert!(events.is_empty());
         assert_eq!(state.stream_error.as_deref(), Some("insufficient credits"));
         assert!(!state.done);
+    }
+
+    /// Regression test (bajo, docs/AUDITORIA-2026-07-v2.md, "OpenRouter
+    /// \"error\":null en un chunk mata el stream"): some gateways
+    /// (LiteLLM/vLLM) always include the `"error"` key, `null` on a
+    /// healthy chunk — this must not be treated as a real error.
+    #[test]
+    fn stream_state_a_null_error_field_is_not_treated_as_a_real_error() {
+        let mut state = OpenRouterStreamState::new();
+        let events = state.handle_chunk(&serde_json::json!({
+            "error": null,
+            "choices": [{"delta": {"content": "hi"}, "finish_reason": null}]
+        }));
+        assert!(state.stream_error.is_none());
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, CompletionEvent::TextDelta(t) if t == "hi"))
+        );
     }
 
     /// Regression test for N-22 (docs/AUDITORIA-2026-07-v2.md): OpenRouter

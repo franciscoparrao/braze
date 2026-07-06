@@ -46,6 +46,7 @@ pub struct OllamaBackend {
     client: reqwest::Client,
     num_ctx: u32,
     temperature: f32,
+    seed: Option<u64>,
 }
 
 impl OllamaBackend {
@@ -57,6 +58,7 @@ impl OllamaBackend {
             client: crate::http_client::build_client(),
             num_ctx: DEFAULT_NUM_CTX,
             temperature: DEFAULT_TEMPERATURE,
+            seed: None,
         }
     }
 
@@ -69,6 +71,7 @@ impl OllamaBackend {
             client: crate::http_client::build_client(),
             num_ctx: DEFAULT_NUM_CTX,
             temperature: DEFAULT_TEMPERATURE,
+            seed: None,
         }
     }
 
@@ -84,6 +87,15 @@ impl OllamaBackend {
     /// `options.temperature` (see [`DEFAULT_TEMPERATURE`]).
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = temperature;
+        self
+    }
+
+    /// Sets `options.seed` for reproducible sampling — e.g. so
+    /// `braze-bench` sweeps compare backends run-for-run instead of each
+    /// draw being unseeded noise (N-34, docs/AUDITORIA-2026-07-v2.md).
+    /// Chainable, same shape as [`OllamaBackend::with_temperature`].
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = Some(seed);
         self
     }
 }
@@ -103,7 +115,7 @@ impl ModelBackend for OllamaBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let body = build_request(&req, &self.model, self.num_ctx, self.temperature);
+        let body = build_request(&req, &self.model, self.num_ctx, self.temperature, self.seed);
         tracing::info!(
             tool_count = body.tools.len(),
             num_ctx = self.num_ctx,
@@ -132,7 +144,7 @@ impl ModelBackend for OllamaBackend {
         let ctx = StreamCtx {
             byte_stream: Box::pin(byte_stream),
             buf: Vec::new(),
-            state: OllamaStreamState::new(),
+            state: OllamaStreamState::new(self.num_ctx),
             pending: VecDeque::new(),
             finished: false,
         };

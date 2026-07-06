@@ -42,6 +42,14 @@ pub async fn run(program: &str, args: &[String], workdir: &Path) -> Result<Comma
     let output = Command::new(program)
         .args(args)
         .current_dir(workdir)
+        // N-33 (docs/AUDITORIA-2026-07-v2.md): without this, dropping the
+        // future that's awaiting `.output()` (e.g. an aborted
+        // `braze_events::TaskNotifier` task, itself dropped when a caller
+        // like `braze-bench` gives up on a hung turn after its wall-clock
+        // timeout) leaves the child process running — it keeps consuming
+        // CPU/RAM independently of whatever this call site decided to do.
+        // `kill_on_drop(true)` makes tokio send it a kill signal instead.
+        .kill_on_drop(true)
         .output()
         .await
         .map_err(|err| format!("failed to spawn '{program}': {err}"))?;
@@ -81,6 +89,7 @@ pub async fn shell_exec(args: ShellExecArgs, workdir: &Path) -> Result<String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn cwd() -> std::path::PathBuf {
         std::env::current_dir().unwrap()
@@ -157,6 +166,49 @@ mod tests {
         .expect("cat should find marker.txt via the workdir, not the process cwd");
 
         assert!(result.contains("hi"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-33 (docs/AUDITORIA-2026-07-v2.md): aborting
+    /// the task that's awaiting `run()` must actually kill the child
+    /// process, not just stop *this* code from waiting on it. Proven
+    /// indirectly (there's no portable way to inspect the OS process table
+    /// for a `tokio::test`) via a shell command that only writes a marker
+    /// file *after* a delay: if `kill_on_drop` weren't set, the process
+    /// would keep running to completion in the background after abort and
+    /// the marker would still show up.
+    #[tokio::test]
+    async fn aborting_the_awaiting_task_kills_the_child_process() {
+        let dir = crate::test_support::unique_temp_dir("shell-exec-kill-on-drop");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let marker = dir.join("marker");
+
+        let workdir = dir.clone();
+        let marker_arg = marker.to_string_lossy().into_owned();
+        let handle = tokio::spawn(async move {
+            let _ = run(
+                "sh",
+                &["-c".to_string(), format!("sleep 1 && touch '{marker_arg}'")],
+                &workdir,
+            )
+            .await;
+        });
+
+        // Let the shell actually start before pulling the rug out.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        handle.abort();
+        let _ = handle.await;
+
+        // Longer than the shell's own `sleep 1` — if the process were
+        // still alive, the marker would exist by the time this returns.
+        tokio::time::sleep(Duration::from_millis(1400)).await;
+        assert!(
+            !marker.exists(),
+            "child process kept running after its owning task was aborted"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

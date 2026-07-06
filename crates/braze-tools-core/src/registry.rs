@@ -47,6 +47,34 @@ impl ToolRegistry {
         Ok(stubs)
     }
 
+    /// Same fan-out as [`Self::all_stubs`], but a provider that errors is
+    /// logged and skipped rather than failing the whole call (N-16,
+    /// docs/AUDITORIA-2026-07-v2.md, "all_stubs() sigue fail-fast"): one
+    /// MCP server going down mid-session shouldn't brick every subsequent
+    /// turn, including ones that only need local tools. Called from
+    /// `Engine::run_turn`'s per-round loop instead of [`Self::all_stubs`]
+    /// for exactly this reason.
+    pub async fn all_stubs_lossy(&self) -> Vec<ToolStub> {
+        let futures = self.providers.iter().map(|p| p.list_stubs());
+        let results = futures::future::join_all(futures).await;
+
+        let mut stubs = Vec::new();
+        for (provider, result) in self.providers.iter().zip(results) {
+            match result {
+                Ok(provider_stubs) => stubs.extend(provider_stubs),
+                Err(err) => {
+                    tracing::warn!(
+                        provider = provider.provider_id(),
+                        error = %err,
+                        "provider failed to list its tool stubs; degrading without it for this round"
+                    );
+                }
+            }
+        }
+        warn_on_cross_provider_collisions(&stubs);
+        stubs
+    }
+
     /// Resolves the full schema for `name` — the deferred-loading step,
     /// called right before dispatch.
     ///
@@ -234,6 +262,23 @@ mod tests {
             .expect_err("a failing provider must fail the whole call");
 
         assert!(matches!(err, ToolError::ProviderUnavailable(id) if id == "mcp:broken"));
+    }
+
+    /// Regression test for N-16 (docs/AUDITORIA-2026-07-v2.md): a failing
+    /// provider must not take down stubs from the providers that still
+    /// work — the whole point of the lossy variant.
+    #[tokio::test]
+    async fn all_stubs_lossy_degrades_a_failing_provider_instead_of_failing_everything() {
+        let registry = ToolRegistry::new(vec![
+            Box::new(MockProvider::new("local", vec!["read_file"])),
+            Box::new(MockProvider::failing("mcp:broken")),
+            Box::new(MockProvider::new("mcp:filesystem", vec!["list_dir"])),
+        ]);
+
+        let stubs = registry.all_stubs_lossy().await;
+        let names: Vec<&str> = stubs.iter().map(|s| s.name.as_str()).collect();
+
+        assert_eq!(names, vec!["read_file", "list_dir"]);
     }
 
     #[tokio::test]

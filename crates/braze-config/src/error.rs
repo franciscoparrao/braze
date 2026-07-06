@@ -25,4 +25,10 @@ pub enum ConfigError {
         value: String,
         reason: String,
     },
+
+    /// Cross-field or range validation that can't be expressed per-field
+    /// via serde alone — see `Config::validate` (N-41,
+    /// docs/AUDITORIA-2026-07-v2.md).
+    #[error("invalid configuration: {0}")]
+    Invalid(String),
 }

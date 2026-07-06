@@ -30,7 +30,30 @@ impl TaskSandbox {
         std::fs::create_dir_all(&dir)?;
 
         for (relative_path, contents) in &task.setup_files {
-            let path = dir.join(relative_path);
+            // N-38 (docs/AUDITORIA-2026-07-v2.md): `Path::join` does no
+            // sanitization — a `setup_files` key like `"../../x"` walks
+            // out of `dir`, and an absolute-looking key (`"/etc/passwd"`
+            // on Unix) replaces `dir` entirely, letting a malicious/buggy
+            // suite TOML write a file outside the sandbox before the
+            // task even runs.
+            let rel = Path::new(relative_path);
+            if rel.is_absolute()
+                || rel
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "task {:?}'s setup_files key {relative_path:?} would escape the \
+                         sandbox (absolute path or '..' component) — refusing to write \
+                         outside {dir:?}",
+                        task.id
+                    ),
+                ));
+            }
+
+            let path = dir.join(rel);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -97,5 +120,31 @@ mod tests {
             sandbox.path().to_path_buf()
         };
         assert!(!path.exists());
+    }
+
+    /// Regression test for N-38 (docs/AUDITORIA-2026-07-v2.md): a
+    /// `setup_files` key with a `..` component must be rejected instead
+    /// of writing outside the sandbox.
+    #[test]
+    fn rejects_a_setup_file_path_that_escapes_the_sandbox_via_parent_dir() {
+        let task = task_with_files(&[("../escaped.txt", "x")]);
+        let result = TaskSandbox::new(&task);
+        assert!(
+            result.is_err(),
+            "expected a '..' setup_files key to be rejected"
+        );
+    }
+
+    /// Regression test for N-38: an absolute-looking key must also be
+    /// rejected — `Path::join` with an absolute path silently replaces
+    /// the base directory entirely instead of nesting under it.
+    #[test]
+    fn rejects_an_absolute_setup_file_path() {
+        let task = task_with_files(&[("/tmp/escaped-braze-bench-test.txt", "x")]);
+        let result = TaskSandbox::new(&task);
+        assert!(
+            result.is_err(),
+            "expected an absolute setup_files key to be rejected"
+        );
     }
 }

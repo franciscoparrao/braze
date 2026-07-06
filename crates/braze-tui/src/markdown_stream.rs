@@ -79,13 +79,40 @@ impl MarkdownStreamCollector {
     }
 }
 
+/// The backtick-fence run length a line opens or could close with, if
+/// any — `None` if the line isn't a fence delimiter at all. Strips a
+/// leading blockquote marker (bajo, docs/AUDITORIA-2026-07-v2.md,
+/// "heurística de fences falla en fences anidadas/citadas": a fence
+/// nested inside a blockquote, e.g. `"> ```"`, previously never matched
+/// `starts_with("```")` at all, so `in_fence` never toggled for it) and
+/// any amount of leading whitespace before counting the run of
+/// backticks, mirroring CommonMark's own fence-marker rule (a run of 3+
+/// backticks, optionally indented/quoted).
+fn fence_marker_len(line_without_newline: &str) -> Option<usize> {
+    let stripped = line_without_newline.trim_start();
+    let stripped = stripped
+        .strip_prefix('>')
+        .map(str::trim_start)
+        .unwrap_or(stripped);
+    let backticks = stripped.chars().take_while(|&c| c == '`').count();
+    (backticks >= 3).then_some(backticks)
+}
+
 /// Byte offset (relative to the start of `text`) up to which `text` can
 /// be safely committed: the end of the last complete line that is not
 /// inside an open code fence. `text` is assumed to start outside any
 /// fence (an invariant `MarkdownStreamCollector` maintains — see its
 /// `committed_len` doc comment).
+///
+/// Tracks the *opening* fence's backtick-run length and only treats a
+/// later line as the matching close if its own run is at least as long
+/// (bajo, docs/AUDITORIA-2026-07-v2.md, "heurística de fences falla en
+/// fences anidadas"), same as CommonMark itself — otherwise a fence
+/// whose content demonstrates markdown syntax (a literal ` ``` ` line
+/// inside it) would close the outer fence prematurely on that inner
+/// line instead of treating it as ordinary fenced content.
 fn safe_commit_boundary(text: &str) -> Option<usize> {
-    let mut in_fence = false;
+    let mut open_fence_len: Option<usize> = None;
     let mut offset = 0;
     let mut last_safe: Option<usize> = None;
 
@@ -94,23 +121,29 @@ fn safe_commit_boundary(text: &str) -> Option<usize> {
             break; // trailing partial line — never safe on its own
         }
         offset += line.len();
-        let is_fence_delim = line[..line.len() - 1].trim_start().starts_with("```");
+        let marker_len = fence_marker_len(&line[..line.len() - 1]);
 
-        if is_fence_delim {
-            in_fence = !in_fence;
-            if !in_fence {
-                // Just closed a fence — the whole fence (including this
-                // closing line) is now safe as one atomic chunk.
+        match (open_fence_len, marker_len) {
+            (None, Some(len)) => {
+                // Opens a new fence: deliberately do NOT mark this
+                // boundary safe — everything from here onward stays
+                // held back until the matching close.
+                open_fence_len = Some(len);
+            }
+            (Some(opening_len), Some(closing_len)) if closing_len >= opening_len => {
+                // Closes the currently-open fence — the whole fence
+                // (including this closing line) is now safe as one
+                // atomic chunk.
+                open_fence_len = None;
                 last_safe = Some(offset);
             }
-            // Just opened a fence: deliberately do NOT mark this
-            // boundary safe — everything from the fence-open line
-            // onward stays held back until the matching close.
-            continue;
-        }
-
-        if !in_fence {
-            last_safe = Some(offset);
+            _ => {
+                // Either a plain line, or a shorter backtick run inside
+                // an open fence (ordinary fenced content, not a close).
+                if open_fence_len.is_none() {
+                    last_safe = Some(offset);
+                }
+            }
         }
     }
 
@@ -222,5 +255,50 @@ mod tests {
             reconstructed.push_str(&tail);
         }
         assert_eq!(reconstructed, full);
+    }
+
+    /// Regression test for the "heurística de fences falla en fences
+    /// anidadas/citadas" bajo (docs/AUDITORIA-2026-07-v2.md): a fence
+    /// nested inside a blockquote (`"> ```"`) must still be recognized
+    /// as a delimiter — previously `trim_start()` alone never stripped
+    /// the leading `>`, so `in_fence` never toggled and the quoted
+    /// fence's content committed line-by-line as ordinary prose instead
+    /// of being held back as one atomic chunk.
+    #[test]
+    fn a_blockquoted_fence_is_recognized_and_held_back_until_it_closes() {
+        let mut collector = MarkdownStreamCollector::default();
+        collector.push("> ```\n> codigo\n");
+        assert_eq!(
+            collector.commit_ready(),
+            None,
+            "the blockquoted fence must still be open, holding back its content"
+        );
+        collector.push("> ```\n");
+        assert_eq!(
+            collector.commit_ready(),
+            Some("> ```\n> codigo\n> ```\n".to_string()),
+            "the whole blockquoted fence must commit atomically once closed"
+        );
+    }
+
+    /// Regression test for the same bajo: an outer fence using a longer
+    /// backtick run (4) can contain a literal 3-backtick fence as
+    /// ordinary content (e.g. documentation demonstrating markdown
+    /// syntax) without that inner line prematurely closing the outer
+    /// fence — matching CommonMark's own length-based fence matching.
+    #[test]
+    fn a_shorter_backtick_run_inside_a_longer_fence_does_not_close_it() {
+        let mut collector = MarkdownStreamCollector::default();
+        collector.push("````\nejemplo:\n```\ncodigo\n```\n");
+        assert_eq!(
+            collector.commit_ready(),
+            None,
+            "the inner 3-backtick lines must not close the outer 4-backtick fence"
+        );
+        collector.push("````\n");
+        assert_eq!(
+            collector.commit_ready(),
+            Some("````\nejemplo:\n```\ncodigo\n```\n````\n".to_string())
+        );
     }
 }

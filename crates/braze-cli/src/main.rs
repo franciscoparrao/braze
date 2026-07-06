@@ -21,50 +21,6 @@ use cli_args::{Cli, Command};
 use error::CliError;
 use terminal_prompt::TerminalConfirmationPrompt;
 
-/// Headroom reserved out of `ollama_num_ctx` for the system prompt + tool
-/// schemas when computing `Engine::with_context_budget` — neither is part
-/// of what `Engine::load_messages`'s token estimate measures (durable
-/// summary + durable/tactical events only).
-const CONTEXT_BUDGET_MARGIN_TOKENS: u32 = 1024;
-
-/// Default system prompt, used unless `config.system_prompt` overrides it.
-///
-/// Earlier versions of this shipped a single generic sentence with no
-/// tool-use guidance, no anti-loop rules, and no working directory — the
-/// cheapest lever for small/local models left completely unused (see
-/// docs/AUDITORIA-2026-07.md, hallazgo A10). The rules below target
-/// dominant small-model failure modes this project has observed
-/// empirically: repeating an identical tool call instead of using its
-/// result; over-elaborating instead of answering once enough
-/// information has been gathered (arXiv 2604.02155's finding that longer
-/// reasoning *degrades* tool-calling accuracy in small models); and
-/// narrating an intended action instead of actually calling the tool for
-/// it — observed live against `qwen2.5:3b` via `braze chat --tui`
-/// (2026-07-05): asked to save a file, it kept restating the plan
-/// ("Voy a proceder con estos pasos ahora") across several turns, even
-/// after explicit confirmation, without ever emitting the `write_file`
-/// call.
-fn default_system_prompt(cwd: &std::path::Path) -> String {
-    format!(
-        "You are braze, an agentic CLI assistant. Working directory: {}.\n\
-         \n\
-         Rules:\n\
-         - Never call the same tool with the same arguments twice in one turn — \
-         if you already have that result, use it instead of calling again.\n\
-         - Once you have enough information to answer, stop calling tools and \
-         answer in plain text. Do not keep exploring after you already have \
-         what was asked.\n\
-         - Keep reasoning brief before acting — a sentence or two, not an \
-         extended chain of thought.\n\
-         - When the user asks you to perform an action (write a file, run a \
-         command, edit something), call the tool for it in the same turn. \
-         Do not just describe or restate the plan — an action you only \
-         narrate never actually happens.\n\
-         - Relative paths are resolved against the working directory above.",
-        cwd.display()
-    )
-}
-
 #[tokio::main]
 async fn main() -> ExitCode {
     // Installed exactly once, here, never in any library crate — respects
@@ -216,7 +172,10 @@ async fn run() -> Result<(), CliError> {
                     "falta --model o BRAZE_ANTHROPIC_MODEL para el backend anthropic".to_string(),
                 )
             })?;
-            Box::new(braze_model::AnthropicBackend::new(api_key, model_name))
+            Box::new(braze_model::AnthropicBackend::new(
+                api_key.expose_secret().to_string(),
+                model_name,
+            ))
         }
         "ollama" => Box::new(
             braze_model::OllamaBackend::with_base_url(
@@ -238,7 +197,7 @@ async fn run() -> Result<(), CliError> {
                 )
             })?;
             Box::new(braze_model::OpenRouterBackend::with_base_url(
-                api_key,
+                api_key.expose_secret().to_string(),
                 model_name,
                 config.openrouter_base_url.clone(),
             ))
@@ -278,7 +237,28 @@ async fn run() -> Result<(), CliError> {
                 _ => None,
             })
             .collect(),
-        Err(braze_session::SessionError::NotFound(_)) => Vec::new(),
+        Err(braze_session::SessionError::NotFound(_)) => {
+            // Bajo (docs/AUDITORIA-2026-07-v2.md, "--resume
+            // <uuid-inexistente> arranca sesión vacía en silencio"): a
+            // brand-new session (no `--resume` at all) hitting
+            // `NotFound` is completely expected and must stay silent —
+            // only an *explicit* `--resume <id>` naming a session this
+            // store has never heard of is worth a warning, since that's
+            // almost certainly a typo the user would want to know about
+            // instead of silently starting a fresh, empty session.
+            if matches!(
+                cli.command,
+                Command::Chat {
+                    resume: Some(_),
+                    ..
+                }
+            ) {
+                eprintln!(
+                    "braze: aviso: no se encontró la sesión {session} — iniciando una nueva sesión vacía"
+                );
+            }
+            Vec::new()
+        }
         Err(err) => return Err(err.into()),
     };
 
@@ -393,7 +373,7 @@ async fn run() -> Result<(), CliError> {
     let system_prompt = config
         .system_prompt
         .clone()
-        .unwrap_or_else(|| default_system_prompt(&cwd));
+        .unwrap_or_else(|| braze_config::default_system_prompt(&cwd));
 
     // Short "backend:model" label for the TUI's status bar — computed
     // here (not inside `braze-tui`) since `Engine` doesn't expose the
@@ -421,7 +401,8 @@ async fn run() -> Result<(), CliError> {
         config.max_tokens,
     )
     .with_tactical_compaction_threshold(config.tactical_compaction_threshold)
-    .with_best_of_n(config.best_of_n);
+    .with_best_of_n(config.best_of_n)
+    .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue);
 
     // Only Ollama has a small, fixed context window worth budgeting for
     // (Anthropic's is large enough that raw event count remains a fine
@@ -429,10 +410,8 @@ async fn run() -> Result<(), CliError> {
     // the system prompt + tool schemas, which aren't part of what
     // `Engine::load_messages` measures (see `estimate_prompt_tokens`).
     if config.default_backend == "ollama" {
-        let budget = config
-            .ollama_num_ctx
-            .saturating_sub(config.max_tokens)
-            .saturating_sub(CONTEXT_BUDGET_MARGIN_TOKENS);
+        let budget =
+            braze_config::ollama_context_budget_tokens(config.ollama_num_ctx, config.max_tokens);
         engine = engine.with_context_budget(budget);
     }
 
@@ -512,30 +491,4 @@ async fn run() -> Result<(), CliError> {
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Regression test for A10: the default prompt must actually carry
-    /// the working directory and the anti-loop/stop-condition guidance —
-    /// the whole point of moving off the old one-sentence default.
-    #[test]
-    fn default_system_prompt_includes_cwd_and_anti_loop_guidance() {
-        let prompt = default_system_prompt(std::path::Path::new("/home/user/project"));
-        assert!(prompt.contains("/home/user/project"));
-        assert!(prompt.contains("Never call the same tool"));
-        assert!(prompt.contains("stop calling tools"));
-    }
-
-    /// Regression test for the "narrates instead of acts" failure mode
-    /// observed live against `qwen2.5:3b` via `braze chat --tui`
-    /// (2026-07-05): asked to save a file, the model kept restating the
-    /// plan instead of ever calling `write_file`.
-    #[test]
-    fn default_system_prompt_tells_the_model_to_act_not_just_narrate() {
-        let prompt = default_system_prompt(std::path::Path::new("/home/user/project"));
-        assert!(prompt.contains("call the tool for it in the same turn"));
-    }
 }

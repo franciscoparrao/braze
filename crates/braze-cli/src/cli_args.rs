@@ -38,10 +38,10 @@ pub enum Command {
         #[arg(long)]
         model: Option<String>,
         /// Use the terminal UI (`braze-tui`, PLAN.md § "Fase TUI —
-        /// diseño") instead of the plain-text stdin/stdout loop.
-        /// Opt-in for now — irreversible-action tool calls are denied
-        /// automatically under `--tui` until the real approval overlay
-        /// ships (oleada 4); the plain path still confirms interactively.
+        /// diseño") instead of the plain-text stdin/stdout loop. Opt-in
+        /// for now. Irreversible-action tool calls show a real,
+        /// keyboard-driven approval overlay (y/n) under `--tui`, same as
+        /// the plain path's interactive stdin confirmation.
         #[arg(long)]
         tui: bool,
         /// Color preset for `--tui`: `dark` (default), `light`, or

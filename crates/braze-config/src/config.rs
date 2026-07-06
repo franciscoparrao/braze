@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::api_key::ApiKey;
 use crate::error::ConfigError;
 use crate::file;
 use crate::overrides::ConfigOverrides;
@@ -31,9 +32,11 @@ pub struct Config {
     /// Which `ModelBackend` to use by default: `"anthropic"` or `"ollama"`.
     pub default_backend: String,
     /// Anthropic API key. Never hardcoded — comes from the config file or
-    /// `BRAZE_ANTHROPIC_API_KEY`.
+    /// `BRAZE_ANTHROPIC_API_KEY`. `ApiKey` (N-39,
+    /// docs/AUDITORIA-2026-07-v2.md), not a plain `String`, so this
+    /// struct's `derive(Debug, Serialize)` can never leak the raw key.
     #[serde(default)]
-    pub anthropic_api_key: Option<String>,
+    pub anthropic_api_key: Option<ApiKey>,
     /// Anthropic model name (e.g. `"claude-opus-4-6-20260805"`). No
     /// default: if the user selects `default_backend = "anthropic"` and
     /// never configures this, that is a clear startup error, not a guessed
@@ -51,9 +54,10 @@ pub struct Config {
     /// prompt and tools mid-turn. See `braze-model::OllamaBackend`.
     pub ollama_num_ctx: u32,
     /// OpenRouter API key. Never hardcoded — comes from the config file or
-    /// `BRAZE_OPENROUTER_API_KEY`.
+    /// `BRAZE_OPENROUTER_API_KEY`. `ApiKey`, same rationale as
+    /// `anthropic_api_key`.
     #[serde(default)]
-    pub openrouter_api_key: Option<String>,
+    pub openrouter_api_key: Option<ApiKey>,
     /// OpenRouter model identifier (e.g.
     /// `"anthropic/claude-3.5-sonnet"`). No default: if the user selects
     /// `default_backend = "openrouter"` and never configures this, that is
@@ -110,6 +114,14 @@ pub struct Config {
     /// resolves it via `Theme::from_name` and errors at startup on an
     /// unrecognized name, same as `default_backend`.
     pub tui_theme: String,
+    /// Disables `Engine`'s textual tool-call rescue (B5,
+    /// docs/AUDITORIA-2026-07.md) — N-15 (docs/AUDITORIA-2026-07-v2.md):
+    /// the rescue is purely syntactic, so a user literally asking to see
+    /// the JSON for a *real* tool name gets that example dispatched for
+    /// real. `false` (the default) preserves the existing behavior. See
+    /// `braze_engine::Engine::with_textual_rescue_enabled`.
+    #[serde(default)]
+    pub disable_textual_tool_call_rescue: bool,
 }
 
 impl Default for Config {
@@ -138,6 +150,7 @@ impl Default for Config {
             mcp_servers: Vec::new(),
             best_of_n: 1,
             tui_theme: "dark".to_string(),
+            disable_textual_tool_call_rescue: false,
         }
     }
 }
@@ -175,7 +188,45 @@ impl Config {
         let env_overrides = ConfigOverrides::from_env(env_vars)?;
         config.apply_overrides(env_overrides);
 
+        config.validate()?;
         Ok(config)
+    }
+
+    /// Cross-field / range validation that can't be expressed per-field
+    /// via serde `#[serde(default)]` alone — called automatically at the
+    /// end of [`Config::load_with`].
+    fn validate(&self) -> Result<(), ConfigError> {
+        // N-41 (docs/AUDITORIA-2026-07-v2.md): once the raw event log
+        // reaches `tactical_window` events, `SimpleContextCompactor`
+        // caps the tactical slice at that size — if `tactical_window` is
+        // not strictly smaller than `tactical_compaction_threshold`, the
+        // tactical slice never drops back under the threshold again,
+        // triggering a compaction (and a `CompactionOccurred` event) on
+        // essentially every subsequent `load_messages` call.
+        if self.tactical_window >= self.tactical_compaction_threshold {
+            return Err(ConfigError::Invalid(format!(
+                "tactical_window ({}) must be smaller than \
+                 tactical_compaction_threshold ({}) — otherwise compaction \
+                 triggers on every turn",
+                self.tactical_window, self.tactical_compaction_threshold
+            )));
+        }
+        // Bajo (docs/AUDITORIA-2026-07-v2.md, "sin validación de rango
+        // numérico"): `0` isn't just a degenerate edge case for these —
+        // `ollama_num_ctx: 0` is sent straight to the real Ollama server
+        // with undefined behavior, and `max_tokens: 0` means every
+        // completion request asks for zero output tokens.
+        if self.ollama_num_ctx == 0 {
+            return Err(ConfigError::Invalid(
+                "ollama_num_ctx must be greater than 0".to_string(),
+            ));
+        }
+        if self.max_tokens == 0 {
+            return Err(ConfigError::Invalid(
+                "max_tokens must be greater than 0".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Apply explicit overrides on top of an already-loaded config,
@@ -235,6 +286,9 @@ impl Config {
         }
         if let Some(v) = overrides.tui_theme {
             self.tui_theme = v;
+        }
+        if let Some(v) = overrides.disable_textual_tool_call_rescue {
+            self.disable_textual_tool_call_rescue = v;
         }
     }
 }
@@ -311,6 +365,37 @@ mod tests {
         let config = Config::load_with(None, env).unwrap();
         assert_eq!(config.tactical_window, 10);
         assert_eq!(config.tactical_compaction_threshold, 25);
+    }
+
+    /// Regression test for N-41 (docs/AUDITORIA-2026-07-v2.md):
+    /// `tactical_window >= tactical_compaction_threshold` must be
+    /// rejected at load time instead of silently entering permanent-
+    /// compaction mode at runtime.
+    #[test]
+    fn rejects_a_tactical_window_not_smaller_than_the_compaction_threshold() {
+        let env = vec![
+            ("BRAZE_TACTICAL_WINDOW".to_string(), "40".to_string()),
+            (
+                "BRAZE_TACTICAL_COMPACTION_THRESHOLD".to_string(),
+                "40".to_string(),
+            ),
+        ];
+        let err = Config::load_with(None, env).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn rejects_ollama_num_ctx_of_zero() {
+        let env = vec![("BRAZE_OLLAMA_NUM_CTX".to_string(), "0".to_string())];
+        let err = Config::load_with(None, env).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn rejects_max_tokens_of_zero() {
+        let env = vec![("BRAZE_MAX_TOKENS".to_string(), "0".to_string())];
+        let err = Config::load_with(None, env).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(_)));
     }
 
     #[test]
@@ -426,7 +511,13 @@ mod tests {
             ),
         ];
         let config = Config::load_with(None, env).unwrap();
-        assert_eq!(config.openrouter_api_key.as_deref(), Some("sk-or-test-123"));
+        assert_eq!(
+            config
+                .openrouter_api_key
+                .as_ref()
+                .map(ApiKey::expose_secret),
+            Some("sk-or-test-123")
+        );
         assert_eq!(
             config.openrouter_model.as_deref(),
             Some("openai/gpt-4o-mini")

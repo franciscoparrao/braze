@@ -31,4 +31,12 @@ pub trait TaskNotifier: Send + Sync {
     /// `None` on timeout. Called once per turn by the engine's main loop —
     /// never in a polling loop.
     async fn next_completed(&self, timeout: Duration) -> Option<(TaskHandle, ToolResult)>;
+
+    /// Cancels a previously-spawned task if it hasn't completed yet — a
+    /// no-op if `handle` already completed, was already aborted, or is
+    /// unknown. Exists so a caller that gives up waiting on a task (e.g.
+    /// `braze-engine`'s per-round completion timeout) can actually stop
+    /// the underlying work instead of leaving it running unobserved —
+    /// N-33, docs/AUDITORIA-2026-07-v2.md.
+    fn abort(&self, handle: TaskHandle);
 }

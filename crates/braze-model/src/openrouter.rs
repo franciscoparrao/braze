@@ -30,6 +30,12 @@ pub struct OpenRouterBackend {
     model: String,
     client: reqwest::Client,
     base_url: String,
+    /// `None` omits the field, leaving whichever underlying model
+    /// OpenRouter routes to at its own default. See
+    /// [`OpenRouterBackend::with_temperature`].
+    temperature: Option<f32>,
+    /// `None` omits the field. See [`OpenRouterBackend::with_seed`].
+    seed: Option<u64>,
 }
 
 impl OpenRouterBackend {
@@ -40,6 +46,8 @@ impl OpenRouterBackend {
             model,
             client: crate::http_client::build_client(),
             base_url: OPENROUTER_DEFAULT_BASE_URL.to_string(),
+            temperature: None,
+            seed: None,
         }
     }
 
@@ -51,7 +59,28 @@ impl OpenRouterBackend {
             model,
             client: crate::http_client::build_client(),
             base_url,
+            temperature: None,
+            seed: None,
         }
+    }
+
+    /// Overrides the sampling temperature sent to OpenRouter — e.g. so
+    /// `braze-bench` can give every backend in a sweep the same value
+    /// (N-34, docs/AUDITORIA-2026-07-v2.md). Chainable, mirrors
+    /// `OllamaBackend::with_temperature`.
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(temperature);
+        self
+    }
+
+    /// Sets the standard OpenAI-compatible `seed` field — best-effort
+    /// reproducibility that depends on which underlying provider
+    /// OpenRouter routes the request to, but still worth setting when
+    /// comparing backends run-for-run. Chainable, mirrors
+    /// `OllamaBackend::with_seed`.
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = Some(seed);
+        self
     }
 }
 
@@ -70,7 +99,7 @@ impl ModelBackend for OpenRouterBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let body = build_request(&req, &self.model);
+        let body = build_request(&req, &self.model, self.temperature, self.seed);
         tracing::info!(
             tool_count = body.tools.len(),
             "starting openrouter completion turn"

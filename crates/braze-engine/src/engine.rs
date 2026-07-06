@@ -70,6 +70,29 @@ pub struct Engine {
     /// code path as before G10 existed. Only `> 1` routes the round
     /// through [`Engine::complete_with_best_of_n`].
     best_of_n: usize,
+    /// Overrides [`TOOL_COMPLETION_TIMEOUT`] — see
+    /// [`Engine::with_tool_completion_timeout`]. Kept configurable (rather
+    /// than only ever the module constant) purely so tests can exercise
+    /// the timeout-then-abort path in `dispatch_tool_calls` without
+    /// actually waiting 120 real seconds.
+    tool_completion_timeout: Duration,
+    /// Set for the duration of a [`Engine::run_turn`] call, cleared on
+    /// every exit path via [`TurnGuard`]'s `Drop`. N-17
+    /// (docs/AUDITORIA-2026-07-v2.md): two concurrent `run_turn` calls on
+    /// the same `Engine` would share one `TaskNotifier`'s single
+    /// completion channel — `dispatch_tool_calls`'s "stale completion"
+    /// check (see its doc comment) would discard the *other* turn's real
+    /// completions as stale, and that turn would eventually persist a
+    /// false timeout error. Not reachable via any current caller (every
+    /// caller of `Engine::run_turn` serializes turns), but was previously
+    /// neither guarded against nor documented — this turns the misuse
+    /// into an explicit, diagnosable error instead of silent cross-talk
+    /// if that ever changes.
+    turn_in_progress: std::sync::atomic::AtomicBool,
+    /// Gates the textual tool-call rescue in [`Engine::complete_once`] —
+    /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
+    /// preserves the existing behavior.
+    textual_rescue_enabled: bool,
 }
 
 /// The resolved outcome of one full model completion — everything the
@@ -80,6 +103,13 @@ struct RoundOutcome {
     text_buffer: String,
     tool_calls: Vec<ToolCall>,
     usage: Option<(u32, u32, Option<String>)>,
+    /// Set when the backend reported `stop_reason: "max_tokens"`/`"length"`
+    /// for this round — N-24 (docs/AUDITORIA-2026-07-v2.md): `run_turn`
+    /// checks this before treating an empty-`tool_calls` round as a
+    /// legitimate final answer, since a truncated response may be cut off
+    /// mid-sentence (or mid-tool-call-JSON, which then fails to parse
+    /// downstream with no other indication why).
+    truncated: bool,
 }
 
 /// Per-turn mutable state `dispatch_tool_calls` threads across every round
@@ -98,6 +128,35 @@ struct TurnDispatchState {
     /// one minted so far this turn — see `ensure_unique_tool_call_id` and
     /// N-14, docs/AUDITORIA-2026-07-v2.md.
     known_tool_call_ids: HashSet<String>,
+}
+
+/// RAII guard for [`Engine::turn_in_progress`] — see that field's doc
+/// comment (N-17, docs/AUDITORIA-2026-07-v2.md). `acquire` fails if a
+/// turn is already in flight; the flag is cleared on `Drop`, covering
+/// every exit path from `run_turn` (success, any `?`-propagated error, or
+/// an unwind) from one construction at the top instead of touching each
+/// exit point individually.
+struct TurnGuard<'a> {
+    flag: &'a std::sync::atomic::AtomicBool,
+}
+
+impl<'a> TurnGuard<'a> {
+    fn acquire(flag: &'a std::sync::atomic::AtomicBool) -> Result<Self, EngineError> {
+        flag.compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .map_err(|_| EngineError::ConcurrentTurn)?;
+        Ok(Self { flag })
+    }
+}
+
+impl Drop for TurnGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl Engine {
@@ -128,6 +187,9 @@ impl Engine {
             tactical_compaction_threshold: DEFAULT_TACTICAL_COMPACTION_THRESHOLD,
             context_budget_tokens: None,
             best_of_n: 1,
+            tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
+            turn_in_progress: std::sync::atomic::AtomicBool::new(false),
+            textual_rescue_enabled: true,
         }
     }
 
@@ -158,6 +220,26 @@ impl Engine {
     /// [`Engine::with_context_budget`].
     pub fn with_best_of_n(mut self, n: usize) -> Self {
         self.best_of_n = n;
+        self
+    }
+
+    /// Overrides [`TOOL_COMPLETION_TIMEOUT`] with a caller-supplied value.
+    /// Chainable, same shape as [`Engine::with_context_budget`].
+    pub fn with_tool_completion_timeout(mut self, timeout: Duration) -> Self {
+        self.tool_completion_timeout = timeout;
+        self
+    }
+
+    /// Disables (`enabled: false`) the textual tool-call rescue (B5,
+    /// docs/AUDITORIA-2026-07.md) — N-15 (docs/AUDITORIA-2026-07-v2.md):
+    /// the rescue is purely syntactic (any response that's entirely a
+    /// `{"name":..., "arguments":...}` JSON blob gets dispatched as a
+    /// real tool call), so a user literally asking to see the JSON for a
+    /// *real* tool name (e.g. "muéstrame el JSON para invocar
+    /// write_file") gets that example executed for real. Chainable, same
+    /// shape as [`Engine::with_context_budget`].
+    pub fn with_textual_rescue_enabled(mut self, enabled: bool) -> Self {
+        self.textual_rescue_enabled = enabled;
         self
     }
 
@@ -203,6 +285,7 @@ impl Engine {
         let mut tool_calls: Vec<ToolCall> = Vec::new();
         let mut usage: Option<(u32, u32, Option<String>)> = None;
         let mut saw_done = false;
+        let mut truncated = false;
 
         while let Some(event) = stream.next().await {
             match event {
@@ -249,6 +332,7 @@ impl Engine {
                             "model output was truncated by max_tokens this round; a tool call's \
                              arguments may have been cut off mid-construction"
                         );
+                        truncated = true;
                     }
                     usage = Some((input_tokens, output_tokens, stop_reason));
                 }
@@ -289,7 +373,8 @@ impl Engine {
         // per-attempt (not after best-of-n voting) so a textually
         // described tool call counts as a real candidate signature for
         // the vote too.
-        if tool_calls.is_empty()
+        if self.textual_rescue_enabled
+            && tool_calls.is_empty()
             && let Some(rescued) = try_parse_textual_tool_call(&text_buffer)
         {
             tracing::info!(
@@ -304,6 +389,7 @@ impl Engine {
             text_buffer,
             tool_calls,
             usage,
+            truncated,
         })
     }
 
@@ -340,15 +426,38 @@ impl Engine {
         req: &CompletionRequest,
         observer: &mut dyn TurnObserver,
     ) -> Result<RoundOutcome, EngineError> {
+        // N-13 (docs/AUDITORIA-2026-07-v2.md): a transient error on one
+        // candidate (e.g. a rate-limit blip on attempt 3 of 5) must not
+        // discard the other candidates already paid for and abort the
+        // whole round — that would multiply the effective failure
+        // probability by `best_of_n`, backwards from what this technique
+        // is for. Vote among whichever candidates actually succeeded;
+        // only propagate an error if every single one failed.
         let mut candidates = Vec::with_capacity(self.best_of_n);
+        let mut last_error = None;
         for attempt in 0..self.best_of_n {
-            let outcome = self.complete_once(req.clone(), observer, false).await?;
-            tracing::debug!(
-                attempt,
-                n_tool_calls = outcome.tool_calls.len(),
-                "best-of-n candidate generated"
-            );
-            candidates.push(outcome);
+            match self.complete_once(req.clone(), observer, false).await {
+                Ok(outcome) => {
+                    tracing::debug!(
+                        attempt,
+                        n_tool_calls = outcome.tool_calls.len(),
+                        "best-of-n candidate generated"
+                    );
+                    candidates.push(outcome);
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        attempt,
+                        error = %err,
+                        "best-of-n candidate failed; continuing with the remaining attempts"
+                    );
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return Err(last_error.unwrap_or(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS)));
         }
 
         let signatures: Vec<Vec<(String, String)>> =
@@ -426,6 +535,12 @@ impl Engine {
         user_input: &str,
         observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
+        // N-17 (docs/AUDITORIA-2026-07-v2.md): held for the rest of this
+        // call via `TurnGuard`'s `Drop`, covering every exit path
+        // (success, any `?`-propagated error, or an unwind) without
+        // touching each one individually.
+        let _turn_guard = TurnGuard::acquire(&self.turn_in_progress)?;
+
         // N-4 (docs/AUDITORIA-2026-07-v2.md): repair any tool_use orphaned
         // by a crash/kill/power-loss in a *previous* run *before* this
         // turn's `UserMessage` is appended — `load_messages` also repairs
@@ -463,7 +578,11 @@ impl Engine {
         };
 
         for round in 0..MAX_TURN_ITERATIONS {
-            let tool_stubs = self.tools.all_stubs().await?;
+            // N-16 (docs/AUDITORIA-2026-07-v2.md): the lossy variant
+            // degrades a provider that fails to list its stubs (e.g. an
+            // MCP server that died mid-session) instead of aborting every
+            // subsequent turn, including ones that only need local tools.
+            let tool_stubs = self.tools.all_stubs_lossy().await;
             let req = CompletionRequest {
                 messages: messages.clone(),
                 tool_stubs: tool_stubs.clone(),
@@ -479,6 +598,7 @@ impl Engine {
                 text_buffer,
                 tool_calls,
                 usage,
+                truncated,
             } = if self.best_of_n > 1 {
                 self.complete_with_best_of_n(&req, observer).await?
             } else {
@@ -514,15 +634,32 @@ impl Engine {
             tracing::debug!(round, n_tool_calls = tool_calls.len(), "round completed");
 
             if tool_calls.is_empty() {
-                // Final response: no further tool calls requested.
-                if !text_buffer.is_empty() {
-                    self.append_and_notify(
-                        session,
-                        &AgentEvent::AssistantText { text: text_buffer },
-                        observer,
-                    )
-                    .await?;
+                // N-24 (docs/AUDITORIA-2026-07-v2.md): a truncated round
+                // with no tool calls used to be persisted as a normal,
+                // converged final answer — indistinguishable downstream
+                // from a response the model actually finished on its own.
+                // Surface it as an error instead of silently keeping (and
+                // showing the user) a possibly mid-sentence answer.
+                if truncated {
+                    return Err(EngineError::TruncatedFinalResponse);
                 }
+                // Bajo (docs/AUDITORIA-2026-07-v2.md, "una completion
+                // vacía termina el turno como éxito silencioso"): no text
+                // and no tool calls is not a legitimate final answer —
+                // under best-of-n several empty candidates can share the
+                // same (empty) signature and win the vote outright.
+                // Treat it as a failure to converge for this round rather
+                // than a silent no-op success.
+                if text_buffer.is_empty() {
+                    return Err(EngineError::EmptyModelResponse);
+                }
+                // Final response: no further tool calls requested.
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::AssistantText { text: text_buffer },
+                    observer,
+                )
+                .await?;
                 return Ok(());
             }
 
@@ -588,8 +725,24 @@ impl Engine {
             max_tokens: self.max_tokens,
         };
 
-        let Ok(mut stream) = self.model.complete(req).await else {
-            return Err(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS));
+        // Bajo (docs/AUDITORIA-2026-07-v2.md, "attempt_final_summary_round
+        // traga el error real"): both error paths below used to discard
+        // the actual cause (a real backend failure — auth, network,
+        // rate limit — looked identical to "the model just didn't
+        // produce anything usable"). Logging it here doesn't change the
+        // returned `EngineError` variant (still `TurnDidNotConverge`,
+        // to avoid rippling a bigger error-type change through this
+        // already-degraded fallback path) but makes the real cause
+        // visible in logs instead of silently lost.
+        let mut stream = match self.model.complete(req).await {
+            Ok(stream) => stream,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "final summary round's model call itself failed; turn will be reported as not converged"
+                );
+                return Err(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS));
+            }
         };
 
         let mut text_buffer = String::new();
@@ -610,7 +763,13 @@ impl Engine {
                 // degraded round isn't worth the same bookkeeping as a
                 // normal one.
                 Ok(_) => {}
-                Err(_) => break,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "final summary round's stream failed mid-response; turn will be reported as not converged"
+                    );
+                    break;
+                }
             }
         }
 
@@ -630,7 +789,9 @@ impl Engine {
     /// Records each requested tool call, spawns it as a background task via
     /// [`TaskNotifier`], and blocks until every task from this round has
     /// reported completion (persisting a `ToolCallCompleted` event for
-    /// each), or times out.
+    /// each), or times out — in which case every still-pending task is
+    /// actually cancelled via [`TaskNotifier::abort`] (N-33,
+    /// docs/AUDITORIA-2026-07-v2.md), not merely forgotten.
     async fn dispatch_tool_calls(
         &self,
         session: &SessionId,
@@ -870,12 +1031,15 @@ impl Engine {
             pending.insert(handle);
         }
 
-        // Known MVP limitation: if `next_completed` times out, remaining
-        // handles are treated as failed and the turn proceeds rather than
-        // hanging forever — there is no cancellation of the underlying
-        // `tokio::spawn`ed work, it simply keeps running unobserved.
+        // If `next_completed` times out, every still-pending task is
+        // aborted (N-33, docs/AUDITORIA-2026-07-v2.md) and treated as
+        // failed so the turn proceeds rather than hanging forever.
         while !pending.is_empty() {
-            match self.notifier.next_completed(TOOL_COMPLETION_TIMEOUT).await {
+            match self
+                .notifier
+                .next_completed(self.tool_completion_timeout)
+                .await
+            {
                 Some((handle, result)) => {
                     if !pending.remove(&handle) {
                         // Stale completion from a task that already timed
@@ -915,10 +1079,11 @@ impl Engine {
                 None => {
                     tracing::error!(
                         pending = pending.len(),
-                        timeout_secs = TOOL_COMPLETION_TIMEOUT.as_secs(),
-                        "timed out waiting for background tool task(s); treating remaining as failed"
+                        timeout_secs = self.tool_completion_timeout.as_secs(),
+                        "timed out waiting for background tool task(s); aborting and treating remaining as failed"
                     );
                     for handle in pending.drain() {
+                        self.notifier.abort(handle);
                         let id = handle_to_id.remove(&handle).unwrap_or_default();
                         self.append_and_notify(
                             session,
@@ -1051,7 +1216,15 @@ impl Engine {
             );
 
             let summary = self.compactor.compact_tactical(&tactical)?;
-            let dropped_tokens_estimate = estimate_dropped_tokens(&tactical);
+            // Bajo (docs/AUDITORIA-2026-07-v2.md, "dropped_tokens_estimate
+            // cuenta como perdido el tail que se conserva"): `start` must
+            // be known *before* estimating what got dropped — only
+            // `tactical[..start]` is actually folded into the summary;
+            // `tactical[start..]` (the live tail) survives verbatim into
+            // this same request. Estimating over the whole `tactical`
+            // slice counted retained events as if they were gone.
+            let start = pair_aware_tail_start(&tactical, KEEP_RAW_TAIL);
+            let dropped_tokens_estimate = estimate_dropped_tokens(&tactical[..start]);
 
             self.append_and_notify(
                 session,
@@ -1064,7 +1237,6 @@ impl Engine {
             .await?;
 
             let effective_durable = merge_summary(durable, summary);
-            let start = pair_aware_tail_start(&tactical, KEEP_RAW_TAIL);
             let live_tail = &tactical[start..];
             Ok(build_messages(&effective_durable, live_tail))
         } else {
@@ -1093,47 +1265,75 @@ impl Engine {
         events: &mut Vec<AgentEvent>,
         observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
-        let completed_ids: HashSet<String> = events
-            .iter()
-            .filter_map(|event| match event {
-                AgentEvent::ToolCallCompleted { id, .. } => Some(id.clone()),
-                _ => None,
-            })
-            .collect();
-
-        let orphan_ids: Vec<String> = events
-            .iter()
-            .filter_map(|event| match event {
-                AgentEvent::AssistantToolCall { id, .. } if !completed_ids.contains(id) => {
-                    Some(id.clone())
-                }
-                _ => None,
-            })
-            .collect();
-
-        for id in orphan_ids {
+        for id in orphaned_tool_call_ids(events) {
             tracing::warn!(
                 tool_call_id = %id,
                 "repairing an orphaned tool_use with no matching result \
                  (likely an interrupted process); synthesizing an error ToolCallCompleted"
             );
-            let repair = AgentEvent::ToolCallCompleted {
-                id: id.clone(),
-                result: ToolResult {
-                    tool_call_id: id,
-                    content: "tool call interrupted: the process ended before a result \
-                              was received for it (crash, kill, or power loss). Retry it \
-                              if it is still needed."
-                        .to_string(),
-                    is_error: true,
-                },
-            };
+            let repair = build_orphan_repair(id);
             self.append_and_notify(session, &repair, observer).await?;
             events.push(repair);
         }
 
         Ok(())
     }
+}
+
+/// Ids of every `AssistantToolCall` in `events` with no matching
+/// `ToolCallCompleted` anywhere in the same slice.
+fn orphaned_tool_call_ids(events: &[AgentEvent]) -> Vec<String> {
+    let completed_ids: HashSet<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolCallCompleted { id, .. } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::AssistantToolCall { id, .. } if !completed_ids.contains(id.as_str()) => {
+                Some(id.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The synthetic error `ToolCallCompleted` a crashed/interrupted orphaned
+/// tool call is repaired with.
+fn build_orphan_repair(id: String) -> AgentEvent {
+    AgentEvent::ToolCallCompleted {
+        id: id.clone(),
+        result: ToolResult {
+            tool_call_id: id,
+            content: "tool call interrupted: the process ended before a result \
+                      was received for it (crash, kill, or power loss). Retry it \
+                      if it is still needed."
+                .to_string(),
+            is_error: true,
+        },
+    }
+}
+
+/// Pure: the synthetic `ToolCallCompleted` repairs for every orphaned
+/// `AssistantToolCall` in `events` — see
+/// `Engine::repair_orphaned_tool_calls`'s doc comment for the scenario
+/// this addresses (a crashed/killed process leaving a `tool_use` with no
+/// result). Exposed as a free function, not just inlined in that method,
+/// so `braze-tui`'s backtrack can apply the identical repair to the
+/// *replicated* prefix it writes into a new session (N-26,
+/// docs/AUDITORIA-2026-07-v2.md) — without this, backtracking to a point
+/// whose log prefix contains an orphaned tool_use but not its (later)
+/// repair event copies the orphan into the new session with nothing to
+/// fix it, poisoning it from the start.
+pub fn synthesize_orphan_repairs(events: &[AgentEvent]) -> Vec<AgentEvent> {
+    orphaned_tool_call_ids(events)
+        .into_iter()
+        .map(build_orphan_repair)
+        .collect()
 }
 
 /// Returns `id` unchanged if it isn't already in `known_ids` (registering
@@ -1287,9 +1487,34 @@ fn try_parse_textual_tool_call(text: &str) -> Option<ToolCall> {
 /// heuristic `SimpleContextCompactor::compact_tactical` already uses
 /// internally, applied here to fill `AgentEvent::CompactionOccurred`'s
 /// `dropped_tokens_estimate` field from the engine's side.
+///
+/// Bajo (docs/AUDITORIA-2026-07-v2.md, "estimador de tokens sobre Debug
+/// repr, infla 30-50%"): counts only each event's user-visible text (same
+/// principle as [`estimate_message_tokens`]'s doc comment), not a
+/// `format!("{event:?}")` dump — the `Debug` form pads the count with
+/// field names, `Some(...)`/enum-variant punctuation, and (for
+/// `AssistantToolCall`) the raw `serde_json::Value` debug form instead of
+/// its compact string one.
 fn estimate_dropped_tokens(events: &[AgentEvent]) -> u32 {
-    let chars: usize = events.iter().map(|event| format!("{event:?}").len()).sum();
+    let chars: usize = events.iter().map(event_text_len).sum();
     (chars / 4) as u32
+}
+
+/// User-visible text length of one `AgentEvent`, for [`estimate_dropped_tokens`].
+/// Audit-only variants (`ToolCallStarted`, `Usage`, `Unknown`) carry
+/// nothing that ever reaches the model, so they count as `0`.
+fn event_text_len(event: &AgentEvent) -> usize {
+    match event {
+        AgentEvent::UserMessage { text } | AgentEvent::AssistantText { text } => text.len(),
+        AgentEvent::AssistantToolCall {
+            name, arguments, ..
+        } => name.len() + arguments.to_string().len(),
+        AgentEvent::ToolCallCompleted { result, .. } => result.content.len(),
+        AgentEvent::CompactionOccurred { summary, .. } => summary.len(),
+        AgentEvent::PermissionRequested { action, .. }
+        | AgentEvent::PermissionDecided { action, .. } => action.len(),
+        AgentEvent::ToolCallStarted { .. } | AgentEvent::Usage { .. } | AgentEvent::Unknown => 0,
+    }
 }
 
 /// Rough token estimate for the *entire* durable+tactical portion of the
@@ -1337,7 +1562,7 @@ fn estimate_message_tokens(messages: &[Message]) -> u32 {
 mod tests {
     use super::*;
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
     use async_trait::async_trait;
     use braze_events::{NoopObserver, TextDeltaObserver};
@@ -1414,6 +1639,71 @@ mod tests {
         }
     }
 
+    /// A `ModelBackend` whose N-th call (0-indexed, `fail_on_attempt`)
+    /// errors and every other call succeeds with the same scripted round
+    /// — used to prove best-of-n (N-13, docs/AUDITORIA-2026-07-v2.md)
+    /// votes among whichever candidates succeeded instead of aborting the
+    /// whole round the instant any one of them fails.
+    struct FlakyBestOfNModel {
+        fail_on_attempt: u32,
+        calls: AtomicU32,
+        good_round: Vec<CompletionEvent>,
+    }
+
+    #[async_trait]
+    impl ModelBackend for FlakyBestOfNModel {
+        fn name(&self) -> &str {
+            "flaky-best-of-n"
+        }
+
+        async fn complete(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
+            let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
+            if attempt == self.fail_on_attempt {
+                return Err(ModelError::Request(
+                    "simulated transient failure".to_string(),
+                ));
+            }
+            Ok(Box::pin(futures::stream::iter(
+                self.good_round.clone().into_iter().map(Ok),
+            )))
+        }
+    }
+
+    /// A `ModelBackend` whose single scripted round only resolves after
+    /// `delay` — used to force two `run_turn` calls to genuinely overlap
+    /// in time (N-17, docs/AUDITORIA-2026-07-v2.md) instead of one
+    /// finishing before the other starts.
+    struct SlowModel {
+        delay: Duration,
+        round: Vec<CompletionEvent>,
+    }
+
+    #[async_trait]
+    impl ModelBackend for SlowModel {
+        fn name(&self) -> &str {
+            "slow"
+        }
+
+        async fn complete(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
+            tokio::time::sleep(self.delay).await;
+            Ok(Box::pin(futures::stream::iter(
+                self.round.clone().into_iter().map(Ok),
+            )))
+        }
+    }
+
     /// Wraps any `ModelBackend` and validates every
     /// `CompletionRequest.messages` against the Anthropic message-ordering
     /// protocol (`crate::protocol_check`) before delegating to `inner` —
@@ -1470,6 +1760,10 @@ mod tests {
         tx: mpsc::UnboundedSender<(TaskHandle, ToolResult)>,
         rx: AsyncMutex<mpsc::UnboundedReceiver<(TaskHandle, ToolResult)>>,
         next: AtomicU64,
+        // Mirrors `braze_events::ChannelTaskNotifier`'s own tracking, so
+        // tests can prove `dispatch_tool_calls`'s timeout path really
+        // cancels a task instead of just forgetting about it (N-33).
+        handles: std::sync::Mutex<HashMap<TaskHandle, tokio::task::JoinHandle<()>>>,
     }
 
     impl TestNotifier {
@@ -1479,6 +1773,7 @@ mod tests {
                 tx,
                 rx: AsyncMutex::new(rx),
                 next: AtomicU64::new(0),
+                handles: std::sync::Mutex::new(HashMap::new()),
             }
         }
 
@@ -1503,19 +1798,30 @@ mod tests {
         fn spawn(&self, task: BackgroundTask) -> TaskHandle {
             let handle = TaskHandle(self.next.fetch_add(1, Ordering::SeqCst));
             let tx = self.tx.clone();
-            tokio::spawn(async move {
+            let join = tokio::spawn(async move {
                 let result = task.work.await;
                 let _ = tx.send((handle, result));
             });
+            self.handles.lock().unwrap().insert(handle, join);
             handle
         }
 
         async fn next_completed(&self, timeout: Duration) -> Option<(TaskHandle, ToolResult)> {
             let mut rx = self.rx.lock().await;
-            tokio::time::timeout(timeout, rx.recv())
+            let completed = tokio::time::timeout(timeout, rx.recv())
                 .await
                 .ok()
-                .flatten()
+                .flatten();
+            if let Some((handle, _)) = &completed {
+                self.handles.lock().unwrap().remove(handle);
+            }
+            completed
+        }
+
+        fn abort(&self, handle: TaskHandle) {
+            if let Some(join) = self.handles.lock().unwrap().remove(&handle) {
+                join.abort();
+            }
         }
     }
 
@@ -1583,6 +1889,134 @@ mod tests {
         }
     }
 
+    /// Like `EchoToolProvider`, but the delay before resolving is taken
+    /// from the call's `delay_ms` argument — lets a test make a round's
+    /// concurrently-dispatched tool calls resolve in a chosen order
+    /// (e.g. reverse of dispatch order) via real `tokio::spawn`/`sleep`
+    /// scheduling, instead of only ever simulating that race by seeding
+    /// events directly in a specific order.
+    struct ReorderingEchoToolProvider {
+        invocations: Arc<AtomicU32>,
+    }
+
+    impl ReorderingEchoToolProvider {
+        fn new(invocations: Arc<AtomicU32>) -> Self {
+            Self { invocations }
+        }
+    }
+
+    #[async_trait]
+    impl ToolProvider for ReorderingEchoToolProvider {
+        fn provider_id(&self) -> &str {
+            "test:reordering-echo"
+        }
+
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            Ok(vec![ToolStub {
+                name: "echo".to_string(),
+                summary: "echoes its input after an id-dependent delay".to_string(),
+                source: "test:reordering-echo".to_string(),
+                input_schema: None,
+            }])
+        }
+
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            if name == "echo" {
+                Ok(Some(ToolSchema {
+                    name: "echo".to_string(),
+                    description: "echoes its input".to_string(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "delay_ms": {"type": "number"},
+                        },
+                        "required": ["text"],
+                    }),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            self.invocations.fetch_add(1, Ordering::SeqCst);
+            let text = call
+                .arguments
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let delay_ms = call
+                .arguments
+                .get("delay_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            if delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            }
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: format!("echoed: {text}"),
+                is_error: false,
+            })
+        }
+    }
+
+    /// A `ToolProvider` whose one tool sleeps a fixed delay then flips a
+    /// shared flag before returning — used to prove a tool-completion
+    /// timeout genuinely cancels the background task (the flag stays
+    /// `false`) rather than merely giving up on waiting for it (the flag
+    /// would eventually flip `true` regardless of what the engine decided
+    /// to do with it). See N-33, docs/AUDITORIA-2026-07-v2.md.
+    struct SlowToolProvider {
+        delay: Duration,
+        completed: Arc<AtomicBool>,
+    }
+
+    impl SlowToolProvider {
+        fn new(delay: Duration, completed: Arc<AtomicBool>) -> Self {
+            Self { delay, completed }
+        }
+    }
+
+    #[async_trait]
+    impl ToolProvider for SlowToolProvider {
+        fn provider_id(&self) -> &str {
+            "test:slow"
+        }
+
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            Ok(vec![ToolStub {
+                name: "slow".to_string(),
+                summary: "sleeps then completes".to_string(),
+                source: "test:slow".to_string(),
+                input_schema: None,
+            }])
+        }
+
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            if name == "slow" {
+                Ok(Some(ToolSchema {
+                    name: "slow".to_string(),
+                    description: "sleeps then completes".to_string(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            tokio::time::sleep(self.delay).await;
+            self.completed.store(true, Ordering::SeqCst);
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: "done".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
     fn temp_store() -> (FileSessionStore, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!(
             "braze-engine-test-{}-{}",
@@ -1624,6 +2058,270 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::AssistantText { .. })),
             "the partial text from the failed round must never be persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-33 (docs/AUDITORIA-2026-07-v2.md): when
+    /// `dispatch_tool_calls`'s wait for a round's tool completions times
+    /// out, every still-pending task must be genuinely cancelled via
+    /// `TaskNotifier::abort`, not merely given up on while it keeps
+    /// running unobserved.
+    #[tokio::test]
+    async fn a_tool_completion_timeout_actually_cancels_the_still_running_task() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let completed = Arc::new(AtomicBool::new(false));
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "slow".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(SlowToolProvider::new(
+                Duration::from_millis(300),
+                Arc::clone(&completed),
+            ))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tool_completion_timeout(Duration::from_millis(20));
+
+        engine
+            .run_turn(&session, "please run the slow tool", &mut NoopObserver)
+            .await
+            .expect(
+                "turn should still converge — the timeout is treated as a \
+                 recoverable tool failure, not a hard error",
+            );
+
+        // Longer than the tool's own delay — if the background task
+        // hadn't really been cancelled, the flag would be true by now.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !completed.load(Ordering::SeqCst),
+            "the tool call kept running in the background after the engine \
+             timed out waiting for it"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-13 (docs/AUDITORIA-2026-07-v2.md): a
+    /// transient error on one best-of-n candidate must not discard the
+    /// other candidates already generated and fail the whole round —
+    /// the turn must still converge by voting among the survivors.
+    #[tokio::test]
+    async fn best_of_n_votes_among_successful_candidates_when_one_attempt_errors() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = FlakyBestOfNModel {
+            fail_on_attempt: 1,
+            calls: AtomicU32::new(0),
+            good_round: vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        };
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(3);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should still succeed despite one candidate erroring");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { text } if text == "done")),
+            "expected the winning candidate's text to be persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-13: if *every* best-of-n candidate fails,
+    /// the round must still propagate an error — voting among survivors
+    /// must not mask a genuine total failure as success.
+    #[tokio::test]
+    async fn best_of_n_fails_the_round_only_when_every_candidate_fails() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ErroringModel;
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(3);
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            matches!(result, Err(EngineError::Model(_))),
+            "expected every candidate to fail and the error to propagate, got {result:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-17 (docs/AUDITORIA-2026-07-v2.md): a second
+    /// `run_turn` call on the same `Engine` while a first one is still in
+    /// flight must be rejected explicitly instead of racing it over the
+    /// shared `TaskNotifier` completion channel.
+    #[tokio::test]
+    async fn a_second_concurrent_run_turn_is_rejected_while_the_first_is_in_flight() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = SlowModel {
+            delay: Duration::from_millis(200),
+            round: vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        };
+
+        let engine = Arc::new(Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        ));
+
+        let engine_a = Arc::clone(&engine);
+        let first = tokio::spawn(async move {
+            let mut observer = NoopObserver;
+            engine_a.run_turn(&session, "hola", &mut observer).await
+        });
+
+        // Give the first call time to acquire the guard before the second
+        // one starts.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let mut observer_b = NoopObserver;
+        let result_b = engine
+            .run_turn(&session, "hola de nuevo", &mut observer_b)
+            .await;
+        assert!(
+            matches!(result_b, Err(EngineError::ConcurrentTurn)),
+            "expected the second call to be rejected, got {result_b:?}"
+        );
+
+        let result_a = first.await.expect("first turn's task should not panic");
+        assert!(result_a.is_ok(), "the first turn should still succeed");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-24 (docs/AUDITORIA-2026-07-v2.md): a round
+    /// with no tool calls whose `stop_reason` reports token-budget
+    /// truncation must not be persisted as a normal converged answer.
+    #[tokio::test]
+    async fn a_truncated_final_response_is_reported_as_an_error_not_a_silent_success() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("partial answer cut off mid".to_string()),
+            CompletionEvent::Usage {
+                input_tokens: 10,
+                output_tokens: 100,
+                stop_reason: Some("max_tokens".to_string()),
+            },
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            matches!(result, Err(EngineError::TruncatedFinalResponse)),
+            "expected a truncated final response to be reported as an error, got {result:?}"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { .. })),
+            "the truncated text must never be persisted as a normal final answer"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for the "una completion vacía termina el turno
+    /// como éxito silencioso" bajo (docs/AUDITORIA-2026-07-v2.md): a
+    /// round with no text and no tool calls at all must not be treated as
+    /// a legitimate, silent convergence.
+    #[tokio::test]
+    async fn an_empty_completion_is_reported_as_an_error_not_a_silent_success() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![CompletionEvent::Done]]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            matches!(result, Err(EngineError::EmptyModelResponse)),
+            "expected an empty completion to be reported as an error, got {result:?}"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -2094,6 +2792,97 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    /// Closes the coverage gap the re-audit (docs/AUDITORIA-2026-07-v2.md,
+    /// "por qué los tests verdes no los atrapan") called out explicitly:
+    /// every existing `ProtocolValidatingModel` test runs 1-2 short rounds
+    /// that never cross `DEFAULT_TACTICAL_COMPACTION_THRESHOLD`, and every
+    /// test that *does* trigger compaction (e.g.
+    /// `compaction_tail_cut_can_orphan_a_tool_result` above) seeds events
+    /// directly and calls `load_messages` once — bypassing `run_turn`'s
+    /// real multi-turn loop entirely. Neither shape proves the two things
+    /// hold *together*, organically, over a long session: concurrent tool
+    /// dispatch completing out of order (N-1/N-2b's trigger) interacting
+    /// with compaction firing repeatedly as the log keeps growing past the
+    /// window/threshold, turn after turn.
+    ///
+    /// Drives many real turns through `run_turn`, each dispatching two
+    /// concurrently-issued tool calls that `ReorderingEchoToolProvider`
+    /// resolves in *reverse* of dispatch order (a real `tokio::spawn`/
+    /// `sleep` race, not a simulated one), with a low compaction threshold
+    /// so compaction triggers repeatedly across the run instead of once.
+    /// `ProtocolValidatingModel` panics the instant any request built
+    /// along the way would 400 against the real Anthropic API.
+    #[tokio::test]
+    async fn a_long_session_with_reordered_concurrent_tool_calls_stays_protocol_valid_across_repeated_compaction()
+     {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        const TURNS: usize = 15;
+        let mut rounds = Vec::with_capacity(TURNS * 2);
+        for i in 0..TURNS {
+            rounds.push(vec![
+                CompletionEvent::ToolCallRequested {
+                    id: format!("call-{i}-a"),
+                    name: "echo".to_string(),
+                    // Dispatched first but resolves last.
+                    arguments: serde_json::json!({ "text": "a", "delay_ms": 30 }),
+                },
+                CompletionEvent::ToolCallRequested {
+                    id: format!("call-{i}-b"),
+                    name: "echo".to_string(),
+                    // Dispatched second but resolves first.
+                    arguments: serde_json::json!({ "text": "b", "delay_ms": 1 }),
+                },
+                CompletionEvent::Done,
+            ]);
+            rounds.push(vec![
+                CompletionEvent::TextDelta(format!("turn {i} done")),
+                CompletionEvent::Done,
+            ]);
+        }
+
+        let model = ProtocolValidatingModel::new(ScriptedModel::new(rounds));
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ReorderingEchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tactical_compaction_threshold(10);
+
+        for i in 0..TURNS {
+            engine
+                .run_turn(
+                    &session,
+                    &format!("please echo turn {i}"),
+                    &mut NoopObserver,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "turn {i} failed (every prior turn passed protocol \
+                         validation, so this is a genuine failure, not the \
+                         validator): {err}"
+                    )
+                });
+        }
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            (TURNS * 2) as u32,
+            "every tool call across every turn must have actually dispatched"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     /// Records everything the engine mirrors into it, for asserting the
     /// live `TurnObserver` seam (PLAN.md § "Fase TUI — diseño", oleada 1)
     /// sees exactly what gets persisted, in the same order.
@@ -2293,6 +3082,10 @@ mod tests {
                 },
                 CompletionEvent::Done,
             ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
         ]);
 
         let invocations = Arc::new(AtomicU32::new(0));
@@ -2378,6 +3171,10 @@ mod tests {
                     name: "echo".to_string(),
                     arguments: serde_json::json!({ "wrong_field": 1 }),
                 },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("giving up".to_string()),
                 CompletionEvent::Done,
             ],
         ]);
@@ -3046,6 +3843,29 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    /// Regression test for the "estimador de tokens sobre Debug repr"
+    /// bajo (docs/AUDITORIA-2026-07-v2.md): the estimate must scale with
+    /// the event's actual user-visible text, not its `Debug` dump —
+    /// field names and enum punctuation must not count as "content".
+    #[test]
+    fn estimate_dropped_tokens_counts_visible_text_not_debug_repr() {
+        let text = "hola".repeat(20); // 80 chars of real content
+        let events = vec![AgentEvent::UserMessage { text: text.clone() }];
+
+        let debug_repr_chars = format!("{:?}", events[0]).len();
+        assert!(
+            debug_repr_chars > text.len(),
+            "sanity: the Debug form should be longer than the raw text itself"
+        );
+
+        let estimate = estimate_dropped_tokens(&events);
+        assert_eq!(
+            estimate,
+            (text.len() / 4) as u32,
+            "expected the estimate to scale with the raw text length, not the (longer) Debug form"
+        );
+    }
+
     /// Confirms the generic permissive schema `braze-model` sends to the
     /// model today (`{"type":"object","additionalProperties":true}`) would
     /// not itself reject arbitrary arguments if it were ever validated
@@ -3117,6 +3937,53 @@ mod tests {
         assert_ne!(a.id, b.id);
     }
 
+    // --- synthesize_orphan_repairs (N-26, docs/AUDITORIA-2026-07-v2.md) ---
+
+    #[test]
+    fn synthesize_orphan_repairs_finds_a_tool_use_with_no_matching_result() {
+        let events = vec![
+            AgentEvent::UserMessage {
+                text: "please echo hi".to_string(),
+            },
+            AgentEvent::AssistantToolCall {
+                id: "call-1".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({ "text": "hi" }),
+            },
+        ];
+
+        let repairs = synthesize_orphan_repairs(&events);
+        assert_eq!(repairs.len(), 1);
+        match &repairs[0] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-1");
+                assert!(result.is_error);
+            }
+            other => panic!("expected ToolCallCompleted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn synthesize_orphan_repairs_is_a_no_op_when_every_call_already_has_a_result() {
+        let events = vec![
+            AgentEvent::AssistantToolCall {
+                id: "call-1".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "call-1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "call-1".to_string(),
+                    content: "echoed: hi".to_string(),
+                    is_error: false,
+                },
+            },
+        ];
+
+        assert!(synthesize_orphan_repairs(&events).is_empty());
+    }
+
     /// Regression test for B5: a model that emits the tool call as plain
     /// text (no structured `tool_calls` entry — the failure mode for
     /// small/local models or templates without native tool-call support)
@@ -3175,6 +4042,64 @@ mod tests {
                 AgentEvent::AssistantText { text } if text.contains("\"name\"")
             )),
             "the raw JSON must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-15 (docs/AUDITORIA-2026-07-v2.md):
+    /// `with_textual_rescue_enabled(false)` must stop the rescue from
+    /// dispatching a real tool a user only asked to see the JSON for —
+    /// the raw text is persisted as ordinary conversational text instead.
+    #[tokio::test]
+    async fn textual_rescue_can_be_disabled() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta(
+                r#"{"name": "echo", "arguments": {"text": "hi"}}"#.to_string(),
+            ),
+            CompletionEvent::Done,
+        ]]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_textual_rescue_enabled(false);
+
+        engine
+            .run_turn(
+                &session,
+                "muéstrame el JSON para invocar echo",
+                &mut NoopObserver,
+            )
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            0,
+            "the tool must never actually be invoked when the rescue is disabled"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("\"name\"")
+            )),
+            "the raw JSON must be persisted as ordinary text instead of dispatched"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

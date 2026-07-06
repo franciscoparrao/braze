@@ -89,8 +89,16 @@ impl BackendSpec {
         }
     }
 
-    /// Builds the `ModelBackend` this spec names.
-    pub fn build(&self, config: &Config) -> Result<Box<dyn ModelBackend>, BenchError> {
+    /// Builds the `ModelBackend` this spec names, with `sampling` applied
+    /// identically to every provider (N-34, docs/AUDITORIA-2026-07-v2.md)
+    /// — without this, comparing e.g. Ollama pinned to a low temperature
+    /// against Anthropic/OpenRouter left at their provider default
+    /// (~1.0) compares different sampling regimes, not different models.
+    pub fn build(
+        &self,
+        config: &Config,
+        sampling: SamplingSpec,
+    ) -> Result<Box<dyn ModelBackend>, BenchError> {
         match self.provider {
             Provider::Anthropic => {
                 let api_key = config.anthropic_api_key.clone().ok_or_else(|| {
@@ -111,17 +119,28 @@ impl BackendSpec {
                                 .to_string(),
                         )
                     })?;
-                Ok(Box::new(AnthropicBackend::new(api_key, model)))
+                // No `seed`: the Anthropic Messages API has no such
+                // parameter, so a run against it can never be fully
+                // reproducible — temperature parity is the most this
+                // backend can offer toward N-34.
+                Ok(Box::new(
+                    AnthropicBackend::new(api_key.expose_secret().to_string(), model)
+                        .with_temperature(sampling.temperature),
+                ))
             }
             Provider::Ollama => {
                 let model = self
                     .model_override
                     .clone()
                     .unwrap_or_else(|| config.ollama_model.clone());
-                Ok(Box::new(
+                let mut backend =
                     OllamaBackend::with_base_url(model, config.ollama_base_url.clone())
-                        .with_num_ctx(config.ollama_num_ctx),
-                ))
+                        .with_num_ctx(config.ollama_num_ctx)
+                        .with_temperature(sampling.temperature);
+                if let Some(seed) = sampling.seed {
+                    backend = backend.with_seed(seed);
+                }
+                Ok(Box::new(backend))
             }
             Provider::OpenRouter => {
                 let api_key = config.openrouter_api_key.clone().ok_or_else(|| {
@@ -142,14 +161,30 @@ impl BackendSpec {
                                 .to_string(),
                         )
                     })?;
-                Ok(Box::new(OpenRouterBackend::with_base_url(
-                    api_key,
+                let mut backend = OpenRouterBackend::with_base_url(
+                    api_key.expose_secret().to_string(),
                     model,
                     config.openrouter_base_url.clone(),
-                )))
+                )
+                .with_temperature(sampling.temperature);
+                if let Some(seed) = sampling.seed {
+                    backend = backend.with_seed(seed);
+                }
+                Ok(Box::new(backend))
             }
         }
     }
+}
+
+/// Sampling parameters applied uniformly across every backend in a sweep
+/// — see [`BackendSpec::build`]'s doc comment for why uniformity is the
+/// point (N-34, docs/AUDITORIA-2026-07-v2.md).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SamplingSpec {
+    pub temperature: f32,
+    /// Ignored for an `anthropic` spec — the Messages API has no `seed`
+    /// parameter.
+    pub seed: Option<u64>,
 }
 
 #[cfg(test)]
@@ -158,6 +193,13 @@ mod tests {
 
     fn config() -> Config {
         Config::load_with(None, Vec::<(String, String)>::new()).unwrap()
+    }
+
+    fn sampling() -> SamplingSpec {
+        SamplingSpec {
+            temperature: 0.2,
+            seed: Some(42),
+        }
     }
 
     #[test]
@@ -203,13 +245,13 @@ mod tests {
         // Ollama needs no API key, unlike Anthropic — this must succeed
         // even against a default (empty) config.
         let spec = BackendSpec::parse("ollama:qwen2.5:3b").unwrap();
-        assert!(spec.build(&config()).is_ok());
+        assert!(spec.build(&config(), sampling()).is_ok());
     }
 
     #[test]
     fn build_anthropic_backend_without_api_key_is_a_startup_error() {
         let spec = BackendSpec::parse("anthropic:claude-x").unwrap();
-        let result = spec.build(&config());
+        let result = spec.build(&config(), sampling());
         assert!(matches!(result, Err(BenchError::Startup(_))));
     }
 
@@ -224,7 +266,7 @@ mod tests {
     #[test]
     fn build_openrouter_backend_without_api_key_is_a_startup_error() {
         let spec = BackendSpec::parse("openrouter:openai/gpt-4o-mini").unwrap();
-        let result = spec.build(&config());
+        let result = spec.build(&config(), sampling());
         assert!(matches!(result, Err(BenchError::Startup(_))));
     }
 }

@@ -43,8 +43,16 @@ pub enum AgentEvent {
         /// Coarse identity of the action being requested, if the caller
         /// could derive one (see `braze_permissions::derive_permission_key`).
         /// `#[serde(default)]` so rollout logs persisted before this field
-        /// existed still deserialize, with `key: None`.
-        #[serde(default)]
+        /// existed still deserialize, with `key: None`. `deserialize_with`
+        /// (N-40, docs/AUDITORIA-2026-07-v2.md): a `PermissionKey` variant
+        /// this binary doesn't recognize (written by a newer one) falls
+        /// back to `None` for just this field instead of failing to
+        /// deserialize this whole event — which would otherwise abort
+        /// `load()` for the entire session at that line.
+        #[serde(
+            default,
+            deserialize_with = "braze_types::deserialize_permission_key_lossy"
+        )]
         key: Option<braze_types::PermissionKey>,
     },
     PermissionDecided {
@@ -55,8 +63,12 @@ pub enum AgentEvent {
         /// replays it back into a fresh `PermissionGuard` via
         /// `PermissionGuard::seed_remembered` so the same action isn't
         /// re-confirmed. `#[serde(default)]` for the same backward-compat
-        /// reason as `PermissionRequested::key`.
-        #[serde(default)]
+        /// reason as `PermissionRequested::key`; `deserialize_with` for
+        /// the same N-40 lossy-fallback reason.
+        #[serde(
+            default,
+            deserialize_with = "braze_types::deserialize_permission_key_lossy"
+        )]
         key: Option<braze_types::PermissionKey>,
     },
     /// Token usage reported by the model backend for one completion round.
@@ -97,6 +109,21 @@ pub enum AgentEvent {
     /// any other audit-only event — see
     /// `braze_session::SimpleContextCompactor::compact_tactical` and
     /// `braze_engine::history::event_to_message`.
+    ///
+    /// Known accepted limitation (bajo, docs/AUDITORIA-2026-07-v2.md,
+    /// "AgentEvent::Unknown pierde el payload al replicarse en
+    /// backtrack"): serde's `#[serde(other)]` for an internally-tagged
+    /// enum only supports a unit variant — it cannot carry the original
+    /// JSON's other fields alongside it, by construction of how serde
+    /// resolves the tag before deserializing the rest of the object.
+    /// Carrying the raw payload here would mean replacing this derive
+    /// with a hand-written `Deserialize` for the whole enum — a much
+    /// larger change to a frozen-contract type than this narrow case
+    /// justifies. Practical effect: if `braze-tui`'s backtrack replicates
+    /// a session containing an event type *this* binary doesn't
+    /// recognize (written by a newer binary), the replicated copy loses
+    /// that event's original fields — the untouched original session file
+    /// still has them; only the new, backtracked-into session doesn't.
     #[serde(other)]
     Unknown,
 }
@@ -122,6 +149,22 @@ mod tests {
                 assert!(allowed);
                 assert_eq!(key, None);
             }
+            other => panic!("expected PermissionDecided, got {other:?}"),
+        }
+    }
+
+    /// Regression test for N-40 (docs/AUDITORIA-2026-07-v2.md): a
+    /// `PermissionDecided` event carrying a `key` shape this binary
+    /// doesn't recognize (simulating a `PermissionKey` variant a newer
+    /// binary added) must still deserialize the whole event, with
+    /// `key: None` — not fail the entire line (and, previously, abort
+    /// `load()` for the whole session at that point).
+    #[test]
+    fn permission_decided_with_an_unrecognized_key_shape_still_deserializes() {
+        let json = r#"{"type":"permission_decided","action":"run `mv a b`","allowed":true,"key":{"SomeFutureVariant":{"field":"value"}}}"#;
+        let event: AgentEvent = serde_json::from_str(json).expect("must deserialize");
+        match event {
+            AgentEvent::PermissionDecided { key, .. } => assert_eq!(key, None),
             other => panic!("expected PermissionDecided, got {other:?}"),
         }
     }

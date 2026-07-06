@@ -45,6 +45,14 @@ ratatui-textarea = { version = "0.9" }
 # `highlight-code` (syntect + ansi-to-tui) for syntax-highlighted code
 # blocks.
 tui-markdown = { version = "0.3" }
+# Display-column width, not `chars().count()` — bajo
+# (docs/AUDITORIA-2026-07-v2.md, "truncación por char-count vs. ancho de
+# display (CJK)"): a CJK/emoji character occupies ~2 terminal columns,
+# so budgeting `truncate_for_display` by raw char count over/undershoots
+# the terminal width it's meant to fit. Already an indirect dependency
+# (pulled in by ratatui/crossterm) — declared directly here so its
+# `UnicodeWidthStr`/`UnicodeWidthChar` traits are usable.
+unicode-width = "0.2"
 
 [dev-dependencies]
 # Snapshot tests for `HistoryCell` rendering (PLAN.md § "Fase TUI —

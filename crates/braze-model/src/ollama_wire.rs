@@ -47,6 +47,12 @@ pub(crate) struct OllamaOptions {
     pub num_ctx: u32,
     pub num_predict: i32,
     pub temperature: f32,
+    /// `None` lets Ollama pick its own (non-reproducible) seed. Set via
+    /// [`OllamaBackend::with_seed`](crate::ollama::OllamaBackend::with_seed)
+    /// for reproducible runs — e.g. `braze-bench` sweeps comparing
+    /// backends (N-34, docs/AUDITORIA-2026-07-v2.md).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -97,6 +103,7 @@ pub(crate) fn build_request(
     model: &str,
     num_ctx: u32,
     temperature: f32,
+    seed: Option<u64>,
 ) -> OllamaRequest {
     let mut messages = Vec::new();
 
@@ -125,6 +132,7 @@ pub(crate) fn build_request(
             // an adversarial value.
             num_predict: req.max_tokens.min(i32::MAX as u32) as i32,
             temperature,
+            seed,
         },
     }
 }
@@ -181,12 +189,20 @@ fn to_ollama_messages(message: &Message) -> Vec<OllamaMessage> {
                 out.push(OllamaMessage {
                     role: "tool",
                     // Ollama's native API doesn't standardize an
-                    // "is_error" field on tool messages; surface it in the
-                    // content so the model still sees it.
+                    // "is_error" field NOR a tool-call-id field on tool
+                    // messages; both get surfaced in the content so the
+                    // model still sees them. N-23
+                    // (docs/AUDITORIA-2026-07-v2.md): the id marker used
+                    // to be embedded only on the error branch — with 2+
+                    // concurrent successful tool calls in one round, the
+                    // model received several indistinguishable `role:
+                    // "tool"` messages and had no way to tell which
+                    // result answered which call (cross-attribution).
+                    // Now embedded unconditionally.
                     content: if *is_error {
                         format!("[error] {content} (tool_use_id={tool_use_id})")
                     } else {
-                        content.clone()
+                        format!("(tool_use_id={tool_use_id}) {content}")
                     },
                     tool_calls: Vec::new(),
                 });
@@ -271,13 +287,18 @@ pub(crate) struct OllamaStreamState {
     /// `Err(ModelError::StreamError)` instead of silently ending the
     /// stream — see [`crate::ModelError::StreamError`]'s doc comment.
     pub stream_error: Option<String>,
+    /// The `options.num_ctx` this request was sent with — `0` disables
+    /// the hard-truncation check below (used by tests that don't care
+    /// about it). See [`Self::handle_line`]'s `done` branch.
+    num_ctx: u32,
 }
 
 impl OllamaStreamState {
-    pub fn new() -> Self {
+    pub fn new(num_ctx: u32) -> Self {
         Self {
             done: false,
             stream_error: None,
+            num_ctx,
         }
     }
 
@@ -313,6 +334,27 @@ impl OllamaStreamState {
                 .and_then(Value::as_u64)
                 .unwrap_or(0) as u32;
             let output_tokens = json.get("eval_count").and_then(Value::as_u64).unwrap_or(0) as u32;
+
+            // Bajo (docs/AUDITORIA-2026-07-v2.md, "B1 nunca implementó la
+            // señal de truncamiento dura"): `prompt_eval_count >=
+            // num_ctx` means Ollama silently dropped tokens off the
+            // *front* of the prompt to fit — per `OllamaBackend`'s own
+            // `DEFAULT_NUM_CTX` doc comment, the system prompt and tool
+            // definitions are the first things to go, with no error
+            // otherwise surfaced anywhere. Treat it as a hard stream
+            // error instead of a normal completion the caller has no way
+            // to distinguish from an honest, untruncated response.
+            if self.num_ctx > 0 && input_tokens >= self.num_ctx {
+                self.stream_error = Some(format!(
+                    "ollama: prompt was truncated to fit num_ctx ({input_tokens} >= \
+                     {num_ctx} tokens) — the system prompt and/or tool definitions may \
+                     have been silently dropped",
+                    num_ctx = self.num_ctx
+                ));
+                self.done = true;
+                return events;
+            }
+
             // "length" means output was cut off by the num_predict budget
             // rather than the model finishing on its own — see
             // `CompletionEvent::Usage`'s doc comment.
@@ -336,12 +378,22 @@ impl OllamaStreamState {
 fn tool_call_from_json(call: &Value) -> Option<CompletionEvent> {
     let function = call.get("function")?;
     let name = function.get("name").and_then(Value::as_str)?.to_string();
+    // Some Ollama-compatible servers send `arguments` as a JSON-encoded
+    // *string* rather than a native object — parse it rather than
+    // passing the raw string through as if it were the object a caller
+    // like braze-engine's schema validation expects (bajo,
+    // docs/AUDITORIA-2026-07-v2.md, "Ollama emite arguments como string
+    // JSON no manejado").
     let arguments = function
         .get("arguments")
-        .cloned()
+        .and_then(|value| match value {
+            Value::String(s) => serde_json::from_str(s).ok(),
+            other => Some(other.clone()),
+        })
         .unwrap_or_else(|| serde_json::json!({}));
     let id = format!(
-        "ollama-tool-call-{}",
+        "ollama-tool-call-{}-{}",
+        crate::synth_id::process_nonce(),
         TOOL_CALL_COUNTER.fetch_add(1, Ordering::Relaxed)
     );
     Some(CompletionEvent::ToolCallRequested {
@@ -375,7 +427,7 @@ mod tests {
             system_prompt: "be terse".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "llama3", 8192, 0.2);
+        let wire = build_request(&req, "llama3", 8192, 0.2, None);
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
         assert_eq!(wire.messages[0].content, "be terse");
@@ -385,6 +437,7 @@ mod tests {
         assert_eq!(wire.options.num_ctx, 8192);
         assert_eq!(wire.options.num_predict, 100);
         assert_eq!(wire.options.temperature, 0.2);
+        assert_eq!(wire.options.seed, None);
     }
 
     #[test]
@@ -395,8 +448,23 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: u32::MAX,
         };
-        let wire = build_request(&req, "llama3", 8192, 0.2);
+        let wire = build_request(&req, "llama3", 8192, 0.2, None);
         assert_eq!(wire.options.num_predict, i32::MAX);
+    }
+
+    /// Regression test for N-34 (docs/AUDITORIA-2026-07-v2.md): an
+    /// explicit seed must actually reach the wire request, since it's
+    /// what makes an Ollama run reproducible across sweeps.
+    #[test]
+    fn build_request_forwards_an_explicit_seed() {
+        let req = CompletionRequest {
+            messages: vec![Message::text(Role::User, "hi")],
+            tool_stubs: vec![],
+            system_prompt: String::new(),
+            max_tokens: 100,
+        };
+        let wire = build_request(&req, "llama3", 8192, 0.2, Some(42));
+        assert_eq!(wire.options.seed, Some(42));
     }
 
     #[test]
@@ -449,7 +517,36 @@ mod tests {
         let out = to_ollama_messages(&message);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].role, "tool");
-        assert_eq!(out[0].content, "sunny, 20C");
+        assert_eq!(out[0].content, "(tool_use_id=call-1) sunny, 20C");
+    }
+
+    /// Regression test for N-23 (docs/AUDITORIA-2026-07-v2.md): two
+    /// successful tool results in one round must each carry their own
+    /// `tool_use_id` marker, not just the error-branch one — otherwise
+    /// the model receives two indistinguishable `role: "tool"` messages
+    /// and has no way to attribute a result to the call that produced it.
+    #[test]
+    fn to_ollama_messages_correlates_multiple_successful_tool_results() {
+        let message = Message {
+            role: Role::User,
+            content: vec![
+                ContentBlock::ToolResult {
+                    tool_use_id: "call-1".to_string(),
+                    content: "sunny, 20C".to_string(),
+                    is_error: false,
+                },
+                ContentBlock::ToolResult {
+                    tool_use_id: "call-2".to_string(),
+                    content: "rainy, 12C".to_string(),
+                    is_error: false,
+                },
+            ],
+        };
+        let out = to_ollama_messages(&message);
+        assert_eq!(out.len(), 2);
+        assert!(out[0].content.contains("call-1"));
+        assert!(out[1].content.contains("call-2"));
+        assert_ne!(out[0].content, out[1].content);
     }
 
     #[test]
@@ -521,9 +618,45 @@ mod tests {
         assert!(matches!(result, Err(ModelError::Decode(_))));
     }
 
+    /// Regression test (bajo, docs/AUDITORIA-2026-07-v2.md, "B1 nunca
+    /// implementó la señal de truncamiento dura"): `prompt_eval_count >=
+    /// num_ctx` means Ollama silently truncated the prompt — this must
+    /// surface as a stream error, not a normal completion.
+    #[test]
+    fn stream_state_detects_hard_truncation_via_prompt_eval_count() {
+        let mut state = OllamaStreamState::new(4096);
+        let events = state.handle_line(&serde_json::json!({
+            "model": "llama3",
+            "message": {"role": "assistant", "content": ""},
+            "done": true,
+            "prompt_eval_count": 4096,
+            "eval_count": 4
+        }));
+        assert!(events.iter().all(|e| !matches!(e, CompletionEvent::Done)));
+        assert!(state.stream_error.is_some());
+        assert!(state.done);
+    }
+
+    /// `num_ctx: 0` disables the check (used by every other test here
+    /// that doesn't care about it) — must not itself be misread as "the
+    /// prompt is already at capacity".
+    #[test]
+    fn stream_state_num_ctx_zero_disables_the_truncation_check() {
+        let mut state = OllamaStreamState::new(0);
+        let events = state.handle_line(&serde_json::json!({
+            "model": "llama3",
+            "message": {"role": "assistant", "content": ""},
+            "done": true,
+            "prompt_eval_count": 999_999,
+            "eval_count": 4
+        }));
+        assert!(state.stream_error.is_none());
+        assert!(events.iter().any(|e| matches!(e, CompletionEvent::Done)));
+    }
+
     #[test]
     fn stream_state_simple_text_completion() {
-        let mut state = OllamaStreamState::new();
+        let mut state = OllamaStreamState::new(0);
         let lines = [
             serde_json::json!({"model": "llama3", "message": {"role": "assistant", "content": "Hello"}, "done": false}),
             serde_json::json!({"model": "llama3", "message": {"role": "assistant", "content": ", world"}, "done": false}),
@@ -567,7 +700,7 @@ mod tests {
 
     #[test]
     fn stream_state_captures_done_reason_as_stop_reason() {
-        let mut state = OllamaStreamState::new();
+        let mut state = OllamaStreamState::new(0);
         let line = serde_json::json!({
             "model": "llama3",
             "message": {"role": "assistant", "content": ""},
@@ -592,7 +725,7 @@ mod tests {
 
     #[test]
     fn stream_state_emits_tool_call_and_done_together() {
-        let mut state = OllamaStreamState::new();
+        let mut state = OllamaStreamState::new(0);
         let line = serde_json::json!({
             "model": "llama3",
             "message": {
@@ -628,7 +761,7 @@ mod tests {
 
     #[test]
     fn stream_state_missing_usage_fields_default_to_zero_without_panicking() {
-        let mut state = OllamaStreamState::new();
+        let mut state = OllamaStreamState::new(0);
         let line = serde_json::json!({"done": true});
         let events = state.handle_line(&line);
         assert!(state.done);

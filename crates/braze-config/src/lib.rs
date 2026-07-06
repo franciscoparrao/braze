@@ -22,13 +22,17 @@
 //! # }
 //! ```
 
+mod api_key;
 mod config;
 mod error;
 mod file;
 mod overrides;
 mod paths;
+mod prompt;
 
+pub use api_key::ApiKey;
 pub use config::{Config, McpServerConfigStub};
 pub use error::ConfigError;
 pub use overrides::ConfigOverrides;
 pub use paths::{config_file_path, default_session_dir};
+pub use prompt::{default_system_prompt, ollama_context_budget_tokens};

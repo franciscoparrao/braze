@@ -25,6 +25,23 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
     },
 ];
 
+/// Parses `body` (the text after a leading `/`, e.g. `"quit ahora"` from
+/// `"/quit ahora"`) into `(command_name, args)` if the first
+/// whitespace-delimited token exactly matches a registered command name —
+/// `None` otherwise (not a recognized command, should fall through as
+/// ordinary text). Bajo (docs/AUDITORIA-2026-07-v2.md, "slash command con
+/// argumentos (/quit ahora) se manda al modelo"): matching the *whole*
+/// string against a command name meant a recognized command followed by
+/// trailing text never matched, and got sent to the model as if it were
+/// ordinary conversation instead of running the command.
+pub fn parse_slash_command(body: &str) -> Option<(&'static str, Option<&str>)> {
+    let mut parts = body.splitn(2, char::is_whitespace);
+    let candidate = parts.next().unwrap_or("");
+    let command = SLASH_COMMANDS.iter().find(|c| c.name == candidate)?;
+    let args = parts.next().map(str::trim).filter(|s| !s.is_empty());
+    Some((command.name, args))
+}
+
 /// Commands whose name starts with `query` (case-insensitive), in
 /// registry order — prefix match, not substring: command names are
 /// short and known upfront, so "matches what you'd type next" is more
@@ -71,5 +88,31 @@ mod tests {
     #[test]
     fn unknown_query_matches_nothing() {
         assert!(matching_commands("zzz").is_empty());
+    }
+
+    #[test]
+    fn parse_slash_command_recognizes_a_bare_command() {
+        assert_eq!(parse_slash_command("quit"), Some(("quit", None)));
+    }
+
+    /// Regression test for the "slash command con argumentos" bajo
+    /// (docs/AUDITORIA-2026-07-v2.md): a recognized command name followed
+    /// by trailing text must still be recognized as that command.
+    #[test]
+    fn parse_slash_command_recognizes_a_command_with_trailing_args() {
+        assert_eq!(
+            parse_slash_command("quit ahora"),
+            Some(("quit", Some("ahora")))
+        );
+    }
+
+    #[test]
+    fn parse_slash_command_returns_none_for_an_unrecognized_command() {
+        assert_eq!(parse_slash_command("zzz ahora"), None);
+    }
+
+    #[test]
+    fn parse_slash_command_trims_and_ignores_all_whitespace_args() {
+        assert_eq!(parse_slash_command("quit   "), Some(("quit", None)));
     }
 }

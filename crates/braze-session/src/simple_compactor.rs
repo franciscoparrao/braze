@@ -98,6 +98,17 @@ fn is_settled_durable(event: &AgentEvent) -> bool {
 const DIGEST_MAX_USER_REQUESTS: usize = 8;
 const DIGEST_MAX_TOOL_CALLS: usize = 15;
 const DIGEST_MAX_TOOL_ERRORS: usize = 8;
+/// Most recent `CompactionOccurred` digests kept verbatim in
+/// `DurableState.summary` — N-25 (docs/AUDITORIA-2026-07-v2.md):
+/// `split` re-derives the summary from the *entire* raw event log on
+/// every call, and every past `CompactionOccurred` stays in that log
+/// forever, so without a cap the summary grows linearly with the number
+/// of compactions a long session has been through (each carrying its own
+/// repeated instructions trailer — see `Self::compact_tactical`'s
+/// returned string), sent on every single request. Older digests beyond
+/// this many are dropped rather than kept verbatim; the model still has
+/// *a* summary, just not every one that ever existed.
+const MAX_SUMMARIES_KEPT: usize = 5;
 
 /// Truncates `text` to its first `max_words` whitespace-separated words,
 /// appending an ellipsis if anything was cut. Operates on
@@ -244,7 +255,10 @@ impl ContextCompactor for SimpleContextCompactor {
         }
 
         let durable = DurableState {
-            summary: summary_parts.join(" "),
+            // N-25 (docs/AUDITORIA-2026-07-v2.md): only the most recent
+            // `MAX_SUMMARIES_KEPT` digests are kept — see that constant's
+            // doc comment for why this must be capped.
+            summary: tail_capped(&summary_parts, MAX_SUMMARIES_KEPT).join(" "),
             durable_events,
         };
         (durable, tactical)
@@ -601,6 +615,35 @@ mod tests {
             );
             assert_eq!(durable.summary, "folded a, b, c");
         }
+    }
+
+    /// Regression test for N-25 (docs/AUDITORIA-2026-07-v2.md):
+    /// `durable.summary` must not grow linearly with the number of past
+    /// compactions — only the most recent `MAX_SUMMARIES_KEPT` digests
+    /// survive into it.
+    #[test]
+    fn durable_summary_stays_bounded_across_many_compactions() {
+        let compactor = SimpleContextCompactor::new(0);
+        let mut events = vec![user("seed")];
+
+        for i in 0..(MAX_SUMMARIES_KEPT * 3) {
+            events.push(compaction(&format!("digest number {i}")));
+        }
+
+        let (durable, _tactical) = compactor.split(&events);
+        let kept_digests = durable.summary.matches("digest number").count();
+        assert_eq!(
+            kept_digests, MAX_SUMMARIES_KEPT,
+            "expected only the most recent {MAX_SUMMARIES_KEPT} digests, got: {}",
+            durable.summary
+        );
+        // The most recent digests, not an arbitrary subset.
+        assert!(
+            durable
+                .summary
+                .contains(&format!("digest number {}", MAX_SUMMARIES_KEPT * 3 - 1))
+        );
+        assert!(!durable.summary.contains("digest number 0"));
     }
 
     #[test]

@@ -35,4 +35,33 @@ pub enum EngineError {
     /// arrived as a complete, converged response.
     #[error("model backend's completion stream ended without a terminal event")]
     IncompleteStream,
+
+    /// A round with no tool calls stopped because of
+    /// `stop_reason: "max_tokens"`/`"length"` — N-24
+    /// (docs/AUDITORIA-2026-07-v2.md). The text gathered so far may be cut
+    /// off mid-sentence (or mid-tool-call-JSON that then failed to
+    /// parse); persisting it as a normal, converged final answer would
+    /// look identical downstream to a response the model actually
+    /// finished on its own.
+    #[error("model's final response was truncated by the token budget before it could finish")]
+    TruncatedFinalResponse,
+
+    /// A round produced no text and no tool calls at all — not a
+    /// legitimate final answer, just a wasted round. Surfaced as an error
+    /// (docs/AUDITORIA-2026-07-v2.md, "una completion vacía termina el
+    /// turno como éxito silencioso") rather than treated as silent
+    /// convergence, since under best-of-n several empty candidates can
+    /// share the same signature and win the vote outright.
+    #[error("model's response had no text and requested no tool calls")]
+    EmptyModelResponse,
+
+    /// A second `run_turn` call was attempted on this `Engine` while a
+    /// first one was still in flight — N-17
+    /// (docs/AUDITORIA-2026-07-v2.md). Not reachable via any current
+    /// caller (every caller serializes turns), but two concurrent turns
+    /// would share one `TaskNotifier`'s single completion channel and
+    /// silently steal each other's tool-call results. Reject the misuse
+    /// explicitly instead of leaving it undocumented and unguarded.
+    #[error("a run_turn call is already in progress on this Engine")]
+    ConcurrentTurn,
 }

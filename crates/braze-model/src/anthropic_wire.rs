@@ -38,6 +38,17 @@ pub(crate) struct AnthropicRequest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<AnthropicTool>,
     pub stream: bool,
+    /// `None` (the default) omits the field entirely, leaving Anthropic's
+    /// own provider default (~1.0) in effect — unchanged behavior for any
+    /// existing caller. Set via
+    /// [`AnthropicBackend::with_temperature`](crate::anthropic::AnthropicBackend::with_temperature),
+    /// e.g. so `braze-bench` can give every backend in a sweep the same
+    /// sampling temperature (N-34, docs/AUDITORIA-2026-07-v2.md). Note:
+    /// the Anthropic Messages API has no `seed` parameter — unlike Ollama
+    /// and OpenRouter's OpenAI-compatible surface, a run against Anthropic
+    /// can never be made fully reproducible this way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,7 +84,11 @@ pub(crate) struct AnthropicTool {
 
 /// Builds the Anthropic request body from the provider-agnostic
 /// [`CompletionRequest`].
-pub(crate) fn build_request(req: &CompletionRequest, model: &str) -> AnthropicRequest {
+pub(crate) fn build_request(
+    req: &CompletionRequest,
+    model: &str,
+    temperature: Option<f32>,
+) -> AnthropicRequest {
     AnthropicRequest {
         model: model.to_string(),
         max_tokens: req.max_tokens,
@@ -81,6 +96,7 @@ pub(crate) fn build_request(req: &CompletionRequest, model: &str) -> AnthropicRe
         messages: req.messages.iter().map(to_anthropic_message).collect(),
         tools: build_tools(&req.tool_stubs),
         stream: true,
+        temperature,
     }
 }
 
@@ -507,11 +523,24 @@ mod tests {
             system_prompt: "you are helpful".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "claude-opus-4-8");
+        let wire = build_request(&req, "claude-opus-4-8", None);
         assert_eq!(wire.system, "you are helpful");
         assert_eq!(wire.messages.len(), 1);
         assert_eq!(wire.messages[0].role, "user");
         assert!(wire.stream);
+        assert_eq!(wire.temperature, None);
+    }
+
+    #[test]
+    fn build_request_forwards_an_explicit_temperature() {
+        let req = CompletionRequest {
+            messages: vec![Message::text(Role::User, "hi")],
+            tool_stubs: vec![],
+            system_prompt: String::new(),
+            max_tokens: 100,
+        };
+        let wire = build_request(&req, "claude-opus-4-8", Some(0.2));
+        assert_eq!(wire.temperature, Some(0.2));
     }
 
     #[test]

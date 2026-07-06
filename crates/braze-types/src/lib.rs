@@ -10,6 +10,6 @@ mod session;
 mod tool;
 
 pub use message::{ContentBlock, Message, Role};
-pub use permission::PermissionKey;
+pub use permission::{PermissionKey, deserialize_permission_key_lossy};
 pub use session::SessionId;
 pub use tool::{ToolCall, ToolResult, ToolStub};

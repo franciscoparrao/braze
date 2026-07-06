@@ -873,16 +873,129 @@ preexistente, no tocado por estar fuera de alcance de esta sesión.
 en la sección "TUI (Fase 2)" de los Hallazgos críticos y altos, y en "TUI"
 dentro de Hallazgos medios, más arriba.
 
-### Grupo M — Validez del bench (media, esfuerzo medio)
-`N-33` (kill-on-timeout), `N-34` (seed + temperatura por todos los backends),
-`N-36` (espejar system prompt + budget de producción), `N-35` (bucketing de
-denegaciones), `N-37` (excluir `HarnessError` del denominador + medianas).
-Hasta cerrarlos, el sweep no es del todo confiable como está reportado.
+### Grupo M — Validez del bench (media, esfuerzo medio) — ✅ CERRADO 2026-07-06
+`N-33, N-34, N-35, N-36, N-37`. Cerrados los 5:
+- `N-33`: `Command::kill_on_drop(true)` en `braze-tools-local::shell_exec::run`
+  (el proceso hijo ya no sobrevive a un `abort()` de su tarea propietaria) +
+  `TaskNotifier::abort` nuevo en el trait (`braze-events`), implementado por
+  `ChannelTaskNotifier` (rastrea `JoinHandle` por tarea, con `Drop` que aborta
+  todo lo pendiente) y por el `TestNotifier` de `braze-engine`.
+  `Engine::dispatch_tool_calls` ahora llama `abort()` de verdad al vencer el
+  timeout por tarea, en vez de solo "olvidarla" corriendo en background.
+- `N-34`: `temperature`/`seed` agregados a los tres `ModelBackend`
+  (`AnthropicBackend::with_temperature`, `OllamaBackend::with_seed`,
+  `OpenRouterBackend::with_temperature`/`with_seed`; Anthropic no tiene
+  parámetro de seed en su API — documentado como límite conocido). El bench
+  ahora expone `--temperature`/`--seed` y aplica el mismo sampling a los tres
+  backends de un sweep, con offset por repetición (`seed + repetition`) para
+  no colapsar `--repetitions` en copias idénticas.
+- `N-35`: `DenyAll` (el `ConfirmationPrompt` del bench) ahora persiste el par
+  `PermissionRequested`/`PermissionDecided` igual que `TerminalConfirmationPrompt`
+  y `ChannelConfirmationPrompt` — antes una denegación nunca entraba al log de
+  sesión, así que `permission_denials` quedaba en 0 y la denegación se contaba
+  como `tool_execution_failures`.
+- `N-36`: `default_system_prompt`/`ollama_context_budget_tokens` se movieron a
+  `braze-config` (compartidos por `braze-cli` y `braze-bench`, en vez de
+  duplicados) — el bench ahora mide con el mismo system prompt anti-loop y el
+  mismo budget de contexto de Ollama que usa `braze chat`/`braze run` de verdad.
+- `N-37`: `report.rs::summarize` excluye las filas `HarnessError` del
+  denominador de pass rate y de los promedios (antes diluían ambos con
+  `wall_time_ms:0`), reportando el conteo excluido en su propia columna
+  (`harness_err`) en vez de descartarlo en silencio; se agregó mediana de
+  wall-time junto al promedio. Wilson tratando repeticiones como i.i.d. y
+  percentiles completos (p90/p99) quedan documentados como límite conocido,
+  no resueltos en este grupo (serían un cambio estadístico mayor,
+  desproporcionado al resto del fix).
 
-### Grupo N — Deuda menor y ergonomía (baja)
-El resto de medios/bajos, incluido `N-39` (redactar keys), `N-40`
-(forward-compat del `PermissionKey`), `N-41` (validación de config) y los
-mensajes de ayuda/config desactualizados.
+15 tests de regresión nuevos entre `braze-tools-local`, `braze-events`,
+`braze-engine`, `braze-model` y `braze-bench` (incluye, para N-33 y N-35,
+revertir el fix y confirmar que el test correspondiente falla). Workspace
+completo verde (`cargo test --workspace`, 473 tests) y `cargo clippy
+--workspace --all-targets -- -D warnings` limpio.
+
+### Grupo N — Deuda menor y ergonomía (baja) — ✅ CERRADO 2026-07-06
+Alcance completo: los 10 hallazgos MEDIA sueltos (`N-13, N-15, N-16, N-17,
+N-23, N-24, N-25, N-26, N-27, N-38`), los 3 BAJA nombrados (`N-39, N-40,
+N-41`), y los ~20 hallazgos bajos sin numerar de los bloques Engine,
+Backends, Sesión, TUI y Config/CLI. Organizado en 5 paquetes por área:
+
+- **Paquete 1 — Engine loop** (`braze-engine`): `N-13` (best-of-n vota
+  entre los candidatos exitosos en vez de abortar todo el round si uno
+  falla), `N-15` (`Engine::with_textual_rescue_enabled` — flag para
+  desactivar el rescate textual, gateado también vía
+  `Config::disable_textual_tool_call_rescue`), `N-16`
+  (`ToolRegistry::all_stubs_lossy` — un provider caído degrada en vez de
+  abortar todos los turnos), `N-17` (`TurnGuard`: guarda con `AtomicBool` +
+  `EngineError::ConcurrentTurn` — rechaza explícitamente una segunda
+  llamada concurrente a `run_turn` en vez de dejarlas robarse
+  completions), `N-24` (`EngineError::TruncatedFinalResponse` — una
+  respuesta final truncada por `max_tokens`/`length` se reporta como error
+  en vez de persistirse como respuesta convergida). Bajos: completion
+  vacía → `EngineError::EmptyModelResponse` en vez de éxito silencioso;
+  `estimate_dropped_tokens` cuenta texto visible en vez de `Debug` repr (y
+  ya no cuenta el tail retenido); `attempt_final_summary_round` ahora
+  loguea el error real en sus dos puntos de fallo en vez de tragarlo.
+- **Paquete 2 — Backends** (`braze-model`): `N-23` (Ollama: el
+  `tool_use_id` se incrusta en el contenido también en el caso
+  exitoso, no solo en error — corrige atribución cruzada con 2+ tool
+  calls concurrentes). Bajos: `arguments` como string JSON parseado antes
+  de pasar (no solo objeto nativo); `TOOL_CALL_COUNTER` de Ollama/OpenRouter
+  mezclado con un nonce de proceso (`synth_id::process_nonce`) para no
+  colisionar tras `--resume`; OpenRouter `"error":null` ya no mata streams
+  sanos (`.filter(|e| !e.is_null())`); Ollama detecta truncamiento duro
+  (`prompt_eval_count >= num_ctx`) y lo reporta como `stream_error`.
+- **Paquete 3 — Sesión** (`braze-session`, `braze-tui`, `braze-events`):
+  `N-25` (`MAX_SUMMARIES_KEPT = 5` — `durable.summary` ya no crece sin
+  cota), `N-26` (`braze_engine::synthesize_orphan_repairs`, función libre
+  reusada por `Engine::repair_orphaned_tool_calls` y por
+  `App::backtrack_to` — el prefijo replicado en un backtrack ahora repara
+  sus propios huérfanos), `N-27` (`FileSessionStore` adquiere un lock
+  advisory por sesión vía `fs2`, `session_locks: Mutex<HashMap<SessionId,
+  File>>` — un segundo proceso escribiendo la misma sesión falla alto y
+  claro en vez de correr reparaciones duplicadas). Bajos: `sync_data()`
+  tras `flush()`; `estimate_dropped_tokens` ya no usa `Debug` repr (mismo
+  fix que Paquete 1). `AgentEvent::Unknown` perdiendo payload en
+  replicación de backtrack queda documentado como límite aceptado
+  (`#[serde(other)]` no soporta payload en enums con tag externo — el
+  wire format real cambiaría, riesgo mayor al problema).
+- **Paquete 4 — TUI** (`braze-tui`): `sanitize_tool_output` (strip ANSI +
+  expand tabs) aplicado en `summarize_tool_output`/
+  `ExpandedToolOutputCell`; `slash_commands::parse_slash_command` — un
+  comando reconocido con argumentos (`/quit ahora`) ya no se manda al
+  modelo; `composer_trigger::token_suffix_len` + `TextArea::delete_str` —
+  `replace_trigger_token` ya no deja residuo con el cursor a mitad de
+  token; `last_esc_at` se limpia en los 3 handlers que consumen un Esc sin
+  pasar por `handle_idle_escape`; `truncate_for_display` budgetea por
+  ancho de display (`unicode-width`) en vez de char-count (CJK/emoji);
+  `safe_commit_boundary` reescrito con matching de largo de backticks
+  (`fence_marker_len`) — fences citadas/anidadas ya no rompen el gateo.
+  Orphaned session file tras un backtrack fallido queda documentado como
+  límite aceptado (`SessionStore` no tiene método de borrado; agregar uno
+  para este caso raro y benigno no es proporcional).
+- **Paquete 5 — Config/CLI + Bench** (`braze-config`, `braze-cli`,
+  `braze-bench`, `braze-types`): `N-38` (`TaskSandbox::new` rechaza
+  `setup_files` con `..` o rutas absolutas), `N-39` (`braze_config::ApiKey`
+  — newtype con `Debug`/`Serialize` redactados, `Deserialize` transparente),
+  `N-40` (`braze_types::deserialize_permission_key_lossy` —
+  `deserialize_with` por-campo en `key`, cae a `None` en vez de abortar
+  toda la línea/sesión ante una variante de `PermissionKey` desconocida),
+  `N-41` (`Config::validate` — rechaza `tactical_window >=
+  tactical_compaction_threshold`). Bajos: `--repetitions 0` rechazado por
+  `clap` (`value_parser().range(1..)`); `--output` validado antes del
+  sweep, no después; claves de config/env desconocidas loguean `warn!`
+  (antes silenciosas); `ollama_num_ctx`/`max_tokens` en 0 rechazados por
+  `Config::validate`; `--resume <uuid-inexistente>` avisa por stderr en
+  vez de arrancar sesión vacía en silencio; help de `--tui` actualizado
+  (la aprobación real ya está implementada, no "hasta la oleada 4").
+
+~45 tests de regresión nuevos a través de 8 crates (incluye, para varios
+hallazgos — el guard de N-13/N-17, el lock de N-27, el kill_on_drop
+heredado de Grupo M —, revertir el fix y confirmar que el test
+correspondiente falla). Dos dependencias nuevas, ambas acotadas a un solo
+crate: `fs2` (`braze-session`, lock advisory) y `unicode-width`
+(`braze-tui`, ya transitiva vía ratatui/crossterm). Workspace completo
+verde (`cargo test --workspace`, 519 tests) y `cargo clippy --workspace
+--all-targets -- -D warnings` limpio.
 
 ---
 

@@ -114,7 +114,37 @@ impl ToolCallCell {
     }
 }
 
+/// Strips ANSI CSI escape sequences (`ESC [ ... <final byte 0x40-0x7E>`,
+/// e.g. SGR color codes) and expands tabs to a single space — bajo
+/// (docs/AUDITORIA-2026-07-v2.md, "ANSI/tabs en tool output se ven como
+/// basura literal"): a colorized shell command's raw output otherwise
+/// renders as literal `\u{1b}[32m...\u{1b}[0m` bytes instead of being
+/// stripped, since `ratatui::Span` treats every codepoint as literal
+/// text, not a terminal control sequence.
+fn sanitize_tool_output(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next(); // consume '['
+            for next in chars.by_ref() {
+                if ('\u{40}'..='\u{7e}').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '\t' {
+            out.push(' ');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn summarize_tool_output(content: &str) -> String {
+    let content = sanitize_tool_output(content);
     let first_line = content.lines().next().unwrap_or("").trim();
     let truncated = first_line.chars().count() > TOOL_SUMMARY_MAX_CHARS;
     let mut summary: String = first_line.chars().take(TOOL_SUMMARY_MAX_CHARS).collect();
@@ -282,7 +312,8 @@ impl HistoryCell for ExpandedToolOutputCell {
             ),
         ])];
 
-        let content_lines: Vec<&str> = self.content.lines().collect();
+        let sanitized_content = sanitize_tool_output(&self.content);
+        let content_lines: Vec<&str> = sanitized_content.lines().collect();
         lines.extend(
             content_lines
                 .iter()
@@ -378,6 +409,28 @@ mod tests {
     #[test]
     fn summarize_tool_output_of_a_single_short_line_is_left_untouched() {
         assert_eq!(summarize_tool_output("echoed: hi"), "echoed: hi");
+    }
+
+    /// Regression test for the "ANSI/tabs en tool output se ven como
+    /// basura literal" bajo (docs/AUDITORIA-2026-07-v2.md): a colorized
+    /// command's SGR escape codes must be stripped, not shown literally.
+    #[test]
+    fn sanitize_tool_output_strips_ansi_color_codes() {
+        let colored = "\u{1b}[32mok\u{1b}[0m";
+        assert_eq!(sanitize_tool_output(colored), "ok");
+    }
+
+    #[test]
+    fn sanitize_tool_output_expands_tabs_to_a_space() {
+        assert_eq!(sanitize_tool_output("a\tb"), "a b");
+    }
+
+    #[test]
+    fn summarize_tool_output_of_colorized_content_has_no_escape_codes() {
+        let colored = "\u{1b}[32mok\u{1b}[0m\nsegunda";
+        let summary = summarize_tool_output(colored);
+        assert_eq!(summary, "ok (+1 more lines)");
+        assert!(!summary.contains('\u{1b}'));
     }
 
     #[test]

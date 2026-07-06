@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use braze_events::AgentEvent;
 use braze_types::SessionId;
+use fs2::FileExt;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
@@ -26,17 +27,26 @@ use crate::store::SessionStore;
 ///
 /// ## Concurrency
 ///
-/// The MVP assumes a **single writer process** per base directory (no
-/// cross-process file locking). Within a process, `append` is
-/// synchronized by an internal [`tokio::sync::Mutex`] shared across *all*
-/// sessions of this store instance, so concurrent `append` calls (even to
-/// different session files) never interleave partial writes. This is
-/// coarser than strictly necessary (a per-session lock would allow
-/// concurrent writers on different sessions to proceed in parallel), but
-/// it is simple and correct for the MVP's expected usage pattern (one
-/// engine loop per process, appending sequentially as it processes
-/// events). Revisit if/when multi-process access to the same session
-/// directory becomes a real requirement.
+/// Within a process, `append` is synchronized by an internal
+/// [`tokio::sync::Mutex`] shared across *all* sessions of this store
+/// instance, so concurrent `append` calls (even to different session
+/// files) never interleave partial writes. This is coarser than strictly
+/// necessary (a per-session lock would allow concurrent writers on
+/// different sessions to proceed in parallel), but it is simple and
+/// correct for the MVP's expected usage pattern (one engine loop per
+/// process, appending sequentially as it processes events).
+///
+/// Across processes: N-27 (docs/AUDITORIA-2026-07-v2.md) — a second
+/// process appending to the *same* session concurrently (e.g. two
+/// overlapping `braze chat --resume <id>` invocations) used to race
+/// silently: each could independently decide the same orphaned
+/// `tool_use` needs repairing and both append their own synthetic
+/// `ToolCallCompleted`, corrupting the log with a duplicate result. This
+/// process now takes an advisory exclusive lock (`fs2`, `flock` on Unix)
+/// on the session's own file the first time it appends to that session,
+/// held until this store drops — a second process's first `append` call
+/// for the same session fails immediately and loudly instead of racing.
+/// See the `session_locks` field below.
 ///
 /// ## In-memory cache (C11, docs/AUDITORIA-2026-07.md)
 ///
@@ -57,6 +67,15 @@ pub struct FileSessionStore {
     base_dir: PathBuf,
     write_lock: Mutex<()>,
     cache: Mutex<HashMap<SessionId, Vec<AgentEvent>>>,
+    /// One dedicated, locked file handle per session this process has
+    /// appended to — held purely to keep the advisory lock alive for the
+    /// rest of the process's lifetime (never read/written through
+    /// directly; the actual data writes go through their own handle in
+    /// `append`). N-27, see the struct-level doc comment's "Concurrency"
+    /// section. A `std::sync::Mutex` (not `tokio::sync::Mutex`): only ever
+    /// locked for a synchronous map check/insert, already inside
+    /// `append`'s own `write_lock` critical section.
+    session_locks: std::sync::Mutex<HashMap<SessionId, std::fs::File>>,
 }
 
 impl FileSessionStore {
@@ -67,6 +86,7 @@ impl FileSessionStore {
             base_dir: base_dir.into(),
             write_lock: Mutex::new(()),
             cache: Mutex::new(HashMap::new()),
+            session_locks: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -94,6 +114,33 @@ impl SessionStore for FileSessionStore {
             .map_err(|e| SessionError::Write(format!("creating {:?}: {e}", self.base_dir)))?;
 
         let path = self.path_for(session);
+
+        // N-27 (docs/AUDITORIA-2026-07-v2.md): acquire (once per session,
+        // per process) the advisory lock described in the struct's doc
+        // comment — a dedicated handle kept alive purely to hold it.
+        {
+            let mut locks = self
+                .session_locks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !locks.contains_key(session) {
+                let lock_file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .map_err(|e| {
+                        SessionError::Write(format!("opening {path:?} for locking: {e}"))
+                    })?;
+                lock_file.try_lock_exclusive().map_err(|e| {
+                    SessionError::Write(format!(
+                        "another process already holds session {session}'s write lock \
+                         ({path:?}): {e}"
+                    ))
+                })?;
+                locks.insert(*session, lock_file);
+            }
+        }
+
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -107,6 +154,13 @@ impl SessionStore for FileSessionStore {
         file.flush()
             .await
             .map_err(|e| SessionError::Write(format!("flushing {path:?}: {e}")))?;
+        // Bajo (docs/AUDITORIA-2026-07-v2.md, "flush() sin sync_data()",
+        // C14): `flush()` only ensures the write reaches the OS page
+        // cache, not the physical disk — a power failure right after
+        // `append` returns `Ok` could still lose the just-appended line.
+        file.sync_data()
+            .await
+            .map_err(|e| SessionError::Write(format!("syncing {path:?}: {e}")))?;
 
         // Only extend an already-warm cache entry — a cold one means this
         // process has never `load`ed this session yet, so it may not
@@ -410,6 +464,13 @@ mod tests {
         raw.push_str(r#"{"type":"user_message","text":"cor"#);
         tokio::fs::write(&path, raw).await.unwrap();
 
+        // Simulates the original process actually exiting (releasing its
+        // N-27 advisory lock on the session file) before the next resume
+        // — otherwise `store`'s still-open locked handle would make the
+        // upcoming `fresh`/`second_resume` stores' appends fail exactly
+        // as a genuinely concurrent second process's would.
+        drop(store);
+
         // A fresh store (cold cache) pointed at the same directory, so
         // `load` genuinely reads — and, if the fix works, repairs — the
         // file on disk rather than serving from `store`'s own cache.
@@ -492,6 +553,57 @@ mod tests {
             1,
             "load must observe the fully-written content, not race ahead of it"
         );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-27 (docs/AUDITORIA-2026-07-v2.md): a second
+    /// store instance (standing in for a second process — the lock is on
+    /// the file, not any in-process state) appending to the same session
+    /// must be rejected immediately instead of silently racing repair
+    /// decisions with the first.
+    #[tokio::test]
+    async fn a_second_store_cannot_append_to_a_session_the_first_already_locked() {
+        let (store_a, dir) = temp_store("cross-store-session-lock");
+        let session = SessionId::new();
+
+        store_a
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "hola".to_string(),
+                },
+            )
+            .await
+            .expect("first store should acquire the lock and append fine");
+
+        let store_b = FileSessionStore::new(dir.clone());
+        let result_b = store_b
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "hola de nuevo".to_string(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(result_b, Err(SessionError::Write(_))),
+            "expected the second store to be rejected while the first holds the lock, got {result_b:?}"
+        );
+
+        // Once the first store (and its locked file handle) drops, the
+        // lock releases and a fresh store can append normally.
+        drop(store_a);
+        let store_c = FileSessionStore::new(dir.clone());
+        store_c
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "hola otra vez".to_string(),
+                },
+            )
+            .await
+            .expect("a third store should succeed once the lock is released");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

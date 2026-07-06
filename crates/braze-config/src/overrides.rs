@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::api_key::ApiKey;
 use crate::config::McpServerConfigStub;
 use crate::error::ConfigError;
 
@@ -22,7 +23,7 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub default_backend: Option<String>,
     #[serde(default)]
-    pub anthropic_api_key: Option<String>,
+    pub anthropic_api_key: Option<ApiKey>,
     #[serde(default)]
     pub anthropic_model: Option<String>,
     #[serde(default)]
@@ -32,7 +33,7 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub ollama_num_ctx: Option<u32>,
     #[serde(default)]
-    pub openrouter_api_key: Option<String>,
+    pub openrouter_api_key: Option<ApiKey>,
     #[serde(default)]
     pub openrouter_model: Option<String>,
     #[serde(default)]
@@ -53,6 +54,8 @@ pub struct ConfigOverrides {
     pub best_of_n: Option<usize>,
     #[serde(default)]
     pub tui_theme: Option<String>,
+    #[serde(default)]
+    pub disable_textual_tool_call_rescue: Option<bool>,
 }
 
 impl ConfigOverrides {
@@ -84,7 +87,7 @@ impl ConfigOverrides {
 
             match field {
                 "DEFAULT_BACKEND" => overrides.default_backend = Some(value.to_string()),
-                "ANTHROPIC_API_KEY" => overrides.anthropic_api_key = Some(value.to_string()),
+                "ANTHROPIC_API_KEY" => overrides.anthropic_api_key = Some(ApiKey::new(value)),
                 "ANTHROPIC_MODEL" => overrides.anthropic_model = Some(value.to_string()),
                 "OLLAMA_BASE_URL" => overrides.ollama_base_url = Some(value.to_string()),
                 "OLLAMA_MODEL" => overrides.ollama_model = Some(value.to_string()),
@@ -99,7 +102,7 @@ impl ConfigOverrides {
                             })?;
                     overrides.ollama_num_ctx = Some(parsed);
                 }
-                "OPENROUTER_API_KEY" => overrides.openrouter_api_key = Some(value.to_string()),
+                "OPENROUTER_API_KEY" => overrides.openrouter_api_key = Some(ApiKey::new(value)),
                 "OPENROUTER_MODEL" => overrides.openrouter_model = Some(value.to_string()),
                 "OPENROUTER_BASE_URL" => overrides.openrouter_base_url = Some(value.to_string()),
                 "MAX_TOKENS" => {
@@ -153,7 +156,25 @@ impl ConfigOverrides {
                 "TUI_THEME" => {
                     overrides.tui_theme = Some(value.to_string());
                 }
-                _ => {} // unrecognized BRAZE_* var: ignore, forward-compatible
+                "DISABLE_TEXTUAL_TOOL_CALL_RESCUE" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.disable_textual_tool_call_rescue = Some(parsed);
+                }
+                // Unrecognized `BRAZE_*` var: ignore (forward-compatible
+                // with a different braze version), but log it — bajo
+                // (docs/AUDITORIA-2026-07-v2.md, "claves de config
+                // desconocidas se ignoran sin warning"), same rationale
+                // as `file::load_file`'s unknown-key warning.
+                _ => {
+                    tracing::warn!(var = %key, "unrecognized BRAZE_* environment variable; ignored")
+                }
             }
         }
 
@@ -190,7 +211,13 @@ mod tests {
         ];
         let overrides = ConfigOverrides::from_env(vars).unwrap();
         assert_eq!(overrides.default_backend.as_deref(), Some("anthropic"));
-        assert_eq!(overrides.anthropic_api_key.as_deref(), Some("sk-test-123"));
+        assert_eq!(
+            overrides
+                .anthropic_api_key
+                .as_ref()
+                .map(ApiKey::expose_secret),
+            Some("sk-test-123")
+        );
         assert_eq!(
             overrides.anthropic_model.as_deref(),
             Some("claude-test-model")
@@ -232,7 +259,10 @@ mod tests {
         ];
         let overrides = ConfigOverrides::from_env(vars).unwrap();
         assert_eq!(
-            overrides.openrouter_api_key.as_deref(),
+            overrides
+                .openrouter_api_key
+                .as_ref()
+                .map(ApiKey::expose_secret),
             Some("sk-or-test-123")
         );
         assert_eq!(
@@ -243,6 +273,20 @@ mod tests {
             overrides.openrouter_base_url.as_deref(),
             Some("http://example:5555/api/v1")
         );
+    }
+
+    #[test]
+    fn from_env_parses_disable_textual_tool_call_rescue() {
+        let vars = [("BRAZE_DISABLE_TEXTUAL_TOOL_CALL_RESCUE", "true")];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(overrides.disable_textual_tool_call_rescue, Some(true));
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_disable_textual_tool_call_rescue() {
+        let vars = [("BRAZE_DISABLE_TEXTUAL_TOOL_CALL_RESCUE", "not-a-bool")];
+        let err = ConfigOverrides::from_env(vars).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
     }
 
     #[test]
