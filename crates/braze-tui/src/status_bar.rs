@@ -21,9 +21,7 @@ pub fn render(
 ) -> String {
     let session_str = session.to_string();
     let short_session = &session_str[..SESSION_PREFIX_LEN.min(session_str.len())];
-    format!(
-        "{status_line} · {short_session} · tokens {total_input_tokens}↑/{total_output_tokens}↓"
-    )
+    format!("{status_line} · {short_session} · tokens {total_input_tokens}↑/{total_output_tokens}↓")
 }
 
 #[cfg(test)]

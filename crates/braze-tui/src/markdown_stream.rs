@@ -125,13 +125,19 @@ mod tests {
     fn commits_complete_lines_progressively_outside_a_fence() {
         let mut collector = MarkdownStreamCollector::default();
         collector.push("primera linea\n");
-        assert_eq!(collector.commit_ready(), Some("primera linea\n".to_string()));
+        assert_eq!(
+            collector.commit_ready(),
+            Some("primera linea\n".to_string())
+        );
 
         collector.push("segunda ");
         assert_eq!(collector.commit_ready(), None, "no newline yet — not safe");
 
         collector.push("linea\n");
-        assert_eq!(collector.commit_ready(), Some("segunda linea\n".to_string()));
+        assert_eq!(
+            collector.commit_ready(),
+            Some("segunda linea\n".to_string())
+        );
     }
 
     #[test]
@@ -139,7 +145,10 @@ mod tests {
         let mut collector = MarkdownStreamCollector::default();
         collector.push("antes del bloque\n```rust\n");
         // The prose line committed; the fence-open line did not.
-        assert_eq!(collector.commit_ready(), Some("antes del bloque\n".to_string()));
+        assert_eq!(
+            collector.commit_ready(),
+            Some("antes del bloque\n".to_string())
+        );
 
         collector.push("let x = 1;\n");
         assert_eq!(
@@ -177,7 +186,10 @@ mod tests {
     fn finish_flushes_a_trailing_partial_line_with_no_newline() {
         let mut collector = MarkdownStreamCollector::default();
         collector.push("linea completa\nsin salto final");
-        assert_eq!(collector.commit_ready(), Some("linea completa\n".to_string()));
+        assert_eq!(
+            collector.commit_ready(),
+            Some("linea completa\n".to_string())
+        );
         assert_eq!(collector.finish(), Some("sin salto final".to_string()));
     }
 

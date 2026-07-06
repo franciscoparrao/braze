@@ -70,7 +70,10 @@ mod tests {
         observer.on_text_delta("mundo");
 
         assert!(matches!(rx.try_recv(), Ok(TuiUpdate::TextDelta(d)) if d == "hola"));
-        assert!(matches!(rx.try_recv(), Ok(TuiUpdate::Event(AgentEvent::UserMessage { .. }))));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(TuiUpdate::Event(AgentEvent::UserMessage { .. }))
+        ));
         assert!(matches!(rx.try_recv(), Ok(TuiUpdate::TextDelta(d)) if d == "mundo"));
         assert!(rx.try_recv().is_err());
     }

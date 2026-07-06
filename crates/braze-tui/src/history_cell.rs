@@ -353,7 +353,12 @@ mod tests {
 
     #[test]
     fn tool_call_cell_done_error_uses_a_cross_glyph() {
-        let cell = ToolCallCell::done("read_file".to_string(), true, "file not found", Theme::dark());
+        let cell = ToolCallCell::done(
+            "read_file".to_string(),
+            true,
+            "file not found",
+            Theme::dark(),
+        );
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "✗ ");
     }
@@ -362,7 +367,10 @@ mod tests {
     fn summarize_tool_output_truncates_long_first_lines_and_counts_remaining() {
         let content = format!("{}\nsegunda\ntercera", "x".repeat(200));
         let summary = summarize_tool_output(&content);
-        assert!(summary.contains('…'), "expected an ellipsis, got: {summary}");
+        assert!(
+            summary.contains('…'),
+            "expected an ellipsis, got: {summary}"
+        );
         assert!(summary.contains("(+2 more lines)"));
         assert!(summary.chars().count() < content.chars().count());
     }
@@ -550,7 +558,12 @@ mod snapshot_tests {
 
     #[test]
     fn tool_call_cell_done_error() {
-        let cell = ToolCallCell::done("read_file".to_string(), true, "file not found", Theme::dark());
+        let cell = ToolCallCell::done(
+            "read_file".to_string(),
+            true,
+            "file not found",
+            Theme::dark(),
+        );
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }
 

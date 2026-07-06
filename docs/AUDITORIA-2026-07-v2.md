@@ -405,6 +405,13 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   si el terminal fuerza paste-bracketing, el paste se descarta entero.
 - **Fix:** `EnableBracketedPaste` en el setup + manejar `Event::Paste` como
   inserción literal.
+- **✅ RESUELTO 2026-07-06.** `terminal::setup`/`TerminalGuard::drop`
+  ejecutan `EnableBracketedPaste`/`DisableBracketedPaste`; el loop principal
+  maneja `Event::Paste(text)` con `App::on_paste`, que hace
+  `composer.insert_str(&text)` en un solo edit atómico (`insert_str` ya
+  parte `\n`/`\r\n` en líneas reales de composer, nunca un submit) y respeta
+  el mismo gate que el tipeo normal (ignorado con una aprobación pendiente).
+  Sin test de `App` completo (ver nota de alcance al final de este grupo).
 
 #### N-11 · [ALTA] El walk de @-menciones cuelga la TUI para siempre en un ciclo de symlinks; sin cota de profundidad; corre síncrono en el event-loop
 - **Ubicación:** `crates/braze-tui/src/mentions.rs:36-67`.
@@ -416,6 +423,18 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   (el select loop nunca vuelve a correr); solo SIGKILL recupera.
 - **Fix:** walk symlink-aware con visited-set/cota de profundidad, o moverlo a
   una `spawn_blocking`.
+- **✅ RESUELTO 2026-07-06.** `list_files` usa `entry.file_type()`
+  (equivalente a `lstat`, nunca sigue symlinks) en vez de `path.is_dir()`
+  (equivalente a `stat`, sí los sigue) — un symlink nunca se desciende,
+  garantizando terminación sin necesitar visited-set ni cota de profundidad
+  (mismo default que ripgrep/fd). Test
+  `mentions::tests::a_directory_symlink_cycle_does_not_hang_the_walk`
+  (corre en un thread aparte con `recv_timeout` para fallar en vez de
+  colgar el binario de test si regresiona) — verificado revirtiendo el fix
+  para confirmar que el test lo detecta. La preocupación secundaria del
+  hallazgo (el walk corre síncrono en el hilo del event-loop incluso para
+  un árbol grande sin ciclos) queda sin resolver — mitigada solo por el cap
+  `MAX_FILES=5000` ya existente, no por mover el walk a `spawn_blocking`.
 
 #### N-12 · [ALTA] Backtrack desincroniza la persistencia de permisos: los eventos de aprobación se apendean a la sesión pre-backtrack para siempre
 - **Ubicación:** `braze-cli/src/main.rs:118` (construye
@@ -431,6 +450,19 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   única fuente de verdad".
 - **Fix:** threading del id de sesión vivo (`Arc<Mutex<SessionId>>`) al
   `ChannelConfirmationPrompt`, o reconstruir los prompts en el backtrack.
+- **✅ RESUELTO 2026-07-06,** exactamente como se propuso. `ChannelConfirmationPrompt::session`
+  pasó de `SessionId` a `Arc<Mutex<SessionId>>`, leído fresco en cada
+  `confirm()` (`current_session()`); `App` gana el campo `live_session`
+  (la misma instancia del `Arc`) y `backtrack_to` escribe en él junto con
+  `self.session`; `braze-cli::build_permission_guard` construye el `Arc`
+  una vez y lo pasa a cada `PermissionGuard` (local + uno por servidor MCP)
+  y a `braze_tui::run`. El camino plano (`TerminalConfirmationPrompt`, sin
+  backtrack) sigue recibiendo un `SessionId` plano, leído una sola vez del
+  mismo `Arc`. Test
+  `approval::tests::persists_against_whatever_session_the_shared_handle_points_to_now`
+  (muta el handle compartido entre la creación del prompt y la llamada a
+  `confirm()`, confirma que persiste en la sesión nueva y que la original
+  queda con `SessionError::NotFound`).
 
 ---
 
@@ -546,21 +578,65 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   Enter → rewind + draft descartado + cambio silencioso de sesión.
   `KeyEventKind::Repeat` no se filtra, así que *mantener* Esc para interrumpir
   auto-repite y abre el popup.
+  **✅ RESUELTO 2026-07-06.** Dos cambios: (1) el brazo de Esc idle ahora
+  exige `key.kind == KeyEventKind::Press` — un `Repeat` (de mantener Esc
+  presionado, p.ej. para interrumpir) ya no puede armar ni completar el
+  doble-tap; (2) a diferencia de Slash/Mention (que sí tienen una query que
+  la tipeada sigue afinando), el popup de Backtrack no tiene query alguna —
+  cualquier tecla que no sea Up/Down/Tab/Enter/Esc ahora lo cierra en vez de
+  dejarlo abierto en silencio bajo lo que el usuario sigue tecleando, así
+  que un Enter posterior envía el draft normalmente en vez de ser
+  secuestrado como "aceptar esta selección de backtrack".
 - **N-29 · [MEDIA] Aprobaciones stale tras `interrupt_turn` bloquean el
   composer y pueden ejecutar una tool del turno abandonado** (`app.rs:709-721`):
   las tasks de dispatch no se abortan; una puede llamar `confirm()` tras el
   drain → overlay de aprobación de un turno ya matado; `y` corre la tool.
+  **✅ RESUELTO 2026-07-06.** Una request de aprobación legítima solo llega
+  mientras su propio turno sigue `turn_running`; el brazo
+  `self.approval_rx.recv()` del loop principal ahora deniega inmediatamente
+  (`respond.send(false)`) cualquier request que llegue estando idle, en vez
+  de encolarla — sin necesidad de un contador de generación ni de cancelar
+  las tasks de dispatch (fuera de alcance, requeriría cambios en
+  `Engine`/`TaskNotifier`).
 - **N-30 · [MEDIA] Un turno que erra mid-stream pierde la cola streameada del
   transcript y la deja congelada en el preview** (`app.rs:902-912`, no llama
   `markdown.finish()`).
+  **✅ RESUELTO 2026-07-06.** El brazo `TurnFinished(Err(..))` llama
+  `self.markdown.finish()` y commitea el tail (si hay) antes del `ErrorCell`
+  — mismo patrón que `interrupt_turn` ya usaba.
 - **N-31 · [MEDIA] El overlay de aprobación recorta descripciones largas sin
   indicador** (`app.rs:995-1002`, 3 filas efectivas): un `shell_exec`
   multilínea se corta —incluida la línea de hint `y`/`n`— y el usuario aprueba
   una acción irreversible que no ve completa. Safety-relevante.
+  **✅ RESUELTO 2026-07-06.** Nueva `truncate_for_display` (función libre,
+  testeada de forma aislada): reserva siempre la última fila para el hint
+  y/n, y acota la descripción a un presupuesto de caracteres derivado de
+  `composer_area.height/width` — el wrap por palabras solo puede usar
+  *menos* filas que esa cota nunca más, así que el hint jamás se empuja
+  fuera de pantalla — con un marcador "…" visible cuando corta algo.
 - **N-32 · [MEDIA] `commit_cell` trunca la altura vía `as u16`** (`app.rs:921-928`):
   exactamente 65.536 líneas wrapeadas → altura 0 → contenido dropeado en
   silencio. Alcanzable por el gateo de fences (un bloque cercado se commitea
   atómico; `finish()` vuelca una fence sin cerrar entera).
+  **✅ RESUELTO 2026-07-06.** Nueva `clamp_height` (función libre, testeada):
+  `line_count.clamp(1, u16::MAX as usize) as u16` — el clamp corre en
+  `usize` antes del cast, así que nunca es lossy. Test confirma
+  `clamp_height(65_536) == u16::MAX` (antes: `0`).
+
+Los 8 hallazgos del Grupo L (`N-10, N-11, N-12, N-28, N-29, N-30, N-31,
+N-32`) — ✅ **CERRADOS 2026-07-06**. Workspace completo verde, clippy
+limpio, `cargo fmt` aplicado a `braze-tui`/`braze-cli`. **Nota de alcance:**
+`braze-tui` no tenía (y sigue sin tener) ningún test a nivel de `App`
+completo — solo funciones libres puras (`backtrack_preview`,
+`truncate_for_display`, `clamp_height`, `mentions::list_files`, etc.) y
+snapshot tests de `HistoryCell` individuales. Construir un harness de `App`
+real requeriría agregar `braze-model`/`braze-tools-core` como dependencias
+de desarrollo (`braze-tui` hoy solo recibe un `Arc<Engine>` ya construido
+desde `braze-cli`, no los conoce) — cambio de alcance mayor al de estos
+fixes puntuales, no realizado en esta sesión. Cada fix se verificó por
+lectura cuidadosa del código + test unitario de su lógica pura extraíble
+(y, para N-11, revirtiendo el fix para confirmar que el test lo detecta);
+ninguno se verificó manejando el binario real en una terminal interactiva.
 
 ### Bench / config
 - **N-33 · [ALTA en el contexto del bench] El timeout por tarea abandona pero
@@ -792,13 +868,10 @@ completo verde, clippy limpio, `cargo fmt` aplicado a los crates tocados
 (`braze-tui`, `braze-cli`, `braze-mcp-client`) tiene drift de formato
 preexistente, no tocado por estar fuera de alcance de esta sesión.
 
-### Grupo L — TUI Fase 2 (media, esfuerzo medio)
-`N-10` (bracketed paste), `N-11` (walk symlink-aware / spawn_blocking), `N-12`
-(id de sesión vivo), luego `N-28..N-32`.
-
-### Grupo L — TUI Fase 2 (media, esfuerzo medio)
-`N-10` (bracketed paste), `N-11` (walk symlink-aware / spawn_blocking), `N-12`
-(id de sesión vivo), luego `N-28..N-32`.
+### Grupo L — TUI Fase 2 (media, esfuerzo medio) — ✅ CERRADO 2026-07-06
+`N-10, N-11, N-12, N-28, N-29, N-30, N-31, N-32`. Ver el detalle de cada fix
+en la sección "TUI (Fase 2)" de los Hallazgos críticos y altos, y en "TUI"
+dentro de Hallazgos medios, más arriba.
 
 ### Grupo M — Validez del bench (media, esfuerzo medio)
 `N-33` (kill-on-timeout), `N-34` (seed + temperatura por todos los backends),

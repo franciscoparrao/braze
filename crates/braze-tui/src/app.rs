@@ -72,7 +72,7 @@ const DOUBLE_ESC_WINDOW: Duration = Duration::from_millis(600);
 pub async fn run(
     terminal: &mut Terminal<Backend>,
     engine: Engine,
-    session: SessionId,
+    live_session: Arc<std::sync::Mutex<SessionId>>,
     store: Arc<dyn braze_session::SessionStore>,
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
     status_line: String,
@@ -80,7 +80,7 @@ pub async fn run(
 ) -> Result<(), TuiError> {
     App::new(
         Arc::new(engine),
-        session,
+        live_session,
         store,
         approvals,
         status_line,
@@ -126,6 +126,13 @@ enum ComposerPopup {
 struct App {
     engine: Arc<Engine>,
     session: SessionId,
+    /// N-12 (docs/AUDITORIA-2026-07-v2.md): the same shared handle every
+    /// `ChannelConfirmationPrompt` this session's `PermissionGuard`s were
+    /// built with reads from — `backtrack_to` writes the fresh session id
+    /// into it alongside `self.session`, so a permission decision made
+    /// *after* a backtrack persists against the session the user is
+    /// actually now talking to, not the one this `App` started with.
+    live_session: Arc<std::sync::Mutex<SessionId>>,
     /// Same handle `engine` was built with — used only to read the
     /// rollout log back (Ctrl+T, `expand_last_tool_call`); every write
     /// still goes exclusively through `engine`/`Engine::run_turn`.
@@ -182,16 +189,24 @@ struct App {
 impl App {
     fn new(
         engine: Arc<Engine>,
-        session: SessionId,
+        live_session: Arc<std::sync::Mutex<SessionId>>,
         store: Arc<dyn braze_session::SessionStore>,
         approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
         status_line: String,
         theme: Theme,
     ) -> Self {
         let (update_tx, update_rx) = mpsc::unbounded_channel();
+        // The initial value is read out of the shared handle rather than
+        // taken as a separate parameter — `live_session` is always
+        // seeded with the session this run started on (see
+        // `braze-cli::run`), so there is only ever one source of truth.
+        let session = *live_session
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         Self {
             engine,
             session,
+            live_session,
             store,
             status_line,
             theme,
@@ -229,6 +244,18 @@ impl App {
                         Some(Ok(Event::Key(key))) if key.kind != KeyEventKind::Release => {
                             self.on_key(key, terminal).await?;
                         }
+                        // N-10 (docs/AUDITORIA-2026-07-v2.md): with
+                        // bracketed paste enabled (`terminal::setup`),
+                        // crossterm delivers a paste as one `Event::Paste`
+                        // instead of a flood of key events — handle it as
+                        // a single literal insert rather than falling
+                        // through to `Some(Ok(_)) => {}` (which used to
+                        // silently drop it, or — without bracketed paste
+                        // enabled at all — let each embedded `\r`/`\n`
+                        // masquerade as the user pressing Enter).
+                        Some(Ok(Event::Paste(text))) => {
+                            self.on_paste(text);
+                        }
                         Some(Ok(_)) => {}
                         Some(Err(err)) => return Err(err.into()),
                         // The input stream itself ended (stdin closed) —
@@ -242,13 +269,33 @@ impl App {
                     self.apply_update(update, terminal)?;
                 }
                 Some(request) = self.approval_rx.recv() => {
-                    self.pending_approvals.push_back(request);
+                    // N-29 (docs/AUDITORIA-2026-07-v2.md): aborting the
+                    // top-level turn task (`interrupt_turn`) does not
+                    // cancel the tool-dispatch background tasks it
+                    // spawned — one of those can still call `confirm()`
+                    // after the turn was abandoned, sending a request
+                    // here well after `turn_running` went back to
+                    // `false`. A legitimate request only ever arrives
+                    // while its own turn is still running, so anything
+                    // arriving while idle is stale by construction — deny
+                    // it immediately instead of queuing an approval
+                    // overlay (which would otherwise lock the composer)
+                    // for a turn that's already gone.
+                    if self.turn_running {
+                        self.pending_approvals.push_back(request);
+                    } else {
+                        let _ = request.respond.send(false);
+                    }
                 }
             }
         }
     }
 
-    async fn on_key(&mut self, key: KeyEvent, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    async fn on_key(
+        &mut self,
+        key: KeyEvent,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
         // Ctrl+C always quits, regardless of state — the universal
         // escape hatch, even mid-approval or mid-turn.
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -278,7 +325,18 @@ impl App {
             return Ok(());
         }
 
-        if self.popup.is_some() {
+        if let Some(popup) = &self.popup {
+            // N-28 (docs/AUDITORIA-2026-07-v2.md): `Slash`/`Mention` have
+            // a query that further typing narrows — falling through to
+            // the composer and re-evaluating via `refresh_popup` is
+            // correct for those. `Backtrack` has no query at all: any
+            // key besides the ones handled below means the user is just
+            // continuing to compose, not choosing a message to jump to.
+            // Closing it here (instead of silently leaving it open
+            // underneath whatever they type) is what makes a later Enter
+            // submit their draft normally instead of being hijacked as
+            // "accept this backtrack selection" and discarding it.
+            let is_backtrack = matches!(popup, ComposerPopup::Backtrack { .. });
             match key.code {
                 KeyCode::Up => {
                     self.move_popup_selection(-1);
@@ -296,6 +354,9 @@ impl App {
                     self.popup = None;
                     return Ok(());
                 }
+                _ if is_backtrack => {
+                    self.popup = None;
+                }
                 // Anything else (typing more of the query, Backspace,
                 // ...) falls through to the normal composer handling
                 // below, which then re-evaluates the popup from the new
@@ -304,7 +365,8 @@ impl App {
             }
         }
 
-        let composer_is_empty = self.composer.lines().len() == 1 && self.composer.lines()[0].is_empty();
+        let composer_is_empty =
+            self.composer.lines().len() == 1 && self.composer.lines()[0].is_empty();
         match (key.code, key.modifiers) {
             (KeyCode::Char('d'), m) if m.contains(KeyModifiers::CONTROL) && composer_is_empty => {
                 self.should_quit = true;
@@ -317,9 +379,20 @@ impl App {
             // fires the Esc-Esc backtrack double-tap. A single idle Esc
             // does nothing else, matching the "no-op" behavior this key
             // already had here before backtrack existed.
-            (KeyCode::Esc, KeyModifiers::NONE) => {
+            //
+            // N-28 (docs/AUDITORIA-2026-07-v2.md): only a genuine new
+            // `Press` may arm/complete the double-tap — a terminal's
+            // auto-repeat for a *held* Esc (e.g. holding it down to
+            // interrupt a turn) delivers `KeyEventKind::Repeat` events,
+            // and by the time `turn_running` flips to `false` those
+            // repeats would otherwise land here and could open the
+            // backtrack popup — which then hijacks Enter and can discard
+            // whatever the user is typing — without them ever having
+            // released the key, let alone pressed it twice.
+            (KeyCode::Esc, KeyModifiers::NONE) if key.kind == KeyEventKind::Press => {
                 self.handle_idle_escape(terminal).await?;
             }
+            (KeyCode::Esc, KeyModifiers::NONE) => {}
             // Ctrl+J: literal newline, bypassing `TextArea::input`'s own
             // `Key::Enter` handling (which we deliberately never reach —
             // plain Enter is intercepted below as submit, before it ever
@@ -343,6 +416,22 @@ impl App {
 
         self.refresh_popup();
         Ok(())
+    }
+
+    /// Handles a bracketed paste (N-10, docs/AUDITORIA-2026-07-v2.md):
+    /// inserts the pasted text literally into the composer in one atomic
+    /// edit via `insert_str` (which itself splits embedded `\n`/`\r\n`
+    /// into real composer lines — never a submit), instead of letting the
+    /// terminal replay it key-by-key. Gated the same as normal typing:
+    /// ignored while a permission decision is pending (matches
+    /// `on_key`'s "no typing into the composer" rule for that state);
+    /// allowed while a turn is running, same as typing already is.
+    fn on_paste(&mut self, text: String) {
+        if !self.pending_approvals.is_empty() {
+            return;
+        }
+        self.composer.insert_str(&text);
+        self.refresh_popup();
     }
 
     /// Re-evaluates whether the composer's cursor now sits inside an
@@ -441,7 +530,10 @@ impl App {
     /// (see `backtrack_to`) — genuinely different actions, unlike
     /// `move_popup_selection` which is the same index arithmetic for
     /// every kind.
-    async fn accept_popup_selection(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    async fn accept_popup_selection(
+        &mut self,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
         let Some(popup) = self.popup.take() else {
             return Ok(());
         };
@@ -496,7 +588,10 @@ impl App {
     /// idle just arms the timer; a second one within
     /// `DOUBLE_ESC_WINDOW` opens the backtrack popup. A single idle Esc
     /// otherwise does nothing, same as before backtrack existed.
-    async fn handle_idle_escape(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    async fn handle_idle_escape(
+        &mut self,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
         let now = Instant::now();
         let is_double_tap = self
             .last_esc_at
@@ -514,7 +609,10 @@ impl App {
     /// listing the most recent `AgentEvent::UserMessage`s, most recent
     /// first. A `NoticeCell` instead if the store can't be read, or if
     /// there's no user message yet to backtrack to (a fresh session).
-    async fn open_backtrack_popup(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    async fn open_backtrack_popup(
+        &mut self,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
         let events = match self.store.load(&self.session).await {
             Ok(events) => events,
             Err(err) => {
@@ -602,6 +700,15 @@ impl App {
             }
         }
         self.session = new_session;
+        // N-12 (docs/AUDITORIA-2026-07-v2.md): keep the shared handle
+        // every `ChannelConfirmationPrompt` reads from in sync with
+        // `self.session` — otherwise a permission decision made after
+        // this backtrack would keep landing in the pre-backtrack
+        // session's rollout log.
+        *self
+            .live_session
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = new_session;
 
         self.composer = TextArea::from(text.lines());
         self.composer.move_cursor(CursorMove::Bottom);
@@ -620,7 +727,11 @@ impl App {
     /// after confirming `command` exactly matches a `SLASH_COMMANDS`
     /// entry, so the wildcard arm here is unreachable in practice, not a
     /// silent fallback for a typo.
-    fn run_slash_command(&mut self, command: &str, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    fn run_slash_command(
+        &mut self,
+        command: &str,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
         match command {
             "help" => self.commit_cell(&HelpCell, terminal),
             "quit" | "exit" => {
@@ -683,7 +794,9 @@ impl App {
         let handle = tokio::spawn(async move {
             let mut observer = ChannelObserver::new(tx.clone());
             let result = engine.run_turn(&session, &user_text, &mut observer).await;
-            let _ = tx.send(TuiUpdate::TurnFinished(result.map_err(|err| err.to_string())));
+            let _ = tx.send(TuiUpdate::TurnFinished(
+                result.map_err(|err| err.to_string()),
+            ));
         });
         self.current_turn = Some(handle);
 
@@ -770,7 +883,10 @@ impl App {
     /// TUI-side cache of past cells. A no-op with a `NoticeCell` if no
     /// tool call has completed yet in this session, or if the store
     /// can't be read at all.
-    async fn expand_last_tool_call(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    async fn expand_last_tool_call(
+        &mut self,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
         let events = match self.store.load(&self.session).await {
             Ok(events) => events,
             Err(err) => {
@@ -902,6 +1018,18 @@ impl App {
             TuiUpdate::TurnFinished(Err(message)) => {
                 self.turn_running = false;
                 self.current_turn = None;
+                // N-30 (docs/AUDITORIA-2026-07-v2.md): a round that fails
+                // mid-stream never gets an `AgentEvent::AssistantText`
+                // (A3/B4 — the engine never persists partial text as a
+                // final answer), so the collector's tail is never
+                // flushed via that path the way a successful round's is.
+                // Without this, whatever was streamed before the error
+                // stays stuck in the 2-row live preview forever — not in
+                // the transcript, and not visibly connected to the error
+                // cell about to be committed below.
+                if let Some(tail) = self.markdown.finish() {
+                    self.commit_cell(&AssistantMarkdownCell { markdown: tail }, terminal)?;
+                }
                 self.commit_cell(
                     &ErrorCell {
                         message,
@@ -918,10 +1046,19 @@ impl App {
     /// `insert_before`, wrapped to the terminal's current width. Never
     /// re-rendered afterwards — see `docs/TUI-INVESTIGACION-2026-07.md`'s
     /// convergence #1 and this module's doc comment.
-    fn commit_cell(&self, cell: &dyn HistoryCell, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    fn commit_cell(
+        &self,
+        cell: &dyn HistoryCell,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
         let width = terminal.size()?.width;
         let paragraph = Paragraph::new(cell.as_text()).wrap(Wrap { trim: false });
-        let height = paragraph.line_count(width).max(1) as u16;
+        // N-32 (docs/AUDITORIA-2026-07-v2.md): see `clamp_height`'s doc
+        // comment — reachable in practice via the markdown fence-gating
+        // in `markdown_stream.rs` committing an unclosed trailing fence
+        // as one atomic chunk on `finish()`: a model dumping a multi-MB
+        // fenced block gets here.
+        let height = clamp_height(paragraph.line_count(width));
         terminal.insert_before(height, |buf| {
             paragraph.render(buf.area, buf);
         })?;
@@ -993,13 +1130,34 @@ impl App {
         }
 
         if let Some(request) = self.pending_approvals.front() {
-            let mut lines = vec![Line::from(request.description.clone())];
-            let mut answer_hint = "esta acción puede ser irreversible — y permitir · n/Esc denegar".to_string();
+            let mut answer_hint =
+                "esta acción puede ser irreversible — y permitir · n/Esc denegar".to_string();
             if self.pending_approvals.len() > 1 {
                 answer_hint.push_str(&format!("  ({} pendientes)", self.pending_approvals.len()));
             }
-            lines.push(Line::from(answer_hint).style(Style::default().fg(self.theme.warning)));
-            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), composer_area);
+            // N-31 (docs/AUDITORIA-2026-07-v2.md): `composer_area` is a
+            // fixed few rows tall — a long or multi-line description
+            // (e.g. a multi-line `shell_exec` command) can wrap past it,
+            // silently pushing the y/n hint line off-screen with no
+            // indication the user is approving something they can't
+            // fully see. Reserve the last row for the hint always, and
+            // cap the description to what provably fits in the rest
+            // (word-wrapping can only use *fewer* rows than this
+            // char-budget estimate, never more), with a visible "…"
+            // marker if anything had to be cut.
+            let available_rows_for_description =
+                usize::from(composer_area.height.saturating_sub(1).max(1));
+            let max_chars = available_rows_for_description
+                .saturating_mul(usize::from(composer_area.width.max(1)));
+            let description = truncate_for_display(&request.description, max_chars);
+            let lines = vec![
+                Line::from(description),
+                Line::from(answer_hint).style(Style::default().fg(self.theme.warning)),
+            ];
+            frame.render_widget(
+                Paragraph::new(lines).wrap(Wrap { trim: false }),
+                composer_area,
+            );
         } else {
             frame.render_widget(&self.composer, composer_area);
         }
@@ -1012,7 +1170,9 @@ fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
     let selected_style = Style::default().add_modifier(Modifier::REVERSED);
 
     let lines: Vec<Line> = match popup {
-        ComposerPopup::Slash { matches, selected, .. } => matches
+        ComposerPopup::Slash {
+            matches, selected, ..
+        } => matches
             .iter()
             .enumerate()
             .map(|(i, cmd)| {
@@ -1027,7 +1187,9 @@ fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
                 ))
             })
             .collect(),
-        ComposerPopup::Mention { matches, selected, .. } => matches
+        ComposerPopup::Mention {
+            matches, selected, ..
+        } => matches
             .iter()
             .enumerate()
             .map(|(i, path)| {
@@ -1065,11 +1227,40 @@ const BACKTRACK_PREVIEW_MAX_CHARS: usize = 70;
 fn backtrack_preview(text: &str) -> String {
     let first_line = text.lines().next().unwrap_or("").trim();
     let truncated = first_line.chars().count() > BACKTRACK_PREVIEW_MAX_CHARS;
-    let mut preview: String = first_line.chars().take(BACKTRACK_PREVIEW_MAX_CHARS).collect();
+    let mut preview: String = first_line
+        .chars()
+        .take(BACKTRACK_PREVIEW_MAX_CHARS)
+        .collect();
     if truncated {
         preview.push('…');
     }
     format!("↩ {preview}")
+}
+
+/// Clamps a wrapped line count into the `u16` range `Terminal::insert_before`
+/// needs, saturating instead of truncating (N-32,
+/// docs/AUDITORIA-2026-07-v2.md). `usize as u16` is a bare truncating
+/// cast — applying it to a count of exactly 65536 (a multiple of
+/// `u16::MAX + 1`) silently produces `0` (`insert_before(0, ...)` inserts
+/// nothing at all, dropping the whole cell), and any higher count wraps
+/// to some other small number instead of clamping. `clamp` runs entirely
+/// in `usize` before the cast, so it's lossless in both directions.
+fn clamp_height(line_count: usize) -> u16 {
+    line_count.clamp(1, usize::from(u16::MAX)) as u16
+}
+
+/// Caps `text` to at most `max_chars` characters, appending a visible
+/// "…" marker if anything had to be cut — N-31, docs/AUDITORIA-2026-07-v2.md.
+/// Character-count (not byte-length) so multi-byte UTF-8 is never split
+/// mid-codepoint.
+fn truncate_for_display(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let budget = max_chars.saturating_sub(1); // leave room for the marker itself
+    let mut truncated: String = text.chars().take(budget).collect();
+    truncated.push('…');
+    truncated
 }
 
 #[cfg(test)]
@@ -1092,5 +1283,54 @@ mod tests {
     #[test]
     fn backtrack_preview_leaves_a_short_message_untouched() {
         assert_eq!(backtrack_preview("hola"), "↩ hola");
+    }
+
+    /// Regression test for N-31 (docs/AUDITORIA-2026-07-v2.md): a
+    /// description within the budget is left untouched.
+    #[test]
+    fn truncate_for_display_leaves_a_short_string_untouched() {
+        assert_eq!(truncate_for_display("hola", 10), "hola");
+    }
+
+    /// The truncated result must never exceed `max_chars` (the whole
+    /// point — this is what guarantees the y/n hint line always fits in
+    /// the remaining row), and must visibly mark that it was cut.
+    #[test]
+    fn truncate_for_display_caps_at_max_chars_with_a_visible_marker() {
+        let long = "x".repeat(100);
+        let truncated = truncate_for_display(&long, 10);
+        assert_eq!(truncated.chars().count(), 10);
+        assert!(truncated.ends_with('…'));
+    }
+
+    /// Character-count, not byte-length — must not panic or split a
+    /// multi-byte codepoint even when the budget lands mid-character.
+    #[test]
+    fn truncate_for_display_is_utf8_safe() {
+        let text = "é".repeat(20); // each 'é' is 2 bytes in UTF-8
+        let truncated = truncate_for_display(&text, 5);
+        assert_eq!(truncated.chars().count(), 5);
+        assert!(truncated.ends_with('…'));
+    }
+
+    /// Regression test for N-32 (docs/AUDITORIA-2026-07-v2.md): a bare
+    /// `as u16` cast on exactly 65536 (a multiple of `u16::MAX + 1`)
+    /// truncates to `0` — the exact silent-content-drop bug — instead of
+    /// clamping to `u16::MAX`.
+    #[test]
+    fn clamp_height_saturates_instead_of_wrapping_to_zero() {
+        assert_eq!(clamp_height(65_536), u16::MAX);
+        assert_eq!(clamp_height(65_537), u16::MAX);
+        assert_eq!(clamp_height(usize::from(u16::MAX)), u16::MAX);
+    }
+
+    #[test]
+    fn clamp_height_never_returns_zero() {
+        assert_eq!(clamp_height(0), 1);
+    }
+
+    #[test]
+    fn clamp_height_leaves_a_normal_count_untouched() {
+        assert_eq!(clamp_height(42), 42);
     }
 }

@@ -54,7 +54,21 @@ pub fn list_files(root: &Path) -> Vec<String> {
             if is_excluded {
                 continue;
             }
-            if path.is_dir() {
+            // N-11 (docs/AUDITORIA-2026-07-v2.md): `entry.file_type()` is
+            // the equivalent of `lstat` — unlike `path.is_dir()` (which
+            // follows symlinks, like `stat`), it never resolves a
+            // symlink. Never descending into one guarantees this walk
+            // terminates even with a directory symlink cycle on disk
+            // (e.g. `a/self -> ../a`), matching the default behavior of
+            // common file-listing tools (ripgrep, fd) — simpler and
+            // cheaper than tracking a canonicalized visited-set.
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
                 stack.push(path);
             } else if let Ok(relative) = path.strip_prefix(root) {
                 files.push(relative.to_string_lossy().into_owned());
@@ -117,6 +131,34 @@ mod tests {
 
         let files = list_files(&dir);
         assert_eq!(files, vec!["Cargo.toml".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression test for N-11 (docs/AUDITORIA-2026-07-v2.md): a
+    /// directory symlink cycle (`a/self -> ../a`) must not hang the walk
+    /// — before the fix, `path.is_dir()` followed the symlink and the
+    /// stack grew without bound. Run on a separate thread with a bounded
+    /// `recv_timeout` so a regression *fails* (loudly, in a few seconds)
+    /// instead of hanging the whole test binary forever.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_symlink_cycle_does_not_hang_the_walk() {
+        let dir = temp_dir("symlink_cycle_does_not_hang");
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::write(dir.join("a/real.txt"), "").unwrap();
+        std::os::unix::fs::symlink(dir.join("a"), dir.join("a/self")).unwrap();
+
+        let dir_for_thread = dir.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(list_files(&dir_for_thread));
+        });
+
+        let files = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("list_files must terminate even with a directory symlink cycle on disk");
+        assert_eq!(files, vec!["a/real.txt".to_string()]);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

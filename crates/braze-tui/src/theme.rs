@@ -81,7 +81,10 @@ mod tests {
     fn from_name_recognizes_every_built_in_preset() {
         assert_eq!(Theme::from_name("dark"), Some(Theme::dark()));
         assert_eq!(Theme::from_name("light"), Some(Theme::light()));
-        assert_eq!(Theme::from_name("high-contrast"), Some(Theme::high_contrast()));
+        assert_eq!(
+            Theme::from_name("high-contrast"),
+            Some(Theme::high_contrast())
+        );
     }
 
     #[test]

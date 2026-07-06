@@ -41,7 +41,8 @@ pub fn detect_trigger(line: &str, col: usize, is_first_line: bool) -> Option<Com
 
     let token: String = chars[start..col].iter().collect();
 
-    if is_first_line && start == 0
+    if is_first_line
+        && start == 0
         && let Some(rest) = token.strip_prefix('/')
     {
         return Some(ComposerTrigger::Slash(rest.to_string()));

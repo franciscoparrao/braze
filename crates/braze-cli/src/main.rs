@@ -105,7 +105,7 @@ async fn main() -> ExitCode {
 /// stdin — same session-store persistence, different question channel.
 fn build_permission_guard(
     cwd: &std::path::Path,
-    session: braze_types::SessionId,
+    live_session: std::sync::Arc<std::sync::Mutex<braze_types::SessionId>>,
     store: std::sync::Arc<dyn braze_session::SessionStore>,
     replayed_keys: &[braze_types::PermissionKey],
     tui_mode: bool,
@@ -115,12 +115,24 @@ fn build_permission_guard(
     let allowlist_for_guard = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
     let classifier = braze_permissions::DefaultClassifier::new(allowlist_for_classifier);
     let confirmation: Box<dyn braze_permissions::ConfirmationPrompt> = if tui_mode {
+        // N-12 (docs/AUDITORIA-2026-07-v2.md): the TUI's confirmation
+        // prompt reads the *current* session out of this shared handle
+        // on every `confirm()` call — `App::backtrack_to` writes a fresh
+        // id into the identical `Arc` once the user backtracks, so a
+        // later permission decision lands in the right session's
+        // rollout log instead of the one this guard was built for.
         Box::new(braze_tui::ChannelConfirmationPrompt::new(
-            session,
+            live_session,
             store,
             approval_tx,
         ))
     } else {
+        // The plain chat/run loop has no backtrack (a TUI-only feature)
+        // and never re-seeds this after startup, so a one-time read is
+        // equivalent to holding a live handle.
+        let session = *live_session
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         Box::new(TerminalConfirmationPrompt::new(session, store))
     };
     let guard = braze_permissions::PermissionGuard::new(
@@ -222,8 +234,7 @@ async fn run() -> Result<(), CliError> {
             })?;
             let model_name = config.openrouter_model.clone().ok_or_else(|| {
                 CliError::Startup(
-                    "falta --model o BRAZE_OPENROUTER_MODEL para el backend openrouter"
-                        .to_string(),
+                    "falta --model o BRAZE_OPENROUTER_MODEL para el backend openrouter".to_string(),
                 )
             })?;
             Box::new(braze_model::OpenRouterBackend::with_base_url(
@@ -305,9 +316,15 @@ async fn run() -> Result<(), CliError> {
     // shared/`Clone` across providers. All of them share the same
     // `replayed_keys`, seeded from the same session's own prior decisions.
     let cwd = std::env::current_dir()?;
+    // N-12 (docs/AUDITORIA-2026-07-v2.md): shared with every
+    // `PermissionGuard` built below *and* with `braze_tui::run` — a
+    // backtrack in the TUI writes the new session id here, so a
+    // permission decision made afterward persists against it instead of
+    // the session this process started with.
+    let live_session = std::sync::Arc::new(std::sync::Mutex::new(session));
     let local_guard = build_permission_guard(
         &cwd,
-        session,
+        std::sync::Arc::clone(&live_session),
         std::sync::Arc::clone(&store),
         &replayed_keys,
         tui_mode,
@@ -341,7 +358,7 @@ async fn run() -> Result<(), CliError> {
     for server in &config.mcp_servers {
         let mcp_guard = build_permission_guard(
             &cwd,
-            session,
+            std::sync::Arc::clone(&live_session),
             std::sync::Arc::clone(&store),
             &replayed_keys,
             tui_mode,
@@ -440,7 +457,7 @@ async fn run() -> Result<(), CliError> {
         Command::Chat { tui: true, .. } => {
             braze_tui::run(
                 engine,
-                session,
+                std::sync::Arc::clone(&live_session),
                 std::sync::Arc::clone(&store),
                 approval_rx,
                 status_line,

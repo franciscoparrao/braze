@@ -39,19 +39,21 @@ use tokio::sync::mpsc;
 /// the terminal for the duration of the call — raw mode is restored on
 /// return, including on error or panic (see `terminal::TerminalGuard`).
 ///
-/// `approvals` is the receiving end of the channel every
-/// `ChannelConfirmationPrompt` this session's `PermissionGuard`s were
-/// built with sends into — `braze-cli` constructs the channel and passes
-/// the sender half into each guard before ever calling this. `store` is
-/// the same `SessionStore` handle `engine` was built with, passed
-/// separately so Ctrl+T can read the rollout log back (see
-/// `app::expand_last_tool_call`). `status_line` is a short, static
-/// "backend:model" label shown in the status bar. `theme` picks the
-/// color preset every `HistoryCell` renders with — `braze-cli` resolves
-/// it from `Config::tui_theme` before calling this.
+/// `live_session` is the same shared handle every `ChannelConfirmationPrompt`
+/// this session's `PermissionGuard`s were built with reads from (N-12,
+/// docs/AUDITORIA-2026-07-v2.md) — `braze-cli` constructs it and must
+/// pass the identical `Arc` into every guard *and* into this call, or a
+/// backtrack has no way to keep future permission decisions landing in
+/// the right session. `approvals` is the receiving end of the channel
+/// those same guards send into. `store` is the same `SessionStore`
+/// handle `engine` was built with, passed separately so Ctrl+T can read
+/// the rollout log back (see `app::expand_last_tool_call`). `status_line`
+/// is a short, static "backend:model" label shown in the status bar.
+/// `theme` picks the color preset every `HistoryCell` renders with —
+/// `braze-cli` resolves it from `Config::tui_theme` before calling this.
 pub async fn run(
     engine: Engine,
-    session: SessionId,
+    live_session: Arc<std::sync::Mutex<SessionId>>,
     store: Arc<dyn braze_session::SessionStore>,
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
     status_line: String,
@@ -61,7 +63,7 @@ pub async fn run(
     app::run(
         &mut guard.terminal,
         engine,
-        session,
+        live_session,
         store,
         approvals,
         status_line,
