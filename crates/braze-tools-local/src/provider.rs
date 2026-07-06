@@ -48,6 +48,13 @@ const PROVIDER_ID: &str = "local";
 pub struct LocalToolsProvider {
     guard: PermissionGuard,
     workdir: PathBuf,
+    /// Gates the post-edit `cargo check` guardrail (see
+    /// `post_edit_check.rs`). On by default — the ACI evidence (arXiv
+    /// 2405.15793) is that feeding breakage back in the very next
+    /// observation is one of the highest-value interface features; a
+    /// no-op outside Cargo projects. `Config::disable_post_edit_check`
+    /// (via `braze-cli`) is the opt-out.
+    post_edit_check: bool,
 }
 
 impl LocalToolsProvider {
@@ -58,7 +65,11 @@ impl LocalToolsProvider {
     /// use [`LocalToolsProvider::with_workdir`] instead.
     pub fn new(guard: PermissionGuard) -> Self {
         let workdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self { guard, workdir }
+        Self {
+            guard,
+            workdir,
+            post_edit_check: true,
+        }
     }
 
     /// Uses `workdir` as the base every relative path is resolved
@@ -69,7 +80,15 @@ impl LocalToolsProvider {
         Self {
             guard,
             workdir: workdir.into(),
+            post_edit_check: true,
         }
+    }
+
+    /// Enables/disables the post-edit `cargo check` guardrail —
+    /// chainable, same shape as the engine's `with_*` knobs.
+    pub fn with_post_edit_check(mut self, enabled: bool) -> Self {
+        self.post_edit_check = enabled;
+        self
     }
 
     /// Joins `path` onto [`Self::workdir`] if relative; returns `path`
@@ -94,14 +113,34 @@ impl LocalToolsProvider {
         let mut args: WriteFileArgs = parse_args(call)?;
         args.path = self.resolve(&args.path);
         self.check_write(call, &args.path).await?;
-        Ok(wrap(call, write_file::write_file(args).await))
+        let path = args.path.clone();
+        let result = wrap(call, write_file::write_file(args).await);
+        Ok(self.append_post_edit_feedback(result, &path).await)
     }
 
     async fn invoke_edit_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
         let mut args: EditFileArgs = parse_args(call)?;
         args.path = self.resolve(&args.path);
         self.check_write(call, &args.path).await?;
-        Ok(wrap(call, edit_file::edit_file(args).await))
+        let path = args.path.clone();
+        let result = wrap(call, edit_file::edit_file(args).await);
+        Ok(self.append_post_edit_feedback(result, &path).await)
+    }
+
+    /// Appends the post-edit guardrail's feedback (if any) to a
+    /// *successful* write/edit result — a failed edit already carries
+    /// its own error and never triggers the check (nothing new landed
+    /// on disk to validate). The result stays `is_error: false` either
+    /// way: the edit did apply; the feedback is the next problem to fix,
+    /// not a failure of this call.
+    async fn append_post_edit_feedback(&self, mut result: ToolResult, path: &str) -> ToolResult {
+        if self.post_edit_check
+            && !result.is_error
+            && let Some(feedback) = crate::post_edit_check::post_edit_feedback(path).await
+        {
+            result.content.push_str(&feedback);
+        }
+        result
     }
 
     async fn invoke_shell_exec(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {

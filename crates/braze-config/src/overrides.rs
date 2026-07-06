@@ -57,6 +57,8 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub disable_textual_tool_call_rescue: Option<bool>,
     #[serde(default)]
+    pub disable_post_edit_check: Option<bool>,
+    #[serde(default)]
     pub planner_backend: Option<String>,
     #[serde(default)]
     pub planner_model: Option<String>,
@@ -172,6 +174,17 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.disable_textual_tool_call_rescue = Some(parsed);
+                }
+                "DISABLE_POST_EDIT_CHECK" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.disable_post_edit_check = Some(parsed);
                 }
                 // Unrecognized `BRAZE_*` var: ignore (forward-compatible
                 // with a different braze version), but log it — bajo
@@ -293,6 +306,13 @@ mod tests {
             overrides.planner_model.as_deref(),
             Some("deepseek/deepseek-v4-flash")
         );
+    }
+
+    #[test]
+    fn from_env_parses_disable_post_edit_check() {
+        let overrides =
+            ConfigOverrides::from_env([("BRAZE_DISABLE_POST_EDIT_CHECK", "true")]).unwrap();
+        assert_eq!(overrides.disable_post_edit_check, Some(true));
     }
 
     #[test]

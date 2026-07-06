@@ -18,6 +18,7 @@
 mod edit_file;
 mod glob;
 mod grep;
+mod post_edit_check;
 mod provider;
 mod read_file;
 mod schema;

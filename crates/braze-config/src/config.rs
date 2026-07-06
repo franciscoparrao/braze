@@ -122,6 +122,15 @@ pub struct Config {
     /// `braze_engine::Engine::with_textual_rescue_enabled`.
     #[serde(default)]
     pub disable_textual_tool_call_rescue: bool,
+    /// Disables the post-edit `cargo check` guardrail
+    /// (`braze-tools-local`, ítem 5 del backlog 2026-07-06): after a
+    /// successful `write_file`/`edit_file` on a `.rs` file inside a
+    /// Cargo project, compile errors are fed back to the model in the
+    /// same tool result (ACI, arXiv 2405.15793: -3.0 pp without it).
+    /// `false` (the default) keeps the guardrail on; set this when the
+    /// project's `cargo check` is too slow to run per-edit.
+    #[serde(default)]
+    pub disable_post_edit_check: bool,
     /// Backend for the optional planner model (PLAN.md § "Split
     /// planificador/ejecutor"): `"anthropic"`, `"ollama"` or
     /// `"openrouter"`. `None` (the default) disables the split entirely.
@@ -165,6 +174,7 @@ impl Default for Config {
             best_of_n: 1,
             tui_theme: "dark".to_string(),
             disable_textual_tool_call_rescue: false,
+            disable_post_edit_check: false,
             planner_backend: None,
             planner_model: None,
         }
@@ -305,6 +315,9 @@ impl Config {
         }
         if let Some(v) = overrides.disable_textual_tool_call_rescue {
             self.disable_textual_tool_call_rescue = v;
+        }
+        if let Some(v) = overrides.disable_post_edit_check {
+            self.disable_post_edit_check = v;
         }
         if let Some(v) = overrides.planner_backend {
             self.planner_backend = Some(v);

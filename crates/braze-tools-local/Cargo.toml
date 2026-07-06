@@ -19,3 +19,11 @@ tokio = { workspace = true, features = ["fs"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# The post-edit check guardrail (post_edit_check.rs) reports its skip
+# reasons (cargo missing, timeout) at trace level only — they must never
+# surface as tool-result noise.
+tracing = { workspace = true }
+
+[dev-dependencies]
+# Unique throwaway fixture-project dirs for the post-edit check tests.
+uuid = { workspace = true }

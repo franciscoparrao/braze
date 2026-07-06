@@ -274,7 +274,8 @@ async fn build_engine(
         approval_tx.clone(),
     );
 
-    let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard);
+    let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard)
+        .with_post_edit_check(!config.disable_post_edit_check);
     let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
         vec![Box::new(local_provider)];
 

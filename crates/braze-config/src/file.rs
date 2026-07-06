@@ -29,6 +29,7 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "best_of_n",
     "tui_theme",
     "disable_textual_tool_call_rescue",
+    "disable_post_edit_check",
     "planner_backend",
     "planner_model",
 ];
