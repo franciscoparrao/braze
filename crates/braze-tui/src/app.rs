@@ -24,6 +24,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::EngineFactory;
 use crate::approval::ApprovalRequest;
 use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len};
 use crate::error::TuiError;
@@ -69,6 +70,7 @@ const DOUBLE_ESC_WINDOW: Duration = Duration::from_millis(600);
 /// accessor) so Ctrl+T (`expand_last_tool_call`) can read the rollout
 /// log fresh, the same seam `braze-cli`'s `ChannelConfirmationPrompt`
 /// already uses this way.
+#[allow(clippy::too_many_arguments)] // mirrors `lib.rs::run`, the public seam
 pub async fn run(
     terminal: &mut Terminal<Backend>,
     engine: Engine,
@@ -77,6 +79,8 @@ pub async fn run(
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
     status_line: String,
     theme: Theme,
+    engine_factory: EngineFactory,
+    model_candidates: Vec<String>,
 ) -> Result<(), TuiError> {
     App::new(
         Arc::new(engine),
@@ -85,10 +89,18 @@ pub async fn run(
         approvals,
         status_line,
         theme,
+        engine_factory,
+        model_candidates,
     )
     .run(terminal)
     .await
 }
+
+/// What a spawned `/model` switch task reports back through
+/// `App::switch_rx`: the spec it tried (for the error message — the
+/// user may have typed it minutes ago) and either the rebuilt engine +
+/// status-bar label or a display error.
+type ModelSwitchOutcome = (String, Result<(Engine, String), String>);
 
 /// `/command` and `@mention` suggestions currently shown above the
 /// composer — "fase TUI 2" (PLAN.md). Not stored as trait objects or
@@ -130,6 +142,13 @@ enum ComposerPopup {
         messages: Vec<(usize, String)>,
         selected: usize,
     },
+    /// `/model` with no argument: candidate `backend[:modelo]` specs to
+    /// switch to (see `App::model_candidates`). Unlike `Backtrack`, the
+    /// full list is kept and `draw_popup` *windows* over it around
+    /// `selected` — there's no query to narrow a long list, and (unlike
+    /// old messages) the tail of the list is no less relevant than the
+    /// head, so capping at open time would hide arbitrary models.
+    Model { specs: Vec<String>, selected: usize },
 }
 
 struct App {
@@ -183,6 +202,27 @@ struct App {
     /// The spawned turn's handle, so Esc can `abort()` it — see
     /// `interrupt_turn`. `None` whenever no turn is in flight.
     current_turn: Option<JoinHandle<()>>,
+    /// Rebuilds the engine for `/model` — see `crate::EngineFactory`.
+    engine_factory: EngineFactory,
+    /// Candidate `backend[:modelo]` specs the `/model` picker offers,
+    /// computed once at startup by `braze-cli` (config's backends +
+    /// the Ollama server's installed models). Not refreshed mid-session
+    /// — same accepted staleness as `mentionable_files`; `/model <spec>`
+    /// reaches anything not (or no longer) on this list.
+    model_candidates: Vec<String>,
+    /// A `/model` switch is in flight (the factory is rebuilding the
+    /// engine in a background task) — gates submissions and further
+    /// switches the same way `turn_running` gates submissions, since a
+    /// turn started against the old engine mid-swap would race the
+    /// replacement.
+    switching_model: bool,
+    /// Sending half handed to each spawned switch task; `switch_rx` is
+    /// the `select!` arm that applies the outcome. A long-lived channel
+    /// (unlike the per-turn `update_tx`/`update_rx` pair): at most one
+    /// switch is ever in flight (`switching_model`), so there's no stale
+    /// predecessor to race against.
+    switch_tx: mpsc::UnboundedSender<ModelSwitchOutcome>,
+    switch_rx: mpsc::UnboundedReceiver<ModelSwitchOutcome>,
     /// Confirmation requests waiting on an answer, in arrival order —
     /// a `VecDeque` rather than a single `Option` because two tool
     /// calls dispatched concurrently in the same round can each need
@@ -196,6 +236,7 @@ struct App {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)] // mirrors `lib.rs::run`, the public seam
     fn new(
         engine: Arc<Engine>,
         live_session: Arc<std::sync::Mutex<SessionId>>,
@@ -203,8 +244,11 @@ impl App {
         approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
         status_line: String,
         theme: Theme,
+        engine_factory: EngineFactory,
+        model_candidates: Vec<String>,
     ) -> Self {
         let (update_tx, update_rx) = mpsc::unbounded_channel();
+        let (switch_tx, switch_rx) = mpsc::unbounded_channel();
         // The initial value is read out of the shared handle rather than
         // taken as a separate parameter — `live_session` is always
         // seeded with the session this run started on (see
@@ -229,6 +273,11 @@ impl App {
             last_esc_at: None,
             turn_running: false,
             current_turn: None,
+            engine_factory,
+            model_candidates,
+            switching_model: false,
+            switch_tx,
+            switch_rx,
             pending_approvals: VecDeque::new(),
             should_quit: false,
             update_tx,
@@ -276,6 +325,9 @@ impl App {
                 }
                 Some(update) = self.update_rx.recv() => {
                     self.apply_update(update, terminal)?;
+                }
+                Some((spec, result)) = self.switch_rx.recv() => {
+                    self.finish_model_switch(spec, result, terminal)?;
                 }
                 Some(request) = self.approval_rx.recv() => {
                     // N-29 (docs/AUDITORIA-2026-07-v2.md): aborting the
@@ -345,14 +397,17 @@ impl App {
             // N-28 (docs/AUDITORIA-2026-07-v2.md): `Slash`/`Mention` have
             // a query that further typing narrows — falling through to
             // the composer and re-evaluating via `refresh_popup` is
-            // correct for those. `Backtrack` has no query at all: any
-            // key besides the ones handled below means the user is just
-            // continuing to compose, not choosing a message to jump to.
+            // correct for those. `Backtrack`/`Model` have no query at
+            // all: any key besides the ones handled below means the user
+            // is just continuing to compose, not choosing an entry.
             // Closing it here (instead of silently leaving it open
             // underneath whatever they type) is what makes a later Enter
             // submit their draft normally instead of being hijacked as
-            // "accept this backtrack selection" and discarding it.
-            let is_backtrack = matches!(popup, ComposerPopup::Backtrack { .. });
+            // "accept this selection" and discarding it.
+            let is_queryless = matches!(
+                popup,
+                ComposerPopup::Backtrack { .. } | ComposerPopup::Model { .. }
+            );
             match key.code {
                 KeyCode::Up => {
                     self.move_popup_selection(-1);
@@ -375,7 +430,7 @@ impl App {
                     self.popup = None;
                     return Ok(());
                 }
-                _ if is_backtrack => {
+                _ if is_queryless => {
                     self.popup = None;
                 }
                 // Anything else (typing more of the query, Backspace,
@@ -426,13 +481,15 @@ impl App {
                 self.composer.insert_newline();
             }
             (KeyCode::Enter, KeyModifiers::NONE) => {
-                if !self.turn_running {
+                if !self.turn_running && !self.switching_model {
                     self.submit(terminal)?;
                 }
-                // Else: a turn is already running — ignore the
-                // submission rather than racing a second `run_turn`
-                // against the same session (see this module's doc
-                // comment). The composer keeps whatever was typed.
+                // Else: a turn is already running (or a `/model` switch
+                // is rebuilding the engine) — ignore the submission
+                // rather than racing a second `run_turn` against the
+                // same session, or starting a turn on an engine about to
+                // be replaced (see this module's doc comment). The
+                // composer keeps whatever was typed.
             }
             _ => {
                 self.composer.input(Event::Key(key));
@@ -469,13 +526,17 @@ impl App {
             self.popup = None;
             return;
         }
-        // A `Backtrack` popup isn't driven by a `/`/`@` cursor trigger at
-        // all (it opens from `handle_idle_escape`, with an empty
-        // composer) — re-deriving from cursor state on every key would
-        // immediately close it again the moment `on_key` calls this at
-        // the end of the very same keystroke that just opened it. Only
-        // `accept_popup_selection`/an explicit Esc close it.
-        if matches!(self.popup, Some(ComposerPopup::Backtrack { .. })) {
+        // A `Backtrack`/`Model` popup isn't driven by a `/`/`@` cursor
+        // trigger at all (they open from `handle_idle_escape` /
+        // `run_slash_command`, with an empty composer) — re-deriving
+        // from cursor state on every key would immediately close it
+        // again the moment `on_key` calls this at the end of the very
+        // same keystroke that just opened it. Only
+        // `accept_popup_selection`/an explicit Esc close them.
+        if matches!(
+            self.popup,
+            Some(ComposerPopup::Backtrack { .. }) | Some(ComposerPopup::Model { .. })
+        ) {
             return;
         }
 
@@ -540,6 +601,7 @@ impl App {
             ComposerPopup::Slash { matches, .. } => matches.len(),
             ComposerPopup::Mention { matches, .. } => matches.len(),
             ComposerPopup::Backtrack { messages, .. } => messages.len(),
+            ComposerPopup::Model { specs, .. } => specs.len(),
         };
         if len == 0 {
             return;
@@ -547,7 +609,8 @@ impl App {
         let selected = match popup {
             ComposerPopup::Slash { selected, .. }
             | ComposerPopup::Mention { selected, .. }
-            | ComposerPopup::Backtrack { selected, .. } => selected,
+            | ComposerPopup::Backtrack { selected, .. }
+            | ComposerPopup::Model { selected, .. } => selected,
         };
         *selected = (*selected as isize + delta).rem_euclid(len as isize) as usize;
     }
@@ -593,6 +656,12 @@ impl App {
                     return Ok(());
                 };
                 self.backtrack_to(event_index, text, terminal).await
+            }
+            ComposerPopup::Model { specs, selected } => {
+                let Some(spec) = specs.into_iter().nth(selected) else {
+                    return Ok(());
+                };
+                self.start_model_switch(spec, terminal)
             }
         }
     }
@@ -794,22 +863,120 @@ impl App {
     fn run_slash_command(
         &mut self,
         command: &str,
-        // Accepted (not yet used by any built-in command) so a command
-        // name with trailing text after it is recognized as that command
-        // with an argument, instead of falling through to `submit`'s
-        // "not a recognized command" branch and being sent to the model
-        // verbatim — bajo (docs/AUDITORIA-2026-07-v2.md, "slash command
-        // con argumentos (/quit ahora) se manda al modelo").
-        _args: Option<&str>,
+        args: Option<&str>,
         terminal: &mut Terminal<Backend>,
     ) -> Result<(), TuiError> {
         match command {
             "help" => self.commit_cell(&HelpCell, terminal),
+            // `/model <backend>[:<modelo>]` switches directly; a bare
+            // `/model` opens the candidates picker instead.
+            "model" => match args {
+                Some(spec) => self.start_model_switch(spec.to_string(), terminal),
+                None => self.open_model_picker(terminal),
+            },
             "quit" | "exit" => {
                 self.should_quit = true;
                 Ok(())
             }
             _ => Ok(()),
+        }
+    }
+
+    /// Opens the `/model` picker over `model_candidates` — a
+    /// `NoticeCell` pointing at the argument form instead if startup
+    /// couldn't compute any candidate (e.g. Ollama down and no other
+    /// backend configured).
+    fn open_model_picker(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        if self.model_candidates.is_empty() {
+            return self.commit_cell(
+                &NoticeCell {
+                    message: "no hay modelos candidatos conocidos — usa /model <backend>[:<modelo>]"
+                        .to_string(),
+                    theme: self.theme,
+                },
+                terminal,
+            );
+        }
+        self.popup = Some(ComposerPopup::Model {
+            specs: self.model_candidates.clone(),
+            selected: 0,
+        });
+        Ok(())
+    }
+
+    /// Kicks off a `/model` switch: spawns the `EngineFactory` rebuild
+    /// as a background task (reconnecting MCP servers can take a moment
+    /// — the UI keeps drawing) and reports the outcome back through
+    /// `switch_rx`, where `finish_model_switch` applies it. Gated on
+    /// both `turn_running` and `switching_model`: the engine must not be
+    /// replaced under a live turn, and two rebuilds racing each other
+    /// would make "which engine won?" order-dependent.
+    fn start_model_switch(
+        &mut self,
+        spec: String,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
+        if self.turn_running || self.switching_model {
+            return self.commit_cell(
+                &NoticeCell {
+                    message: "hay un turno o cambio de modelo en curso — inténtalo cuando termine"
+                        .to_string(),
+                    theme: self.theme,
+                },
+                terminal,
+            );
+        }
+        self.switching_model = true;
+        self.commit_cell(
+            &NoticeCell {
+                message: format!("⏳ cambiando modelo a {spec}…"),
+                theme: self.theme,
+            },
+            terminal,
+        )?;
+
+        let future = (self.engine_factory)(spec.clone());
+        let tx = self.switch_tx.clone();
+        tokio::spawn(async move {
+            // A send error means the app loop is gone (quit mid-switch)
+            // — nothing left to apply the new engine to.
+            let _ = tx.send((spec, future.await));
+        });
+        Ok(())
+    }
+
+    /// Applies a finished `/model` switch (the `switch_rx` arm of the
+    /// event loop): on success swaps the engine and status-bar label —
+    /// the session id is untouched, so the conversation continues
+    /// exactly where it was, now against the new backend/model (the
+    /// engine reloads history from the session store each turn) — and on
+    /// failure keeps the current engine running as if nothing happened.
+    fn finish_model_switch(
+        &mut self,
+        spec: String,
+        result: Result<(Engine, String), String>,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
+        self.switching_model = false;
+        match result {
+            Ok((engine, status_line)) => {
+                self.engine = Arc::new(engine);
+                self.status_line = status_line;
+                self.commit_cell(
+                    &NoticeCell {
+                        message: format!("✓ modelo cambiado a {}", self.status_line),
+                        theme: self.theme,
+                    },
+                    terminal,
+                )
+            }
+            Err(message) => self.commit_cell(
+                &ErrorCell {
+                    message: format!("no se pudo cambiar a {spec}: {message}"),
+                    theme: self.theme,
+                },
+                terminal,
+            ),
         }
     }
 
@@ -1182,6 +1349,8 @@ impl App {
 
             let hint = if !self.pending_approvals.is_empty() {
                 "esperando tu decisión... (y permitir · n/Esc denegar)"
+            } else if self.switching_model {
+                "cambiando de modelo... (Ctrl+C salir)"
             } else if self.turn_running {
                 "esperando respuesta del modelo... (Ctrl+C salir · Esc interrumpir)"
             } else {
@@ -1290,9 +1459,45 @@ fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
                 Line::from(Span::styled(backtrack_preview(text), style))
             })
             .collect(),
+        ComposerPopup::Model { specs, selected } => {
+            // Windows over the full candidate list (see
+            // `ComposerPopup::Model`'s doc comment) — the selection can
+            // walk past the 3-row budget, and the visible slice follows.
+            let start = popup_window_start(*selected, specs.len(), POPUP_MAX_VISIBLE);
+            specs
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(POPUP_MAX_VISIBLE)
+                .map(|(i, spec)| {
+                    let style = if i == *selected {
+                        selected_style
+                    } else {
+                        Style::default()
+                    };
+                    // The `(i+1)/total` marker is what tells the user
+                    // there's more above/below the 3 visible rows.
+                    Line::from(Span::styled(
+                        format!("⇄ {spec}  ({}/{})", i + 1, specs.len()),
+                        style,
+                    ))
+                })
+                .collect()
+        }
     };
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// First visible index for a `visible`-row window over a `len`-item list
+/// keeping `selected` in view: the window sticks to the top until the
+/// selection walks past it, then follows so the selection sits on the
+/// last row, and never starts so late that fewer than `visible` items
+/// remain when the list has at least that many.
+fn popup_window_start(selected: usize, len: usize, visible: usize) -> usize {
+    selected
+        .saturating_sub(visible.saturating_sub(1))
+        .min(len.saturating_sub(visible))
 }
 
 /// Longest single line shown per entry in the backtrack popup before
@@ -1446,5 +1651,26 @@ mod tests {
     #[test]
     fn clamp_height_leaves_a_normal_count_untouched() {
         assert_eq!(clamp_height(42), 42);
+    }
+
+    #[test]
+    fn popup_window_sticks_to_the_top_until_the_selection_walks_past_it() {
+        assert_eq!(popup_window_start(0, 10, 3), 0);
+        assert_eq!(popup_window_start(1, 10, 3), 0);
+        assert_eq!(popup_window_start(2, 10, 3), 0);
+    }
+
+    #[test]
+    fn popup_window_follows_a_selection_below_the_visible_rows() {
+        // Selection sits on the window's last row as it walks down.
+        assert_eq!(popup_window_start(3, 10, 3), 1);
+        assert_eq!(popup_window_start(9, 10, 3), 7);
+    }
+
+    #[test]
+    fn popup_window_never_starts_past_len_minus_visible() {
+        // A list shorter than the window always renders from the top.
+        assert_eq!(popup_window_start(1, 2, 3), 0);
+        assert_eq!(popup_window_start(0, 0, 3), 0);
     }
 }

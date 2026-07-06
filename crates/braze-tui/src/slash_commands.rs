@@ -16,6 +16,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "atajos de teclado y comandos disponibles",
     },
     SlashCommand {
+        name: "model",
+        description: "cambiar de backend/modelo (picker, o /model backend[:modelo])",
+    },
+    SlashCommand {
         name: "quit",
         description: "salir de braze",
     },
@@ -69,6 +73,21 @@ mod tests {
         let matches = matching_commands("qu");
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].name, "quit");
+    }
+
+    #[test]
+    fn model_command_is_registered_and_parses_its_spec_argument() {
+        let matches = matching_commands("mo");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "model");
+
+        // The spec keeps its own `:`s intact (an Ollama tag) — args is
+        // everything after the first whitespace, verbatim.
+        assert_eq!(
+            parse_slash_command("model ollama:qwen2.5:7b"),
+            Some(("model", Some("ollama:qwen2.5:7b")))
+        );
+        assert_eq!(parse_slash_command("model"), Some(("model", None)));
     }
 
     #[test]

@@ -1338,6 +1338,64 @@ creó una sesión nueva de verdad, no una mutación); editar el texto
 (`"leeme el archivo otra vez"`) y reenviar produjo un turno nuevo normal
 con la tercera ronda scripteada, sin errores. Salida limpia con Ctrl+C.
 
+## Fase TUI 2 — `/model` picker + `--ollama-url` (2026-07-06)
+
+Cierra el "gap #1 de UX" identificado en la revisión de OpenCode
+(`docs/SOTA-2026-07.md` § Adenda 2026-07-06): cambiar de backend/modelo
+a mitad de sesión sin salir de la TUI. Diseño = el esbozado ahí mismo:
+**rebuild del `Engine` + resume del mismo session id** (el engine relee
+el historial del store en cada turno, así que reconstruirlo no pierde
+nada; la conversación sigue exactamente donde iba).
+
+- **`/model <backend>[:<modelo>]`** cambia directo (split en el *primer*
+  `:`, misma convención que `--planner`); **`/model`** a secas abre un
+  picker (`ComposerPopup::Model`). El picker *ventanea* sobre la lista
+  completa de candidatos alrededor de la selección (marcador `(n/total)`,
+  `popup_window_start`) en vez de capear a `POPUP_MAX_VISIBLE` como
+  Backtrack — no hay query que estreche la lista y la cola no es menos
+  relevante que la cabeza. Fuzzy search estilo OpenCode queda diferido.
+- **Candidatos** (computados una vez al arranque en `braze-cli`, misma
+  staleness aceptada que `mentionable_files`): cada backend construible
+  con la config actual (credenciales + modelo presentes), con la entrada
+  Ollama expandida a los modelos instalados del server vía
+  `braze_model::list_ollama_models` (`GET /api/tags`, timeouts cortos,
+  best-effort: Ollama caído degrada al modelo configurado, nunca bloquea
+  el arranque).
+- **Costura `braze_tui::EngineFactory`** (`spec -> Future<Result<(Engine,
+  String), String>>`): `braze-tui` sigue sin depender de
+  `braze-config`/`braze-model`; `braze-cli` implementa el factory sobre
+  el nuevo `build_engine(...)` extraído de `run()` — la misma
+  composición que el arranque (guards re-sembrados con las aprobaciones
+  de la sesión *viva* vía `store.load`, providers locales + MCP
+  reconectados, compactor, budget de contexto Ollama, planner del
+  arranque preservado vía `planner_spec`). El rebuild corre como task en
+  background (`switching_model` gatea submits y switches concurrentes;
+  el resultado vuelve por un canal dedicado `switch_rx`); un spec
+  inválido o un backend sin credenciales produce un `ErrorCell` y el
+  engine anterior sigue intacto.
+- **`--ollama-url <url>`** en `chat` y `run`: override de
+  `ollama_base_url` con la misma precedencia que `--model` (gana a config
+  file y `BRAZE_OLLAMA_BASE_URL`) — para apuntar a un nodo de inferencia
+  LAN (p.ej. Nitro) sin editar config.
+
+**Tests**: 548 → 558 (parseo de `--ollama-url`, registro/parseo de
+`/model`, `popup_window_start`, `list_ollama_models` contra el server
+enlatado ×4). `cargo build/test/clippy --workspace` verdes; snapshot de
+`HelpCell` actualizado (línea `/model`).
+
+**Verificación manual en vivo** (pty scripteado, binario real, config
+real openrouter + Ollama local con 7 modelos): (1) arranque con status
+`openrouter:openai/gpt-4o-mini`; (2) `/model ollama:qwen2.5:3b` → notice
+"cambiando…", "✓ modelo cambiado", status bar actualizada; (3) `/model`
+→ picker con 8 candidatos, 4×Down deslizó la ventana y Enter cambió al
+candidato 5 (`ollama:gemma4:latest`) — windowing y selección correctos
+end-to-end; (4) `/model foo:bar` → `ErrorCell` "no se pudo cambiar…" con
+la TUI intacta; (5) `/quit` salió limpio (status 0). Nota de harness: en
+pty hay que detectar la salida con `waitpid`, no `kill(pid, 0)` (el
+zombie sin cosechar responde como vivo) — y los asserts van sobre las
+celdas commiteadas al scrollback, no sobre el render diffeado del popup
+(ratatui intercala escapes de posicionamiento dentro del texto).
+
 ## Split planificador/ejecutor (`with_planner`) — diseño (2026-07-06)
 
 > **Estado: diseño aprobado, implementación pendiente.** Primera pieza de

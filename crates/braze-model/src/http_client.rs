@@ -37,8 +37,10 @@ pub(crate) fn build_client() -> reqwest::Client {
 /// Parameterized on the actual durations so a test can verify the
 /// timeout *wiring* (does a stalled connection actually get cut off?)
 /// against a millisecond-scale bound instead of waiting out the real
-/// production values (up to 600s).
-fn build_client_with_timeouts(connect: Duration, read: Duration) -> reqwest::Client {
+/// production values (up to 600s). Also used directly by
+/// `ollama::list_ollama_models`, whose non-streaming metadata request
+/// deserves a much tighter read bound than a model generation.
+pub(crate) fn build_client_with_timeouts(connect: Duration, read: Duration) -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(connect)
         .read_timeout(read)

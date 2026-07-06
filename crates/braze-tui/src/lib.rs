@@ -34,6 +34,23 @@ use braze_engine::Engine;
 use braze_types::SessionId;
 use tokio::sync::mpsc;
 
+/// Async constructor for a replacement [`Engine`], used by the `/model`
+/// command (PLAN.md § "fase TUI 2"): given a `backend[:modelo]` spec,
+/// rebuilds a fresh engine — same composition as startup: permission
+/// guards re-seeded from the live session's approvals, tool providers,
+/// compactor, planner — plus its short "backend:model" status-bar label.
+/// `braze-cli` implements it over the same `build_engine` startup uses;
+/// this crate deliberately can't build engines itself (it depends on
+/// neither `braze-config` nor `braze-model`). The error side is a
+/// display string — the TUI only ever shows it, never matches on it.
+pub type EngineFactory = Box<
+    dyn Fn(
+            String,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(Engine, String), String>> + Send>,
+        > + Send,
+>;
+
 /// Runs the interactive TUI chat loop for `session` against `engine`
 /// until the user quits (Ctrl+C, or Ctrl+D on an empty composer). Owns
 /// the terminal for the duration of the call — raw mode is restored on
@@ -51,6 +68,12 @@ use tokio::sync::mpsc;
 /// is a short, static "backend:model" label shown in the status bar.
 /// `theme` picks the color preset every `HistoryCell` renders with —
 /// `braze-cli` resolves it from `Config::tui_theme` before calling this.
+/// `engine_factory` rebuilds the engine for the `/model` command, and
+/// `model_candidates` are the `backend[:modelo]` specs its no-args
+/// picker offers — computed once at startup (e.g. from the config's
+/// backends plus the Ollama server's installed models), not refreshed
+/// mid-session.
+#[allow(clippy::too_many_arguments)] // the composition-root seam: one param per collaborator
 pub async fn run(
     engine: Engine,
     live_session: Arc<std::sync::Mutex<SessionId>>,
@@ -58,6 +81,8 @@ pub async fn run(
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
     status_line: String,
     theme: Theme,
+    engine_factory: EngineFactory,
+    model_candidates: Vec<String>,
 ) -> Result<(), TuiError> {
     let mut guard = terminal::setup()?;
     app::run(
@@ -68,6 +93,8 @@ pub async fn run(
         approvals,
         status_line,
         theme,
+        engine_factory,
+        model_candidates,
     )
     .await
 }

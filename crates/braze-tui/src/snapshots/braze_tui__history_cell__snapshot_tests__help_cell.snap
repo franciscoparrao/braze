@@ -3,7 +3,7 @@ source: crates/braze-tui/src/history_cell.rs
 expression: "render_to_buffer(&HelpCell, 50)"
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 50, height: 17 },
+    area: Rect { x: 0, y: 0, width: 50, height: 19 },
     content: [
         "Atajos                                            ",
         "Enter enviar · Ctrl+J salto de línea              ",
@@ -17,6 +17,8 @@ Buffer {
         "                                                  ",
         "Comandos                                          ",
         "/help  este mensaje                               ",
+        "/model  cambiar de backend/modelo (picker; /model ",
+        "backend[:modelo] directo)                         ",
         "/quit, /exit  salir de braze                      ",
         "                                                  ",
         "Menciones                                         ",
@@ -28,7 +30,7 @@ Buffer {
         x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 8, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 14, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 9, y: 14, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 9, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

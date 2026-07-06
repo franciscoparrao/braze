@@ -232,10 +232,111 @@ async fn drive_stream(
     }
 }
 
+/// Read timeout for [`list_ollama_models`]'s non-streaming metadata
+/// request — `/api/tags` answers from local state in milliseconds on a
+/// healthy server, so anything that stays silent this long is down, not
+/// slow. Deliberately far below `http_client`'s generation-sized 600s
+/// read timeout: this call sits on the TUI's startup path, best-effort.
+const LIST_MODELS_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Lists the models installed on an Ollama server (`GET /api/tags`),
+/// returning their `name` tags (e.g. `"qwen2.5:3b"`) in server order.
+/// Used to populate the TUI's `/model` picker with what's actually
+/// available locally — callers should treat failure as "server not
+/// reachable" and degrade (e.g. to the configured model name) rather
+/// than abort, since a stopped Ollama is a completely normal state for
+/// someone running against Anthropic/OpenRouter.
+pub async fn list_ollama_models(base_url: &str) -> Result<Vec<String>, ModelError> {
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    let client = crate::http_client::build_client_with_timeouts(
+        std::time::Duration::from_secs(10),
+        LIST_MODELS_READ_TIMEOUT,
+    );
+
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| ModelError::Request(format!("ollama request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(http_error_to_model_error(response, "ollama").await);
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ModelError::Decode(format!("ollama /api/tags: invalid JSON: {e}")))?;
+
+    // `{"models": [{"name": "qwen2.5:3b", ...}, ...]}` — entries missing a
+    // string `name` are skipped rather than failing the whole listing (the
+    // picker would rather show the models it *can* name).
+    Ok(body
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model.get("name").and_then(serde_json::Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use braze_types::{Message, Role};
+
+    #[tokio::test]
+    async fn list_ollama_models_returns_the_installed_model_names_in_order() {
+        let body = br#"{"models":[{"name":"qwen2.5:3b","size":1},{"name":"llama3.2:1b","size":2}]}"#
+            .to_vec();
+        let addr = crate::test_support::spawn_canned_http_server(200, "application/json", body)
+            .await;
+
+        let models = list_ollama_models(&format!("http://{addr}"))
+            .await
+            .expect("listing should succeed");
+        assert_eq!(models, vec!["qwen2.5:3b", "llama3.2:1b"]);
+    }
+
+    #[tokio::test]
+    async fn list_ollama_models_skips_entries_without_a_string_name() {
+        let body = br#"{"models":[{"size":1},{"name":"qwen2.5:3b"},{"name":42}]}"#.to_vec();
+        let addr = crate::test_support::spawn_canned_http_server(200, "application/json", body)
+            .await;
+
+        let models = list_ollama_models(&format!("http://{addr}"))
+            .await
+            .expect("listing should succeed");
+        assert_eq!(models, vec!["qwen2.5:3b"]);
+    }
+
+    #[tokio::test]
+    async fn list_ollama_models_maps_an_http_error_instead_of_panicking() {
+        let body = br#"{"error":"boom"}"#.to_vec();
+        let addr = crate::test_support::spawn_canned_http_server(500, "application/json", body)
+            .await;
+
+        let err = list_ollama_models(&format!("http://{addr}"))
+            .await
+            .expect_err("a 500 must surface as an error");
+        // The exact variant is `http_error_to_model_error`'s business —
+        // this test only pins that failure is an `Err`, not a panic or
+        // an empty Ok.
+        let _ = err;
+    }
+
+    #[tokio::test]
+    async fn list_ollama_models_against_an_unreachable_server_is_a_request_error() {
+        // Port 1 is essentially never listening; connect fails fast.
+        let err = list_ollama_models("http://127.0.0.1:1")
+            .await
+            .expect_err("connection refused must surface as an error");
+        assert!(matches!(err, ModelError::Request(_)));
+    }
 
     fn sample_request() -> CompletionRequest {
         CompletionRequest {

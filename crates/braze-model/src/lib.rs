@@ -23,5 +23,5 @@ mod test_support;
 pub use anthropic::AnthropicBackend;
 pub use backend::{CompletionEvent, CompletionRequest, ModelBackend};
 pub use error::ModelError;
-pub use ollama::OllamaBackend;
+pub use ollama::{OllamaBackend, list_ollama_models};
 pub use openrouter::OpenRouterBackend;

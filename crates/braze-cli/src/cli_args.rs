@@ -37,6 +37,12 @@ pub enum Command {
         /// Override the configured model name for this run.
         #[arg(long)]
         model: Option<String>,
+        /// Override the Ollama server base URL for this run (e.g.
+        /// `--ollama-url http://192.168.1.8:11434` to use a LAN inference
+        /// node instead of localhost). Same precedence position as
+        /// `--model`: wins over the config file and `BRAZE_OLLAMA_BASE_URL`.
+        #[arg(long = "ollama-url")]
+        ollama_url: Option<String>,
         /// Use the terminal UI (`braze-tui`, PLAN.md § "Fase TUI —
         /// diseño") instead of the plain-text stdin/stdout loop. Opt-in
         /// for now. Irreversible-action tool calls show a real,
@@ -68,6 +74,10 @@ pub enum Command {
         /// Override the configured model name for this run.
         #[arg(long)]
         model: Option<String>,
+        /// Override the Ollama server base URL for this run — same
+        /// semantics as `chat --ollama-url`.
+        #[arg(long = "ollama-url")]
+        ollama_url: Option<String>,
         /// Enable the planner/executor split for this run — same syntax
         /// as `chat --planner`.
         #[arg(long)]
@@ -87,6 +97,15 @@ impl Command {
     pub fn model_override(&self) -> Option<&str> {
         match self {
             Command::Chat { model, .. } | Command::Run { model, .. } => model.as_deref(),
+        }
+    }
+
+    /// The `--ollama-url` override, if any, common to both subcommands.
+    pub fn ollama_url_override(&self) -> Option<&str> {
+        match self {
+            Command::Chat { ollama_url, .. } | Command::Run { ollama_url, .. } => {
+                ollama_url.as_deref()
+            }
         }
     }
 
@@ -124,6 +143,7 @@ mod tests {
             resume: None,
             backend: None,
             model: None,
+            ollama_url: None,
             tui: false,
             theme: None,
             planner: planner.map(str::to_string),
@@ -149,5 +169,24 @@ mod tests {
     #[test]
     fn planner_override_is_none_without_the_flag() {
         assert_eq!(chat_with_planner(None).planner_override(), None);
+    }
+
+    #[test]
+    fn ollama_url_flag_parses_on_both_subcommands() {
+        let cli =
+            Cli::parse_from(["braze", "chat", "--ollama-url", "http://192.168.1.8:11434"]);
+        assert_eq!(
+            cli.command.ollama_url_override(),
+            Some("http://192.168.1.8:11434")
+        );
+
+        let cli = Cli::parse_from(["braze", "run", "hola", "--ollama-url", "http://nitro:11434"]);
+        assert_eq!(cli.command.ollama_url_override(), Some("http://nitro:11434"));
+    }
+
+    #[test]
+    fn ollama_url_override_is_none_without_the_flag() {
+        let cli = Cli::parse_from(["braze", "chat"]);
+        assert_eq!(cli.command.ollama_url_override(), None);
     }
 }
