@@ -53,6 +53,31 @@ pub(crate) struct OllamaOptions {
     /// backends (N-34, docs/AUDITORIA-2026-07-v2.md).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
+    /// `None` (the default for these three) omits the field entirely so
+    /// Ollama falls back to the model's own Modelfile value — the knobs
+    /// exist for sampling sweeps (ítem 7 del backlog 2026-07-06: la
+    /// familia Qwen recomienda temp 0.7 / top_p 0.8 / top_k 20 /
+    /// repeat_penalty 1.05, muy lejos del 0.2 del bench), not to impose
+    /// new defaults on every run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repeat_penalty: Option<f32>,
+}
+
+/// The sampling-related subset of [`OllamaOptions`], grouped so
+/// [`build_request`]'s signature doesn't grow one positional parameter
+/// per knob — `num_ctx`/`num_predict` stay separate because they're
+/// context-budget configuration, not sampling.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct OllamaSampling {
+    pub temperature: f32,
+    pub seed: Option<u64>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
+    pub repeat_penalty: Option<f32>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -95,15 +120,14 @@ pub(crate) struct OllamaFunctionDef {
 /// Anthropic's — the system prompt is just the first message in the array,
 /// with `role: "system"`.
 ///
-/// `num_ctx`/`temperature` are backend-level configuration (not part of
+/// `num_ctx`/`sampling` are backend-level configuration (not part of
 /// [`CompletionRequest`], which is provider-agnostic) — see
 /// [`OllamaBackend`](crate::ollama::OllamaBackend)'s fields.
 pub(crate) fn build_request(
     req: &CompletionRequest,
     model: &str,
     num_ctx: u32,
-    temperature: f32,
-    seed: Option<u64>,
+    sampling: OllamaSampling,
 ) -> OllamaRequest {
     let mut messages = Vec::new();
 
@@ -131,8 +155,11 @@ pub(crate) fn build_request(
             // to fit, but saturate defensively rather than panic/wrap on
             // an adversarial value.
             num_predict: req.max_tokens.min(i32::MAX as u32) as i32,
-            temperature,
-            seed,
+            temperature: sampling.temperature,
+            seed: sampling.seed,
+            top_p: sampling.top_p,
+            top_k: sampling.top_k,
+            repeat_penalty: sampling.repeat_penalty,
         },
     }
 }
@@ -419,6 +446,54 @@ mod tests {
     use super::*;
     use braze_types::Role;
 
+    /// The historical default the pre-knob tests were written against:
+    /// temperature 0.2, everything else unset.
+    fn sampling_02(seed: Option<u64>) -> OllamaSampling {
+        OllamaSampling {
+            temperature: 0.2,
+            seed,
+            ..OllamaSampling::default()
+        }
+    }
+
+    /// Ítem 7 del backlog (2026-07-06): the sweep knobs must reach the
+    /// wire when set, and must serialize to *nothing* when unset (so an
+    /// un-swept run keeps deferring to the model's Modelfile values).
+    #[test]
+    fn sampling_knobs_reach_the_wire_when_set_and_vanish_when_unset() {
+        let req = CompletionRequest {
+            messages: vec![Message::text(Role::User, "hi")],
+            tool_stubs: vec![],
+            system_prompt: String::new(),
+            max_tokens: 100,
+        };
+
+        let wire = build_request(
+            &req,
+            "qwen2.5:3b",
+            8192,
+            OllamaSampling {
+                temperature: 0.7,
+                seed: Some(42),
+                top_p: Some(0.8),
+                top_k: Some(20),
+                repeat_penalty: Some(1.05),
+            },
+        );
+        let json = serde_json::to_value(wire.options).unwrap();
+        assert_eq!(json["temperature"], 0.699999988079071); // f32 0.7
+        assert_eq!(json["top_p"], 0.800000011920929); // f32 0.8
+        assert_eq!(json["top_k"], 20);
+        assert_eq!(json["repeat_penalty"], 1.0499999523162842); // f32 1.05
+
+        let wire = build_request(&req, "qwen2.5:3b", 8192, sampling_02(None));
+        let json = serde_json::to_value(wire.options).unwrap();
+        assert!(json.get("top_p").is_none());
+        assert!(json.get("top_k").is_none());
+        assert!(json.get("repeat_penalty").is_none());
+        assert!(json.get("seed").is_none());
+    }
+
     #[test]
     fn build_request_prepends_system_message() {
         let req = CompletionRequest {
@@ -427,7 +502,7 @@ mod tests {
             system_prompt: "be terse".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "llama3", 8192, 0.2, None);
+        let wire = build_request(&req, "llama3", 8192, sampling_02(None));
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
         assert_eq!(wire.messages[0].content, "be terse");
@@ -448,7 +523,7 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: u32::MAX,
         };
-        let wire = build_request(&req, "llama3", 8192, 0.2, None);
+        let wire = build_request(&req, "llama3", 8192, sampling_02(None));
         assert_eq!(wire.options.num_predict, i32::MAX);
     }
 
@@ -463,7 +538,7 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "llama3", 8192, 0.2, Some(42));
+        let wire = build_request(&req, "llama3", 8192, sampling_02(Some(42)));
         assert_eq!(wire.options.seed, Some(42));
     }
 

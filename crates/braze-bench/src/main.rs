@@ -70,6 +70,19 @@ struct Cli {
     /// no determinístico normal del proveedor.
     #[arg(long)]
     seed: Option<u64>,
+    /// `options.top_p` para backends Ollama (ítem 7 del backlog: la
+    /// familia Qwen recomienda temp 0.7 / top_p 0.8 / top_k 20 /
+    /// repeat_penalty 1.05 — el default del bench es 0.2 sin estos
+    /// knobs). Sin el flag, Ollama usa el valor del Modelfile del
+    /// modelo. Ignorado por backends anthropic/openrouter.
+    #[arg(long)]
+    top_p: Option<f32>,
+    /// `options.top_k` para backends Ollama — ver `--top-p`.
+    #[arg(long)]
+    top_k: Option<u32>,
+    /// `options.repeat_penalty` para backends Ollama — ver `--top-p`.
+    #[arg(long)]
+    repeat_penalty: Option<f32>,
     /// No ejecutar 'ollama stop <modelo>' al terminar con un backend Ollama.
     /// Por defecto el sweep sí lo hace: en esta máquina (38GB RAM, ~1.4GB
     /// libres bajo carga) un modelo grande que queda residente mientras
@@ -157,6 +170,9 @@ async fn run() -> Result<(), BenchError> {
         let probe_sampling = backend_spec::SamplingSpec {
             temperature: cli.temperature,
             seed: cli.seed,
+            top_p: cli.top_p,
+            top_k: cli.top_k,
+            repeat_penalty: cli.repeat_penalty,
         };
         if let Err(err) = spec
             .build(&config, probe_sampling)
@@ -186,6 +202,9 @@ async fn run() -> Result<(), BenchError> {
                 let sampling = backend_spec::SamplingSpec {
                     temperature: cli.temperature,
                     seed: cli.seed.map(|s| s.wrapping_add(u64::from(repetition))),
+                    top_p: cli.top_p,
+                    top_k: cli.top_k,
+                    repeat_penalty: cli.repeat_penalty,
                 };
                 match runner::run_task(spec, &config, task, repetition, task_timeout, sampling)
                     .await

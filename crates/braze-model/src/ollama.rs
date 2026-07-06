@@ -12,7 +12,7 @@ use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
 use crate::http_error::http_error_to_model_error;
 use crate::ollama_wire::{
-    OllamaStreamState, build_request, extract_next_ndjson_line, parse_ndjson_line,
+    OllamaSampling, OllamaStreamState, build_request, extract_next_ndjson_line, parse_ndjson_line,
 };
 
 const DEFAULT_BASE_URL: &str = "http://localhost:11434";
@@ -47,6 +47,11 @@ pub struct OllamaBackend {
     num_ctx: u32,
     temperature: f32,
     seed: Option<u64>,
+    /// `None` (the default) omits the option so Ollama uses the model's
+    /// own Modelfile value — see `OllamaOptions` in `ollama_wire.rs`.
+    top_p: Option<f32>,
+    top_k: Option<u32>,
+    repeat_penalty: Option<f32>,
 }
 
 impl OllamaBackend {
@@ -59,6 +64,9 @@ impl OllamaBackend {
             num_ctx: DEFAULT_NUM_CTX,
             temperature: DEFAULT_TEMPERATURE,
             seed: None,
+            top_p: None,
+            top_k: None,
+            repeat_penalty: None,
         }
     }
 
@@ -72,6 +80,9 @@ impl OllamaBackend {
             num_ctx: DEFAULT_NUM_CTX,
             temperature: DEFAULT_TEMPERATURE,
             seed: None,
+            top_p: None,
+            top_k: None,
+            repeat_penalty: None,
         }
     }
 
@@ -98,6 +109,27 @@ impl OllamaBackend {
         self.seed = Some(seed);
         self
     }
+
+    /// Sets `options.top_p` (nucleus sampling). Unset by default so the
+    /// model's Modelfile value applies — these three knobs exist for
+    /// sampling sweeps (ítem 7 del backlog 2026-07-06: Qwen recomienda
+    /// temp 0.7 / top_p 0.8 / top_k 20 / repeat_penalty 1.05).
+    pub fn with_top_p(mut self, top_p: f32) -> Self {
+        self.top_p = Some(top_p);
+        self
+    }
+
+    /// Sets `options.top_k` — see [`OllamaBackend::with_top_p`].
+    pub fn with_top_k(mut self, top_k: u32) -> Self {
+        self.top_k = Some(top_k);
+        self
+    }
+
+    /// Sets `options.repeat_penalty` — see [`OllamaBackend::with_top_p`].
+    pub fn with_repeat_penalty(mut self, repeat_penalty: f32) -> Self {
+        self.repeat_penalty = Some(repeat_penalty);
+        self
+    }
 }
 
 #[async_trait]
@@ -115,7 +147,18 @@ impl ModelBackend for OllamaBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let body = build_request(&req, &self.model, self.num_ctx, self.temperature, self.seed);
+        let body = build_request(
+            &req,
+            &self.model,
+            self.num_ctx,
+            OllamaSampling {
+                temperature: self.temperature,
+                seed: self.seed,
+                top_p: self.top_p,
+                top_k: self.top_k,
+                repeat_penalty: self.repeat_penalty,
+            },
+        );
         tracing::info!(
             tool_count = body.tools.len(),
             num_ctx = self.num_ctx,

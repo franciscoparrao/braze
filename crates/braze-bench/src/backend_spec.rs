@@ -219,6 +219,15 @@ impl BackendSpec {
                 if let Some(seed) = sampling.seed {
                     backend = backend.with_seed(seed);
                 }
+                if let Some(top_p) = sampling.top_p {
+                    backend = backend.with_top_p(top_p);
+                }
+                if let Some(top_k) = sampling.top_k {
+                    backend = backend.with_top_k(top_k);
+                }
+                if let Some(repeat_penalty) = sampling.repeat_penalty {
+                    backend = backend.with_repeat_penalty(repeat_penalty);
+                }
                 Ok(Box::new(backend))
             }
             Provider::OpenRouter => {
@@ -264,6 +273,14 @@ pub struct SamplingSpec {
     /// Ignored for an `anthropic` spec — the Messages API has no `seed`
     /// parameter.
     pub seed: Option<u64>,
+    /// Ollama-only sampling knobs (ítem 7 del backlog 2026-07-06):
+    /// `None` defers to the model's Modelfile. Ignored (with no warning
+    /// — uniformity across a mixed sweep isn't achievable here) by the
+    /// anthropic/openrouter builders, whose wire formats don't take
+    /// them through this crate yet.
+    pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
+    pub repeat_penalty: Option<f32>,
 }
 
 #[cfg(test)]
@@ -278,6 +295,9 @@ mod tests {
         SamplingSpec {
             temperature: 0.2,
             seed: Some(42),
+            top_p: None,
+            top_k: None,
+            repeat_penalty: None,
         }
     }
 
