@@ -36,6 +36,17 @@ use braze_types::{ContentBlock, Message, Role};
 /// roadmap SOTA": no tool has demonstrated a need for an exemption yet).
 const NEVER_CLEAR_TOOLS: &[&str] = &[];
 
+/// How many of the tactical window's most recent observations
+/// (`ToolCallCompleted` results) are rendered in full; anything older is
+/// collapsed to its first line (see [`collapsed_observation_content`]).
+/// The value comes straight from SWE-agent/ACI (arXiv 2405.15793, Tabla
+/// 3): collapsing old observations to 1 line except the last 5 was worth
+/// +3.0 pp on SWE-bench Lite vs keeping full history — old file dumps and
+/// shell output mostly distract; what the model needs from them usually
+/// survives in its own subsequent text. Tactical-side only: durable
+/// results are already fully cleared by `event_to_block_cleared`.
+const TACTICAL_FULL_OBSERVATIONS: usize = 5;
+
 /// Builds the message history for the next model call from durable state
 /// (already-settled summary *and* settled events, never re-derived from
 /// raw events) plus the live tactical window (either raw events, or —
@@ -109,9 +120,60 @@ fn build_messages_with_never_clear(
     push_grouped(&mut messages, &durable.durable_events, |event| {
         event_to_block_cleared(event, &tool_names, never_clear)
     });
-    push_grouped(&mut messages, tactical, event_to_block);
+
+    // Colapso de observaciones viejas (ACI, ver
+    // `TACTICAL_FULL_OBSERVATIONS`): the i-th observation is "old" when
+    // at least `TACTICAL_FULL_OBSERVATIONS` observations come after it
+    // within this same tactical window. Counted over observations, not
+    // events — text/tool_use events in between don't consume slots.
+    let total_observations = tactical
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::ToolCallCompleted { .. }))
+        .count();
+    let mut observations_seen = 0;
+    push_grouped(&mut messages, tactical, |event| {
+        if let AgentEvent::ToolCallCompleted { id, result } = event {
+            observations_seen += 1;
+            let newer_observations = total_observations - observations_seen;
+            if newer_observations >= TACTICAL_FULL_OBSERVATIONS {
+                return Some((
+                    Role::User,
+                    ContentBlock::ToolResult {
+                        tool_use_id: id.clone(),
+                        content: collapsed_observation_content(&result.content),
+                        is_error: result.is_error,
+                    },
+                ));
+            }
+        }
+        event_to_block(event)
+    });
 
     messages
+}
+
+/// Renders an old tactical observation as its first line plus a marker
+/// noting what was omitted — the ACI "collapse to 1 line" treatment (see
+/// [`TACTICAL_FULL_OBSERVATIONS`]). Returns the content unchanged when
+/// collapsing wouldn't actually save anything (a short, single-line
+/// result), so the marker never *adds* tokens to an already-small
+/// observation.
+fn collapsed_observation_content(content: &str) -> String {
+    /// Longest first-line excerpt kept — beyond this even the "1 line"
+    /// gets cut (a minified single-line JSON dump is one line and still
+    /// enormous).
+    const FIRST_LINE_MAX_CHARS: usize = 160;
+
+    let first_line = content.lines().next().unwrap_or("").trim_end();
+    let excerpt: String = first_line.chars().take(FIRST_LINE_MAX_CHARS).collect();
+    let omitted = content.len().saturating_sub(excerpt.len());
+    let collapsed = format!(
+        "{excerpt} [old observation collapsed: {omitted} chars omitted; the {TACTICAL_FULL_OBSERVATIONS} most recent tool results are shown in full]"
+    );
+    if collapsed.len() >= content.len() {
+        return content.to_string();
+    }
+    collapsed
 }
 
 /// Appends every event's rendered block to `messages`, grouping
@@ -124,7 +186,9 @@ fn build_messages_with_never_clear(
 fn push_grouped<'a>(
     messages: &mut Vec<Message>,
     events: impl IntoIterator<Item = &'a AgentEvent>,
-    render: impl Fn(&AgentEvent) -> Option<(Role, ContentBlock)>,
+    // `FnMut`, not `Fn`: the tactical renderer counts observations as it
+    // goes (see the collapse pass in `build_messages_with_never_clear`).
+    mut render: impl FnMut(&AgentEvent) -> Option<(Role, ContentBlock)>,
 ) {
     for event in events {
         let Some((role, block)) = render(event) else {
@@ -563,6 +627,133 @@ mod tests {
             }
             other => panic!("expected a ToolResult block, got {other:?}"),
         }
+    }
+
+    // --- colapso de observaciones viejas (ACI, ítem 4 del backlog
+    // 2026-07-06 — ver TACTICAL_FULL_OBSERVATIONS) ---
+
+    /// Extracts every ToolResult content in render order, flattening the
+    /// grouped messages — collapse tests only care about the payloads.
+    fn tool_result_contents(messages: &[Message]) -> Vec<String> {
+        messages
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .filter_map(|block| match block {
+                ContentBlock::ToolResult { content, .. } => Some(content.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn old_tactical_observations_collapse_but_the_last_five_stay_full() {
+        // 7 observations, each long enough that collapsing saves space.
+        let mut tactical = Vec::new();
+        for i in 0..7 {
+            let id = format!("call-{i}");
+            tactical.push(tool_call_event(&id, "read_file"));
+            tactical.push(tool_completed_event(
+                &id,
+                &format!("primera linea {i}\n{}", "x".repeat(500)),
+            ));
+        }
+
+        let messages = build_messages(&empty_durable(), &tactical);
+        let contents = tool_result_contents(&messages);
+        assert_eq!(contents.len(), 7);
+
+        // The first 2 (7 - 5) collapse to first line + marker...
+        for (i, content) in contents.iter().take(2).enumerate() {
+            assert!(
+                content.starts_with(&format!("primera linea {i} ")),
+                "observation {i} should start with its first line, got: {content}"
+            );
+            assert!(
+                content.contains("old observation collapsed"),
+                "observation {i} should carry the collapse marker"
+            );
+            assert!(
+                !content.contains("xxx"),
+                "observation {i} leaked its collapsed body"
+            );
+        }
+        // ...and the newest 5 stay verbatim.
+        for (i, content) in contents.iter().enumerate().skip(2) {
+            assert!(
+                content.contains(&"x".repeat(500)),
+                "observation {i} (within the last 5) must stay full"
+            );
+        }
+    }
+
+    #[test]
+    fn with_five_or_fewer_observations_nothing_collapses() {
+        let mut tactical = Vec::new();
+        for i in 0..5 {
+            let id = format!("call-{i}");
+            tactical.push(tool_call_event(&id, "read_file"));
+            tactical.push(tool_completed_event(&id, &"z".repeat(400)));
+        }
+
+        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        assert!(contents.iter().all(|c| c == &"z".repeat(400)));
+    }
+
+    #[test]
+    fn a_collapsed_observation_preserves_its_id_and_error_flag() {
+        let mut tactical = vec![AgentEvent::ToolCallCompleted {
+            id: "call-old".to_string(),
+            result: ToolResult {
+                tool_call_id: "call-old".to_string(),
+                content: format!("fallo: no existe\n{}", "detalle ".repeat(100)),
+                is_error: true,
+            },
+        }];
+        for i in 0..5 {
+            tactical.push(tool_completed_event(&format!("call-{i}"), "ok"));
+        }
+
+        let messages = build_messages(&empty_durable(), &tactical);
+        match &messages[0].content[0] {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                assert_eq!(tool_use_id, "call-old");
+                assert!(*is_error, "the error flag must survive the collapse");
+                assert!(content.starts_with("fallo: no existe"));
+                assert!(content.contains("collapsed"));
+            }
+            other => panic!("expected a ToolResult block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_short_old_observation_is_left_untouched_by_the_collapse() {
+        // Collapsing "ok" would *add* tokens (the marker) — the no-op
+        // guard in `collapsed_observation_content` must kick in.
+        let mut tactical = vec![tool_completed_event("call-old", "ok")];
+        for i in 0..5 {
+            tactical.push(tool_completed_event(&format!("call-{i}"), &"w".repeat(300)));
+        }
+
+        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        assert_eq!(contents[0], "ok");
+    }
+
+    #[test]
+    fn a_huge_single_line_old_observation_still_collapses() {
+        // Minified single-line JSON: one "line" but enormous — the
+        // excerpt cap (not the line split) is what bounds it.
+        let mut tactical = vec![tool_completed_event("call-old", &"j".repeat(5_000))];
+        for i in 0..5 {
+            tactical.push(tool_completed_event(&format!("call-{i}"), "ok"));
+        }
+
+        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        assert!(contents[0].len() < 400, "got len {}", contents[0].len());
+        assert!(contents[0].contains("collapsed"));
     }
 
     /// Regression test for the deeper issue N-1's investigation surfaced
