@@ -415,17 +415,27 @@ impl Engine {
         // (not after best-of-n voting) so a textually described tool
         // call counts as a real candidate signature for the vote too.
         //
-        // Escalera, most-specific first: (1) the `<tool_call>{json}
-        // </tool_call>` tagged format Qwen/Hermes models emit natively
-        // (explicit markers — admits surrounding prose and several
-        // calls per response), then (2) a bare JSON object that is the
-        // entire response (optionally ```json-fenced).
+        // Escalera, most-specific first: (1) the `<tool_call>…</tool_call>`
+        // tagged format Qwen/Hermes models emit natively (explicit
+        // markers — admits surrounding prose and several calls per
+        // response; the inner grammar may be qwen2.5's JSON or
+        // qwen3-coder's `<function=…>` XML), then (2) a bare
+        // `<function=…>` XML block without the wrapper, then (3) a bare
+        // JSON object that is the entire response (optionally
+        // ```json-fenced).
         if self.textual_rescue_enabled && tool_calls.is_empty() {
             let (tagged, remaining_text) = extract_tagged_tool_calls(&text_buffer);
+            let (tagged, remaining_text, format) = if tagged.is_empty() {
+                let (xml, remaining_text) = extract_function_xml_tool_calls(&text_buffer);
+                (xml, remaining_text, "<function=> XML (qwen3-coder)")
+            } else {
+                (tagged, remaining_text, "<tool_call> tagged (Qwen/Hermes)")
+            };
             if !tagged.is_empty() {
                 tracing::info!(
                     count = tagged.len(),
-                    "rescued tool call(s) emitted in the <tool_call> tagged format (Qwen/Hermes) instead of structured tool_calls entries"
+                    format,
+                    "rescued tool call(s) emitted as text in a native tool-template format instead of structured tool_calls entries"
                 );
                 tool_calls.extend(tagged);
                 text_buffer = remaining_text;
@@ -1703,13 +1713,19 @@ fn extract_tagged_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
             break;
         };
         let block_end = start + OPEN_TAG.len() + inner_len + CLOSE_TAG.len();
-        match parse_tool_call_json(trim_json_fences(&after_open[..inner_len])) {
+        let inner = &after_open[..inner_len];
+        // The wrapper admits two inner grammars: qwen2.5's JSON object,
+        // and qwen3-coder's `<function=...>` XML (which its template
+        // nests inside the same `<tool_call>` tags).
+        match parse_tool_call_json(trim_json_fences(inner))
+            .or_else(|| parse_function_xml_tool_call(inner))
+        {
             Some(call) => {
                 calls.push(call);
                 remaining.push_str(&rest[..start]);
             }
-            // Malformed inner JSON: keep the whole tagged block in the
-            // text — clearly *meant* as a tool call, but inventing a
+            // Malformed inner content: keep the whole tagged block in
+            // the text — clearly *meant* as a tool call, but inventing a
             // repair here risks running something the model didn't say.
             None => remaining.push_str(&rest[..block_end]),
         }
@@ -1720,6 +1736,98 @@ fn extract_tagged_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
     }
     remaining.push_str(rest);
     (calls, remaining.trim().to_string())
+}
+
+/// Rescue for *bare* `<function=...>` blocks — qwen3-coder's XML grammar
+/// emitted without its usual `<tool_call>` wrapper (observed leak mode
+/// when the template isn't honored end-to-end). Same contract as
+/// [`extract_tagged_tool_calls`]: parsed blocks are removed, surrounding
+/// prose is preserved, malformed blocks stay in the text, empty `Vec`
+/// means "leave the text untouched".
+fn extract_function_xml_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
+    const OPEN_MARK: &str = "<function=";
+    const CLOSE_TAG: &str = "</function>";
+
+    let mut calls = Vec::new();
+    let mut remaining = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(OPEN_MARK) {
+        let Some(inner_len) = rest[start..].find(CLOSE_TAG) else {
+            break; // unclosed: the final push keeps everything visible
+        };
+        let block_end = start + inner_len + CLOSE_TAG.len();
+        match parse_function_xml_tool_call(&rest[start..block_end]) {
+            Some(call) => {
+                calls.push(call);
+                remaining.push_str(&rest[..start]);
+            }
+            None => remaining.push_str(&rest[..block_end]),
+        }
+        rest = &rest[block_end..];
+    }
+    if calls.is_empty() {
+        return (calls, text.to_string());
+    }
+    remaining.push_str(rest);
+    (calls, remaining.trim().to_string())
+}
+
+/// Parses one qwen3-coder function-XML block (docs/SOTA-2026-07.md §
+/// Adenda — the grammar designed to avoid JSON escaping in
+/// code-carrying arguments):
+///
+/// ```text
+/// <function=read_file>
+/// <parameter=path>
+/// x.txt
+/// </parameter>
+/// </function>
+/// ```
+///
+/// Parameter values are kept as **strings** (trimmed of the
+/// template's surrounding newlines) unless the whole value is clearly
+/// structured (starts with `{`/`[` and parses as JSON) — this
+/// project's tool arguments are overwhelmingly strings, and coercing a
+/// scalar-looking value (`"42"`, `"true"`) into a JSON number/bool
+/// would break a `path: String`-style schema downstream, the exact
+/// kind of silent damage a rescue must not cause. `None` for anything
+/// that doesn't match the grammar.
+fn parse_function_xml_tool_call(block: &str) -> Option<ToolCall> {
+    let trimmed = block.trim();
+    let rest = trimmed.strip_prefix("<function=")?;
+    let (name, body) = rest.split_once('>')?;
+    let name = name.trim();
+    if name.is_empty() || name.contains(['<', '\n']) {
+        return None;
+    }
+    let body = body.strip_suffix("</function>")?;
+
+    let mut arguments = serde_json::Map::new();
+    let mut cursor = body;
+    while let Some(param_start) = cursor.find("<parameter=") {
+        let after_mark = &cursor[param_start + "<parameter=".len()..];
+        let (key, after_key) = after_mark.split_once('>')?;
+        let key = key.trim();
+        let value_len = after_key.find("</parameter>")?;
+        if key.is_empty() || key.contains(['<', '\n']) {
+            return None;
+        }
+        let raw_value = after_key[..value_len].trim();
+        let value = if raw_value.starts_with(['{', '[']) {
+            serde_json::from_str(raw_value)
+                .unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()))
+        } else {
+            serde_json::Value::String(raw_value.to_string())
+        };
+        arguments.insert(key.to_string(), value);
+        cursor = &after_key[value_len + "</parameter>".len()..];
+    }
+
+    Some(ToolCall {
+        id: format!("rescued-{}", uuid::Uuid::new_v4()),
+        name: name.to_string(),
+        arguments: serde_json::Value::Object(arguments),
+    })
 }
 
 /// System prompt for the planning round (PLAN.md § "Split
@@ -4693,6 +4801,94 @@ mod tests {
         let (calls, _) = extract_tagged_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].arguments, serde_json::json!({"text": "hi"}));
+    }
+
+    // --- gramática XML <function=...> de qwen3-coder (extensión del
+    // ítem 2, destrancada 2026-07-06 al haber qwen3.5-coder en Nitro) ---
+
+    /// The exact shape qwen3-coder's chat template documents: XML-ish
+    /// tags, parameter values on their own lines, wrapped in the same
+    /// `<tool_call>` tags qwen2.5 uses around JSON.
+    #[test]
+    fn function_xml_inside_tool_call_wrapper_parses() {
+        let text = "<tool_call>\n<function=read_file>\n<parameter=path>\nx.txt\n</parameter>\n</function>\n</tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read_file");
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "x.txt"}));
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn bare_function_xml_with_prose_around_parses_and_preserves_the_prose() {
+        let text = "Voy a leerlo.\n<function=read_file>\n<parameter=path>\nx.txt\n</parameter>\n</function>\ndespués te cuento";
+        let (calls, remaining) = extract_function_xml_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "x.txt"}));
+        assert_eq!(remaining, "Voy a leerlo.\n\ndespués te cuento");
+    }
+
+    #[test]
+    fn function_xml_with_several_parameters_collects_them_all() {
+        let text = "<function=edit_file>\n<parameter=path>\nsrc/main.rs\n</parameter>\n<parameter=old_string>\nlet x = 1;\n</parameter>\n<parameter=new_string>\nlet x = 2;\n</parameter>\n</function>";
+        let call = parse_function_xml_tool_call(text).expect("should parse");
+        assert_eq!(call.name, "edit_file");
+        assert_eq!(
+            call.arguments,
+            serde_json::json!({
+                "path": "src/main.rs",
+                "old_string": "let x = 1;",
+                "new_string": "let x = 2;",
+            })
+        );
+    }
+
+    /// The whole point of the XML grammar: code-carrying values need no
+    /// JSON escaping — inner quotes/braces arrive verbatim as a string.
+    #[test]
+    fn function_xml_keeps_code_carrying_values_as_verbatim_strings() {
+        let text = "<function=write_file>\n<parameter=path>\na.json\n</parameter>\n<parameter=content>\nfn main() { println!(\"{:?}\", vec![1]); }\n</parameter>\n</function>";
+        let call = parse_function_xml_tool_call(text).expect("should parse");
+        assert_eq!(
+            call.arguments["content"],
+            serde_json::json!("fn main() { println!(\"{:?}\", vec![1]); }")
+        );
+    }
+
+    /// Scalar-looking values stay strings ("42" must not become 42 —
+    /// a `path: String` schema downstream would reject the number),
+    /// while a clearly structured value (`{...}`) is parsed.
+    #[test]
+    fn function_xml_coerces_only_clearly_structured_values() {
+        let text = "<function=echo>\n<parameter=text>\n42\n</parameter>\n<parameter=options>\n{\"deep\": true}\n</parameter>\n</function>";
+        let call = parse_function_xml_tool_call(text).expect("should parse");
+        assert_eq!(call.arguments["text"], serde_json::json!("42"));
+        assert_eq!(call.arguments["options"], serde_json::json!({"deep": true}));
+    }
+
+    #[test]
+    fn malformed_function_xml_stays_in_the_text() {
+        // Missing </parameter> close.
+        let text = "<function=echo>\n<parameter=text>\nhola\n</function>";
+        let (calls, remaining) = extract_function_xml_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn function_xml_without_parameters_is_a_zero_argument_call() {
+        let call =
+            parse_function_xml_tool_call("<function=list_tools>\n</function>").expect("parses");
+        assert_eq!(call.name, "list_tools");
+        assert_eq!(call.arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn plain_prose_is_not_mistaken_for_function_xml() {
+        let (calls, remaining) =
+            extract_function_xml_tool_calls("la función f(x) = x + 1 es creciente");
+        assert!(calls.is_empty());
+        assert_eq!(remaining, "la función f(x) = x + 1 es creciente");
     }
 
     // --- synthesize_orphan_repairs (N-26, docs/AUDITORIA-2026-07-v2.md) ---
