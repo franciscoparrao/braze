@@ -1194,6 +1194,53 @@ mod tests {
         }
     }
 
+    /// Wraps any `ModelBackend` and validates every
+    /// `CompletionRequest.messages` against the Anthropic message-ordering
+    /// protocol (`crate::protocol_check`) before delegating to `inner` —
+    /// converts what would be a production `400` (or, on a backend that
+    /// doesn't validate, a silently wrong conversation) into an immediate,
+    /// precisely-diagnosed test failure at the exact call site that built
+    /// the bad `Vec<Message>`. Precondition for Grupo I,
+    /// docs/AUDITORIA-2026-07-v2.md: several context-pipeline fixes (A1/C1,
+    /// A2/C2, C4) had gaps (N-1, N-2, N-4) that no existing test caught,
+    /// because `ScriptedModel` never looks at the messages it's handed —
+    /// wrapping it in this turns those gaps into a red test right here.
+    struct ProtocolValidatingModel<M> {
+        inner: M,
+    }
+
+    impl<M> ProtocolValidatingModel<M> {
+        fn new(inner: M) -> Self {
+            Self { inner }
+        }
+    }
+
+    #[async_trait]
+    impl<M: ModelBackend> ModelBackend for ProtocolValidatingModel<M> {
+        fn name(&self) -> &str {
+            self.inner.name()
+        }
+
+        async fn complete(
+            &self,
+            req: CompletionRequest,
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
+            if let Err(violation) =
+                crate::protocol_check::check_anthropic_message_protocol(&req.messages)
+            {
+                panic!(
+                    "invalid message sequence would be rejected by the real Anthropic \
+                     API: {violation}\nfull message list: {:#?}",
+                    req.messages
+                );
+            }
+            self.inner.complete(req).await
+        }
+    }
+
     /// Minimal `TaskNotifier`: `tokio::spawn` per task + an mpsc
     /// completion channel, same shape `braze-cli::ChannelTaskNotifier`
     /// uses in the real binary — duplicated here (rather than depending on
@@ -1514,6 +1561,232 @@ mod tests {
             other => panic!("expected ToolCallCompleted, got {other:?}"),
         }
         assert!(matches!(events[4], AgentEvent::AssistantText { .. }));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Smoke test for `ProtocolValidatingModel`: the exact same scenario as
+    /// `run_turn_with_a_tool_call_round_trips_end_to_end` above, but with
+    /// the model wrapped in the validator — proves the harness itself is
+    /// usable (doesn't false-positive on a normal, well-formed exchange)
+    /// before it's relied on by the regression tests below.
+    #[tokio::test]
+    async fn run_turn_with_a_tool_call_passes_protocol_validation() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ProtocolValidatingModel::new(ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]));
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed and every request should pass protocol validation");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-4.
+    ///
+    /// `load_messages_repairs_an_orphaned_tool_use_with_no_result` (below)
+    /// proves the repair *happens*, but it seeds the orphan and calls
+    /// `load_messages` directly with nothing in between — so the repaired
+    /// `ToolCallCompleted` lands right after the orphaned `AssistantToolCall`
+    /// and the sequence is trivially valid. That's not what actually
+    /// happens in production: `run_turn` appends the turn's new
+    /// `UserMessage` *before* calling `load_messages` (see `run_turn`'s
+    /// first few lines), so the repair — which only runs inside
+    /// `load_messages` — ends up appended *after* that `UserMessage`
+    /// instead of immediately after the tool_use it repairs. The resulting
+    /// log order (`tool_use`, unrelated `user` text, `tool_result`) is
+    /// exactly what `ProtocolValidatingModel` is built to catch, and it
+    /// persists to disk — every future resume repeats it.
+    ///
+    /// Currently red: un-ignore once Grupo I's N-4 fix lands (repair the
+    /// orphan before appending the turn's `UserMessage`, not after).
+    #[tokio::test]
+    #[ignore = "N-4 (docs/AUDITORIA-2026-07-v2.md): repair_orphaned_tool_calls \
+                runs inside load_messages, which run_turn only calls *after* \
+                appending the new turn's UserMessage — the synthesized \
+                ToolCallCompleted ends up after that UserMessage instead of \
+                immediately after its tool_use. Un-ignore once fixed."]
+    async fn resuming_after_a_crash_with_an_orphaned_tool_call_stays_protocol_valid() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Simulate a process that crashed between persisting the tool_use
+        // and receiving its result: an `AssistantToolCall` with no
+        // matching `ToolCallCompleted` anywhere in the log yet.
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "please echo hi".to_string(),
+                },
+            )
+            .await
+            .expect("seed the original user message");
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantToolCall {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+            )
+            .await
+            .expect("seed an orphaned tool_use — process 'crashed' right here");
+
+        let model = ProtocolValidatingModel::new(ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("done".to_string()),
+            CompletionEvent::Done,
+        ]]));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        // Resuming the session and sending a new message must repair the
+        // orphan into a protocol-valid sequence — `ProtocolValidatingModel`
+        // panics inside `complete()` if it instead produces the
+        // tool_use/user-text/tool_result order the bug creates.
+        engine
+            .run_turn(&session, "are you still there?", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-1.
+    ///
+    /// `KEEP_RAW_TAIL` slices the last few tactical events verbatim into
+    /// the request with no awareness of `tool_use`/`tool_result` pairing.
+    /// If a round dispatches several tool calls concurrently and their
+    /// completions arrive in a different order than their requests were
+    /// issued (a realistic race under `TaskNotifier::spawn`), the log can
+    /// end up as `[..., ATC1, ATC2, ATC3, TCC1, TCC2, TCC3]`. Once that
+    /// whole span ages into the compactor's tactical window and a
+    /// compaction triggers, the raw tail keeps only the last
+    /// `KEEP_RAW_TAIL` (6) events — here, `[ATC3, TCC1, TCC2, TCC3]` plus
+    /// two audit-only `ToolCallStarted`s that don't render — cutting
+    /// `ATC1`/`ATC2` out entirely (they're not old enough to have settled
+    /// into `durable_events` either, since the whole log fits inside the
+    /// compactor's window). `TCC1`/`TCC2` still render as `tool_result`
+    /// blocks with no matching `tool_use` anywhere in the request.
+    ///
+    /// Currently red: un-ignore once Grupo I's N-1 fix lands (make the tail
+    /// cut pair-aware).
+    #[tokio::test]
+    #[ignore = "N-1 (docs/AUDITORIA-2026-07-v2.md): KEEP_RAW_TAIL cuts the \
+                tactical tail blind to tool_use/tool_result pairing, so a \
+                completion whose request got cut can render as an orphaned \
+                tool_result. Un-ignore once the tail cut is made pair-aware."]
+    async fn compaction_tail_cut_can_orphan_a_tool_result() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        fn tool_call(id: &str) -> AgentEvent {
+            AgentEvent::AssistantToolCall {
+                id: id.to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({ "text": id }),
+            }
+        }
+        fn tool_started(id: &str) -> AgentEvent {
+            AgentEvent::ToolCallStarted {
+                id: id.to_string(),
+                name: "echo".to_string(),
+                background: false,
+            }
+        }
+        fn tool_completed(id: &str) -> AgentEvent {
+            AgentEvent::ToolCallCompleted {
+                id: id.to_string(),
+                result: ToolResult {
+                    tool_call_id: id.to_string(),
+                    content: "ok".to_string(),
+                    is_error: false,
+                },
+            }
+        }
+
+        // Three concurrently-dispatched tool calls whose completions all
+        // arrive after every request was issued — a realistic ordering
+        // when tools run as independently-spawned background tasks.
+        for event in [
+            AgentEvent::UserMessage {
+                text: "please echo three things".to_string(),
+            },
+            tool_call("call-1"),
+            tool_started("call-1"),
+            tool_call("call-2"),
+            tool_started("call-2"),
+            tool_call("call-3"),
+            tool_started("call-3"),
+            tool_completed("call-1"),
+            tool_completed("call-2"),
+            tool_completed("call-3"),
+        ] {
+            store.append(&session, &event).await.expect("seed event");
+        }
+
+        // A low compaction threshold forces `load_messages` to compact on
+        // this very first call, exactly like a long-running session that
+        // has just crossed the real (default 40) threshold would.
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tactical_compaction_threshold(3);
+
+        let messages = engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        crate::protocol_check::check_anthropic_message_protocol(&messages).expect(
+            "load_messages must never hand back a request with an orphaned \
+             tool_result, regardless of where the tactical tail happens to \
+             be cut",
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

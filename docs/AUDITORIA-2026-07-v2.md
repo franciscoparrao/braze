@@ -502,11 +502,46 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
 ### Grupo I — Corrupción permanente de sesión (BLOQUEANTE de Fase 6, esfuerzo medio)
 `N-2, N-1, N-4, N-3, N-6, N-5, N-7, N-14`. Todos producen 400 permanente o
 pérdida de contexto contra Anthropic real, y todos se manifiestan en la
-verificación end-to-end pendiente. **Precondición nueva y crítica:** agregar un
-backend de test que valide el protocolo de mensajes de Anthropic (orden
-`user`-primero, `tool_result` adyacente a su `tool_use`, unicidad de ids) — sin
-él, estos bugs seguirán pasando los tests. Cerrar N-1..N-7 y N-14, cada uno con
-un test de integración que reproduzca la banda/escenario exacto.
+verificación end-to-end pendiente.
+
+**Precondición — ✅ CERRADA 2026-07-05.** Se agregó
+`crates/braze-engine/src/protocol_check.rs` (`#[cfg(test)]`, `pub(crate)`): un
+validador puro (`check_anthropic_message_protocol`) que aplica las cuatro
+reglas de orden que la API real de Anthropic exige — primer mensaje `user`,
+ids de `tool_use` únicos, todo `tool_result` referencia un `tool_use` previo,
+y ese `tool_result` debe ser el mensaje *inmediatamente siguiente* al de su
+`tool_use`. `crate::protocol_check::ProtocolViolation` reporta la violación
+exacta (con índice de mensaje) en vez de solo "Err".
+
+También se agregó `ProtocolValidatingModel<M>` (decorador de `ModelBackend`,
+en `engine.rs`'s `mod tests`) que envuelve cualquier backend de test
+(`ScriptedModel` u otro) y valida `req.messages` en cada `complete()` antes de
+delegar — convierte lo que sería un 400 en producción en un panic inmediato y
+preciso justo en el sitio donde se construyó la secuencia inválida.
+
+Con esta infraestructura se escribieron 3 tests de regresión que **reproducen
+N-1, N-2 y N-4 como fallas rojas** (marcados `#[ignore = "..."]` para que
+`cargo test --workspace` siga verde; se corren explícitamente con
+`--ignored` y hoy fallan tal como se predijo):
+- `history::tests::build_messages_keeps_log_order_even_when_summary_is_still_empty`
+  (N-2) → `FirstMessageNotUser { got: Assistant }`.
+- `engine::tests::resuming_after_a_crash_with_an_orphaned_tool_call_stays_protocol_valid`
+  (N-4) → `ToolResultNotAdjacent { expected_message_index: 2, actual_message_index: 3 }`.
+- `engine::tests::compaction_tail_cut_can_orphan_a_tool_result`
+  (N-1) → `OrphanedToolResult { tool_use_id: "call-1", message_index: 2 }`.
+
+Más un test verde de humo
+(`engine::tests::run_turn_with_a_tool_call_passes_protocol_validation`) que
+prueba que el validador no da falsos positivos en un intercambio normal, y 7
+tests unitarios puros del validador mismo.
+
+N-3/N-6/N-5/N-7/N-14 no son violaciones de *forma* del mensaje (son
+desaparición de contenido, thrashing de compactación, corrupción de archivo o
+ids duplicados) — este validador no los cubre; necesitan tests dirigidos
+propios cuando se aborden. **Siguiente paso:** implementar los fixes de N-1,
+N-2 y N-4 y sacarles el `#[ignore]` a estos tres tests (deben pasar de rojo a
+verde sin tocar sus aserciones), luego escribir tests equivalentes para
+N-3/N-5/N-6/N-7/N-14 antes de cerrarlos.
 
 ### Grupo J — Seguridad (máxima prioridad, esfuerzo bajo) — ✅ CERRADO 2026-07-05
 `N-8a, N-8b`. Cerrados los dos escapes del allowlist en

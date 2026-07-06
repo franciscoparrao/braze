@@ -486,4 +486,66 @@ mod tests {
             other => panic!("expected a Text block, got {other:?}"),
         }
     }
+
+    /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-2.
+    ///
+    /// `round_trip_orders_summary_then_durable_then_tactical` above only
+    /// exercises the case where `durable.summary` is already non-empty —
+    /// then the prepended "[Resumen de contexto previo]" message is
+    /// `Role::User` and happens to satisfy Anthropic's "first message must
+    /// be user" rule regardless of what durable_events/tactical contain.
+    ///
+    /// But `SimpleContextCompactor::split` can populate `durable_events`
+    /// (settled `AssistantToolCall`/`ToolCallCompleted` aged past the
+    /// tactical window) **before any compaction has ever run** — i.e.
+    /// while `summary` is still empty — purely because the log has grown
+    /// past the compactor's `tactical_window`, independent of
+    /// `Engine`'s `tactical_compaction_threshold`. `build_messages` then
+    /// renders `durable_events` (an `Assistant` tool_use, here) before the
+    /// `UserMessage` that's still sitting in `tactical`, even though that
+    /// `UserMessage` chronologically preceded the tool call. Every
+    /// Anthropic-backed session with tool calls crosses this exact shape
+    /// once it passes ~20 events (`DEFAULT_TACTICAL_WINDOW`), well before
+    /// the compaction threshold (default 40) ever triggers.
+    ///
+    /// Currently red: un-ignore once Grupo I's N-2 fix lands (render in
+    /// log order instead of durable-then-tactical).
+    #[test]
+    #[ignore = "N-2 (docs/AUDITORIA-2026-07-v2.md): build_messages renders \
+                durable_events before tactical regardless of log order, so an \
+                old settled tool call can render before the UserMessage that \
+                preceded it — first message ends up Assistant, which \
+                Anthropic rejects with 400. Un-ignore once fixed."]
+    fn build_messages_keeps_log_order_even_when_summary_is_still_empty() {
+        // No CompactionOccurred has ever run — summary is empty — but the
+        // tool call pair already aged out of the tactical window into
+        // durable_events, exactly as `SimpleContextCompactor::split` does
+        // once the log passes `tactical_window` events.
+        let durable = DurableState {
+            summary: String::new(),
+            durable_events: vec![
+                tool_call_event("call-1", "echo"),
+                tool_completed_event("call-1", "ok"),
+            ],
+        };
+        // The UserMessage that *caused* call-1 is still in `tactical`
+        // (per the compactor's "no-silent-loss" orphan handling), even
+        // though it precedes both durable events chronologically.
+        let tactical = vec![
+            AgentEvent::UserMessage {
+                text: "please echo something".to_string(),
+            },
+            AgentEvent::AssistantText {
+                text: "still working on it".to_string(),
+            },
+        ];
+
+        let messages = build_messages(&durable, &tactical);
+
+        crate::protocol_check::check_anthropic_message_protocol(&messages).expect(
+            "build_messages must produce an Anthropic-valid sequence \
+             (first message role=User) regardless of which side of the \
+             durable/tactical split the log's oldest event landed on",
+        );
+    }
 }

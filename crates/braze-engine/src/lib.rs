@@ -10,6 +10,8 @@
 mod engine;
 mod error;
 mod history;
+#[cfg(test)]
+mod protocol_check;
 
 pub use engine::{DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine};
 pub use error::EngineError;
