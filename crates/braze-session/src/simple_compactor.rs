@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use braze_events::AgentEvent;
 
 use crate::compactor::{ContextCompactor, DurableState};
@@ -162,6 +164,28 @@ impl ContextCompactor for SimpleContextCompactor {
             .map(|(i, _)| i)
             .next_back();
 
+        // N-2b (docs/AUDITORIA-2026-07-v2.md): ids of every
+        // `ToolCallCompleted` still *inside* the raw window. An
+        // `AssistantToolCall` older than the window is normally settled
+        // (moved to `durable_events`) — but if its own result hasn't aged
+        // out of the window yet (a round with enough tool calls, or
+        // enough total events between an `AssistantToolCall` and its
+        // `ToolCallCompleted`, that the window boundary falls *between*
+        // them), moving only the call would split the pair across the
+        // durable/tactical divide: the `tool_use` renders in the durable
+        // block, its `tool_result` renders later in tactical, with
+        // whatever tactical content sits between them (typically the
+        // next `UserMessage`) breaking the immediate adjacency Anthropic
+        // requires — reproduced live against the real API with a
+        // concurrent 2-tool-call round and a narrow window.
+        let completed_ids_in_window: HashSet<&str> = events[window_start..]
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::ToolCallCompleted { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+
         let mut durable_events = Vec::new();
         let mut summary_parts = Vec::new();
         let mut tactical = Vec::new();
@@ -188,7 +212,18 @@ impl ContextCompactor for SimpleContextCompactor {
                 continue;
             }
 
-            if is_settled_durable(event) {
+            // See `completed_ids_in_window` above (N-2b): a call whose
+            // result hasn't aged out of the window yet is treated as
+            // not-yet-settled, falling through to the same
+            // orphan-handling path (dropped if a later compaction
+            // already covers it, kept raw in tactical otherwise) every
+            // other not-yet-covered event already uses.
+            let result_still_in_window = matches!(
+                event,
+                AgentEvent::AssistantToolCall { id, .. } if completed_ids_in_window.contains(id.as_str())
+            );
+
+            if is_settled_durable(event) && !result_still_in_window {
                 if let AgentEvent::CompactionOccurred { summary, .. } = event {
                     summary_parts.push(summary.clone());
                 }
@@ -423,6 +458,42 @@ mod tests {
         ));
         assert_eq!(tactical.len(), 2);
         assert_eq!(durable.durable_events.len() + tactical.len(), events.len());
+    }
+
+    /// Regression test for N-2b (docs/AUDITORIA-2026-07-v2.md), found
+    /// live against real Anthropic (a concurrent 2-tool-call round with a
+    /// narrow `tactical_window`): an `AssistantToolCall` older than the
+    /// window is normally settled and migrates to `durable_events` — but
+    /// if its own `ToolCallCompleted` hasn't aged out of the window yet
+    /// (the window boundary falls *between* the call and its result),
+    /// moving only the call there splits the pair across the
+    /// durable/tactical divide. `history::build_messages` renders
+    /// `durable_events` first, then `tactical` — so the `tool_use` would
+    /// render, then whatever tactical content sits before the window
+    /// (typically the *next* `UserMessage`), and only then the
+    /// `tool_result` — breaking the immediate adjacency Anthropic
+    /// requires between a `tool_use` and its answer.
+    #[test]
+    fn split_keeps_a_tool_use_with_its_result_even_when_the_call_alone_would_be_old_enough_for_durable()
+     {
+        let compactor = SimpleContextCompactor::new(1);
+        let events = vec![
+            user("older message"),
+            tool_call("1", "read_file"), // old enough for durable on its own...
+            tool_completed("1"),         // ...but its result is still inside the window (last 1)
+        ];
+
+        let (durable, tactical) = compactor.split(&events);
+
+        assert!(
+            durable.durable_events.is_empty(),
+            "the call must stay with its result instead of moving to durable_events alone, \
+             got: {:?}",
+            durable.durable_events
+        );
+        assert_eq!(tactical.len(), 3);
+        assert!(matches!(tactical[1], AgentEvent::AssistantToolCall { .. }));
+        assert!(matches!(tactical[2], AgentEvent::ToolCallCompleted { .. }));
     }
 
     #[test]

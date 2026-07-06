@@ -245,7 +245,19 @@ pub trait TaskNotifier: Send + Sync {
 - **Hallazgo importante (no un bug, evidencia de la deuda ya documentada)**: con `llama3.2:1b` el modelo invocó `read_file` con argumentos inventados (`{"fn":"...", "mode":"r"}` en vez de `{"path":"..."}`) porque el `input_schema` que le llega es el genérico permisivo (`additionalProperties: true`), no el real — exactamente el gap flageado en Fase 3/5 para resolver en una futura validación real de schema. Con `qwen2.5:3b`/`qwen2.5:7b` (mejor soporte de tool-calling nativo) el argumento salió correcto (`{"path":"Cargo.toml"}`) en ambos intentos, y sí trajo el contenido real del archivo. Conclusión: el bug de diseño es real pero su impacto depende fuertemente de la capacidad del modelo — no bloquea el MVP, pero es la prioridad más clara para una próxima iteración de `braze-engine`.
 - **Limitación de entorno detectada (no de braze)**: la máquina de pruebas es CPU-only (sin GPU) y en el momento de la prueba tenía load average 12-15 y swap casi lleno por procesos ajenos al proyecto — los turnos con `qwen2.5:7b`/`qwen2.5:3b` no alcanzaron a completar la respuesta final dentro de 180-400s en esas condiciones. No se investigó más a fondo por decisión explícita (prioridad baja frente a la evidencia de corrección ya obtenida).
 - **Paso 5 (confirmación y/n) — verificado (2026-07-04)**: `braze run 'Use the write_file tool with path "/tmp/.../outside.txt" ...'` contra `llama3.2:1b`, respondiendo "y" por stdin. El prompt real apareció exactamente como se diseñó (`write file /tmp/.../outside.txt\n¿Permitir? [y/N]: `), la escritura fuera del `cwd` se clasificó `Irreversible` correctamente, y el archivo se creó tras la confirmación. La rama de rechazo ("n") no se logró disparar en vivo tras 3 intentos — el modelo formó mal el JSON del tool call antes de llegar al chequeo de permisos en los 3 casos (mismo problema de siempre, no uno nuevo) — pero se verificó por inspección directa de `TerminalConfirmationPrompt::confirm`: es la misma lectura de stdin ya probada en vivo, comparada contra un literal distinto (`"y"`/`"yes"` → cualquier otra respuesta cae al mismo `else` → `false`/denegado), y la semántica de denegación de `PermissionGuard::check` ya tiene cobertura unitaria dedicada desde la Fase 3.
-- **Pendiente**: paso 3 (Anthropic real, implica costo de API).
+- **Paso 3 (Anthropic real) — confirmado 2026-07-05**, tras cerrar el Grupo I
+  de `docs/AUDITORIA-2026-07-v2.md`: `braze chat --backend anthropic --model
+  claude-haiku-4-5-20251001` con API key real del usuario. La primera corrida
+  (sesión multi-turno con 2 tool calls concurrentes y `tactical_window`
+  angosto para forzar compactación) reprodujo un **400 real** de Anthropic
+  (`tool_use ids were found without tool_result blocks immediately after`) —
+  un hallazgo nuevo (N-2b: un par tool_use/tool_result puede quedar partido
+  entre `durable_events` y `tactical` cuando la ventana cae justo entre
+  ambos) que ningún test unitario con `ScriptedModel` podía atrapar por
+  diseño. Corregido en `SimpleContextCompactor::split` y re-verificado: la
+  misma sesión exacta corre limpia. Con esto, **los 6 pasos del checklist
+  end-to-end quedan confirmados**; ver el detalle completo en
+  `docs/AUDITORIA-2026-07-v2.md` § 7.
 
 ## MVP cerrado (2026-07-04) — tag `v0.1.0`
 

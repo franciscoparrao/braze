@@ -172,6 +172,44 @@ porque esos backends no validan el orden — pero el contexto queda revuelto.
   `never_clear_list_exempts_only_the_named_tool`) se actualizaron para
   reflejar el mensaje adicional (índices +1).
 
+#### N-2b · [ALTA→CRÍTICA, hallazgo nuevo, encontrado en vivo contra Anthropic real] Un par tool_use/tool_result puede quedar partido entre `durable_events` y `tactical` cuando la ventana cae justo entre ambos
+- **Ubicación:** `crates/braze-session/src/simple_compactor.rs` (`split`,
+  clasificación de `AssistantToolCall` como "settled" sin mirar dónde cae
+  su `ToolCallCompleted`).
+- **Cómo se descubrió:** verificación end-to-end 2026-07-05 contra
+  **Anthropic real** (`claude-haiku-4-5-20251001`, la única prueba de esta
+  serie con validación estricta de protocolo) — pedir al modelo leer dos
+  archivos "de una vez" (tool calls concurrentes) con
+  `tactical_window`/`tactical_compaction_threshold` bajos produjo un 400
+  real: `messages.4: tool_use ids were found without tool_result blocks
+  immediately after`. Ninguno de los tests unitarios previos (incluidos los
+  de N-1b) lo cubría porque siempre probaban el par completo *fuera* de la
+  ventana o completo *dentro* — nunca el caso borde de un `AssistantToolCall`
+  viejo cuyo `ToolCallCompleted` seguía dentro de la ventana.
+- **Escenario:** `split` decide "settled" (→ `durable_events`) para todo
+  `AssistantToolCall` con índice `< window_start`, sin verificar si su
+  `ToolCallCompleted` sigue con índice `>= window_start` (aún dentro de la
+  ventana). Con una ronda de 2+ tool calls concurrentes (`dispatch_tool_calls`
+  persiste todas las `AssistantToolCall` antes de despachar ninguna — el
+  mismo patrón de N-1b), el índice del `tool_use` puede quedar *antes* del
+  corte de ventana mientras su `tool_result` queda *después* — el `tool_use`
+  se renderiza en el bloque `durable_events` (temprano), su `tool_result`
+  se renderiza más tarde en `tactical`, con contenido no relacionado (el
+  siguiente `UserMessage`) entre medio. Reproducible incluso con la ventana
+  default (20) en una ronda con suficientes tool calls concurrentes o
+  suficiente distancia entre eventos — el test de esta sesión solo lo hizo
+  trivial de disparar con una ventana artificialmente angosta.
+- **Fix — ✅ RESUELTO 2026-07-05.** `split` calcula ahora
+  `completed_ids_in_window` (ids de todo `ToolCallCompleted` con índice
+  `>= window_start`); un `AssistantToolCall` cuyo id está en ese conjunto
+  ya NO se clasifica "settled" aunque su propio índice sea viejo — cae al
+  mismo camino que cualquier evento huérfano no cubierto (se queda en
+  `tactical`, en orden original, junto a su resultado). Test
+  `simple_compactor::tests::split_keeps_a_tool_use_with_its_result_even_when_the_call_alone_would_be_old_enough_for_durable`
+  — verificado revirtiendo el fix para confirmar que sin él el test falla
+  exactamente como se predijo. **Re-ejecutada la sesión exacta que había
+  dado el 400 real contra Anthropic tras el fix: completa sin error.**
+
 #### N-3 · [ALTA] "Apagón" del summary: el `CompactionOccurred` recién persistido es invisible mientras está en la ventana táctica
 - **Ubicación:** `crates/braze-session/src/simple_compactor.rs:165-177` +
   `crates/braze-engine/src/history.rs:122-127`.
@@ -672,6 +710,18 @@ un test dirigido de contenido/estado propio:
 resueltos con test de regresión propio cada uno. Workspace completo verde,
 clippy limpio.
 
+**Actualización — verificación end-to-end contra Anthropic real (2026-07-05):
+un hallazgo más, N-2b, encontrado y cerrado.** La suite de tests unitarios
+(`ScriptedModel`, sin validación de protocolo real) no podía atrapar esto por
+diseño; hizo falta el key real de Anthropic para que apareciera. Ver el
+detalle en el hallazgo N-2b arriba (junto a N-2, ya que es la misma familia
+de bug: un par tool_use/tool_result partido entre `durable_events` y
+`tactical`, esta vez por el lado de la ventana en vez del lado del orden de
+renderizado). Con N-2b cerrado, la sesión exacta que había producido el 400
+real se re-ejecutó limpia. **Grupo I ahora tiene 10 hallazgos, todos
+cerrados y verificados tanto por test unitario como en vivo contra
+Anthropic real.**
+
 ### Grupo J — Seguridad (máxima prioridad, esfuerzo bajo) — ✅ CERRADO 2026-07-05
 `N-8a, N-8b`. Cerrados los dos escapes del allowlist en
 `crates/braze-permissions/src/classifier.rs`:
@@ -715,14 +765,31 @@ mensajes de ayuda/config desactualizados.
 
 ## 7. Nota sobre la próxima acción
 
-**Actualización 2026-07-05: Grupo I e Grupo J están cerrados.** La condición
-que bloqueaba la verificación end-to-end contra Anthropic/Ollama reales
-(PLAN.md § "Verificación end-to-end (tras Fase 5)") ya no aplica — los 9
-hallazgos de corrupción permanente de sesión (`N-1, N-1b, N-2, N-3, N-4, N-5,
-N-6, N-7, N-14`) tienen fix y test de regresión propio, y los dos escapes de
-seguridad del allowlist (`N-8a, N-8b`) también. Recomendación: correr esa
-verificación end-to-end ahora es razonable como siguiente paso — cualquier
-400 que aparezca ya no debería originarse en el orden del historial.
+**Actualización 2026-07-05: verificación end-to-end contra Anthropic/Ollama
+reales EJECUTADA (PLAN.md § "Verificación end-to-end (tras Fase 5)").**
+
+- **Ollama** (`qwen2.5:3b`): sesión multi-turno con `tactical_window`/
+  `tactical_compaction_threshold` bajos forzando compactación real (4
+  compactaciones sobre 51 eventos, sin thrashing); `kill -9` a mitad de
+  sesión + `--resume` reprodujo en vivo la colisión de ids de N-14
+  (`ollama-tool-call-0` → renombrado a `ollama-tool-call-0-dup1`,
+  correlación correcta); simulación de huérfano + resume confirmó el orden
+  de reparación de N-4 exactamente como se diseñó. Sin crashes, sin
+  procesos colgados.
+- **Anthropic real** (`claude-haiku-4-5-20251001`, con API key provista por
+  el usuario): el paso 3 del checklist, pendiente desde el MVP original por
+  costo. **Encontró un bug real en el primer intento** — un 400 genuino
+  (`tool_use ids were found without tool_result blocks immediately after`)
+  al pedir dos tool calls concurrentes con ventana angosta — precisamente
+  el tipo de violación que ningún test unitario con `ScriptedModel` podía
+  atrapar. Diagnosticado, corregido (N-2b, ver arriba) y **re-verificado en
+  vivo**: la misma sesión exacta corre limpia tras el fix.
+
+**Grupo I ahora tiene 10 hallazgos** (`N-1, N-1b, N-2, N-2b, N-3, N-4, N-5,
+N-6, N-7, N-14`), todos cerrados y verificados tanto por test unitario como
+en vivo contra Anthropic real. El checklist completo de PLAN.md § "Verificación
+end-to-end" (pasos 1-6, incluido el paso 3 que quedaba pendiente por costo)
+está satisfecho.
 
 Quedan abiertos, fuera del alcance de esta sesión: Grupo K (robustez de
 backends — el más barato es N-9, argumentos vacíos dropeados en silencio),
@@ -730,3 +797,13 @@ Grupo L (TUI Fase 2 — bracketed paste, walk de @-menciones, id de sesión en
 backtrack), y Grupo M (validez del bench). Y dentro de lo ya cubierto,
 `N-25` (crecimiento sin cota de `durable.summary`) sigue explícitamente fuera
 de alcance — mencionada como antecedente de N-6 pero no cerrada.
+
+**Lección metodológica para futuras verificaciones:** N-2b sobrevivió
+completo al Grupo I (incluida su precondición, el validador de protocolo
+`protocol_check.rs`, y sus tests con `ProtocolValidatingModel`) porque todos
+los tests unitarios probaban el par tool_use/tool_result *completo* a un
+lado de la ventana (todo durable o todo táctico), nunca el caso borde de la
+ventana cayendo *entre* ambos. Una verificación end-to-end contra el
+proveedor real que sí valida estrictamente el protocolo — no solo tests
+unitarios con un modelo simulado — sigue siendo necesaria antes de dar por
+cerrada esta clase de hallazgo.
