@@ -109,6 +109,20 @@ pub async fn run_task(
     let store: Arc<dyn SessionStore> = Arc::new(FileSessionStore::new(session_dir.clone()));
     let session = SessionId::new();
 
+    // E1 (docs/AUDITORIA-2026-07-v3.md): a `+ablate:` suffix on `spec`
+    // overrides whichever of these knobs it names; everything else falls
+    // through to `config`'s own value, same as a plain (unablated) spec.
+    let ablation = spec.ablation();
+    let post_edit_check_enabled =
+        !config.disable_post_edit_check && !ablation.disable_post_edit_check;
+    let textual_rescue_enabled =
+        !config.disable_textual_tool_call_rescue && !ablation.disable_textual_rescue;
+    let tactical_window = ablation.tactical_window.unwrap_or(config.tactical_window);
+    let tactical_compaction_threshold = ablation
+        .tactical_compaction_threshold
+        .unwrap_or(config.tactical_compaction_threshold);
+    let best_of_n = ablation.best_of_n.unwrap_or(config.best_of_n);
+
     let allowlist = WorkdirAllowlist::new(sandbox.path());
     let classifier = DefaultClassifier::new(WorkdirAllowlist::new(sandbox.path()));
     let deny_all = DenyAll {
@@ -122,7 +136,15 @@ pub async fn run_task(
     // decouple the guard's `WorkdirAllowlist` (scoped to the sandbox
     // above) from where the tools' actual I/O lands. See
     // docs/AUDITORIA-2026-07.md hallazgo F1.
-    let tools_provider = braze_tools_local::LocalToolsProvider::with_workdir(guard, sandbox.path());
+    //
+    // `with_post_edit_check` here (E1c, docs/AUDITORIA-2026-07-v3.md): this
+    // call was previously missing entirely, so every bench run had the
+    // guardrail permanently ON regardless of `Config::disable_post_edit_check`
+    // — a real `braze` invocation with that flag set measured a different
+    // harness than the one the bench reported on.
+    let tools_provider = braze_tools_local::LocalToolsProvider::with_workdir(guard, sandbox.path())
+        .with_post_edit_check(post_edit_check_enabled)
+        .with_edit_strict_mode(ablation.edit_strict_mode);
     let tools = braze_tools_core::ToolRegistry::new(vec![Box::new(tools_provider)]);
 
     let model = spec.build(config, sampling)?;
@@ -164,19 +186,24 @@ pub async fn run_task(
 
     // C10 (docs/AUDITORIA-2026-07.md): mirrors braze-cli's wiring, so a
     // bench run measures the same tactical window/threshold/best_of_n
-    // behavior a real `braze` invocation with this config would use.
+    // behavior a real `braze` invocation with this config would use —
+    // modulo whatever `ablation` overrides (E1).
     let mut engine = braze_engine::Engine::new(
         model,
         tools,
         Arc::clone(&store),
-        Box::new(SimpleContextCompactor::new(config.tactical_window)),
+        Box::new(SimpleContextCompactor::new(tactical_window)),
         Box::new(braze_events::ChannelTaskNotifier::new()),
         system_prompt,
         config.max_tokens,
     )
-    .with_tactical_compaction_threshold(config.tactical_compaction_threshold)
-    .with_best_of_n(config.best_of_n)
-    .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue);
+    .with_tactical_compaction_threshold(tactical_compaction_threshold)
+    .with_best_of_n(best_of_n)
+    .with_textual_rescue_enabled(textual_rescue_enabled);
+
+    if let Some(full_observations) = ablation.tactical_full_observations {
+        engine = engine.with_tactical_full_observations(full_observations);
+    }
 
     if let Some(budget) = ollama_budget {
         engine = engine.with_context_budget(budget);
@@ -228,7 +255,12 @@ pub async fn run_task(
                 .iter()
                 .all(|(relative_path, expected_substring)| {
                     std::fs::read_to_string(sandbox.path().join(relative_path))
-                        .map(|contents| contents.contains(expected_substring.as_str()))
+                        .map(|contents| {
+                            crate::metrics::contains_as_a_bounded_token(
+                                &contents,
+                                expected_substring,
+                            )
+                        })
                         .unwrap_or(false)
                 }),
         )

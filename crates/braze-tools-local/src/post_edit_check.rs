@@ -111,10 +111,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "braze-post-edit-{label}-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("braze-post-edit-{label}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join("src")).expect("create temp project dirs");
         dir
     }

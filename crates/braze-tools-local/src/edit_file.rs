@@ -24,6 +24,15 @@
 //! Rungs 2-3 are line-window matches: `old_string`'s lines must
 //! correspond to whole lines of the file (the observed failure mode is
 //! "right lines, wrong whitespace", not partial-line fragments).
+//!
+//! ## Strict mode (E1, docs/AUDITORIA-2026-07-v3.md)
+//!
+//! `edit_file`'s `strict` parameter disables rungs 2-3 entirely (only
+//! exact matching survives) — not a production default, but the knob
+//! `braze-bench`'s `+ablate:strict-edit` needs to actually *measure*
+//! whether Aider's fuzzy-matching ladder helps a given model/task, per
+//! the SOTA-2026-07 finding that the edit format is a hidden variable for
+//! small models. Threaded from `LocalToolsProvider::with_edit_strict_mode`.
 
 use std::path::PathBuf;
 
@@ -48,8 +57,10 @@ const WRITE_FILE_STEERING: &str = "If you cannot reproduce the exact current tex
 
 /// `Ok(summary)` on success. `Err(message)` covers I/O failures and the
 /// disambiguation failures (`old_string` missing / ambiguous) — all
-/// recoverable tool-level failures, see `provider.rs::wrap`.
-pub async fn edit_file(args: EditFileArgs) -> Result<String, String> {
+/// recoverable tool-level failures, see `provider.rs::wrap`. `strict`
+/// disables the fuzzy rungs (2-3) of the matching ladder — see the module
+/// doc comment's "Strict mode" section.
+pub async fn edit_file(args: EditFileArgs, strict: bool) -> Result<String, String> {
     if args.old_string.is_empty() {
         return Err("old_string must not be empty".to_string());
     }
@@ -71,7 +82,7 @@ pub async fn edit_file(args: EditFileArgs) -> Result<String, String> {
         Err(err) => return Err(format!("failed to read '{}': {err}", path.display())),
     };
 
-    let (updated, strategy) = apply_edit(&original, &args.old_string, &args.new_string)
+    let (updated, strategy) = apply_edit(&original, &args.old_string, &args.new_string, strict)
         .map_err(|kind| kind.into_message(&path, &original, &args.old_string))?;
 
     tokio::fs::write(&path, updated.as_bytes())
@@ -173,13 +184,16 @@ fn find_closest_line<'a>(original: &'a str, old_string: &str) -> Option<(usize, 
 }
 
 /// Pure core of the tool: runs the matching ladder over `original` and
-/// returns the updated content plus the strategy that matched.
+/// returns the updated content plus the strategy that matched. `strict`
+/// stops after rung 1 (exact match only) — see the module doc comment's
+/// "Strict mode" section.
 fn apply_edit(
     original: &str,
     old_string: &str,
     new_string: &str,
+    strict: bool,
 ) -> Result<(String, MatchStrategy), MatchFailure> {
-    // Rung 1: exact substring — always takes precedence.
+    // Rung 1: exact substring — always takes precedence, strict or not.
     let exact = original.matches(old_string).count();
     if exact == 1 {
         return Ok((
@@ -189,6 +203,10 @@ fn apply_edit(
     }
     if exact > 1 {
         return Err(MatchFailure::Ambiguous(exact, MatchStrategy::Exact));
+    }
+
+    if strict {
+        return Err(MatchFailure::NotFound);
     }
 
     // Rungs 2-3: line-window matching.
@@ -328,12 +346,21 @@ mod tests {
         file_path
     }
 
+    /// Thin wrapper preserving every pre-existing test's call shape after
+    /// `edit_file` grew its `strict` parameter (E1,
+    /// docs/AUDITORIA-2026-07-v3.md) — `false` keeps the fuzzy ladder on,
+    /// the behavior every test below except the dedicated strict-mode
+    /// ones was written to exercise.
+    async fn edit_file_fuzzy(args: EditFileArgs) -> Result<String, String> {
+        edit_file(args, false).await
+    }
+
     #[tokio::test]
     async fn replaces_the_single_occurrence() {
         let dir = unique_temp_dir("edit-file-happy");
         let file_path = fixture_file(&dir, "hello world").await;
 
-        let result = edit_file(EditFileArgs {
+        let result = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             old_string: "world".to_string(),
             new_string: "braze".to_string(),
@@ -354,7 +381,7 @@ mod tests {
         let dir = unique_temp_dir("edit-file-not-found");
         let file_path = fixture_file(&dir, "hello world").await;
 
-        let result = edit_file(EditFileArgs {
+        let result = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             old_string: "missing".to_string(),
             new_string: "x".to_string(),
@@ -375,7 +402,7 @@ mod tests {
         let dir = unique_temp_dir("edit-file-ambiguous");
         let file_path = fixture_file(&dir, "foo foo foo").await;
 
-        let result = edit_file(EditFileArgs {
+        let result = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             old_string: "foo".to_string(),
             new_string: "bar".to_string(),
@@ -400,7 +427,7 @@ mod tests {
         let dir = unique_temp_dir("edit-file-fuzzy-trailing");
         let file_path = fixture_file(&dir, "fn main() {   \n    hola();\n}\n").await;
 
-        let result = edit_file(EditFileArgs {
+        let result = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             // Note: no trailing spaces after "{", unlike the file.
             old_string: "fn main() {\n    hola();".to_string(),
@@ -427,7 +454,7 @@ mod tests {
         let original = "mod x {\n        fn f() {\n            uno();\n        }\n}\n";
         let file_path = fixture_file(&dir, original).await;
 
-        let result = edit_file(EditFileArgs {
+        let result = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             // The model emitted the block with 4-space base indentation;
             // the file actually uses 8.
@@ -457,7 +484,7 @@ mod tests {
         // "x();" appears exactly (line 1) and fuzzily ("  x();  ", line 2).
         let file_path = fixture_file(&dir, "x();\n  x();  \n").await;
 
-        edit_file(EditFileArgs {
+        edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             old_string: "x();".to_string(),
             new_string: "y();".to_string(),
@@ -476,7 +503,7 @@ mod tests {
         let original = "  foo()\n  bar()\n    foo()\n";
         let file_path = fixture_file(&dir, original).await;
 
-        let result = edit_file(EditFileArgs {
+        let result = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             // Trimmed, this matches both "  foo()" and "    foo()".
             old_string: "foo()".to_string(),
@@ -500,7 +527,7 @@ mod tests {
         let dir = unique_temp_dir("edit-file-steering");
         let file_path = fixture_file(&dir, "hello world").await;
 
-        let err = edit_file(EditFileArgs {
+        let err = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             old_string: "missing entirely".to_string(),
             new_string: "x".to_string(),
@@ -522,7 +549,7 @@ mod tests {
         let original = "a\n\nb\n";
         let file_path = fixture_file(&dir, original).await;
 
-        let result = edit_file(EditFileArgs {
+        let result = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             old_string: "   \n   ".to_string(),
             new_string: "x".to_string(),
@@ -547,7 +574,7 @@ mod tests {
         let dir = unique_temp_dir("edit-file-no-trailing-nl");
         let file_path = fixture_file(&dir, "uno()   \ndos()").await;
 
-        let result = edit_file(EditFileArgs {
+        let result = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             old_string: "uno()\ndos()".to_string(),
             new_string: "tres()\ndos()".to_string(),
@@ -572,7 +599,7 @@ mod tests {
         let original = "fn alpha() {}\nfn beta() {}\nfn compute_total(x: i32) -> i32 { x }\n";
         let file_path = fixture_file(&dir, original).await;
 
-        let err = edit_file(EditFileArgs {
+        let err = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             // Not present verbatim, but shares "compute_total" with line 3.
             old_string: "fn compute_total(y: i32) -> i32 { y }".to_string(),
@@ -593,7 +620,7 @@ mod tests {
         let dir = unique_temp_dir("edit-file-no-closest-line");
         let file_path = fixture_file(&dir, "hello world").await;
 
-        let err = edit_file(EditFileArgs {
+        let err = edit_file_fuzzy(EditFileArgs {
             path: file_path.to_string_lossy().into_owned(),
             old_string: "totally unrelated content".to_string(),
             new_string: "x".to_string(),
@@ -616,7 +643,7 @@ mod tests {
             .expect("create temp dir");
         let missing = dir.join("does-not-exist.txt");
 
-        let err = edit_file(EditFileArgs {
+        let err = edit_file_fuzzy(EditFileArgs {
             path: missing.to_string_lossy().into_owned(),
             old_string: "anything".to_string(),
             new_string: "x".to_string(),
@@ -630,6 +657,93 @@ mod tests {
             !err.contains("os error"),
             "should not leak the raw OS error: {err}"
         );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- strict mode (hallazgo E1, docs/AUDITORIA-2026-07-v3.md) ---
+
+    #[tokio::test]
+    async fn strict_mode_still_applies_an_exact_match() {
+        let dir = unique_temp_dir("edit-file-strict-exact");
+        let file_path = fixture_file(&dir, "hello world").await;
+
+        let result = edit_file(
+            EditFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                old_string: "world".to_string(),
+                new_string: "braze".to_string(),
+            },
+            true,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let contents = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read back");
+        assert_eq!(contents, "hello braze");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn strict_mode_refuses_a_trailing_whitespace_only_match() {
+        // Same fixture as `trailing_whitespace_difference_still_matches`
+        // (fuzzy mode) — strict mode must refuse it instead of applying
+        // rung 2.
+        let dir = unique_temp_dir("edit-file-strict-refuses-fuzzy");
+        let file_path = fixture_file(&dir, "fn main() {   \n    hola();\n}\n").await;
+
+        let result = edit_file(
+            EditFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                old_string: "fn main() {\n    hola();".to_string(),
+                new_string: "fn main() {\n    chao();".to_string(),
+            },
+            true,
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "strict mode must not fall back to whitespace-tolerant matching"
+        );
+        let contents = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read back");
+        assert_eq!(
+            contents, "fn main() {   \n    hola();\n}\n",
+            "file must be untouched"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn strict_mode_refuses_an_indentation_only_match() {
+        // Same fixture as
+        // `indentation_difference_matches_and_preserves_the_files_indentation`
+        // (fuzzy mode) — strict mode must refuse rung 3 too.
+        let dir = unique_temp_dir("edit-file-strict-refuses-indent");
+        let original = "mod x {\n        fn f() {\n            uno();\n        }\n}\n";
+        let file_path = fixture_file(&dir, original).await;
+
+        let result = edit_file(
+            EditFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                old_string: "    fn f() {\n        uno();\n    }".to_string(),
+                new_string: "    fn f() {\n        dos();\n    }".to_string(),
+            },
+            true,
+        )
+        .await;
+
+        assert!(result.is_err());
+        let contents = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read back");
+        assert_eq!(contents, original, "file must be untouched");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

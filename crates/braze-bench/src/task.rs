@@ -37,14 +37,19 @@ pub struct TaskDef {
     #[serde(default)]
     pub expect_no_tool_call: bool,
     /// If set, the task only passes if the assistant's final text
-    /// contains this substring (case-insensitive).
+    /// contains this as a bounded token — case-insensitive, and (E4,
+    /// docs/AUDITORIA-2026-07-v3.md) not merely embedded inside a larger
+    /// alphanumeric run (`"2"` no longer matches inside `"v2"`, e.g. a
+    /// setup file named `informe_final_v2.txt`). See
+    /// `metrics::contains_as_a_bounded_token`.
     #[serde(default)]
     pub expect_text_contains: Option<String>,
     /// If non-empty, the task only passes if every named file (path
     /// relative to the sandbox root) exists and contains the given
-    /// substring — checked against the sandbox's actual filesystem state
-    /// after the run, not just "was some tool called". This is what makes
-    /// a write/edit task's pass/fail track the real outcome instead of a
+    /// substring (same bounded-token matching as `expect_text_contains`)
+    /// — checked against the sandbox's actual filesystem state after the
+    /// run, not just "was some tool called". This is what makes a
+    /// write/edit task's pass/fail track the real outcome instead of a
     /// proxy that a failed or no-op call could still satisfy.
     #[serde(default)]
     pub expect_file_contains: HashMap<String, String>,
@@ -200,27 +205,48 @@ mod tests {
         let tasks = load_suite(&path).expect("default.toml must parse");
 
         assert!(
-            tasks.len() >= 9,
-            "expected at least 9 tasks, got {}",
+            tasks.len() >= 18,
+            "expected at least 18 tasks, got {}",
             tasks.len()
         );
-
-        let skills: std::collections::HashSet<&str> =
-            tasks.iter().filter_map(|t| t.skill.as_deref()).collect();
-        for expected in [
-            "single_tool",
-            "multi_step",
-            "error_recovery",
-            "distractor_selection",
-        ] {
-            assert!(
-                skills.contains(expected),
-                "expected default.toml to include a '{expected}' task, got skills: {skills:?}"
-            );
-        }
 
         // At least one task's pass/fail is verified against the sandbox's
         // real filesystem state, not just "some tool was called" (F4).
         assert!(tasks.iter().any(|t| !t.expect_file_contains.is_empty()));
+
+        // E3 (docs/AUDITORIA-2026-07-v3.md): a skill with n=1 has zero
+        // statistical power — a single pass/fail is indistinguishable
+        // from sampling noise. Every skill besides the single_tool floor
+        // must have at least 3 tasks.
+        let mut skill_counts: std::collections::HashMap<&str, usize> = Default::default();
+        for skill in tasks.iter().filter_map(|t| t.skill.as_deref()) {
+            *skill_counts.entry(skill).or_insert(0) += 1;
+        }
+        for expected in [
+            "single_tool",
+            "no_tool",
+            "multi_step",
+            "error_recovery",
+            "distractor_selection",
+        ] {
+            let count = skill_counts.get(expected).copied().unwrap_or(0);
+            assert!(
+                count >= 3,
+                "expected at least 3 '{expected}' tasks for statistical power, got {count} \
+                 (skill counts: {skill_counts:?})"
+            );
+        }
+
+        // Editing (write_file/edit_file outcomes) was underrepresented
+        // relative to read/grep/glob — at least 2 tasks must check the
+        // sandbox's real file content after an edit_file-shaped task.
+        let editing_tasks = tasks
+            .iter()
+            .filter(|t| !t.expect_file_contains.is_empty())
+            .count();
+        assert!(
+            editing_tasks >= 2,
+            "expected at least 2 tasks verifying real file content, got {editing_tasks}"
+        );
     }
 }

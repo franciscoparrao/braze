@@ -2045,8 +2045,112 @@ variable para reflejar la invariante real del motor), `braze-model::openrouter_w
 --all-targets -- -D warnings`), `rustfmt` aplicado a los archivos
 tocados.
 
-Queda en el roadmap de la v3, no atacado en esta sesión: Grupo S
-(ablación en braze-bench para el paper — E1, E4, E6, E3, E2, E5).
+## Grupo S — `braze-bench` como instrumento de paper (docs/AUDITORIA-2026-07-v3.md, 2026-07-06)
+
+Seis hallazgos sobre la validez del bench como instrumento de medición:
+`E4, E1, E6, E3, E5, E2`.
+
+**Grupo S — ✅ CERRADO 2026-07-06.**
+
+- **E4 (matching laxo por substring, F10)**: nueva
+  `metrics::contains_as_a_bounded_token(haystack, needle)` — exige que
+  `needle` esté acotado por caracteres no-alfanuméricos (o el borde del
+  string) en ambos lados, no solo que aparezca como substring. Reemplaza
+  el `.contains()` crudo tanto en `expect_text_contains`
+  (`metrics::compute_metrics`) como en `expect_file_contains`
+  (`runner::run_task`). Corrige el falso positivo confirmado en vivo:
+  `error_recovery_wrong_filename` (archivo `informe_final_v2.txt`,
+  `expect_text_contains = "2"`) pasaba con una respuesta incorrecta con
+  solo mencionar el nombre del archivo, porque "2" matcheaba dentro de
+  "v2". Test de regresión que reproduce exactamente ese escenario.
+- **E1 (ablación componible de palancas del harness)** — el ítem
+  "crítico" del grupo, con dos prerequisitos de infraestructura antes de
+  llegar al bench:
+  - Nuevo knob `edit_strict_mode` en `edit_file`/`LocalToolsProvider`:
+    desactiva las rungs 2-3 (matching difuso) de la escalera de Aider,
+    dejando solo el match exacto — sin esto no hay forma de medir si la
+    escalera realmente ayuda.
+  - `TACTICAL_FULL_OBSERVATIONS` (antes una `const` hardcodeada en
+    `history.rs`) pasó a ser un parámetro runtime threaded por
+    `render_tactical_events`/`tactical_full_observation_indices`/
+    `collapsed_observation_content`/`build_messages_with_never_clear`,
+    con `Engine::with_tactical_full_observations` como builder — el "5"
+    de SWE-agent/ACI se tuneó contra GPT-4 con contexto grande; sin este
+    knob no había forma de preguntar si "5" es siquiera el número
+    correcto para el `num_ctx` chico de un modelo local.
+  - `BackendSpec` gana un sufijo componible `"+ablate:<clave>[=<valor>];..."`
+    (separador `;`, no `,` — la coma ya delimita entradas de
+    `--backends`; un bug real de colisión con el delimitador de clap se
+    encontró y arregló durante la implementación, con test de regresión
+    que parsea a través del `Cli` real, no solo `BackendSpec::parse`
+    directo). Claves: `no-rescue`, `no-post-edit-check`, `strict-edit`,
+    `best-of-n=N`, `tactical-window=N`, `tactical-threshold=N`,
+    `full-observations=N`. `display_name` ecoa la ablación activa para
+    que un baseline y una fila ablada no aparezcan indistinguibles en el
+    reporte.
+  - `runner::run_task` aplica los overrides de `spec.ablation()` sobre
+    los defaults de `Config` antes de construir `Engine`/
+    `LocalToolsProvider`. De paso (E1c, gap de paridad hallado mientras se
+    wireaba esto): `runner.rs` nunca llamaba `.with_post_edit_check(...)`
+    — el bench corría el guardrail siempre ON sin importar
+    `Config::disable_post_edit_check`, midiendo un harness distinto al
+    que una invocación real de `braze` con ese flag correría.
+- **E6 (metadata de corrida en el JSON)**: nuevo `metadata.rs` —
+  `RunMetadata` (sampling completo, repeticiones, timeout, ruta y
+  fingerprint del suite — `DefaultHasher` sobre los bytes crudos, no
+  criptográfico, alcanza para detectar "el suite cambió entre corridas"),
+  commit de git (`git rev-parse HEAD`, best-effort), y digest de cada
+  modelo Ollama de la corrida (nuevo `braze_model::ollama_model_digest`,
+  vía `/api/tags` — un tag como "qwen2.5:3b" puede re-apuntar a pesos
+  distintos tras un `ollama pull`; el digest no). `report::write_json`
+  cambia de forma: de un array plano de `TaskResult` a
+  `{"metadata": ..., "results": [...]}` — breaking change de schema
+  deliberado, sin consumidores externos detectados en el repo.
+- **E3 (suite sin poder estadístico)**: `no_tool`/`multi_step`/
+  `error_recovery`/`distractor_selection` tenían n=1 cada una — ampliadas
+  a n=3, más una segunda tarea de edición (`edit_file_function_body`,
+  editando dentro de un archivo de código en vez de una línea
+  `clave=valor` trivial) ya que write/edit estaba subrepresentado frente
+  a read/grep/glob. `default.toml` pasa de 10 a 19 tareas. El test
+  `default_suite_parses_and_covers_a_difficulty_gradient` ahora exige
+  `>= 3` tareas por skill (antes solo verificaba que la skill existiera)
+  y `>= 2` tareas verificadas contra el filesystem real.
+- **E5 (falta el tradeoff costo/calidad por skill)**: la tabla "Comparación
+  por skill" en `report::print_table` gana `avg_rounds`/`avg_ms`/
+  `median_ms`/`avg_tok_out` (ya calculados por `summarize()`, solo
+  faltaba imprimirlos) — antes solo mostraba `pass_rate`, ocultando que
+  dos backends empatados en un skill pueden diferir mucho en cuántas
+  rondas/tokens/ms les tomó llegar ahí.
+- **E2 (sin ancla externa)**: mini-swe-agent no está instalado en este
+  entorno, e instalar tooling de terceros no es algo para hacer sin que
+  se pida explícitamente — así que este hallazgo se resolvió como
+  *contrato*, no como adapter en vivo. Nuevo `external.rs`: trait
+  `ExternalHarness` (`run(task, sandbox_dir, timeout) -> ExternalRunOutcome`),
+  y `external_outcome_to_task_result` que pliega ese outcome al mismo
+  `TaskResult` que produce `runner::run_task` — con
+  `expect_tool_call`/`expect_no_tool_call` deliberadamente no evaluados
+  (`None`, no fallados) porque un harness de caja negra no expone *cómo*
+  resolvió la tarea, solo su respuesta final y el estado del filesystem.
+  Módulo con `#![allow(dead_code)]` explícito y documentado — no hay
+  wiring de CLI (`--external <cmd>`) porque no hay ningún adapter real
+  detrás todavía; wirearlo es "implementar `ExternalHarness` para una
+  herramienta concreta", no "rediseñar el harness".
+
+~35 tests de regresión nuevos: `braze-bench::metrics` (9 de E4),
+`braze-tools-local::edit_file` (3 de E1a), `braze-engine::history` (1 de
+E1b), `braze-bench::backend_spec` (8 de E1d, incluyendo el bug del
+delimitador de clap), `braze-bench::main` (1, el mismo bug pero a través
+del `Cli` real), `braze-model::ollama` (4 de E6), `braze-bench::metadata`
+(4), `braze-bench::report` (1, `write_json` con la nueva forma),
+`braze-bench::task` (test de suite actualizado), `braze-bench::external`
+(5). Workspace completo verde (`cargo test --workspace`, ~722 tests),
+clippy limpio (`cargo clippy --workspace --all-targets -- -D warnings`),
+`rustfmt --check` sin diffs.
+
+Verificación en vivo pendiente: sweep corto contra Nitro comparando
+`ollama:qwen2.5:3b` baseline vs. una variante `+ablate:` — confirma que
+la infraestructura de ablación funciona end-to-end contra un servidor
+Ollama real, no solo que compila.
 
 ## Archivos críticos
 

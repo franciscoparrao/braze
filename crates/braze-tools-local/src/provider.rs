@@ -55,6 +55,13 @@ pub struct LocalToolsProvider {
     /// no-op outside Cargo projects. `Config::disable_post_edit_check`
     /// (via `braze-cli`) is the opt-out.
     post_edit_check: bool,
+    /// Gates `edit_file`'s fuzzy matching ladder (rungs 2-3) — see
+    /// `edit_file.rs`'s "Strict mode" doc section (E1,
+    /// docs/AUDITORIA-2026-07-v3.md). `false` (the default) keeps the
+    /// fuzzy ladder on, the production behavior since Aider's fix; `true`
+    /// is an ablation knob for `braze-bench`, not something a real
+    /// `braze` invocation has a reason to set.
+    edit_strict_mode: bool,
 }
 
 impl LocalToolsProvider {
@@ -69,6 +76,7 @@ impl LocalToolsProvider {
             guard,
             workdir,
             post_edit_check: true,
+            edit_strict_mode: false,
         }
     }
 
@@ -81,6 +89,7 @@ impl LocalToolsProvider {
             guard,
             workdir: workdir.into(),
             post_edit_check: true,
+            edit_strict_mode: false,
         }
     }
 
@@ -88,6 +97,14 @@ impl LocalToolsProvider {
     /// chainable, same shape as the engine's `with_*` knobs.
     pub fn with_post_edit_check(mut self, enabled: bool) -> Self {
         self.post_edit_check = enabled;
+        self
+    }
+
+    /// Enables/disables `edit_file`'s fuzzy matching ladder — chainable,
+    /// same shape as [`Self::with_post_edit_check`]. See
+    /// `edit_strict_mode`'s field doc comment.
+    pub fn with_edit_strict_mode(mut self, strict: bool) -> Self {
+        self.edit_strict_mode = strict;
         self
     }
 
@@ -123,7 +140,10 @@ impl LocalToolsProvider {
         args.path = self.resolve(&args.path);
         self.check_write(call, &args.path).await?;
         let path = args.path.clone();
-        let result = wrap(call, edit_file::edit_file(args).await);
+        let result = wrap(
+            call,
+            edit_file::edit_file(args, self.edit_strict_mode).await,
+        );
         Ok(self.append_post_edit_feedback(result, &path).await)
     }
 

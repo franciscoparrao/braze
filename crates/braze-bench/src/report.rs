@@ -229,8 +229,16 @@ pub fn print_table(results: &[TaskResult]) {
         }
     }
     if !skills.is_empty() {
+        // E5 (docs/AUDITORIA-2026-07-v3.md): pass_rate alone hides the
+        // cost/quality tradeoff — two backends tied on pass_rate for a
+        // skill can differ wildly in how many rounds/tokens/ms it took
+        // them to get there, which is exactly the kind of thing that
+        // decides whether a lever is "worth it" for small models.
         println!("\n== Comparación por skill ==");
-        println!("{:<24} {:<20} {:>12}", "backend", "skill", "pass_rate");
+        println!(
+            "{:<24} {:<20} {:>9} {:>8} {:>10} {:>10} {:>11}",
+            "backend", "skill", "pass_rate", "avg_rounds", "avg_ms", "median_ms", "avg_tok_out"
+        );
         for backend in {
             let mut order: Vec<&str> = Vec::new();
             for result in results {
@@ -249,21 +257,45 @@ pub fn print_table(results: &[TaskResult]) {
                     continue;
                 }
                 let summary = summarize(backend, &rows);
+                let pass_rate_cell = format!("{}/{}", summary.passed, summary.total);
                 println!(
-                    "{:<24} {:<20} {:>9}/{:<2}",
-                    backend, skill, summary.passed, summary.total
+                    "{:<24} {:<20} {:>9} {:>8.1} {:>10.0} {:>10.0} {:>11.0}",
+                    backend,
+                    skill,
+                    pass_rate_cell,
+                    summary.avg_rounds,
+                    summary.avg_wall_time_ms,
+                    summary.median_wall_time_ms,
+                    summary.avg_output_tokens,
                 );
             }
         }
     }
 }
 
-/// Writes the raw per-task results as JSON, for downstream analysis
-/// (e.g. tracking a backend's pass rate over time as `braze` itself
-/// changes).
-pub fn write_json(results: &[TaskResult], path: &Path) -> Result<(), BenchError> {
+/// One sweep's full JSON output: run-level metadata (E6,
+/// docs/AUDITORIA-2026-07-v3.md) alongside the raw per-task results — the
+/// metadata is what makes a `results.json` file traceable back to exactly
+/// what produced it (sampling, suite version, active ablation, model
+/// digests, harness commit), instead of a bare, unreproducible array of
+/// numbers.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SweepReport<'a> {
+    pub metadata: &'a crate::metadata::RunMetadata,
+    pub results: &'a [TaskResult],
+}
+
+/// Writes the sweep's metadata plus raw per-task results as JSON, for
+/// downstream analysis (e.g. tracking a backend's pass rate over time as
+/// `braze` itself changes).
+pub fn write_json(
+    metadata: &crate::metadata::RunMetadata,
+    results: &[TaskResult],
+    path: &Path,
+) -> Result<(), BenchError> {
     let file = std::fs::File::create(path)?;
-    serde_json::to_writer_pretty(file, results)
+    let report = SweepReport { metadata, results };
+    serde_json::to_writer_pretty(file, &report)
         .map_err(|err| BenchError::Startup(format!("failed to write JSON report: {err}")))?;
     Ok(())
 }
@@ -271,6 +303,53 @@ pub fn write_json(results: &[TaskResult], path: &Path) -> Result<(), BenchError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_metadata() -> crate::metadata::RunMetadata {
+        crate::metadata::RunMetadata {
+            sampling: crate::backend_spec::SamplingSpec {
+                temperature: 0.2,
+                seed: Some(42),
+                top_p: None,
+                top_k: None,
+                repeat_penalty: None,
+            },
+            repetitions: 3,
+            task_timeout_secs: 180,
+            suite_path: "suites/default.toml".to_string(),
+            suite_fingerprint: "deadbeef".to_string(),
+            braze_git_commit: Some("abc123".to_string()),
+            ollama_model_digests: vec![],
+        }
+    }
+
+    /// Regression test for E6 (docs/AUDITORIA-2026-07-v3.md): the JSON
+    /// output must carry both the run metadata and the raw results under
+    /// distinct top-level keys, not just a bare results array — otherwise
+    /// a `results.json` file is unreproducible (no record of what
+    /// sampling/suite/commit produced it).
+    #[test]
+    fn write_json_writes_metadata_alongside_results() {
+        let dir = std::env::temp_dir().join(format!(
+            "braze-bench-report-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("out.json");
+
+        let metadata = sample_metadata();
+        let results = vec![result(true, 100, 10, 2)];
+        write_json(&metadata, &results, &path).expect("write must succeed");
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&contents).unwrap();
+        assert_eq!(parsed["metadata"]["suite_path"], "suites/default.toml");
+        assert_eq!(parsed["metadata"]["repetitions"], 3);
+        assert_eq!(parsed["results"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["results"][0]["task_id"], "t");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn result(
         passed: bool,

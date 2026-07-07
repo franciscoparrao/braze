@@ -147,7 +147,8 @@ mod tests {
 
     #[test]
     fn escaped_quotes_inside_strings_do_not_confuse_the_walker() {
-        let (value, outcome) = parse_arguments_with_repair(r#"{"cmd": "echo \"hola\"", "dir": "/tm"#);
+        let (value, outcome) =
+            parse_arguments_with_repair(r#"{"cmd": "echo \"hola\"", "dir": "/tm"#);
         assert_eq!(
             value,
             serde_json::json!({"cmd": "echo \"hola\"", "dir": "/tm"})

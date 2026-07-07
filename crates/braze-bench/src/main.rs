@@ -5,6 +5,8 @@
 
 mod backend_spec;
 mod error;
+mod external;
+mod metadata;
 mod metrics;
 mod report;
 mod runner;
@@ -32,7 +34,15 @@ struct Cli {
     suite: PathBuf,
     /// Backends a comparar, separados por coma. Cada uno es
     /// "anthropic", "anthropic:<modelo>", "ollama", "ollama:<modelo>",
-    /// "openrouter" o "openrouter:<modelo>".
+    /// "openrouter" o "openrouter:<modelo>". Sufijos componibles (en ese
+    /// orden si se usan ambos): "+plan:<spec>" adjunta un planner
+    /// (PLAN.md § "Split planificador/ejecutor");
+    /// "+ablate:<clave>[=<valor>];..." (nota: separador ';', no ',' —
+    /// la coma ya delimita entradas de --backends) override de palancas
+    /// del harness para esta fila del sweep — claves: no-rescue,
+    /// no-post-edit-check, strict-edit, best-of-n=N, tactical-window=N,
+    /// tactical-threshold=N, full-observations=N (E1,
+    /// docs/AUDITORIA-2026-07-v3.md).
     #[arg(long, value_delimiter = ',', required = true)]
     backends: Vec<String>,
     /// Si se pasa, además de la tabla en stdout escribe los resultados
@@ -243,7 +253,41 @@ async fn run() -> Result<(), BenchError> {
     report::print_table(&results);
 
     if let Some(output_path) = &cli.output {
-        report::write_json(&results, output_path)?;
+        // E6 (docs/AUDITORIA-2026-07-v3.md): only worth computing when
+        // actually writing a JSON file — the suite re-read, the git
+        // subprocess, and (if any Ollama backend is in the sweep) the
+        // digest lookups are all wasted work for a stdout-only run.
+        let suite_bytes = std::fs::read(&cli.suite)?;
+        let ollama_models: Vec<String> = {
+            let mut models: Vec<String> = specs
+                .iter()
+                .flat_map(|(_, spec)| spec.ollama_models(&config))
+                .collect();
+            models.sort();
+            models.dedup();
+            models
+        };
+        let metadata = metadata::RunMetadata {
+            sampling: backend_spec::SamplingSpec {
+                temperature: cli.temperature,
+                seed: cli.seed,
+                top_p: cli.top_p,
+                top_k: cli.top_k,
+                repeat_penalty: cli.repeat_penalty,
+            },
+            repetitions: cli.repetitions,
+            task_timeout_secs: cli.task_timeout_secs,
+            suite_path: cli.suite.display().to_string(),
+            suite_fingerprint: metadata::fingerprint_bytes(&suite_bytes),
+            braze_git_commit: metadata::current_git_commit().await,
+            ollama_model_digests: metadata::collect_ollama_model_digests(
+                &config.ollama_base_url,
+                &ollama_models,
+            )
+            .await,
+        };
+
+        report::write_json(&metadata, &results, output_path)?;
         println!("\nResultados JSON escritos en {}", output_path.display());
     }
 
@@ -271,5 +315,42 @@ async fn stop_ollama_model(model: &str) {
         Err(err) => {
             eprintln!("braze-bench: no se pudo ejecutar 'ollama stop {model}': {err}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for a real bug caught while wiring E1's ablation
+    /// suffix (docs/AUDITORIA-2026-07-v3.md): `--backends` uses
+    /// `value_delimiter = ','` to split multiple entries, so an
+    /// `+ablate:` suffix using `,` as ITS OWN internal separator would
+    /// get silently split apart by clap before `BackendSpec::parse` ever
+    /// saw it whole. The suffix grammar uses `;` specifically to avoid
+    /// this collision — this test parses through the real `Cli` (not
+    /// just `BackendSpec::parse` directly) so a future change to either
+    /// the delimiter or the suffix grammar that reintroduces the
+    /// collision fails here.
+    #[test]
+    fn an_ablate_suffix_with_multiple_keys_survives_the_comma_backends_delimiter() {
+        let cli = Cli::parse_from([
+            "braze-bench",
+            "suite.toml",
+            "--backends",
+            "ollama:qwen2.5:3b+ablate:no-rescue;strict-edit,anthropic:claude-x",
+        ]);
+        assert_eq!(
+            cli.backends,
+            vec![
+                "ollama:qwen2.5:3b+ablate:no-rescue;strict-edit".to_string(),
+                "anthropic:claude-x".to_string(),
+            ]
+        );
+
+        let spec = BackendSpec::parse(&cli.backends[0]).expect("must parse");
+        let ablation = spec.ablation();
+        assert!(ablation.disable_textual_rescue);
+        assert!(ablation.edit_strict_mode);
     }
 }

@@ -5,13 +5,19 @@
 # para completarse con éxito.
 #
 # Gradiente de dificultad (campo `skill`, ver docs/AUDITORIA-2026-07.md
-# hallazgo F8): las primeras 6 tareas son single_tool (una sola llamada,
+# hallazgo F8): las primeras 7 tareas son single_tool (una sola llamada,
 # un solo paso) — el piso que casi cualquier modelo con tool-calling
-# nativo debería despejar. Las últimas 3 suben la dificultad para separar
-# "sabe llamar una tool" de "puede encadenar pasos, recuperarse de un
-# nombre equivocado, o elegir entre distractores" — sin ese gradiente el
-# reporte no puede mostrar *dónde* se rompe la capacidad de un modelo
+# nativo debería despejar. Las siguientes suben la dificultad para
+# separar "sabe llamar una tool" de "puede encadenar pasos, recuperarse de
+# un nombre equivocado, o elegir entre distractores" — sin ese gradiente
+# el reporte no puede mostrar *dónde* se rompe la capacidad de un modelo
 # chico, solo que se rompió en algún punto.
+#
+# E3 (docs/AUDITORIA-2026-07-v3.md): no_tool/multi_step/error_recovery/
+# distractor_selection tenían n=1 cada una — sin poder estadístico
+# alguno, un pass/fail de una sola tarea es indistinguible de ruido de
+# muestreo. Ampliadas a n=3 cada una (más una segunda tarea de edición,
+# ya que write/edit estaba subrepresentado frente a read/grep/glob).
 
 [[tasks]]
 id = "read_file_basic"
@@ -117,3 +123,102 @@ skill = "distractor_selection"
 "notas_viaje.txt" = "necesitamos reservar el vuelo y el hotel\n"
 "notas_presupuesto.txt" = "el presupuesto total del proyecto es 5000\n"
 "notas_equipo.txt" = "el equipo tiene cuatro integrantes\n"
+
+# --- E3: ampliación a n=3 en las skills débiles + segunda tarea de edición ---
+
+[[tasks]]
+id = "edit_file_function_body"
+prompt = "Edita el archivo saludo.py del directorio actual: cambia el mensaje que imprime la función de 'Hola' a 'Adios'."
+expect_tool_call = "edit_file"
+skill = "single_tool"
+
+[tasks.setup_files]
+"saludo.py" = "def saludar(nombre):\n    print(f\"Hola, {nombre}!\")\n\nsaludar(\"Ana\")\n"
+
+[tasks.expect_file_contains]
+"saludo.py" = "Adios"
+
+[[tasks]]
+id = "no_tool_capital_question"
+prompt = "¿Cuál es la capital de Perú? Responde solo con el nombre de la ciudad, sin usar ninguna herramienta."
+expect_no_tool_call = true
+expect_text_contains = "lima"
+skill = "no_tool"
+
+[[tasks]]
+id = "no_tool_subtraction"
+prompt = "¿Cuánto es 10 menos 3? Responde solo con el número, sin usar ninguna herramienta."
+expect_no_tool_call = true
+expect_text_contains = "7"
+skill = "no_tool"
+
+[[tasks]]
+id = "multi_step_sum_two_files"
+prompt = "Lee los archivos a.txt y b.txt del directorio actual, suma la cantidad de líneas que tiene cada uno, y escribe el total (solo el número, sin texto adicional) en un archivo nuevo llamado total.txt."
+skill = "multi_step"
+
+[tasks.setup_files]
+"a.txt" = "linea 1\nlinea 2\n"
+"b.txt" = "linea 1\nlinea 2\nlinea 3\n"
+
+[tasks.expect_file_contains]
+"total.txt" = "5"
+
+[[tasks]]
+id = "multi_step_multiply_and_write"
+prompt = "Lee el archivo precio.txt del directorio actual (contiene un solo número), multiplica ese número por 3, y escribe el resultado (solo el número, sin texto adicional) en un archivo nuevo llamado total_final.txt."
+skill = "multi_step"
+
+[tasks.setup_files]
+"precio.txt" = "5\n"
+
+[tasks.expect_file_contains]
+"total_final.txt" = "15"
+
+[[tasks]]
+id = "error_recovery_wrong_config_extension"
+prompt = "Lee el archivo de configuración del directorio actual (el nombre empieza con 'config' pero no recuerdo la extensión) y dime qué valor tiene la clave 'modo'."
+expect_text_contains = "activo"
+skill = "error_recovery"
+
+# Igual que error_recovery_wrong_filename: el prompt no da el nombre
+# exacto, forzando glob/grep o un read_file fallido antes de encontrar el
+# archivo real.
+[tasks.setup_files]
+"config.yaml" = "modo: activo\n"
+
+[[tasks]]
+id = "error_recovery_edit_wrong_filename"
+prompt = "Edita el archivo de ajustes del proyecto (no recuerdo el nombre exacto, pero tiene que ver con la configuración de la app) y cambia 'timeout=30' por 'timeout=60'."
+skill = "error_recovery"
+
+# Sin expect_tool_call: recuperarse vía write_file (la propia señal de
+# error de edit_file sugiere ese camino) cuenta igual que recuperarse vía
+# edit_file — lo que importa es el resultado en el archivo, no la ruta.
+[tasks.setup_files]
+"ajustes_app.ini" = "timeout=30\n"
+
+[tasks.expect_file_contains]
+"ajustes_app.ini" = "timeout=60"
+
+[[tasks]]
+id = "distractor_selection_log_with_error"
+prompt = "Hay varios archivos .txt en el directorio actual. Busca cuál de ellos contiene la palabra 'ERROR' y dime el nombre de ese archivo."
+expect_text_contains = "log_fail"
+skill = "distractor_selection"
+
+[tasks.setup_files]
+"log_ok.txt" = "todo funciona correctamente\n"
+"log_fail.txt" = "ERROR: fallo critico en el modulo de pagos\n"
+"log_info.txt" = "informacion general del sistema\n"
+
+[[tasks]]
+id = "distractor_selection_debug_config"
+prompt = "Entre los archivos de configuración del directorio actual, identifica cuál tiene 'debug=true' y dime su nombre."
+expect_text_contains = "config_dev"
+skill = "distractor_selection"
+
+[tasks.setup_files]
+"config_dev.txt" = "debug=true\nport=3000\n"
+"config_prod.txt" = "debug=false\nport=80\n"
+"config_test.txt" = "debug=false\nport=8080\n"

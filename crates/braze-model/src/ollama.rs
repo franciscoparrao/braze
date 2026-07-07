@@ -327,6 +327,56 @@ pub async fn list_ollama_models(base_url: &str) -> Result<Vec<String>, ModelErro
         .unwrap_or_default())
 }
 
+/// Looks up the content digest Ollama reports for an installed model
+/// (`GET /api/tags`, matching by exact `name`) — e.g.
+/// `"357c53fb659c5076de1d65ccb0b397446227b71a42be9d1603d46168015c9e4b"`.
+/// Unlike a model tag (which Ollama can silently re-pull to different
+/// weights over time, e.g. after `ollama pull qwen2.5:3b` picks up an
+/// updated release under the same name), the digest ties a result to the
+/// *exact* weights that produced it — `braze-bench`'s run metadata (E6,
+/// docs/AUDITORIA-2026-07-v3.md) records this per Ollama model in a
+/// sweep. `Ok(None)` when the server is reachable but lists no model by
+/// that exact name (not installed, or the name doesn't match); `Err` only
+/// on a genuine transport/decode failure — same reachability contract as
+/// [`list_ollama_models`].
+pub async fn ollama_model_digest(
+    base_url: &str,
+    model: &str,
+) -> Result<Option<String>, ModelError> {
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    let client = crate::http_client::build_client_with_timeouts(
+        std::time::Duration::from_secs(10),
+        LIST_MODELS_READ_TIMEOUT,
+    );
+
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| ModelError::Request(format!("ollama request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(http_error_to_model_error(response, "ollama").await);
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ModelError::Decode(format!("ollama /api/tags: invalid JSON: {e}")))?;
+
+    Ok(body
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|models| {
+            models
+                .iter()
+                .find(|entry| entry.get("name").and_then(serde_json::Value::as_str) == Some(model))
+        })
+        .and_then(|entry| entry.get("digest"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,10 +384,11 @@ mod tests {
 
     #[tokio::test]
     async fn list_ollama_models_returns_the_installed_model_names_in_order() {
-        let body = br#"{"models":[{"name":"qwen2.5:3b","size":1},{"name":"llama3.2:1b","size":2}]}"#
-            .to_vec();
-        let addr = crate::test_support::spawn_canned_http_server(200, "application/json", body)
-            .await;
+        let body =
+            br#"{"models":[{"name":"qwen2.5:3b","size":1},{"name":"llama3.2:1b","size":2}]}"#
+                .to_vec();
+        let addr =
+            crate::test_support::spawn_canned_http_server(200, "application/json", body).await;
 
         let models = list_ollama_models(&format!("http://{addr}"))
             .await
@@ -348,8 +399,8 @@ mod tests {
     #[tokio::test]
     async fn list_ollama_models_skips_entries_without_a_string_name() {
         let body = br#"{"models":[{"size":1},{"name":"qwen2.5:3b"},{"name":42}]}"#.to_vec();
-        let addr = crate::test_support::spawn_canned_http_server(200, "application/json", body)
-            .await;
+        let addr =
+            crate::test_support::spawn_canned_http_server(200, "application/json", body).await;
 
         let models = list_ollama_models(&format!("http://{addr}"))
             .await
@@ -360,8 +411,8 @@ mod tests {
     #[tokio::test]
     async fn list_ollama_models_maps_an_http_error_instead_of_panicking() {
         let body = br#"{"error":"boom"}"#.to_vec();
-        let addr = crate::test_support::spawn_canned_http_server(500, "application/json", body)
-            .await;
+        let addr =
+            crate::test_support::spawn_canned_http_server(500, "application/json", body).await;
 
         let err = list_ollama_models(&format!("http://{addr}"))
             .await
@@ -379,6 +430,48 @@ mod tests {
             .await
             .expect_err("connection refused must surface as an error");
         assert!(matches!(err, ModelError::Request(_)));
+    }
+
+    // --- ollama_model_digest (E6, docs/AUDITORIA-2026-07-v3.md) ---
+
+    #[tokio::test]
+    async fn ollama_model_digest_returns_the_matching_entrys_digest() {
+        let body = br#"{"models":[
+            {"name":"qwen2.5:3b","digest":"abc123"},
+            {"name":"qwen3.5-coder:latest","digest":"def456"}
+        ]}"#
+        .to_vec();
+        let addr =
+            crate::test_support::spawn_canned_http_server(200, "application/json", body).await;
+
+        let digest = ollama_model_digest(&format!("http://{addr}"), "qwen3.5-coder:latest")
+            .await
+            .expect("lookup should succeed");
+        assert_eq!(digest.as_deref(), Some("def456"));
+    }
+
+    #[tokio::test]
+    async fn ollama_model_digest_is_none_when_no_entry_matches_the_name() {
+        let body = br#"{"models":[{"name":"qwen2.5:3b","digest":"abc123"}]}"#.to_vec();
+        let addr =
+            crate::test_support::spawn_canned_http_server(200, "application/json", body).await;
+
+        let digest = ollama_model_digest(&format!("http://{addr}"), "not-installed:latest")
+            .await
+            .expect("lookup should succeed even with no match");
+        assert_eq!(digest, None);
+    }
+
+    #[tokio::test]
+    async fn ollama_model_digest_maps_an_http_error_instead_of_panicking() {
+        let body = br#"{"error":"boom"}"#.to_vec();
+        let addr =
+            crate::test_support::spawn_canned_http_server(500, "application/json", body).await;
+
+        let err = ollama_model_digest(&format!("http://{addr}"), "qwen2.5:3b")
+            .await
+            .expect_err("a 500 must surface as an error");
+        let _ = err;
     }
 
     fn sample_request() -> CompletionRequest {

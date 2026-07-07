@@ -890,8 +890,9 @@ impl App {
         if self.model_candidates.is_empty() {
             return self.commit_cell(
                 &NoticeCell {
-                    message: "no hay modelos candidatos conocidos — usa /model <backend>[:<modelo>]"
-                        .to_string(),
+                    message:
+                        "no hay modelos candidatos conocidos — usa /model <backend>[:<modelo>]"
+                            .to_string(),
                     theme: self.theme,
                 },
                 terminal,

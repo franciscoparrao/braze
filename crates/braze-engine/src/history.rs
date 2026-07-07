@@ -53,7 +53,17 @@ const NEVER_CLEAR_TOOLS: &[&str] = &[];
 /// small local model's entire `num_ctx` (docs/AUDITORIA-2026-07-v3.md,
 /// hallazgo B1), a number this constant alone (borrowed from a paper
 /// measured against a large-context model) never accounted for.
-const TACTICAL_FULL_OBSERVATIONS: usize = 5;
+///
+/// The default every production call site uses — `Engine` threads its
+/// own `full_observations` field (which defaults to this same value)
+/// through [`build_messages_with_full_observations`]/
+/// [`render_tactical_events`] instead of reading this constant directly,
+/// so `braze-bench`'s `+ablate:full-observations=N` (E1,
+/// docs/AUDITORIA-2026-07-v3.md) can override it per sweep row — the
+/// literature's "5" was tuned against GPT-4's large context, and this is
+/// exactly the knob needed to measure whether that figure holds for a
+/// small local model's tiny `num_ctx`.
+pub(crate) const TACTICAL_FULL_OBSERVATIONS: usize = 5;
 
 /// Aggregate cap (chars) across every observation
 /// [`tactical_full_observation_indices`] keeps full — without it,
@@ -81,13 +91,25 @@ const MAX_FULL_OBSERVATIONS_TOTAL_CHARS: usize = 8_000;
 /// old events vanished from context entirely once they aged out of the
 /// tactical window (unless their gist happened to survive in
 /// `durable.summary`).
-pub fn build_messages(durable: &DurableState, tactical: &[AgentEvent]) -> Vec<Message> {
-    build_messages_with_never_clear(durable, tactical, NEVER_CLEAR_TOOLS)
+///
+/// `full_observations` overrides how many of the tactical window's most
+/// recent observations stay full instead of collapsing to one line (see
+/// [`TACTICAL_FULL_OBSERVATIONS`]) — production always passes `Engine`'s
+/// own field (which defaults to that same constant), while
+/// `braze-bench`'s `+ablate:full-observations=N` (E1,
+/// docs/AUDITORIA-2026-07-v3.md) can override it per sweep row.
+pub fn build_messages_with_full_observations(
+    durable: &DurableState,
+    tactical: &[AgentEvent],
+    full_observations: usize,
+) -> Vec<Message> {
+    build_messages_with_never_clear(durable, tactical, NEVER_CLEAR_TOOLS, full_observations)
 }
 
 /// Renders `durable_events` alone — no leading summary placeholder, no
-/// tactical — through the exact same clearing logic [`build_messages`]
-/// applies to the durable side. Exposed so `Engine`'s token-budget
+/// tactical — through the exact same clearing logic
+/// [`build_messages_with_full_observations`] applies to the durable side.
+/// Exposed so `Engine`'s token-budget
 /// estimator can size *what actually reaches the model* (an old
 /// `ToolCallCompleted`'s content replaced by a short "cleared" placeholder)
 /// instead of the raw, uncleared event payload (N-6,
@@ -103,13 +125,14 @@ pub(crate) fn render_durable_events(durable_events: &[AgentEvent]) -> Vec<Messag
     messages
 }
 
-/// Implementation behind [`build_messages`], parameterized on the
+/// Implementation behind [`build_messages_with_full_observations`], parameterized on the
 /// tool-result clearing exclusion list so tests can exercise both branches
 /// without mutating the production `NEVER_CLEAR_TOOLS` constant.
 fn build_messages_with_never_clear(
     durable: &DurableState,
     tactical: &[AgentEvent],
     never_clear: &[&str],
+    full_observations: usize,
 ) -> Vec<Message> {
     let mut messages = Vec::with_capacity(durable.durable_events.len() + tactical.len() + 1);
 
@@ -141,21 +164,24 @@ fn build_messages_with_never_clear(
         event_to_block_cleared(event, &tool_names, never_clear)
     });
 
-    messages.extend(render_tactical_events(tactical));
+    messages.extend(render_tactical_events(tactical, full_observations));
     messages
 }
 
 /// Renders the tactical slice alone — applying the same ACI collapse
-/// [`build_messages`] applies to it — so `Engine`'s token-budget estimator
+/// [`build_messages_with_full_observations`] applies to it — so `Engine`'s token-budget estimator
 /// can size *what actually reaches the model* instead of the raw,
 /// uncollapsed observation payloads (mirrors [`render_durable_events`]'s
 /// reasoning on the durable side; see docs/AUDITORIA-2026-07-v3.md,
 /// hallazgo B2: sizing the tactical slice by its raw content could keep
 /// tripping repeated compaction well past the point where the actual,
 /// collapsed prompt was already back under budget).
-pub(crate) fn render_tactical_events(tactical: &[AgentEvent]) -> Vec<Message> {
+pub(crate) fn render_tactical_events(
+    tactical: &[AgentEvent],
+    full_observations: usize,
+) -> Vec<Message> {
     let mut messages = Vec::with_capacity(tactical.len());
-    let full_indices = tactical_full_observation_indices(tactical);
+    let full_indices = tactical_full_observation_indices(tactical, full_observations);
     let mut observations_seen = 0usize;
     push_grouped(&mut messages, tactical, |event| {
         if let AgentEvent::ToolCallCompleted { id, result } = event {
@@ -166,7 +192,7 @@ pub(crate) fn render_tactical_events(tactical: &[AgentEvent]) -> Vec<Message> {
                     Role::User,
                     ContentBlock::ToolResult {
                         tool_use_id: id.clone(),
-                        content: collapsed_observation_content(&result.content),
+                        content: collapsed_observation_content(&result.content, full_observations),
                         is_error: result.is_error,
                     },
                 ));
@@ -187,7 +213,10 @@ pub(crate) fn render_tactical_events(tactical: &[AgentEvent]) -> Vec<Message> {
 /// the single newest observation is always admitted first regardless of
 /// its own size, so one oversized dump can never zero out the "at least
 /// the current turn's own output stays visible" guarantee.
-fn tactical_full_observation_indices(tactical: &[AgentEvent]) -> std::collections::HashSet<usize> {
+fn tactical_full_observation_indices(
+    tactical: &[AgentEvent],
+    full_observations: usize,
+) -> std::collections::HashSet<usize> {
     let observation_lens: Vec<usize> = tactical
         .iter()
         .filter_map(|event| match event {
@@ -200,7 +229,7 @@ fn tactical_full_observation_indices(tactical: &[AgentEvent]) -> std::collection
     let mut full = std::collections::HashSet::new();
     let mut running_total = 0usize;
     for (rev_i, &len) in observation_lens.iter().rev().enumerate() {
-        if rev_i >= TACTICAL_FULL_OBSERVATIONS {
+        if rev_i >= full_observations {
             break;
         }
         if running_total.saturating_add(len) > MAX_FULL_OBSERVATIONS_TOTAL_CHARS && !full.is_empty()
@@ -219,7 +248,7 @@ fn tactical_full_observation_indices(tactical: &[AgentEvent]) -> std::collection
 /// collapsing wouldn't actually save anything (a short, single-line
 /// result), so the marker never *adds* tokens to an already-small
 /// observation.
-fn collapsed_observation_content(content: &str) -> String {
+fn collapsed_observation_content(content: &str, full_observations: usize) -> String {
     /// Longest first-line excerpt kept — beyond this even the "1 line"
     /// gets cut (a minified single-line JSON dump is one line and still
     /// enormous).
@@ -229,7 +258,7 @@ fn collapsed_observation_content(content: &str) -> String {
     let excerpt: String = first_line.chars().take(FIRST_LINE_MAX_CHARS).collect();
     let omitted = content.len().saturating_sub(excerpt.len());
     let collapsed = format!(
-        "{excerpt} [old observation collapsed: {omitted} chars omitted; the {TACTICAL_FULL_OBSERVATIONS} most recent tool results are shown in full]"
+        "{excerpt} [old observation collapsed: {omitted} chars omitted; the {full_observations} most recent tool results are shown in full]"
     );
     if collapsed.len() >= content.len() {
         return content.to_string();
@@ -279,7 +308,7 @@ fn push_grouped<'a>(
 }
 
 /// Resolves a `tool_use_id` to the name of the tool that issued it, built
-/// once per `build_messages` call from every `AssistantToolCall` present
+/// once per `build_messages_with_full_observations` call from every `AssistantToolCall` present
 /// in the same durable slice — rather than re-scanned once per
 /// `ToolCallCompleted`, which would be quadratic in the number of settled
 /// events.
@@ -419,7 +448,11 @@ mod tests {
 
     #[test]
     fn empty_log_produces_no_messages() {
-        let messages = build_messages(&empty_durable(), &[]);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &[],
+            TACTICAL_FULL_OBSERVATIONS,
+        );
         assert!(messages.is_empty());
     }
 
@@ -433,7 +466,8 @@ mod tests {
             text: "y ahora qué".to_string(),
         }];
 
-        let messages = build_messages(&durable, &tactical);
+        let messages =
+            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS);
 
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, Role::User);
@@ -452,7 +486,11 @@ mod tests {
         let tactical = vec![AgentEvent::UserMessage {
             text: "hola".to_string(),
         }];
-        let messages = build_messages(&empty_durable(), &tactical);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        );
         assert_eq!(messages.len(), 1);
     }
 
@@ -480,7 +518,11 @@ mod tests {
             },
         ];
 
-        let messages = build_messages(&empty_durable(), &tactical);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        );
 
         assert_eq!(messages.len(), 4);
         assert_eq!(messages[0].role, Role::User);
@@ -538,7 +580,11 @@ mod tests {
             },
         ];
 
-        let messages = build_messages(&empty_durable(), &tactical);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        );
         assert!(messages.is_empty());
     }
 
@@ -557,7 +603,11 @@ mod tests {
             },
         ];
 
-        let messages = build_messages(&empty_durable(), &tactical);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        );
 
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[1].role, Role::Assistant);
@@ -600,7 +650,8 @@ mod tests {
             ],
         };
 
-        let messages = build_messages(&durable, &[]);
+        let messages =
+            build_messages_with_full_observations(&durable, &[], TACTICAL_FULL_OBSERVATIONS);
 
         // N-2 fix: a leading placeholder `User` message is now prepended
         // whenever `durable_events` is non-empty and `summary` is still
@@ -651,7 +702,12 @@ mod tests {
             ],
         };
 
-        let messages = build_messages_with_never_clear(&durable, &[], &["keep_me"]);
+        let messages = build_messages_with_never_clear(
+            &durable,
+            &[],
+            &["keep_me"],
+            TACTICAL_FULL_OBSERVATIONS,
+        );
 
         // N-2 fix: leading placeholder shifts real content from [0..4) to
         // [1..5).
@@ -679,7 +735,11 @@ mod tests {
         let long_content = "y".repeat(10_000);
         let tactical = vec![tool_completed_event("call-9", &long_content)];
 
-        let messages = build_messages(&empty_durable(), &tactical);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        );
 
         assert_eq!(messages.len(), 1);
         match &messages[0].content[0] {
@@ -719,7 +779,11 @@ mod tests {
             ));
         }
 
-        let messages = build_messages(&empty_durable(), &tactical);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        );
         let contents = tool_result_contents(&messages);
         assert_eq!(contents.len(), 7);
 
@@ -756,8 +820,50 @@ mod tests {
             tactical.push(tool_completed_event(&id, &"z".repeat(400)));
         }
 
-        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        let contents = tool_result_contents(&build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        ));
         assert!(contents.iter().all(|c| c == &"z".repeat(400)));
+    }
+
+    // --- overriding full_observations (hallazgo E1, docs/AUDITORIA-2026-07-v3.md) ---
+
+    #[test]
+    fn overriding_full_observations_to_one_collapses_everything_but_the_newest() {
+        // Same 5-observation fixture that `with_five_or_fewer_observations_nothing_collapses`
+        // asserts stays entirely uncollapsed under the *default* (5) — with
+        // an override of 1 (as `braze-bench`'s `+ablate:full-observations=1`
+        // would set), only the single newest observation should survive
+        // in full.
+        let mut tactical = Vec::new();
+        for i in 0..5 {
+            let id = format!("call-{i}");
+            tactical.push(tool_call_event(&id, "read_file"));
+            tactical.push(tool_completed_event(
+                &id,
+                &format!("linea {i}\n{}", "z".repeat(400)),
+            ));
+        }
+
+        let contents = tool_result_contents(&build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            1,
+        ));
+
+        assert_eq!(contents.len(), 5);
+        for (i, content) in contents.iter().take(4).enumerate() {
+            assert!(
+                content.contains("old observation collapsed"),
+                "observation {i} should have collapsed under full_observations=1, got: {content}"
+            );
+        }
+        assert!(
+            contents[4].contains(&"z".repeat(400)),
+            "the single newest observation must still stay full"
+        );
     }
 
     // --- aggregate cap on full observations (hallazgo B1,
@@ -775,7 +881,11 @@ mod tests {
             tactical.push(tool_completed_event(&id, &"x".repeat(3000)));
         }
 
-        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        let contents = tool_result_contents(&build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        ));
         assert_eq!(contents.len(), 5);
 
         let full_count = contents
@@ -811,7 +921,11 @@ mod tests {
             tactical.push(tool_completed_event(&id, &"y".repeat(500)));
         }
 
-        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        let contents = tool_result_contents(&build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        ));
         assert!(
             contents
                 .iter()
@@ -834,7 +948,11 @@ mod tests {
             tactical.push(tool_completed_event(&format!("call-{i}"), "ok"));
         }
 
-        let messages = build_messages(&empty_durable(), &tactical);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        );
         match &messages[0].content[0] {
             ContentBlock::ToolResult {
                 tool_use_id,
@@ -859,7 +977,11 @@ mod tests {
             tactical.push(tool_completed_event(&format!("call-{i}"), &"w".repeat(300)));
         }
 
-        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        let contents = tool_result_contents(&build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        ));
         assert_eq!(contents[0], "ok");
     }
 
@@ -872,7 +994,11 @@ mod tests {
             tactical.push(tool_completed_event(&format!("call-{i}"), "ok"));
         }
 
-        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        let contents = tool_result_contents(&build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        ));
         assert!(contents[0].len() < 400, "got len {}", contents[0].len());
         assert!(contents[0].contains("collapsed"));
     }
@@ -918,7 +1044,11 @@ mod tests {
             tool_completed_event("call-3", "ok-3"),
         ];
 
-        let messages = build_messages(&empty_durable(), &tactical);
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+        );
 
         // [user text, one Assistant message with 3 ToolUse blocks, one
         // User message with 3 ToolResult blocks] — not 7 separate messages.
@@ -976,7 +1106,8 @@ mod tests {
             },
         ];
 
-        let messages = build_messages(&durable, &tactical);
+        let messages =
+            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS);
 
         // [resumen, mensaje viejo, tool_use viejo, tool_result viejo
         // (cleared), mensaje reciente, respuesta reciente] — durable
@@ -1024,7 +1155,7 @@ mod tests {
     /// tactical window) **before any compaction has ever run** — i.e.
     /// while `summary` is still empty — purely because the log has grown
     /// past the compactor's `tactical_window`, independent of
-    /// `Engine`'s `tactical_compaction_threshold`. `build_messages` then
+    /// `Engine`'s `tactical_compaction_threshold`. `build_messages_with_full_observations` then
     /// renders `durable_events` (an `Assistant` tool_use, here) before the
     /// `UserMessage` that's still sitting in `tactical`, even though that
     /// `UserMessage` chronologically preceded the tool call. Every
@@ -1067,10 +1198,11 @@ mod tests {
             },
         ];
 
-        let messages = build_messages(&durable, &tactical);
+        let messages =
+            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS);
 
         crate::protocol_check::check_anthropic_message_protocol(&messages).expect(
-            "build_messages must produce an Anthropic-valid sequence \
+            "build_messages_with_full_observations must produce an Anthropic-valid sequence \
              (first message role=User) regardless of which side of the \
              durable/tactical split the log's oldest event landed on",
         );

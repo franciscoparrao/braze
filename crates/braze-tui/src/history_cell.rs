@@ -297,7 +297,9 @@ impl HistoryCell for HelpCell {
             Line::from(""),
             Line::from(Span::styled("Comandos", heading_style)),
             Line::from("/help  este mensaje"),
-            Line::from("/model  cambiar de backend/modelo (picker; /model backend[:modelo] directo)"),
+            Line::from(
+                "/model  cambiar de backend/modelo (picker; /model backend[:modelo] directo)",
+            ),
             Line::from("/quit, /exit  salir de braze"),
             Line::from(""),
             Line::from(Span::styled("Menciones", heading_style)),

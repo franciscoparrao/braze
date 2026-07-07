@@ -15,7 +15,9 @@ use braze_tools_core::ToolRegistry;
 use braze_types::{ContentBlock, Message, SessionId, ToolCall, ToolResult, ToolStub};
 
 use crate::error::EngineError;
-use crate::history::{build_messages, render_durable_events, render_tactical_events};
+use crate::history::{
+    build_messages_with_full_observations, render_durable_events, render_tactical_events,
+};
 
 /// Default number of raw tactical events above which [`Engine::run_turn`]
 /// triggers a compaction pass before building the next model request. See
@@ -82,6 +84,13 @@ pub struct Engine {
     system_prompt: String,
     max_tokens: u32,
     tactical_compaction_threshold: usize,
+    /// How many of the tactical window's most recent observations stay
+    /// full instead of collapsing to one line — see
+    /// `history::TACTICAL_FULL_OBSERVATIONS`'s doc comment. Defaults to
+    /// that same constant; overridable via
+    /// [`Engine::with_tactical_full_observations`] for `braze-bench`'s
+    /// `+ablate:full-observations=N` (E1, docs/AUDITORIA-2026-07-v3.md).
+    tactical_full_observations: usize,
     /// Approximate token budget for the durable+tactical portion of the
     /// prompt (i.e. excluding `system_prompt`/tool schemas, which the
     /// caller should already have reserved headroom for when computing
@@ -234,6 +243,7 @@ impl Engine {
             system_prompt,
             max_tokens,
             tactical_compaction_threshold: DEFAULT_TACTICAL_COMPACTION_THRESHOLD,
+            tactical_full_observations: crate::history::TACTICAL_FULL_OBSERVATIONS,
             context_budget_tokens: None,
             best_of_n: 1,
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
@@ -260,6 +270,15 @@ impl Engine {
     /// same shape as [`Engine::with_context_budget`].
     pub fn with_tactical_compaction_threshold(mut self, threshold: usize) -> Self {
         self.tactical_compaction_threshold = threshold;
+        self
+    }
+
+    /// Overrides how many of the tactical window's most recent
+    /// observations stay full instead of collapsing — see
+    /// `tactical_full_observations`'s field doc comment. Chainable, same
+    /// shape as [`Engine::with_context_budget`].
+    pub fn with_tactical_full_observations(mut self, full_observations: usize) -> Self {
+        self.tactical_full_observations = full_observations;
         self
     }
 
@@ -1523,9 +1542,9 @@ impl Engine {
         let (durable, tactical) = self.compactor.split(&events);
 
         let over_event_count_threshold = tactical.len() > self.tactical_compaction_threshold;
-        let over_token_budget = self
-            .context_budget_tokens
-            .is_some_and(|budget| estimate_prompt_tokens(&durable, &tactical) > budget);
+        let over_token_budget = self.context_budget_tokens.is_some_and(|budget| {
+            estimate_prompt_tokens(&durable, &tactical, self.tactical_full_observations) > budget
+        });
         // N-6 (docs/AUDITORIA-2026-07-v2.md): compacting only ever folds
         // `tactical` — it can't shrink `durable.summary` or
         // `durable_events`. If `tactical` is already down to (or below)
@@ -1577,9 +1596,17 @@ impl Engine {
 
             let effective_durable = merge_summary(durable, summary);
             let live_tail = &tactical[start..];
-            Ok(build_messages(&effective_durable, live_tail))
+            Ok(build_messages_with_full_observations(
+                &effective_durable,
+                live_tail,
+                self.tactical_full_observations,
+            ))
         } else {
-            Ok(build_messages(&durable, &tactical))
+            Ok(build_messages_with_full_observations(
+                &durable,
+                &tactical,
+                self.tactical_full_observations,
+            ))
         }
     }
 
@@ -2475,11 +2502,16 @@ fn event_text_len(event: &AgentEvent) -> usize {
 /// times `load_messages` compacts — exactly the "modo compactación
 /// permanente" pathology A2/C2 already fixed for the event-count trigger,
 /// reachable again through either uncollapsed side.
-fn estimate_prompt_tokens(durable: &DurableState, tactical: &[AgentEvent]) -> u32 {
+fn estimate_prompt_tokens(
+    durable: &DurableState,
+    tactical: &[AgentEvent],
+    full_observations: usize,
+) -> u32 {
     let summary_tokens = (durable.summary.len() / 4) as u32;
     let durable_events_tokens =
         estimate_message_tokens(&render_durable_events(&durable.durable_events));
-    let tactical_tokens = estimate_message_tokens(&render_tactical_events(tactical));
+    let tactical_tokens =
+        estimate_message_tokens(&render_tactical_events(tactical, full_observations));
     summary_tokens + durable_events_tokens + tactical_tokens
 }
 

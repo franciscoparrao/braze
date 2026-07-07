@@ -719,7 +719,9 @@ mod tests {
             "{not valid json",
         );
         match event {
-            CompletionEvent::ToolCallRequested { name, arguments, .. } => {
+            CompletionEvent::ToolCallRequested {
+                name, arguments, ..
+            } => {
                 assert_eq!(name, "get_weather");
                 assert_eq!(arguments, serde_json::json!({}));
             }

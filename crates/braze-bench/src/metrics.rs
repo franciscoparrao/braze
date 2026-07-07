@@ -142,6 +142,39 @@ pub fn harness_error_result(
     }
 }
 
+/// `true` when `needle` appears in `haystack` bounded by non-alphanumeric
+/// characters (or the string's edges) on both sides — a stricter
+/// "contains" than plain substring matching (F10,
+/// docs/AUDITORIA-2026-07-v2.md; confirmed as a live false positive in
+/// hallazgo E4, docs/AUDITORIA-2026-07-v3.md): a bare `.contains()` lets
+/// an expected digit/word embedded inside an unrelated token satisfy the
+/// assertion — `expect_text_contains = "2"` was satisfiable by a model's
+/// wrong answer merely because the *setup file* was named
+/// `informe_final_v2.txt`, with no relation to the "2" the task actually
+/// asked for. Used for both `expect_text_contains` (this module) and
+/// `expect_file_contains` (`runner.rs`) so the two assertion kinds share
+/// one notion of "contains".
+///
+/// Case-sensitive by design — callers that want case-insensitive
+/// matching (as `expect_text_contains` always has) lowercase both sides
+/// before calling this, same as the substring check it replaces.
+pub(crate) fn contains_as_a_bounded_token(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true; // preserves `"".contains("")`-style behavior
+    }
+    let haystack: Vec<char> = haystack.chars().collect();
+    let needle: Vec<char> = needle.chars().collect();
+    let n = needle.len();
+    if n > haystack.len() {
+        return false;
+    }
+    haystack.windows(n).enumerate().any(|(start, window)| {
+        window == needle.as_slice()
+            && (start == 0 || !haystack[start - 1].is_alphanumeric())
+            && (start + n == haystack.len() || !haystack[start + n].is_alphanumeric())
+    })
+}
+
 /// Derives a [`TaskResult`] for one (task, backend) run from its
 /// persisted event log plus the [`RunOutcome`] `Engine::run_turn` itself
 /// produced (kept separate from the log because a hard model/tool error
@@ -254,10 +287,9 @@ pub fn compute_metrics(
         .as_deref()
         .map(|expected| tool_call_names.contains(&expected));
 
-    let expected_text_found = task
-        .expect_text_contains
-        .as_deref()
-        .map(|expected| final_text.to_lowercase().contains(&expected.to_lowercase()));
+    let expected_text_found = task.expect_text_contains.as_deref().map(|expected| {
+        contains_as_a_bounded_token(&final_text.to_lowercase(), &expected.to_lowercase())
+    });
 
     let assertions_passed = expected_tool_called.unwrap_or(true)
         && (!task.expect_no_tool_call || tool_call_names.is_empty())
@@ -504,6 +536,86 @@ mod tests {
         );
         assert_eq!(result.expected_text_found, Some(true));
         assert!(result.passed);
+    }
+
+    // --- contains_as_a_bounded_token (hallazgo E4, docs/AUDITORIA-2026-07-v3.md) ---
+
+    #[test]
+    fn a_digit_embedded_in_a_filename_like_token_does_not_match() {
+        // The exact false positive confirmed in the audit:
+        // error_recovery_wrong_filename's setup file is named
+        // "informe_final_v2.txt" and expects text_contains="2" — a wrong
+        // answer that merely echoes the filename must not satisfy the
+        // assertion just because "v2" contains a "2".
+        assert!(!contains_as_a_bounded_token(
+            "el archivo informe_final_v2.txt tiene 5 lineas",
+            "2"
+        ));
+    }
+
+    #[test]
+    fn a_standalone_digit_surrounded_by_spaces_still_matches() {
+        assert!(contains_as_a_bounded_token(
+            "el archivo tiene 2 lineas",
+            "2"
+        ));
+    }
+
+    #[test]
+    fn a_digit_at_the_very_start_or_end_of_the_text_still_matches() {
+        assert!(contains_as_a_bounded_token("2 lineas", "2"));
+        assert!(contains_as_a_bounded_token("son 2", "2"));
+        assert!(contains_as_a_bounded_token("2", "2"));
+    }
+
+    #[test]
+    fn a_longer_phrase_needle_still_matches_as_a_bounded_token() {
+        assert!(contains_as_a_bounded_token(
+            "el archivo es notas_presupuesto.txt",
+            "notas_presupuesto"
+        ));
+    }
+
+    #[test]
+    fn a_needle_embedded_inside_a_longer_word_does_not_match() {
+        // "presupuesto" must not match inside "prepresupuestoso" (a
+        // synthetic larger token) even though it's a textual substring.
+        assert!(!contains_as_a_bounded_token(
+            "prepresupuestoso",
+            "presupuesto"
+        ));
+    }
+
+    #[test]
+    fn punctuation_and_symbols_count_as_valid_boundaries() {
+        assert!(contains_as_a_bounded_token("version=2", "2"));
+        assert!(contains_as_a_bounded_token("respuesta: 4.", "4"));
+    }
+
+    #[test]
+    fn an_empty_needle_always_matches() {
+        assert!(contains_as_a_bounded_token("cualquier cosa", ""));
+    }
+
+    #[test]
+    fn a_needle_longer_than_the_haystack_never_matches() {
+        assert!(!contains_as_a_bounded_token("2", "informe"));
+    }
+
+    /// End-to-end regression for the exact false positive confirmed live
+    /// in the suite (hallazgo E4): a wrong answer that just repeats the
+    /// setup file's name ("informe_final_v2.txt") must FAIL
+    /// `error_recovery`-shaped tasks expecting `"2"`, not pass by
+    /// accident via the embedded "v2".
+    #[test]
+    fn a_wrong_line_count_that_echoes_the_v2_filename_no_longer_falsely_passes() {
+        let t = task(None, false, Some("2"));
+        let events = vec![AgentEvent::AssistantText {
+            text: "El archivo informe_final_v2.txt tiene 5 líneas.".to_string(),
+        }];
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        assert_eq!(result.expected_text_found, Some(false));
+        assert!(!result.passed);
     }
 
     #[test]
