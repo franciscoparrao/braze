@@ -55,12 +55,24 @@ pub async fn edit_file(args: EditFileArgs) -> Result<String, String> {
     }
 
     let path = PathBuf::from(&args.path);
-    let original = tokio::fs::read_to_string(&path)
-        .await
-        .map_err(|err| format!("failed to read '{}': {err}", path.display()))?;
+    let original = match tokio::fs::read_to_string(&path).await {
+        Ok(contents) => contents,
+        // A model reaching for edit_file to CREATE a file is a predictable
+        // mistake (the tool name reads as "change a file"); a bare OS error
+        // ("No such file or directory") gives it nothing to act on, unlike
+        // the matching-failure messages below, which all steer somewhere.
+        // See docs/AUDITORIA-2026-07-v3.md, hallazgo A4.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!(
+                "'{}' does not exist. To create a new file, use write_file with its full content.",
+                path.display()
+            ));
+        }
+        Err(err) => return Err(format!("failed to read '{}': {err}", path.display())),
+    };
 
     let (updated, strategy) = apply_edit(&original, &args.old_string, &args.new_string)
-        .map_err(|kind| kind.into_message(&path))?;
+        .map_err(|kind| kind.into_message(&path, &original, &args.old_string))?;
 
     tokio::fs::write(&path, updated.as_bytes())
         .await
@@ -98,13 +110,23 @@ enum MatchFailure {
 }
 
 impl MatchFailure {
-    fn into_message(self, path: &std::path::Path) -> String {
+    fn into_message(self, path: &std::path::Path, original: &str, old_string: &str) -> String {
         match self {
-            MatchFailure::NotFound => format!(
-                "old_string not found in '{}' (also tried whitespace-tolerant matching). \
-                 {WRITE_FILE_STEERING}",
-                path.display()
-            ),
+            MatchFailure::NotFound => {
+                let hint = find_closest_line(original, old_string)
+                    .map(|(line_no, line)| {
+                        format!(
+                            " The closest match in the file is line {line_no}: `{}`.",
+                            line.trim()
+                        )
+                    })
+                    .unwrap_or_default();
+                format!(
+                    "old_string not found in '{}' (also tried whitespace-tolerant matching).\
+                     {hint} {WRITE_FILE_STEERING}",
+                    path.display()
+                )
+            }
             MatchFailure::Ambiguous(count, strategy) => format!(
                 "old_string is ambiguous in '{}': found {count} occurrences{}, expected \
                  exactly 1. Include more surrounding context in old_string to disambiguate. \
@@ -117,6 +139,37 @@ impl MatchFailure {
             ),
         }
     }
+}
+
+/// Best-effort "did you mean" hint for a failed match: the file line with
+/// the most words in common with `old_string`'s first non-blank line.
+/// `None` when nothing shares even one word with it — a small model gets
+/// no material to correct with a plain "not found"; this gives it a real
+/// anchor line to compare against instead (docs/AUDITORIA-2026-07-v3.md,
+/// hallazgo A3).
+fn find_closest_line<'a>(original: &'a str, old_string: &str) -> Option<(usize, &'a str)> {
+    let needle = old_string.lines().find(|l| !l.trim().is_empty())?.trim();
+    let needle_words: std::collections::HashSet<&str> = needle
+        .split_whitespace()
+        .filter(|w| !w.is_empty())
+        .collect();
+    if needle_words.is_empty() {
+        return None;
+    }
+
+    original
+        .lines()
+        .enumerate()
+        .map(|(i, line)| {
+            let overlap = line
+                .split_whitespace()
+                .filter(|w| needle_words.contains(w))
+                .count();
+            (i + 1, line, overlap)
+        })
+        .filter(|&(_, _, overlap)| overlap > 0)
+        .max_by_key(|&(_, _, overlap)| overlap)
+        .map(|(line_no, line, _)| (line_no, line))
 }
 
 /// Pure core of the tool: runs the matching ladder over `original` and
@@ -507,6 +560,76 @@ mod tests {
             .await
             .expect("read back");
         assert_eq!(contents, "tres()\ndos()", "no trailing newline must appear");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- closest-line hint (docs/AUDITORIA-2026-07-v3.md, hallazgo A3) ---
+
+    #[tokio::test]
+    async fn not_found_error_suggests_the_closest_line_by_word_overlap() {
+        let dir = unique_temp_dir("edit-file-closest-line");
+        let original = "fn alpha() {}\nfn beta() {}\nfn compute_total(x: i32) -> i32 { x }\n";
+        let file_path = fixture_file(&dir, original).await;
+
+        let err = edit_file(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            // Not present verbatim, but shares "compute_total" with line 3.
+            old_string: "fn compute_total(y: i32) -> i32 { y }".to_string(),
+            new_string: "x".to_string(),
+        })
+        .await
+        .expect_err("must fail: old_string isn't in the file");
+
+        assert!(err.contains("closest match"), "got: {err}");
+        assert!(err.contains("line 3"), "got: {err}");
+        assert!(err.contains("compute_total"), "got: {err}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn not_found_error_has_no_hint_when_nothing_overlaps() {
+        let dir = unique_temp_dir("edit-file-no-closest-line");
+        let file_path = fixture_file(&dir, "hello world").await;
+
+        let err = edit_file(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: "totally unrelated content".to_string(),
+            new_string: "x".to_string(),
+        })
+        .await
+        .expect_err("must fail");
+
+        assert!(!err.contains("closest match"), "got: {err}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- nonexistent file steers to write_file (hallazgo A4) ---
+
+    #[tokio::test]
+    async fn editing_a_nonexistent_file_steers_toward_write_file() {
+        let dir = unique_temp_dir("edit-file-missing-file");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let missing = dir.join("does-not-exist.txt");
+
+        let err = edit_file(EditFileArgs {
+            path: missing.to_string_lossy().into_owned(),
+            old_string: "anything".to_string(),
+            new_string: "x".to_string(),
+        })
+        .await
+        .expect_err("must fail: the file doesn't exist");
+
+        assert!(err.contains("does not exist"), "got: {err}");
+        assert!(err.contains("write_file"), "got: {err}");
+        assert!(
+            !err.contains("os error"),
+            "should not leak the raw OS error: {err}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

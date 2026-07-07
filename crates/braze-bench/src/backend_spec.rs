@@ -154,6 +154,21 @@ impl BackendSpec {
         self.provider == Provider::Ollama
     }
 
+    /// The executor's resolved model name (override, or `config`'s
+    /// default for its provider) — no provider prefix, unlike
+    /// `display_name`. Used to pick the model-family system-prompt hint
+    /// (docs/AUDITORIA-2026-07-v3.md, hallazgo D1), which only cares
+    /// about the model name, not which provider is serving it.
+    pub fn executor_model_name(&self, config: &Config) -> String {
+        self.model_override
+            .clone()
+            .unwrap_or_else(|| match self.provider {
+                Provider::Anthropic => config.anthropic_model.clone().unwrap_or_default(),
+                Provider::Ollama => config.ollama_model.clone(),
+                Provider::OpenRouter => config.openrouter_model.clone().unwrap_or_default(),
+            })
+    }
+
     /// Builds the planner backend, if this spec carries one — same
     /// `sampling` as the executor (N-34: one sampling regime per sweep,
     /// planner included).

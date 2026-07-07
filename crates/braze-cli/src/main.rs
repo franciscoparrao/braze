@@ -139,13 +139,35 @@ fn build_model_backend(
             let model_name = model_override
                 .map(str::to_string)
                 .unwrap_or_else(|| config.ollama_model.clone());
-            Ok(Box::new(
-                braze_model::OllamaBackend::with_base_url(
-                    model_name,
-                    config.ollama_base_url.clone(),
-                )
-                .with_num_ctx(config.ollama_num_ctx),
-            ))
+            let mut backend = braze_model::OllamaBackend::with_base_url(
+                model_name,
+                config.ollama_base_url.clone(),
+            )
+            .with_num_ctx(config.ollama_num_ctx);
+            // D2 (docs/AUDITORIA-2026-07-v3.md): these five knobs existed
+            // on `OllamaBackend` and as `braze-bench` CLI flags, but were
+            // never wired into a real invocation — a sampling regime found
+            // better in a bench sweep (e.g. Qwen's own recommended temp
+            // 0.7/top_p 0.8/top_k 20/repeat_penalty 1.05) could be
+            // measured but never actually applied to `braze chat`/`braze
+            // run`. `None` (the default for all five) leaves
+            // `OllamaBackend`'s own defaults in place, unchanged.
+            if let Some(temperature) = config.ollama_temperature {
+                backend = backend.with_temperature(temperature);
+            }
+            if let Some(seed) = config.ollama_seed {
+                backend = backend.with_seed(seed);
+            }
+            if let Some(top_p) = config.ollama_top_p {
+                backend = backend.with_top_p(top_p);
+            }
+            if let Some(top_k) = config.ollama_top_k {
+                backend = backend.with_top_k(top_k);
+            }
+            if let Some(repeat_penalty) = config.ollama_repeat_penalty {
+                backend = backend.with_repeat_penalty(repeat_penalty);
+            }
+            Ok(Box::new(backend))
         }
         "openrouter" => {
             let api_key = config.openrouter_api_key.clone().ok_or_else(|| {
@@ -347,10 +369,34 @@ async fn build_engine(
     // constant, so they can be tuned per backend without recompiling.
     let compactor = braze_session::SimpleContextCompactor::new(config.tactical_window);
 
-    let system_prompt = config
-        .system_prompt
-        .clone()
-        .unwrap_or_else(|| braze_config::default_system_prompt(cwd));
+    // D1 (docs/AUDITORIA-2026-07-v3.md): only the Ollama executor gets a
+    // model-name hint — Anthropic/OpenRouter's native tool-calling needs
+    // no textual fallback example.
+    let model_hint_for_prompt =
+        (config.default_backend == "ollama").then(|| config.ollama_model.clone());
+    let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
+        braze_config::default_system_prompt(cwd, model_hint_for_prompt.as_deref())
+    });
+
+    // Only Ollama has a small, fixed context window worth budgeting for
+    // (Anthropic's is large enough that raw event count remains a fine
+    // proxy). Computed here, before `tools`/`system_prompt` move into
+    // `Engine::new` below (hallazgo B4, docs/AUDITORIA-2026-07-v3.md): the
+    // margin needs the real system prompt length plus the size of every
+    // currently-advertised tool stub (including MCP ones), not a fixed
+    // constant that can't grow with how many tools are configured.
+    let ollama_budget = if config.default_backend == "ollama" {
+        let tool_definitions_bytes =
+            braze_tools_core::tool_stub_definition_bytes(&tools.all_stubs_lossy().await);
+        Some(braze_config::ollama_context_budget_tokens(
+            config.ollama_num_ctx,
+            config.max_tokens,
+            &system_prompt,
+            tool_definitions_bytes,
+        ))
+    } else {
+        None
+    };
 
     // Short "backend:model" label for the TUI's status bar — computed
     // here (not inside `braze-tui`) since `Engine` doesn't expose the
@@ -368,6 +414,21 @@ async fn build_engine(
         other => other.to_string(),
     };
 
+    // D6 (docs/AUDITORIA-2026-07-v3.md): `best_of_n` is a real model call
+    // per candidate — fine for a cheap/parallel cloud backend, a footgun
+    // against a local Ollama model already at 90-100s/task on CPU (N×
+    // the latency, serialized). The default (1) is unaffected; this only
+    // warns when a user has explicitly raised it while also running
+    // Ollama.
+    if config.default_backend == "ollama" && config.best_of_n > 1 {
+        tracing::warn!(
+            best_of_n = config.best_of_n,
+            "best_of_n > 1 against the Ollama backend multiplies latency by best_of_n \
+             (each candidate is a full sequential model call) — this technique pays off on \
+             cheap/parallel cloud backends, not a local model already CPU-bound per turn"
+        );
+    }
+
     let mut engine = braze_engine::Engine::new(
         model,
         tools,
@@ -381,14 +442,7 @@ async fn build_engine(
     .with_best_of_n(config.best_of_n)
     .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue);
 
-    // Only Ollama has a small, fixed context window worth budgeting for
-    // (Anthropic's is large enough that raw event count remains a fine
-    // proxy) — reserve `CONTEXT_BUDGET_MARGIN_TOKENS` out of `num_ctx` for
-    // the system prompt + tool schemas, which aren't part of what
-    // `Engine::load_messages` measures (see `estimate_prompt_tokens`).
-    if config.default_backend == "ollama" {
-        let budget =
-            braze_config::ollama_context_budget_tokens(config.ollama_num_ctx, config.max_tokens);
+    if let Some(budget) = ollama_budget {
         engine = engine.with_context_budget(budget);
     }
 
@@ -631,8 +685,8 @@ async fn run() -> Result<(), CliError> {
                         ..Default::default()
                     });
                     if let Some(model) = model {
-                        let overrides = model_override_for(backend, model)
-                            .map_err(|err| err.to_string())?;
+                        let overrides =
+                            model_override_for(backend, model).map_err(|err| err.to_string())?;
                         config.apply_overrides(overrides);
                     }
                     build_engine(

@@ -223,6 +223,48 @@ async fn resolve_schema_returns_the_real_json_schema_for_a_known_tool() {
     assert_eq!(schema.input_schema["required"][0], "text");
 }
 
+/// C1 (docs/AUDITORIA-2026-07-v3.md): once a tool has been resolved, its
+/// real schema is promoted into subsequent `list_stubs` results instead
+/// of staying permissively deferred forever — free (the schema is
+/// already in `tool_cache`), and it's exactly the tool the model has
+/// already shown intent to use, so a second/later round no longer has to
+/// guess blind at its argument shape.
+#[tokio::test]
+async fn list_stubs_promotes_the_real_schema_for_a_tool_already_resolved() {
+    let provider = connect().await;
+
+    provider
+        .resolve_schema("mcp__toy__echo")
+        .await
+        .expect("resolve_schema should succeed")
+        .expect("echo is a real tool the server advertised");
+
+    let stubs = provider
+        .list_stubs()
+        .await
+        .expect("list_stubs should succeed");
+
+    let echo = stubs
+        .iter()
+        .find(|s| s.name == "mcp__toy__echo")
+        .expect("echo stub");
+    let schema = echo
+        .input_schema
+        .as_ref()
+        .expect("echo's schema must be promoted after being resolved once");
+    assert_eq!(schema["properties"]["text"]["type"], "string");
+
+    // A tool never resolved stays deferred, same as before.
+    let add = stubs
+        .iter()
+        .find(|s| s.name == "mcp__toy__add")
+        .expect("add stub");
+    assert!(
+        add.input_schema.is_none(),
+        "an untouched tool must stay deferred"
+    );
+}
+
 #[tokio::test]
 async fn resolve_schema_returns_none_for_an_unknown_tool() {
     let provider = connect().await;
@@ -317,19 +359,17 @@ async fn invoke_records_the_permission_action_with_the_bare_tool_name() {
         Box::new(DefaultClassifier::new(WorkdirAllowlist::new(cwd))),
         Box::new(SharedRecordingPrompt(std::sync::Arc::clone(&recorder))),
     );
-    let provider = McpToolProvider::connect("toy".to_string(), toy_server_path(), Vec::new(), guard)
-        .await
-        .expect("toy MCP server should spawn and complete the handshake");
+    let provider =
+        McpToolProvider::connect("toy".to_string(), toy_server_path(), Vec::new(), guard)
+            .await
+            .expect("toy MCP server should spawn and complete the handshake");
 
     let call = tool_call(
         "call-5",
         "mcp__toy__add",
         serde_json::json!({"a": 2, "b": 3}),
     );
-    provider
-        .invoke(&call)
-        .await
-        .expect("invoke should succeed");
+    provider.invoke(&call).await.expect("invoke should succeed");
 
     let seen = recorder.seen.lock().unwrap();
     assert_eq!(seen.len(), 1);

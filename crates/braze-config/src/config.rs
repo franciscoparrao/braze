@@ -53,6 +53,31 @@ pub struct Config {
     /// from the front — no error, just a model that "forgot" its system
     /// prompt and tools mid-turn. See `braze-model::OllamaBackend`.
     pub ollama_num_ctx: u32,
+    /// Sampling temperature for the Ollama backend (`options.temperature`).
+    /// `None` (the default) leaves `OllamaBackend`'s own default (0.2,
+    /// biased toward well-formed tool calls) in place. These five sampling
+    /// fields existed as `OllamaBackend::with_*` setters and as
+    /// `braze-bench` CLI flags, but were never wired into a real `braze
+    /// chat`/`braze run` invocation — so a sampling regime a bench sweep
+    /// found better for a given model (e.g. Qwen's own recommended temp
+    /// 0.7/top_p 0.8/top_k 20/repeat_penalty 1.05) could be *measured* but
+    /// never actually *used* in production (docs/AUDITORIA-2026-07-v3.md,
+    /// hallazgo D2).
+    #[serde(default)]
+    pub ollama_temperature: Option<f32>,
+    /// Ollama `options.seed`, for reproducible sampling — see
+    /// `ollama_temperature`.
+    #[serde(default)]
+    pub ollama_seed: Option<u64>,
+    /// Ollama `options.top_p` — see `ollama_temperature`.
+    #[serde(default)]
+    pub ollama_top_p: Option<f32>,
+    /// Ollama `options.top_k` — see `ollama_temperature`.
+    #[serde(default)]
+    pub ollama_top_k: Option<u32>,
+    /// Ollama `options.repeat_penalty` — see `ollama_temperature`.
+    #[serde(default)]
+    pub ollama_repeat_penalty: Option<f32>,
     /// OpenRouter API key. Never hardcoded — comes from the config file or
     /// `BRAZE_OPENROUTER_API_KEY`. `ApiKey`, same rationale as
     /// `anthropic_api_key`.
@@ -169,6 +194,11 @@ impl Default for Config {
             ollama_base_url: "http://localhost:11434".to_string(),
             ollama_model: "llama3.1".to_string(),
             ollama_num_ctx: 8192,
+            ollama_temperature: None,
+            ollama_seed: None,
+            ollama_top_p: None,
+            ollama_top_k: None,
+            ollama_repeat_penalty: None,
             openrouter_api_key: None,
             openrouter_model: None,
             openrouter_base_url: "https://openrouter.ai/api/v1".to_string(),
@@ -265,6 +295,29 @@ impl Config {
                 "max_tokens must be greater than 0".to_string(),
             ));
         }
+        // B5 (docs/AUDITORIA-2026-07-v3.md): `max_tokens` is shared across
+        // every backend, so lowering its *default* to suit Ollama's small
+        // `num_ctx` would silently truncate legitimate long completions on
+        // Anthropic/OpenRouter (whose context windows are large enough
+        // that this never matters) — not a safe global default to change.
+        // A warning, scoped to the Ollama backend only, is the fix that
+        // doesn't regress the other two: at the stock 8192/4096 defaults,
+        // `max_tokens` alone reserves half of `ollama_num_ctx` for output,
+        // leaving only ~3072 tokens of prompt budget for a tool-calling
+        // executor that rarely needs more than a few hundred output tokens
+        // per round.
+        if self.default_backend == "ollama"
+            && ollama_max_tokens_starves_the_prompt_budget(self.ollama_num_ctx, self.max_tokens)
+        {
+            tracing::warn!(
+                ollama_num_ctx = self.ollama_num_ctx,
+                max_tokens = self.max_tokens,
+                "max_tokens reserves at least half of ollama_num_ctx for output, leaving \
+                 little room for the prompt (system prompt + tools + conversation) — consider \
+                 lowering max_tokens (a tool-calling executor rarely needs more than a few \
+                 hundred output tokens per round) or raising ollama_num_ctx"
+            );
+        }
         Ok(())
     }
 
@@ -292,6 +345,21 @@ impl Config {
         }
         if let Some(v) = overrides.ollama_num_ctx {
             self.ollama_num_ctx = v;
+        }
+        if let Some(v) = overrides.ollama_temperature {
+            self.ollama_temperature = Some(v);
+        }
+        if let Some(v) = overrides.ollama_seed {
+            self.ollama_seed = Some(v);
+        }
+        if let Some(v) = overrides.ollama_top_p {
+            self.ollama_top_p = Some(v);
+        }
+        if let Some(v) = overrides.ollama_top_k {
+            self.ollama_top_k = Some(v);
+        }
+        if let Some(v) = overrides.ollama_repeat_penalty {
+            self.ollama_repeat_penalty = Some(v);
         }
         if let Some(v) = overrides.openrouter_api_key {
             self.openrouter_api_key = Some(v);
@@ -345,6 +413,14 @@ impl Config {
             self.lead_model = Some(v);
         }
     }
+}
+
+/// `true` when `max_tokens` alone reserves at least half of
+/// `ollama_num_ctx` for output — see the warning in [`Config::validate`].
+/// Pure and free-standing so the threshold is unit-testable without
+/// constructing a whole `Config`.
+fn ollama_max_tokens_starves_the_prompt_budget(ollama_num_ctx: u32, max_tokens: u32) -> bool {
+    max_tokens.saturating_mul(2) >= ollama_num_ctx
 }
 
 #[cfg(test)]
@@ -450,6 +526,43 @@ mod tests {
         let env = vec![("BRAZE_MAX_TOKENS".to_string(), "0".to_string())];
         let err = Config::load_with(None, env).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    // --- B5 (docs/AUDITORIA-2026-07-v3.md): max_tokens starving the
+    // Ollama prompt budget is a warning, not an error ---
+
+    #[test]
+    fn ollama_max_tokens_starves_the_prompt_budget_at_stock_defaults() {
+        assert!(ollama_max_tokens_starves_the_prompt_budget(8192, 4096));
+    }
+
+    #[test]
+    fn ollama_max_tokens_does_not_starve_the_prompt_budget_with_a_smaller_max_tokens() {
+        assert!(!ollama_max_tokens_starves_the_prompt_budget(8192, 1024));
+    }
+
+    #[test]
+    fn the_stock_default_config_is_still_valid_despite_the_max_tokens_warning() {
+        // The warning above must never become a hard error — the stock
+        // defaults (ollama_num_ctx=8192, max_tokens=4096) are a valid,
+        // if suboptimal, configuration.
+        Config::default()
+            .validate()
+            .expect("the default config must load even though it triggers the max_tokens warning");
+    }
+
+    #[test]
+    fn a_non_ollama_default_backend_never_triggers_the_max_tokens_warning_path() {
+        // Same starving ratio, but `validate()` must not even look at it
+        // when Ollama isn't the active backend — a hard error here would
+        // mean the check regressed into unconditional.
+        let config = Config {
+            default_backend: "anthropic".to_string(),
+            max_tokens: 4096,
+            ollama_num_ctx: 8192,
+            ..Config::default()
+        };
+        assert!(config.validate().is_ok());
     }
 
     #[test]

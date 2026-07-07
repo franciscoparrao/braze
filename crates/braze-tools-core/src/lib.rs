@@ -13,7 +13,7 @@ mod registry;
 
 pub use error::ToolError;
 pub use provider::{ToolProvider, ToolSchema};
-pub use registry::ToolRegistry;
+pub use registry::{ToolRegistry, tool_stub_definition_bytes};
 
 // Re-exported for convenience: `ToolStub` is the shared vocabulary type
 // (lives in `braze-types` so `braze-model` can reference it without

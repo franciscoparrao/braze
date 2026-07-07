@@ -15,7 +15,7 @@ use braze_tools_core::ToolRegistry;
 use braze_types::{ContentBlock, Message, SessionId, ToolCall, ToolResult, ToolStub};
 
 use crate::error::EngineError;
-use crate::history::{build_messages, render_durable_events};
+use crate::history::{build_messages, render_durable_events, render_tactical_events};
 
 /// Default number of raw tactical events above which [`Engine::run_turn`]
 /// triggers a compaction pass before building the next model request. See
@@ -40,6 +40,27 @@ const TOOL_COMPLETION_TIMEOUT: Duration = Duration::from_secs(120);
 /// turn, just appended in `run_turn`), so the model's next request
 /// contained no trace of what was actually being asked.
 const KEEP_RAW_TAIL: usize = 6;
+
+/// Local tool names whose successful dispatch may change filesystem/
+/// environment state that another tool's result depends on — F6
+/// (docs/AUDITORIA-2026-07-v3.md): the repeated-call nudge in
+/// `dispatch_tool_calls` claims "the result has not changed", which is
+/// false for the canonical `read_file(x) → write_file(x) → read_file(x)`
+/// pattern (re-verifying an edit) — without this, the second `read_file`
+/// gets nudged and blocked from actually re-running instead of returning
+/// the file's real, now-different content. Read-only-by-default is the
+/// safe assumption here (mirrors `history.rs`'s `NEVER_CLEAR_TOOLS`
+/// starting empty) — MCP tools aren't covered; revisit with a read/write
+/// annotation on `ToolStub` if that becomes a real gap.
+const MUTATING_TOOL_NAMES: &[&str] = &["write_file", "edit_file", "shell_exec"];
+
+/// Consecutive zero-tool-call turns before `run_turn` injects the
+/// narration-without-action reminder (D5, docs/AUDITORIA-2026-07-v3.md).
+/// `2`: the *third* such turn in a row gets the reminder — one narrated
+/// response alone is often a legitimate conversational answer; two in a
+/// row against a request that should have produced a tool call is the
+/// pattern actually observed.
+const NARRATION_WITHOUT_ACTION_THRESHOLD: u32 = 2;
 
 /// Cap on the planning round's `max_tokens` (PLAN.md § "Split
 /// planificador/ejecutor") — plans are short numbered lists; letting the
@@ -97,6 +118,20 @@ pub struct Engine {
     /// into an explicit, diagnosable error instead of silent cross-talk
     /// if that ever changes.
     turn_in_progress: std::sync::atomic::AtomicBool,
+    /// How many *consecutive* turns ended with zero tool calls dispatched
+    /// (a plain text final answer, never a `dispatch_tool_calls` call) —
+    /// D5 (docs/AUDITORIA-2026-07-v3.md): the repeated-call nudge (A5) is
+    /// intra-turn and only fires in response to an actual tool call, so
+    /// it never catches this project's own documented failure mode — a
+    /// model that just keeps *narrating* an intended action turn after
+    /// turn without ever calling the tool for it (observed live against
+    /// qwen2.5:3b, `prompt.rs`'s doc comment). Reset to 0 the moment any
+    /// turn dispatches a real tool call; incremented only on the "final
+    /// text answer, no tool calls" success path in `run_turn`. Persists
+    /// across `run_turn` calls on the same `Engine` instance (a CLI
+    /// session's whole lifetime, barring a manual model switch or
+    /// process restart) — never read back from the session log.
+    consecutive_turns_without_tool_calls: std::sync::atomic::AtomicU32,
     /// Gates the textual tool-call rescue in [`Engine::complete_once`] —
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
@@ -203,6 +238,7 @@ impl Engine {
             best_of_n: 1,
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
             turn_in_progress: std::sync::atomic::AtomicBool::new(false),
+            consecutive_turns_without_tool_calls: std::sync::atomic::AtomicU32::new(0),
             textual_rescue_enabled: true,
             planner: None,
         }
@@ -305,21 +341,39 @@ impl Engine {
         observer: &mut dyn TurnObserver,
         emit_deltas: bool,
     ) -> Result<RoundOutcome, EngineError> {
-        self.complete_once_with(self.model.as_ref(), req, observer, emit_deltas)
-            .await
+        self.complete_once_with(
+            self.model.as_ref(),
+            req,
+            observer,
+            emit_deltas,
+            self.textual_rescue_enabled,
+        )
+        .await
     }
 
     /// [`Engine::complete_once`], parameterized on which backend answers
     /// — the executor (`self.model`) on the normal path, or the optional
     /// planner (`self.planner`) for the planning round (PLAN.md § "Split
     /// planificador/ejecutor"). Everything else (stream consumption,
-    /// truncation flag, textual rescue) is identical by construction.
+    /// truncation flag) is identical by construction.
+    ///
+    /// `rescue_enabled` is threaded separately from `self.textual_rescue_enabled`
+    /// — F7 (docs/AUDITORIA-2026-07-v3.md): the planning round always
+    /// passes `false` regardless of the executor's setting. A local
+    /// planner emitting its own native tool-template leak (e.g. Qwen's
+    /// `<tool_call>{...}</tool_call>`) while listing the concrete tools it
+    /// would use — exactly what `planning_system_prompt` asks for — would
+    /// otherwise have those blocks *removed* from the plan text before
+    /// `attempt_planning_round` even looks at `outcome.tool_calls`
+    /// (already ignored there), silently deleting the very steps that
+    /// named a tool from the persisted `PlanCreated` plan.
     async fn complete_once_with(
         &self,
         model: &dyn ModelBackend,
         req: CompletionRequest,
         observer: &mut dyn TurnObserver,
         emit_deltas: bool,
+        rescue_enabled: bool,
     ) -> Result<RoundOutcome, EngineError> {
         let mut stream = model.complete(req).await?;
 
@@ -420,26 +474,44 @@ impl Engine {
         // markers — admits surrounding prose and several calls per
         // response; the inner grammar may be qwen2.5's JSON or
         // qwen3-coder's `<function=…>` XML), then (2) a bare
-        // `<function=…>` XML block without the wrapper, then (3) a bare
-        // JSON object that is the entire response (optionally
-        // ```json-fenced).
-        if self.textual_rescue_enabled && tool_calls.is_empty() {
-            let (tagged, remaining_text) = extract_tagged_tool_calls(&text_buffer);
-            let (tagged, remaining_text, format) = if tagged.is_empty() {
-                let (xml, remaining_text) = extract_function_xml_tool_calls(&text_buffer);
-                (xml, remaining_text, "<function=> XML (qwen3-coder)")
-            } else {
-                (tagged, remaining_text, "<tool_call> tagged (Qwen/Hermes)")
-            };
-            if !tagged.is_empty() {
-                tracing::info!(
-                    count = tagged.len(),
-                    format,
-                    "rescued tool call(s) emitted as text in a native tool-template format instead of structured tool_calls entries"
-                );
-                tool_calls.extend(tagged);
-                text_buffer = remaining_text;
-            } else if let Some(rescued) = try_parse_textual_tool_call(&text_buffer) {
+        // `<function=…>` XML block without the wrapper, then (3) Llama
+        // 3.x's native "pythonic" format (C2, docs/AUDITORIA-2026-07-v3.md
+        // — the escalera covered Qwen's two formats but nothing for
+        // Llama, one of the most commonly installed local model
+        // families), then (4) a bare JSON object that is the entire
+        // response (optionally ```json-fenced).
+        if rescue_enabled && tool_calls.is_empty() {
+            type TextualExtractor = fn(&str) -> (Vec<ToolCall>, String);
+            const RESCUE_LADDER: &[(TextualExtractor, &str)] = &[
+                (
+                    extract_tagged_tool_calls,
+                    "<tool_call> tagged (Qwen/Hermes)",
+                ),
+                (
+                    extract_function_xml_tool_calls,
+                    "<function=> XML (qwen3-coder)",
+                ),
+                (extract_pythonic_tool_calls, "pythonic [func(...)] (Llama)"),
+            ];
+
+            let mut rescued_from_ladder = false;
+            for (extract, format) in RESCUE_LADDER {
+                let (calls, remaining_text) = extract(&text_buffer);
+                if !calls.is_empty() {
+                    tracing::info!(
+                        count = calls.len(),
+                        format,
+                        "rescued tool call(s) emitted as text in a native tool-template format instead of structured tool_calls entries"
+                    );
+                    tool_calls.extend(calls);
+                    text_buffer = remaining_text;
+                    rescued_from_ladder = true;
+                    break;
+                }
+            }
+
+            if !rescued_from_ladder && let Some(rescued) = try_parse_textual_tool_call(&text_buffer)
+            {
                 tracing::info!(
                     tool = %rescued.name,
                     "rescued a tool call the model emitted as plain text instead of a structured tool_calls entry"
@@ -624,6 +696,28 @@ impl Engine {
         )
         .await?;
 
+        // D5: the streak reflects *previous* turns only (this turn hasn't
+        // run yet) — reusing the plain `UserMessage` event kind rather
+        // than adding a new `AgentEvent` variant just for this.
+        if self
+            .consecutive_turns_without_tool_calls
+            .load(std::sync::atomic::Ordering::SeqCst)
+            >= NARRATION_WITHOUT_ACTION_THRESHOLD
+        {
+            self.append_and_notify(
+                session,
+                &AgentEvent::UserMessage {
+                    text: "[Reminder] Your last few responses described an intended action \
+                           without actually calling the tool for it. If you're being asked \
+                           to do something, call the appropriate tool now instead of \
+                           describing or restating the plan."
+                        .to_string(),
+                },
+                observer,
+            )
+            .await?;
+        }
+
         let mut messages = self.load_messages(session, observer).await?;
 
         // PLAN.md § "Split planificador/ejecutor": optional one-shot
@@ -653,6 +747,16 @@ impl Engine {
             seen_calls: HashSet::new(),
             known_tool_call_ids: Self::existing_tool_call_ids(&existing_events),
         };
+
+        // D5: whether *any* round of this specific turn has dispatched a
+        // tool call yet — decides, at every exit point below, whether
+        // this turn counts toward `consecutive_turns_without_tool_calls`
+        // or breaks the streak. Local to this call, unlike the `Engine`
+        // field it eventually updates: a turn that calls a tool in an
+        // early round and then converges with a plain-text answer in a
+        // later round must NOT count as "narration only" just because its
+        // *last* round happened to have no tool calls.
+        let mut any_tool_calls_this_turn = false;
 
         for round in 0..MAX_TURN_ITERATIONS {
             // N-16 (docs/AUDITORIA-2026-07-v2.md): the lossy variant
@@ -737,6 +841,15 @@ impl Engine {
                     observer,
                 )
                 .await?;
+                // D5: only a turn that *never* dispatched a tool call
+                // (not just "this round didn't") counts toward the streak.
+                if any_tool_calls_this_turn {
+                    self.consecutive_turns_without_tool_calls
+                        .store(0, std::sync::atomic::Ordering::SeqCst);
+                } else {
+                    self.consecutive_turns_without_tool_calls
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
                 return Ok(());
             }
 
@@ -760,9 +873,17 @@ impl Engine {
                 observer,
             )
             .await?;
+            any_tool_calls_this_turn = true;
 
             messages = self.load_messages(session, observer).await?;
         }
+
+        // Fell through with `MAX_TURN_ITERATIONS` rounds exhausted — every
+        // one of them had a non-empty `tool_calls` (any empty round would
+        // have returned above), so this turn definitely isn't "narration
+        // only"; D5's streak resets here too.
+        self.consecutive_turns_without_tool_calls
+            .store(0, std::sync::atomic::Ordering::SeqCst);
 
         self.attempt_final_summary_round(session, &messages, observer)
             .await
@@ -815,8 +936,13 @@ impl Engine {
         // `emit_deltas: false`: the plan reaches frontends once, as the
         // `PlanCreated` event mirror — streaming its text live too would
         // render it twice in the TUI (markdown preview + PlanCell).
+        // `rescue_enabled: false` (F7, docs/AUDITORIA-2026-07-v3.md): a
+        // plan step naming a tool in the planner's own native
+        // tool-template syntax must survive as plan *text*, not be
+        // extracted and discarded by the textual rescue before this
+        // function even sees it.
         let outcome = match self
-            .complete_once_with(planner.as_ref(), req, observer, false)
+            .complete_once_with(planner.as_ref(), req, observer, false, false)
             .await
         {
             Ok(outcome) => outcome,
@@ -988,6 +1114,11 @@ impl Engine {
 
         let mut handle_to_id: HashMap<TaskHandle, String> = HashMap::new();
         let mut pending: HashSet<TaskHandle> = HashSet::new();
+        // F6: resolves a completed call's id back to its tool name, so a
+        // successful completion can be checked against
+        // `MUTATING_TOOL_NAMES` without threading the name through the
+        // background task machinery.
+        let mut id_to_name: HashMap<String, String> = HashMap::new();
 
         for call in tool_calls {
             // N-14 (docs/AUDITORIA-2026-07-v2.md): shadow `call` with an
@@ -1001,7 +1132,7 @@ impl Engine {
             // gave the same id) enters the append-only log as two
             // `tool_use`/`tool_result` pairs sharing one id — Anthropic
             // rejects that with a permanent 400 on every future request.
-            let call = ToolCall {
+            let mut call = ToolCall {
                 id: ensure_unique_tool_call_id(call.id.clone(), known_tool_call_ids),
                 name: call.name.clone(),
                 arguments: call.arguments.clone(),
@@ -1071,6 +1202,17 @@ impl Engine {
             // rather than a hard resolution failure.
             match self.tools.resolve(&call.name).await {
                 Ok(schema) => {
+                    // F2 (docs/AUDITORIA-2026-07-v3.md): the qwen3-coder
+                    // XML rescue (`parse_function_xml_tool_call`) has no
+                    // native number/boolean grammar, so every scalar
+                    // param comes back as a string, and a code-carrying
+                    // string param can come back mis-parsed as a JSON
+                    // object — both fail schema validation deterministically
+                    // even though the model's *intent* was correct. A
+                    // no-op for wire-sourced calls, whose backend already
+                    // sends correctly-typed JSON.
+                    coerce_arguments_to_schema(&mut call.arguments, &schema.input_schema);
+
                     if let Err(validation_err) =
                         jsonschema::validate(&schema.input_schema, &call.arguments)
                     {
@@ -1189,6 +1331,8 @@ impl Engine {
             )
             .await?;
 
+            id_to_name.insert(call.id.clone(), call.name.clone());
+
             let tools = Arc::clone(&self.tools);
             let call_owned = call.clone();
             let label = call.name.clone();
@@ -1249,6 +1393,21 @@ impl Engine {
                         is_error = result.is_error,
                         "tool call completed"
                     );
+                    // F6 (docs/AUDITORIA-2026-07-v3.md): a successful
+                    // mutating tool call invalidates the whole
+                    // repeated-call streak — any prior `read_file`
+                    // (or other) call recorded in `seen_calls` might now
+                    // return something different, so a later identical
+                    // repeat must be allowed to actually re-run instead
+                    // of being nudged with a claim ("the result has not
+                    // changed") that's no longer true.
+                    if !result.is_error
+                        && id_to_name
+                            .get(&id)
+                            .is_some_and(|name| MUTATING_TOOL_NAMES.contains(&name.as_str()))
+                    {
+                        seen_calls.clear();
+                    }
                     self.append_and_notify(
                         session,
                         &AgentEvent::ToolCallCompleted { id, result },
@@ -1670,7 +1829,7 @@ fn parse_tool_call_json(candidate: &str) -> Option<ToolCall> {
         .get("arguments")
         .or_else(|| value.get("parameters"))?
         .clone();
-    if !arguments.is_object() {
+    if !arguments.is_object() || looks_like_json_schema_definition(&arguments) {
         return None;
     }
     Some(ToolCall {
@@ -1678,6 +1837,26 @@ fn parse_tool_call_json(candidate: &str) -> Option<ToolCall> {
         name,
         arguments,
     })
+}
+
+/// `true` when `value` has the shape of a JSON-Schema object
+/// (`{"type":"object","properties":{...}}`) rather than actual tool-call
+/// arguments — F1 (docs/AUDITORIA-2026-07-v3.md): `parameters` doubles as
+/// OpenAI's name for both a tool call's *arguments* and a tool
+/// *definition*'s schema, so `{"name":"get_weather","parameters":
+/// {"type":"object","properties":{...}}}` — the single most common shape
+/// in tool-calling documentation, a very plausible response to "explain
+/// how to define a tool" — would otherwise pass the shape check (an
+/// object) and get despatched with the schema as if it were the
+/// arguments. Real tool-call arguments essentially never carry both a
+/// literal `type: "object"` field and a `properties` field at their own
+/// top level.
+fn looks_like_json_schema_definition(value: &serde_json::Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    matches!(obj.get("type"), Some(serde_json::Value::String(t)) if t == "object")
+        && obj.contains_key("properties")
 }
 
 /// Rescue for the tagged textual format the Qwen family (and other
@@ -1714,6 +1893,21 @@ fn extract_tagged_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
         };
         let block_end = start + OPEN_TAG.len() + inner_len + CLOSE_TAG.len();
         let inner = &after_open[..inner_len];
+
+        // F1 (docs/AUDITORIA-2026-07-v3.md): a block sitting inside a
+        // fenced code sample is the model *showing* the format (e.g.
+        // answering "how does Qwen emit tool calls?"), not a real leaked
+        // attempt — a genuine leak is never fenced, since fencing it
+        // would be a successful, intentional act of formatting, not the
+        // failure to honor the tool-call template this rescue exists to
+        // recover from.
+        let absolute_start = text.len() - rest.len() + start;
+        if is_inside_code_fence(text, absolute_start) {
+            remaining.push_str(&rest[..block_end]);
+            rest = &rest[block_end..];
+            continue;
+        }
+
         // The wrapper admits two inner grammars: qwen2.5's JSON object,
         // and qwen3-coder's `<function=...>` XML (which its template
         // nests inside the same `<tool_call>` tags).
@@ -1738,6 +1932,27 @@ fn extract_tagged_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
     (calls, remaining.trim().to_string())
 }
 
+/// `true` when `offset` (a byte index into `text`) falls inside a
+/// ``` ... ``` fenced region — toggled each time a literal "```" marker
+/// is seen (doesn't require the fence to be alone on its own line; models
+/// are consistent enough about this marker that the simpler check is
+/// worth the tiny false-positive risk of a stray triple-backtick in
+/// prose). Used to keep the tagged/XML rescues from firing on a fenced
+/// example rather than a genuine leaked tool call (hallazgo F1).
+fn is_inside_code_fence(text: &str, offset: usize) -> bool {
+    let mut in_fence = false;
+    let mut search_from = 0;
+    while let Some(rel) = text[search_from..].find("```") {
+        let idx = search_from + rel;
+        if idx >= offset {
+            break;
+        }
+        in_fence = !in_fence;
+        search_from = idx + 3;
+    }
+    in_fence
+}
+
 /// Rescue for *bare* `<function=...>` blocks — qwen3-coder's XML grammar
 /// emitted without its usual `<tool_call>` wrapper (observed leak mode
 /// when the template isn't honored end-to-end). Same contract as
@@ -1756,6 +1971,17 @@ fn extract_function_xml_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
             break; // unclosed: the final push keeps everything visible
         };
         let block_end = start + inner_len + CLOSE_TAG.len();
+
+        // F1 (docs/AUDITORIA-2026-07-v3.md): see the identical check in
+        // `extract_tagged_tool_calls` — a fenced occurrence is the model
+        // showing an example, not a real leaked call.
+        let absolute_start = text.len() - rest.len() + start;
+        if is_inside_code_fence(text, absolute_start) {
+            remaining.push_str(&rest[..block_end]);
+            rest = &rest[block_end..];
+            continue;
+        }
+
         match parse_function_xml_tool_call(&rest[start..block_end]) {
             Some(call) => {
                 calls.push(call);
@@ -1830,6 +2056,341 @@ fn parse_function_xml_tool_call(block: &str) -> Option<ToolCall> {
     })
 }
 
+/// Rescue for Llama 3.x's native "pythonic" tool-call format — distinct
+/// from Qwen's tagged/XML formats above: one or more comma-separated
+/// `name(key=value, ...)` call expressions wrapped in a single pair of
+/// square brackets, e.g. `[get_weather(city="SF", metric="celsius")]`.
+/// See docs/AUDITORIA-2026-07-v3.md, hallazgo C2 — the rescue escalera
+/// covered Qwen's two native formats but nothing for Llama, one of the
+/// most commonly installed local model families via Ollama.
+///
+/// Same contract as [`extract_tagged_tool_calls`]/[`extract_function_xml_tool_calls`]:
+/// parsed calls are removed from the returned text, surrounding prose is
+/// preserved verbatim, and a bracketed block that doesn't parse cleanly
+/// is left in the text rather than guessed at (`None` for anything not
+/// unambiguously a call: an unrecognized argument shape fails the whole
+/// call, not just that one argument). The bracket wrapper is what makes
+/// this safe to scan for unprompted — plain prose describing a function
+/// call rarely wraps it in literal `[...]`, unlike a bare `name(...)`
+/// pattern which risks matching prose like "call read_file(path) to
+/// check" — the exact ambiguity this project's other rescues are careful
+/// to avoid.
+fn extract_pythonic_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
+    let mut calls = Vec::new();
+    let mut remaining = String::new();
+    let mut rest = text;
+
+    while let Some(start) = find_pythonic_block_start(rest) {
+        let Some(close_offset) = matching_bracket_end(&rest[start..]) else {
+            break; // unclosed '[': stop scanning, leave the rest visible
+        };
+        let block_end = start + close_offset + 1; // include the ']'
+        let inner = &rest[start + 1..block_end - 1];
+        match parse_pythonic_calls(inner) {
+            Some(parsed) => {
+                calls.extend(parsed);
+                remaining.push_str(&rest[..start]);
+            }
+            // Malformed inner content: keep the whole bracketed block in
+            // the text — clearly *meant* as a tool call, but inventing a
+            // repair here risks running something the model didn't say.
+            None => remaining.push_str(&rest[..block_end]),
+        }
+        rest = &rest[block_end..];
+    }
+
+    if calls.is_empty() {
+        return (calls, text.to_string());
+    }
+    remaining.push_str(rest);
+    (calls, remaining.trim().to_string())
+}
+
+/// Finds the byte offset of a `[` in `text` that's immediately (modulo
+/// whitespace) followed by what looks like the start of a call
+/// expression (`identifier(`) — the signal that this bracket is a
+/// pythonic tool-call wrapper, not an unrelated list literal or markdown
+/// link.
+fn find_pythonic_block_start(text: &str) -> Option<usize> {
+    let mut search_from = 0;
+    while let Some(rel) = text[search_from..].find('[') {
+        let idx = search_from + rel;
+        if looks_like_pythonic_call_start(&text[idx + 1..]) {
+            return Some(idx);
+        }
+        search_from = idx + 1;
+    }
+    None
+}
+
+/// `true` when `s` (the text right after a candidate `[`) starts with an
+/// identifier immediately followed by `(` — allowing leading whitespace
+/// before the identifier, none between the identifier and `(`.
+fn looks_like_pythonic_call_start(s: &str) -> bool {
+    let s = s.trim_start();
+    let ident_len: usize = s
+        .char_indices()
+        .take_while(|&(i, c)| {
+            if i == 0 {
+                c.is_ascii_alphabetic() || c == '_'
+            } else {
+                c.is_ascii_alphanumeric() || c == '_'
+            }
+        })
+        .count();
+    ident_len > 0 && s[ident_len..].starts_with('(')
+}
+
+/// Given `s` starting with `[`, finds the byte offset (within `s`) of the
+/// matching `]` — tracking nested `[`/`]` depth and skipping
+/// bracket-like characters inside quoted string arguments (`"..."`/
+/// `'...'`, with backslash-escaped quotes). `None` if never closed.
+fn matching_bracket_end(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_string: Option<char> = None;
+    let mut escaped = false;
+    for (i, c) in s.char_indices() {
+        if let Some(quote) = in_string {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == quote {
+                in_string = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => in_string = Some(c),
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Splits `s` on top-level occurrences of `sep` — one not nested inside
+/// `(...)`/`[...]` or a quoted string. Shared by [`extract_pythonic_tool_calls`]'s
+/// two split points: several calls inside the outer brackets, and
+/// `key=value` pairs inside one call's parens.
+fn split_top_level(s: &str, sep: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut in_string: Option<char> = None;
+    let mut escaped = false;
+    let mut start = 0usize;
+
+    for (i, c) in s.char_indices() {
+        if let Some(quote) = in_string {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == quote {
+                in_string = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' => in_string = Some(c),
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            _ if c == sep && depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+/// Parses `inner` (the content between the outer `[`/`]`) as one or more
+/// top-level `name(args)` call expressions. `None` if any expression
+/// doesn't unambiguously parse as a call — the whole bracketed block is
+/// then left as text by the caller rather than partially rescued.
+fn parse_pythonic_calls(inner: &str) -> Option<Vec<ToolCall>> {
+    let mut calls = Vec::new();
+    for expr in split_top_level(inner, ',') {
+        let expr = expr.trim();
+        if expr.is_empty() {
+            continue;
+        }
+        calls.push(parse_pythonic_call(expr)?);
+    }
+    if calls.is_empty() { None } else { Some(calls) }
+}
+
+/// Parses one `name(key=value, ...)` call expression.
+fn parse_pythonic_call(expr: &str) -> Option<ToolCall> {
+    let open = expr.find('(')?;
+    let name = expr[..open].trim();
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    let rest = expr[open..].trim();
+    let args_str = rest.strip_prefix('(')?.strip_suffix(')')?;
+
+    let mut arguments = serde_json::Map::new();
+    for pair in split_top_level(args_str, ',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value_str) = pair.split_once('=')?;
+        let key = key.trim();
+        if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return None;
+        }
+        arguments.insert(key.to_string(), parse_pythonic_value(value_str.trim())?);
+    }
+
+    Some(ToolCall {
+        id: format!("rescued-{}", uuid::Uuid::new_v4()),
+        name: name.to_string(),
+        arguments: serde_json::Value::Object(arguments),
+    })
+}
+
+/// Parses one pythonic scalar literal: a quoted string, `true`/`false`
+/// (Python or JSON casing), or a number. No lists/dicts/`None` —
+/// deliberately scoped to hallazgo C2's ask (string/number/bool); an
+/// argument shaped like anything else fails the whole call rather than
+/// guessing at a representation.
+fn parse_pythonic_value(s: &str) -> Option<serde_json::Value> {
+    if let Some(unquoted) = strip_matching_quotes(s) {
+        return Some(serde_json::Value::String(unquoted));
+    }
+    match s {
+        "true" | "True" => return Some(serde_json::Value::Bool(true)),
+        "false" | "False" => return Some(serde_json::Value::Bool(false)),
+        _ => {}
+    }
+    if let Ok(n) = s.parse::<i64>() {
+        return Some(serde_json::Value::Number(n.into()));
+    }
+    if let Ok(n) = s.parse::<f64>()
+        && let Some(num) = serde_json::Number::from_f64(n)
+    {
+        return Some(serde_json::Value::Number(num));
+    }
+    None
+}
+
+/// Strips a matching pair of leading/trailing `"`/`'` quotes and
+/// unescapes `\"`/`\'`/`\\` — the minimal escape set; anything else
+/// (`\n`, etc.) passes through literally rather than guessing at Python
+/// string-escape semantics. `None` if `s` isn't quoted (or the quotes
+/// don't match).
+fn strip_matching_quotes(s: &str) -> Option<String> {
+    if s.len() < 2 {
+        return None;
+    }
+    let quote = s.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    if !s.ends_with(quote) {
+        return None;
+    }
+    let inner = &s[quote.len_utf8()..s.len() - quote.len_utf8()];
+
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.peek() {
+                Some(&next) if next == quote || next == '\\' => {
+                    out.push(next);
+                    chars.next();
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        out.push(c);
+    }
+    Some(out)
+}
+
+/// Coerces `arguments` in place to match `schema`'s declared property
+/// types, one level deep — narrowly targeted at
+/// [`parse_function_xml_tool_call`]'s grammar, which has no native
+/// number/boolean type, so every scalar param comes back as a JSON
+/// string, and a code-carrying string value can come back mis-parsed as
+/// a JSON object (docs/AUDITORIA-2026-07-v3.md, hallazgo F2). Two
+/// directions:
+/// - a string where the schema declares `integer`/`number`/`boolean` is
+///   parsed into that type; left untouched if parsing fails — schema
+///   validation, not this function, is what surfaces the real error to
+///   the model;
+/// - an object/array where the schema declares `string` is re-serialized
+///   back to compact JSON text (the mirror-image mistake: the grammar
+///   treats any value starting with `{`/`[` as structured, so
+///   `<parameter=content>{"a":1}</parameter>` for a `content: string`
+///   field parses as an object instead of the literal text).
+///
+/// A no-op for arguments that already match their schema's declared
+/// types — the common case for wire-sourced tool calls, whose backend
+/// already sends correctly-typed JSON — so this is safe to call
+/// unconditionally before validating/dispatching any call, rescued or
+/// not.
+fn coerce_arguments_to_schema(arguments: &mut serde_json::Value, schema: &serde_json::Value) {
+    let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) else {
+        return;
+    };
+    let Some(args) = arguments.as_object_mut() else {
+        return;
+    };
+
+    for (key, prop_schema) in properties {
+        let Some(value) = args.get_mut(key) else {
+            continue;
+        };
+        let Some(expected_type) = prop_schema.get("type").and_then(|t| t.as_str()) else {
+            continue;
+        };
+
+        if let Some(s) = value.as_str() {
+            let s = s.trim().to_string();
+            match expected_type {
+                "integer" => {
+                    if let Ok(n) = s.parse::<i64>() {
+                        *value = serde_json::Value::Number(n.into());
+                    }
+                }
+                "number" => {
+                    if let Ok(n) = s.parse::<f64>()
+                        && let Some(num) = serde_json::Number::from_f64(n)
+                    {
+                        *value = serde_json::Value::Number(num);
+                    }
+                }
+                "boolean" => match s.as_str() {
+                    "true" => *value = serde_json::Value::Bool(true),
+                    "false" => *value = serde_json::Value::Bool(false),
+                    _ => {}
+                },
+                _ => {}
+            }
+        } else if matches!(
+            value,
+            serde_json::Value::Object(_) | serde_json::Value::Array(_)
+        ) && expected_type == "string"
+            && let Ok(text) = serde_json::to_string(value)
+        {
+            *value = serde_json::Value::String(text);
+        }
+    }
+}
+
 /// System prompt for the planning round (PLAN.md § "Split
 /// planificador/ejecutor"): the base prompt plus planning instructions
 /// and the tool list inlined as text — the planner sees the same working
@@ -1901,19 +2462,25 @@ fn event_text_len(event: &AgentEvent) -> usize {
 /// *count* alone can't tell a two-word `AssistantText` apart from a
 /// `ToolCallCompleted` carrying a 200KB file dump.
 ///
-/// `durable_events` is measured through [`render_durable_events`] — the
-/// *cleared* form actually sent to the model — rather than the raw event
-/// payload (N-6, docs/AUDITORIA-2026-07-v2.md). `durable_events` never
-/// shrinks once settled (compaction only ever folds `tactical`), so
-/// over-counting it here means the estimate can never drop back under
-/// budget no matter how many times `load_messages` compacts — exactly the
-/// "modo compactación permanente" pathology A2/C2 already fixed for the
-/// event-count trigger, reachable again through this one.
+/// Both sides are measured through what `build_messages` would actually
+/// render, not the raw event payload: `durable_events` through
+/// [`render_durable_events`] (N-6, docs/AUDITORIA-2026-07-v2.md) and
+/// `tactical` through [`render_tactical_events`] (B2,
+/// docs/AUDITORIA-2026-07-v3.md — the ACI collapse can shrink old
+/// observations to one line, so estimating the raw content overstates
+/// what's actually sent and can trigger compaction that doesn't reduce
+/// the *real* prompt at all). `durable_events` never shrinks once settled
+/// (compaction only ever folds `tactical`), so over-counting it here
+/// means the estimate can never drop back under budget no matter how many
+/// times `load_messages` compacts — exactly the "modo compactación
+/// permanente" pathology A2/C2 already fixed for the event-count trigger,
+/// reachable again through either uncollapsed side.
 fn estimate_prompt_tokens(durable: &DurableState, tactical: &[AgentEvent]) -> u32 {
     let summary_tokens = (durable.summary.len() / 4) as u32;
     let durable_events_tokens =
         estimate_message_tokens(&render_durable_events(&durable.durable_events));
-    summary_tokens + durable_events_tokens + estimate_dropped_tokens(tactical)
+    let tactical_tokens = estimate_message_tokens(&render_tactical_events(tactical));
+    summary_tokens + durable_events_tokens + tactical_tokens
 }
 
 /// Rough token estimate (~4 chars/token) over already-rendered `Message`s
@@ -2290,6 +2857,146 @@ mod tests {
                 content: format!("echoed: {text}"),
                 is_error: false,
             })
+        }
+    }
+
+    /// Like `EchoToolProvider`, but its schema declares an `integer`
+    /// field — used to test F2 (docs/AUDITORIA-2026-07-v3.md):
+    /// `coerce_arguments_to_schema` must turn a stringified integer from
+    /// the qwen3-coder XML rescue (whose grammar has no native number
+    /// type) into a real JSON number before validation/dispatch, instead
+    /// of failing schema validation and burning a repair round.
+    struct EchoWithLimitToolProvider {
+        invocations: Arc<AtomicU32>,
+        received_limit: Arc<std::sync::Mutex<Option<serde_json::Value>>>,
+    }
+
+    impl EchoWithLimitToolProvider {
+        fn new(
+            invocations: Arc<AtomicU32>,
+            received_limit: Arc<std::sync::Mutex<Option<serde_json::Value>>>,
+        ) -> Self {
+            Self {
+                invocations,
+                received_limit,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToolProvider for EchoWithLimitToolProvider {
+        fn provider_id(&self) -> &str {
+            "test:echo_limit"
+        }
+
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            Ok(vec![ToolStub {
+                name: "echo_limit".to_string(),
+                summary: "echoes with a numeric limit".to_string(),
+                source: "test:echo_limit".to_string(),
+                input_schema: None,
+            }])
+        }
+
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            if name == "echo_limit" {
+                Ok(Some(ToolSchema {
+                    name: "echo_limit".to_string(),
+                    description: "echoes with a numeric limit".to_string(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "limit": {"type": "integer"},
+                        },
+                        "required": ["text", "limit"],
+                    }),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            self.invocations.fetch_add(1, Ordering::SeqCst);
+            *self.received_limit.lock().unwrap() = call.arguments.get("limit").cloned();
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: "ok".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    /// Mock provider offering tools named exactly like two of the real
+    /// local built-ins — used to test F6
+    /// (docs/AUDITORIA-2026-07-v3.md) against the actual names
+    /// `MUTATING_TOOL_NAMES` lists, not stand-ins.
+    struct ReadWriteToolProvider {
+        read_invocations: Arc<AtomicU32>,
+    }
+
+    impl ReadWriteToolProvider {
+        fn new(read_invocations: Arc<AtomicU32>) -> Self {
+            Self { read_invocations }
+        }
+    }
+
+    #[async_trait]
+    impl ToolProvider for ReadWriteToolProvider {
+        fn provider_id(&self) -> &str {
+            "test:read_write"
+        }
+
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            Ok(vec![
+                ToolStub {
+                    name: "read_file".to_string(),
+                    summary: "reads a file".to_string(),
+                    source: "test:read_write".to_string(),
+                    input_schema: None,
+                },
+                ToolStub {
+                    name: "write_file".to_string(),
+                    summary: "writes a file".to_string(),
+                    source: "test:read_write".to_string(),
+                    input_schema: None,
+                },
+            ])
+        }
+
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            if name != "read_file" && name != "write_file" {
+                return Ok(None);
+            }
+            Ok(Some(ToolSchema {
+                name: name.to_string(),
+                description: name.to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                }),
+            }))
+        }
+
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            match call.name.as_str() {
+                "read_file" => {
+                    self.read_invocations.fetch_add(1, Ordering::SeqCst);
+                    Ok(ToolResult {
+                        tool_call_id: call.id.clone(),
+                        content: "contenido".to_string(),
+                        is_error: false,
+                    })
+                }
+                "write_file" => Ok(ToolResult {
+                    tool_call_id: call.id.clone(),
+                    content: "wrote".to_string(),
+                    is_error: false,
+                }),
+                other => Err(ToolError::NotFound(other.to_string())),
+            }
         }
     }
 
@@ -3653,6 +4360,77 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    /// F7 (docs/AUDITORIA-2026-07-v3.md): `planning_system_prompt` asks
+    /// the planner to name the concrete tools it would use. A local
+    /// planner answering in its own native tool-template syntax (e.g.
+    /// Qwen's `<tool_call>{...}</tool_call>`) must have that block survive
+    /// as plain plan *text* — the textual rescue, shared with the
+    /// executor by default before this fix, would otherwise extract and
+    /// remove it from the plan before `attempt_planning_round` even
+    /// looks at `outcome.tool_calls` (already ignored there regardless).
+    #[tokio::test]
+    async fn a_planners_native_tool_template_leak_survives_as_plan_text_not_rescued() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta(
+                "1. <tool_call>{\"name\": \"read_file\", \"arguments\": {\"path\": \"x\"}}</tool_call>\n\
+                 2. responder"
+                    .to_string(),
+            ),
+            CompletionEvent::Done,
+        ]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            0,
+            "the leaked block must never be dispatched as a real call"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::PlanCreated { .. }))
+            .expect("expected a PlanCreated event")
+        {
+            AgentEvent::PlanCreated { plan } => {
+                assert!(
+                    plan.contains("<tool_call>"),
+                    "the tagged block must survive as plan text, got: {plan}"
+                );
+                assert!(plan.contains("read_file"), "got: {plan}");
+            }
+            _ => unreachable!(),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     /// Records everything the engine mirrors into it, for asserting the
     /// live `TurnObserver` seam (PLAN.md § "Fase TUI — diseño", oleada 1)
     /// sees exactly what gets persisted, in the same order.
@@ -4071,6 +4849,267 @@ mod tests {
             }
             _ => unreachable!(),
         }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// F6 (docs/AUDITORIA-2026-07-v3.md): `read_file(x)` → `write_file(x)`
+    /// → `read_file(x)` again is a legitimate re-verification pattern —
+    /// the second `read_file` must actually re-run (the write may have
+    /// changed what it returns), not get nudged with a now-false "the
+    /// result has not changed" claim.
+    #[tokio::test]
+    async fn a_repeated_read_after_a_mutating_call_actually_redispatches() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let read_args = serde_json::json!({ "path": "x.txt" });
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: read_args.clone(),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({ "path": "x.txt", "content": "new" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                // Same (name, arguments) as call-1 — but a write happened
+                // in between, so this must actually re-run.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-3".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: read_args,
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let read_invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::clone(
+                &read_invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "read x, write x, read x again", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            read_invocations.load(Ordering::SeqCst),
+            2,
+            "the second read_file, after an intervening write_file, must actually re-run"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-3"))
+            .expect("expected a ToolCallCompleted for call-3")
+        {
+            AgentEvent::ToolCallCompleted { result, .. } => {
+                assert!(!result.is_error, "must not be nudged: {result:?}");
+                assert_eq!(result.content, "contenido");
+            }
+            other => panic!("expected ToolCallCompleted, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- D5 (docs/AUDITORIA-2026-07-v3.md): narration-without-action
+    // across several turns ---
+
+    /// The nudge that already exists (A5) only fires in response to a
+    /// *tool call* being repeated — it never catches a model that just
+    /// keeps narrating across turns without ever calling a tool. After
+    /// `NARRATION_WITHOUT_ACTION_THRESHOLD` (2) such turns, the 3rd turn
+    /// must carry an extra reminder alongside the user's own message.
+    #[tokio::test]
+    async fn narration_without_action_across_several_turns_injects_a_reminder() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("ok, entiendo".to_string()),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("voy a hacerlo".to_string()),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("dale, ahora si".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "guarda el archivo", &mut NoopObserver)
+            .await
+            .expect("turn 1 should succeed");
+        engine
+            .run_turn(&session, "hazlo ahora", &mut NoopObserver)
+            .await
+            .expect("turn 2 should succeed");
+        engine
+            .run_turn(&session, "por favor hazlo", &mut NoopObserver)
+            .await
+            .expect("turn 3 should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let user_texts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::UserMessage { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            user_texts,
+            vec![
+                "guarda el archivo",
+                "hazlo ahora",
+                "por favor hazlo",
+                "[Reminder] Your last few responses described an intended action without \
+                 actually calling the tool for it. If you're being asked to do something, \
+                 call the appropriate tool now instead of describing or restating the plan.",
+            ],
+            "the reminder must appear exactly once, appended right after the 3rd turn's \
+             own user message (2 prior narration-only turns crossed the threshold)"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A turn that dispatches a real tool call resets the streak to 0,
+    /// even though the model still converges with a plain-text final
+    /// answer *in that same turn* (a later round with no tool calls must
+    /// not, on its own, count that whole turn as "narration only" — see
+    /// `any_tool_calls_this_turn`'s doc comment). Sequence: 1 narration
+    /// turn (streak→1), 1 turn that calls a tool then answers in text
+    /// (streak must reset, not reach 2), then 2 more narration turns —
+    /// without the reset, the 4th turn here would already be the 3rd
+    /// *consecutive* narration-only turn and would wrongly carry the
+    /// reminder.
+    #[tokio::test]
+    async fn a_dispatched_tool_call_resets_the_narration_streak() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let model = ScriptedModel::new(vec![
+            // Turn 1: narration only (streak 0 -> 1).
+            vec![
+                CompletionEvent::TextDelta("ok".to_string()),
+                CompletionEvent::Done,
+            ],
+            // Turn 2: dispatches a tool call...
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            // ...then converges with a plain-text final answer in the
+            // very same turn — must still reset the streak to 0, not
+            // leave/advance it based on this last round alone.
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+            // Turn 3: narration only (streak 0 -> 1, thanks to turn 2's reset).
+            vec![
+                CompletionEvent::TextDelta("ok".to_string()),
+                CompletionEvent::Done,
+            ],
+            // Turn 4: narration only (streak 1 -> 2) — still below
+            // threshold, so this turn must NOT carry the reminder.
+            vec![
+                CompletionEvent::TextDelta("ok again".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "a", &mut NoopObserver)
+            .await
+            .unwrap();
+        engine
+            .run_turn(&session, "b", &mut NoopObserver)
+            .await
+            .unwrap();
+        engine
+            .run_turn(&session, "c", &mut NoopObserver)
+            .await
+            .unwrap();
+        engine
+            .run_turn(&session, "d", &mut NoopObserver)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "turn 2's tool call must have actually dispatched"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events.iter().any(
+                |e| matches!(e, AgentEvent::UserMessage { text } if text.contains("[Reminder]"))
+            ),
+            "turn 2's dispatched tool call must have reset the streak — only 2 \
+             consecutive narration-only turns (3, 4) followed it, below the threshold"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -4649,6 +5688,92 @@ mod tests {
         assert!(jsonschema::validate(&schema, &instance).is_ok());
     }
 
+    // --- coerce_arguments_to_schema (hallazgo F2) ---
+
+    fn limit_and_flag_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "limit": {"type": "integer"},
+                "ratio": {"type": "number"},
+                "recursive": {"type": "boolean"},
+            },
+        })
+    }
+
+    #[test]
+    fn coerces_a_stringified_integer_to_a_number() {
+        let mut args = serde_json::json!({"path": "x", "limit": "50"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["limit"], serde_json::json!(50));
+    }
+
+    #[test]
+    fn coerces_a_stringified_float_to_a_number() {
+        let mut args = serde_json::json!({"ratio": "0.5"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["ratio"], serde_json::json!(0.5));
+    }
+
+    #[test]
+    fn coerces_stringified_booleans() {
+        let mut args = serde_json::json!({"recursive": "true"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["recursive"], serde_json::json!(true));
+
+        let mut args = serde_json::json!({"recursive": "false"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["recursive"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn an_unparseable_string_is_left_untouched_for_validation_to_reject() {
+        let mut args = serde_json::json!({"limit": "not a number"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["limit"], serde_json::json!("not a number"));
+    }
+
+    #[test]
+    fn a_json_object_is_re_serialized_to_a_string_when_the_schema_wants_one() {
+        // The mirror-image mistake: `<parameter=path>{"a":1}</parameter>`
+        // parses as a JSON object because the XML grammar treats any
+        // value starting with `{`/`[` as structured — but the schema says
+        // `path` is a string.
+        let mut args = serde_json::json!({"path": {"a": 1}});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["path"], serde_json::json!(r#"{"a":1}"#));
+    }
+
+    #[test]
+    fn already_correctly_typed_arguments_are_left_alone() {
+        // The common case (wire-sourced calls): coercion must be a no-op.
+        let mut args = serde_json::json!({
+            "path": "x", "limit": 50, "ratio": 0.5, "recursive": true
+        });
+        let before = args.clone();
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args, before);
+    }
+
+    #[test]
+    fn a_string_value_for_a_string_field_is_left_alone() {
+        let mut args = serde_json::json!({"path": "src/main.rs"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["path"], serde_json::json!("src/main.rs"));
+    }
+
+    #[test]
+    fn a_non_object_schema_or_arguments_is_a_no_op() {
+        let mut args = serde_json::json!("not an object");
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args, serde_json::json!("not an object"));
+
+        let mut args = serde_json::json!({"limit": "50"});
+        coerce_arguments_to_schema(&mut args, &serde_json::json!({"type": "object"}));
+        assert_eq!(args["limit"], serde_json::json!("50"));
+    }
+
     // --- try_parse_textual_tool_call (hallazgo B5) ---
 
     #[test]
@@ -4700,6 +5825,59 @@ mod tests {
         );
     }
 
+    // --- F1 (docs/AUDITORIA-2026-07-v3.md): reject OpenAI-style tool
+    // *definitions* masquerading as a call via `parameters` ---
+
+    #[test]
+    fn an_openai_style_tool_definition_is_not_mistaken_for_a_call() {
+        let text = r#"{"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}"#;
+        assert!(
+            try_parse_textual_tool_call(text).is_none(),
+            "a JSON-Schema-shaped `parameters` must not be treated as arguments"
+        );
+    }
+
+    #[test]
+    fn a_genuine_object_typed_argument_named_type_is_still_accepted() {
+        // Must not over-trigger: a real argument object that happens to
+        // have a `type` field but no `properties` is not a schema.
+        let rescued =
+            try_parse_textual_tool_call(r#"{"name": "set_status", "arguments": {"type": "busy"}}"#)
+                .expect("should still parse — no `properties` key present");
+        assert_eq!(rescued.arguments, serde_json::json!({"type": "busy"}));
+    }
+
+    // --- F1: fenced examples are not real leaked tool calls ---
+
+    #[test]
+    fn a_tagged_call_inside_a_markdown_fence_is_not_executed() {
+        let text = "Así es como Qwen emite tool calls:\n```\n<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"/etc/shadow\"}}\n</tool_call>\n```\n";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert!(calls.is_empty(), "a fenced example must not be dispatched");
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn a_bare_function_xml_inside_a_markdown_fence_is_not_executed() {
+        let text = "Ejemplo:\n```\n<function=read_file>\n<parameter=path>\n/etc/shadow\n</parameter>\n</function>\n```\n";
+        let (calls, remaining) = extract_function_xml_tool_calls(text);
+        assert!(calls.is_empty(), "a fenced example must not be dispatched");
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_unfenced_tagged_call_after_fenced_prose_is_still_rescued() {
+        // The fence-toggle logic must correctly track state across
+        // multiple fences, not just detect "any fence exists somewhere".
+        let text = "Aquí un ejemplo:\n```\nesto es solo texto\n```\n<tool_call>\n{\"name\": \"echo\", \"arguments\": {\"text\": \"hi\"}}\n</tool_call>";
+        let (calls, _) = extract_tagged_tool_calls(text);
+        assert_eq!(
+            calls.len(),
+            1,
+            "the real call after the fence must still rescue"
+        );
+    }
+
     #[test]
     fn each_rescued_call_gets_a_distinct_id() {
         let a = try_parse_textual_tool_call(r#"{"name": "echo", "arguments": {}}"#).unwrap();
@@ -4745,8 +5923,7 @@ mod tests {
 
     #[test]
     fn a_fenced_json_inside_the_tags_still_parses() {
-        let text =
-            "<tool_call>```json\n{\"name\": \"echo\", \"arguments\": {}}\n```</tool_call>";
+        let text = "<tool_call>```json\n{\"name\": \"echo\", \"arguments\": {}}\n```</tool_call>";
         let (calls, _) = extract_tagged_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "echo");
@@ -4782,7 +5959,8 @@ mod tests {
 
     #[test]
     fn a_valid_block_followed_by_an_unclosed_tag_keeps_the_dangling_tail() {
-        let text = "<tool_call>{\"name\": \"echo\", \"arguments\": {}}</tool_call> y <tool_call>{\"na";
+        let text =
+            "<tool_call>{\"name\": \"echo\", \"arguments\": {}}</tool_call> y <tool_call>{\"na";
         let (calls, remaining) = extract_tagged_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(remaining, "y <tool_call>{\"na");
@@ -4797,7 +5975,8 @@ mod tests {
 
     #[test]
     fn tagged_extraction_accepts_parameters_as_a_synonym_for_arguments() {
-        let text = "<tool_call>{\"name\": \"echo\", \"parameters\": {\"text\": \"hi\"}}</tool_call>";
+        let text =
+            "<tool_call>{\"name\": \"echo\", \"parameters\": {\"text\": \"hi\"}}</tool_call>";
         let (calls, _) = extract_tagged_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].arguments, serde_json::json!({"text": "hi"}));
@@ -4889,6 +6068,177 @@ mod tests {
             extract_function_xml_tool_calls("la función f(x) = x + 1 es creciente");
         assert!(calls.is_empty());
         assert_eq!(remaining, "la función f(x) = x + 1 es creciente");
+    }
+
+    // --- extract_pythonic_tool_calls (hallazgo C2, Llama's native format) ---
+
+    #[test]
+    fn parses_a_single_pythonic_call() {
+        let (calls, remaining) =
+            extract_pythonic_tool_calls(r#"[get_weather(city="SF", metric="celsius")]"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "get_weather");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({"city": "SF", "metric": "celsius"})
+        );
+        assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn pythonic_call_preserves_surrounding_prose() {
+        let text = r#"Claro, reviso el clima.[get_weather(city="SF")]Listo."#;
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(remaining, "Claro, reviso el clima.Listo.");
+    }
+
+    #[test]
+    fn pythonic_call_parses_numbers_and_booleans() {
+        let (calls, _) =
+            extract_pythonic_tool_calls("[read_file(path=\"a.txt\", offset=5, recursive=true)]");
+        assert_eq!(calls[0].arguments["offset"], serde_json::json!(5));
+        assert_eq!(calls[0].arguments["recursive"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn pythonic_call_parses_floats() {
+        let (calls, _) = extract_pythonic_tool_calls("[set_ratio(value=0.5)]");
+        assert_eq!(calls[0].arguments["value"], serde_json::json!(0.5));
+    }
+
+    #[test]
+    fn several_pythonic_calls_in_one_bracket_are_all_parsed() {
+        let (calls, remaining) = extract_pythonic_tool_calls(r#"[echo(text="a"), echo(text="b")]"#);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].arguments["text"], serde_json::json!("a"));
+        assert_eq!(calls[1].arguments["text"], serde_json::json!("b"));
+        assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn pythonic_call_without_arguments_is_a_zero_argument_call() {
+        let (calls, _) = extract_pythonic_tool_calls("[list_tools()]");
+        assert_eq!(calls[0].name, "list_tools");
+        assert_eq!(calls[0].arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn a_comma_inside_a_quoted_argument_does_not_split_the_call() {
+        let (calls, _) = extract_pythonic_tool_calls(r#"[echo(text="a, b, c")]"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments["text"], serde_json::json!("a, b, c"));
+    }
+
+    #[test]
+    fn a_bracket_inside_a_quoted_argument_does_not_close_the_block_early() {
+        let (calls, remaining) = extract_pythonic_tool_calls(r#"[echo(text="a] b")]"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments["text"], serde_json::json!("a] b"));
+        assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn plain_prose_is_not_mistaken_for_a_pythonic_call() {
+        // No literal brackets around the call — must not match (this is
+        // exactly the ambiguity the bracket-wrapper requirement avoids).
+        let text = "puedes llamar a leer(archivo) para revisar el contenido";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_ordinary_list_literal_is_not_mistaken_for_a_call() {
+        // `[1, 2, 3]` has no `identifier(` right after the `[`.
+        let text = "los valores son [1, 2, 3] en ese orden";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_unrecognized_argument_shape_leaves_the_whole_block_in_the_text() {
+        // A nested list value isn't in scope (string/number/bool only) —
+        // the whole call must be left untouched, not partially rescued.
+        let text = "[echo(items=[1, 2])]";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_unclosed_pythonic_bracket_stays_in_the_text() {
+        let text = "[get_weather(city=\"SF\"";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    /// Regression test for the rescue escalera's ordering: a `<tool_call>`
+    /// tagged block must win even if the response also happens to contain
+    /// bracketed text that looks pythonic-shaped elsewhere.
+    #[tokio::test]
+    async fn a_llama_pythonic_call_is_rescued_end_to_end_when_no_structured_call_arrives() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("Voy a revisar.[echo(text=\"hi\")]".to_string()),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "the pythonic call must actually reach the real tool"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallCompleted { result, .. } if result.content == "echoed: hi")),
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("Voy a revisar.")
+            )),
+            "the surrounding prose must be persisted as the round's text"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("echo(")
+            )),
+            "the bracketed call must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     // --- synthesize_orphan_repairs (N-26, docs/AUDITORIA-2026-07-v2.md) ---
@@ -5069,6 +6419,69 @@ mod tests {
                 AgentEvent::AssistantText { text } if text.contains("<tool_call>") || text.contains("\"name\"")
             )),
             "the tagged block must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// F2 (docs/AUDITORIA-2026-07-v3.md): qwen3-coder's bare `<function=>`
+    /// XML grammar has no native number type, so a `limit: integer`
+    /// parameter comes back from the rescue as the string `"5"` — without
+    /// schema-guided coercion this fails validation deterministically
+    /// (every call to a tool with a numeric param, rescued via this
+    /// format, would burn a repair round it can't even fix, since the
+    /// XML grammar has no way to emit a JSON number). With the fix, the
+    /// call dispatches on the first attempt and the tool receives a real
+    /// JSON number.
+    #[tokio::test]
+    async fn qwen3_coder_xml_with_a_stringified_integer_param_gets_coerced_before_dispatch() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta(
+                    "<function=echo_limit>\n<parameter=text>\nhi\n</parameter>\n\
+                     <parameter=limit>\n5\n</parameter>\n</function>"
+                        .to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let received_limit = Arc::new(std::sync::Mutex::new(None));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoWithLimitToolProvider::new(
+                Arc::clone(&invocations),
+                Arc::clone(&received_limit),
+            ))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi with limit 5", &mut NoopObserver)
+            .await
+            .expect("turn should succeed — coercion must let validation pass on the first try");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "must dispatch exactly once — no schema-repair retry round needed"
+        );
+        assert_eq!(
+            received_limit.lock().unwrap().clone(),
+            Some(serde_json::json!(5)),
+            "the tool must receive a real JSON number, not the string \"5\""
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

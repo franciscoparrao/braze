@@ -126,6 +126,42 @@ pub async fn run_task(
     let tools = braze_tools_core::ToolRegistry::new(vec![Box::new(tools_provider)]);
 
     let model = spec.build(config, sampling)?;
+    // N-36 (docs/AUDITORIA-2026-07-v2.md): the exact same anti-loop system
+    // prompt `braze chat`/`braze run` build by default — a bare one-line
+    // prompt with no tool-use guidance measured a different (worse)
+    // system than the one users actually run. D1
+    // (docs/AUDITORIA-2026-07-v3.md): mirrors production's model-family
+    // hint too, scoped the same way (Ollama executor only) — otherwise a
+    // sweep would measure a *different*, hint-free prompt than what a
+    // real `braze` invocation with this same config actually sends.
+    let model_hint = spec
+        .executor_is_ollama()
+        .then(|| spec.executor_model_name(config));
+    let system_prompt = braze_config::default_system_prompt(sandbox.path(), model_hint.as_deref());
+
+    // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget
+    // — without it, a bench pass rate for an Ollama backend measured a
+    // context-management regime production never actually uses. Keyed on
+    // the *executor* being Ollama (`ollama_models` also reports a local
+    // planner, but the budget protects the executor's context window —
+    // production keys it on `default_backend` the same way). Computed
+    // here, before `tools`/`system_prompt` move into `Engine::new` below
+    // (hallazgo B4, docs/AUDITORIA-2026-07-v3.md: the margin needs the
+    // real system prompt length plus the size of every advertised tool
+    // stub, not a fixed constant).
+    let ollama_budget = if spec.executor_is_ollama() {
+        let tool_definitions_bytes =
+            braze_tools_core::tool_stub_definition_bytes(&tools.all_stubs_lossy().await);
+        Some(braze_config::ollama_context_budget_tokens(
+            config.ollama_num_ctx,
+            config.max_tokens,
+            &system_prompt,
+            tool_definitions_bytes,
+        ))
+    } else {
+        None
+    };
+
     // C10 (docs/AUDITORIA-2026-07.md): mirrors braze-cli's wiring, so a
     // bench run measures the same tactical window/threshold/best_of_n
     // behavior a real `braze` invocation with this config would use.
@@ -135,28 +171,15 @@ pub async fn run_task(
         Arc::clone(&store),
         Box::new(SimpleContextCompactor::new(config.tactical_window)),
         Box::new(braze_events::ChannelTaskNotifier::new()),
-        // N-36 (docs/AUDITORIA-2026-07-v2.md): the exact same anti-loop
-        // system prompt `braze chat`/`braze run` build by default — a
-        // bare one-line prompt with no tool-use guidance measured a
-        // different (worse) system than the one users actually run.
-        braze_config::default_system_prompt(sandbox.path()),
+        system_prompt,
         config.max_tokens,
     )
     .with_tactical_compaction_threshold(config.tactical_compaction_threshold)
     .with_best_of_n(config.best_of_n)
     .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue);
 
-    // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget
-    // — without it, a bench pass rate for an Ollama backend measured a
-    // context-management regime production never actually uses. Keyed on
-    // the *executor* being Ollama (`ollama_models` also reports a local
-    // planner, but the budget protects the executor's context window —
-    // production keys it on `default_backend` the same way).
-    if spec.executor_is_ollama() {
-        engine = engine.with_context_budget(braze_config::ollama_context_budget_tokens(
-            config.ollama_num_ctx,
-            config.max_tokens,
-        ));
+    if let Some(budget) = ollama_budget {
+        engine = engine.with_context_budget(budget);
     }
 
     // PLAN.md § "Split planificador/ejecutor", oleada 4: a spec with a

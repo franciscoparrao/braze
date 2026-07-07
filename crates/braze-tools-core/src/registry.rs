@@ -147,6 +147,28 @@ fn warn_on_cross_provider_collisions(stubs: &[ToolStub]) {
     }
 }
 
+/// Rough size, in bytes, of what these stubs contribute to the tool
+/// definitions actually sent on the wire (name + summary + schema, when
+/// resolved) — used to size `Engine::with_context_budget`'s prompt-side
+/// margin dynamically instead of a fixed constant
+/// (docs/AUDITORIA-2026-07-v3.md, hallazgo B4): a fixed margin can't grow
+/// with the number of configured MCP tools, so enough of them push the
+/// real prompt past `num_ctx` while the budget still reports "under".
+pub fn tool_stub_definition_bytes(stubs: &[ToolStub]) -> usize {
+    stubs
+        .iter()
+        .map(|stub| {
+            stub.name.len()
+                + stub.summary.len()
+                + stub
+                    .input_schema
+                    .as_ref()
+                    .map(|schema| schema.to_string().len())
+                    .unwrap_or(0)
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,5 +386,54 @@ mod tests {
             .expect_err("no provider owns this tool");
 
         assert!(matches!(err, ToolError::NotFound(name) if name == "does_not_exist"));
+    }
+
+    // --- tool_stub_definition_bytes (hallazgo B4) ---
+
+    #[test]
+    fn tool_stub_definition_bytes_sums_name_summary_and_schema() {
+        let stubs = vec![ToolStub {
+            name: "abcde".to_string(),         // 5 bytes
+            summary: "0123456789".to_string(), // 10 bytes
+            source: "local".to_string(),
+            input_schema: Some(serde_json::json!({"a": 1})), // `{"a":1}` = 7 bytes
+        }];
+        assert_eq!(tool_stub_definition_bytes(&stubs), 5 + 10 + 7);
+    }
+
+    #[test]
+    fn tool_stub_definition_bytes_counts_zero_for_an_unresolved_schema() {
+        let stubs = vec![ToolStub {
+            name: "x".to_string(),
+            summary: "y".to_string(),
+            source: "mcp:server".to_string(),
+            input_schema: None,
+        }];
+        assert_eq!(tool_stub_definition_bytes(&stubs), 1 + 1);
+    }
+
+    #[test]
+    fn tool_stub_definition_bytes_grows_with_more_stubs() {
+        let one = vec![ToolStub {
+            name: "read_file".to_string(),
+            summary: "reads a file".to_string(),
+            source: "local".to_string(),
+            input_schema: None,
+        }];
+        let mut many = one.clone();
+        for i in 0..10 {
+            many.push(ToolStub {
+                name: format!("mcp_tool_{i}"),
+                summary: "an MCP tool".to_string(),
+                source: "mcp:server".to_string(),
+                input_schema: Some(serde_json::json!({"type": "object"})),
+            });
+        }
+        assert!(tool_stub_definition_bytes(&many) > tool_stub_definition_bytes(&one));
+    }
+
+    #[test]
+    fn tool_stub_definition_bytes_of_no_stubs_is_zero() {
+        assert_eq!(tool_stub_definition_bytes(&[]), 0);
     }
 }

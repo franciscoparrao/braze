@@ -199,15 +199,17 @@ mod tests {
 
     #[test]
     fn ollama_url_flag_parses_on_both_subcommands() {
-        let cli =
-            Cli::parse_from(["braze", "chat", "--ollama-url", "http://192.168.1.8:11434"]);
+        let cli = Cli::parse_from(["braze", "chat", "--ollama-url", "http://192.168.1.8:11434"]);
         assert_eq!(
             cli.command.ollama_url_override(),
             Some("http://192.168.1.8:11434")
         );
 
         let cli = Cli::parse_from(["braze", "run", "hola", "--ollama-url", "http://nitro:11434"]);
-        assert_eq!(cli.command.ollama_url_override(), Some("http://nitro:11434"));
+        assert_eq!(
+            cli.command.ollama_url_override(),
+            Some("http://nitro:11434")
+        );
     }
 
     #[test]

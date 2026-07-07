@@ -33,6 +33,16 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub ollama_num_ctx: Option<u32>,
     #[serde(default)]
+    pub ollama_temperature: Option<f32>,
+    #[serde(default)]
+    pub ollama_seed: Option<u64>,
+    #[serde(default)]
+    pub ollama_top_p: Option<f32>,
+    #[serde(default)]
+    pub ollama_top_k: Option<u32>,
+    #[serde(default)]
+    pub ollama_repeat_penalty: Option<f32>,
+    #[serde(default)]
     pub openrouter_api_key: Option<ApiKey>,
     #[serde(default)]
     pub openrouter_model: Option<String>,
@@ -111,6 +121,61 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.ollama_num_ctx = Some(parsed);
+                }
+                "OLLAMA_TEMPERATURE" => {
+                    let parsed =
+                        value
+                            .parse::<f32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.ollama_temperature = Some(parsed);
+                }
+                "OLLAMA_SEED" => {
+                    let parsed =
+                        value
+                            .parse::<u64>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.ollama_seed = Some(parsed);
+                }
+                "OLLAMA_TOP_P" => {
+                    let parsed =
+                        value
+                            .parse::<f32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.ollama_top_p = Some(parsed);
+                }
+                "OLLAMA_TOP_K" => {
+                    let parsed =
+                        value
+                            .parse::<u32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.ollama_top_k = Some(parsed);
+                }
+                "OLLAMA_REPEAT_PENALTY" => {
+                    let parsed =
+                        value
+                            .parse::<f32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.ollama_repeat_penalty = Some(parsed);
                 }
                 "OPENROUTER_API_KEY" => overrides.openrouter_api_key = Some(ApiKey::new(value)),
                 "OPENROUTER_MODEL" => overrides.openrouter_model = Some(value.to_string()),
@@ -271,6 +336,30 @@ mod tests {
     #[test]
     fn from_env_rejects_invalid_tactical_window() {
         let vars = [("BRAZE_TACTICAL_WINDOW", "not-a-number")];
+        let err = ConfigOverrides::from_env(vars).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
+    }
+
+    #[test]
+    fn from_env_parses_ollama_sampling_fields() {
+        let vars = [
+            ("BRAZE_OLLAMA_TEMPERATURE", "0.7"),
+            ("BRAZE_OLLAMA_SEED", "42"),
+            ("BRAZE_OLLAMA_TOP_P", "0.8"),
+            ("BRAZE_OLLAMA_TOP_K", "20"),
+            ("BRAZE_OLLAMA_REPEAT_PENALTY", "1.05"),
+        ];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(overrides.ollama_temperature, Some(0.7));
+        assert_eq!(overrides.ollama_seed, Some(42));
+        assert_eq!(overrides.ollama_top_p, Some(0.8));
+        assert_eq!(overrides.ollama_top_k, Some(20));
+        assert_eq!(overrides.ollama_repeat_penalty, Some(1.05));
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_ollama_temperature() {
+        let vars = [("BRAZE_OLLAMA_TEMPERATURE", "not-a-number")];
         let err = ConfigOverrides::from_env(vars).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
     }

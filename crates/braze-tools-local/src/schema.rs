@@ -35,7 +35,10 @@ pub fn all_stubs(source: &str) -> Vec<ToolStub> {
 
 fn summary_for(name: &str) -> &'static str {
     match name {
-        "read_file" => "Read the full text contents of a file at a given path.",
+        "read_file" => {
+            "Read the text contents of a file at a given path. Large files come back as a \
+             page (with a note on how many lines remain); use offset/limit to read the rest."
+        }
         "write_file" => {
             "Create or overwrite a file with the given content. Also the preferred way to \
              modify a file when you are not certain of its exact current text: write the \
@@ -66,6 +69,14 @@ pub fn schema_for(name: &str) -> Option<ToolSchema> {
                 "path": {
                     "type": "string",
                     "description": "Path to the file to read, absolute or relative to the working directory."
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "1-indexed line number to start reading from. Omit to start at line 1. Use this to page through a file past the point where a previous read_file call said \"more lines below\"."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of lines to return starting at offset. Omit for the default page size."
                 }
             },
             "required": ["path"],

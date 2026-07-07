@@ -10,8 +10,83 @@
 
 use std::path::Path;
 
+/// Coarse model family, inferred from the model name, used to pick a
+/// proactive tool-call-syntax hint for [`default_system_prompt`] —
+/// D1 (docs/AUDITORIA-2026-07-v3.md), the gap this project's own cited
+/// evidence (the Qwen3-Coder technical report) says matters most for
+/// small models: they overfit hard to the tool-template they were
+/// trained/fine-tuned on. Before this, the *only* family-aware code in
+/// `braze` was reactive — `braze-engine`'s textual rescue
+/// (`extract_tagged_tool_calls`/`extract_function_xml_tool_calls`) only
+/// ever runs after a model has already failed to emit a structured tool
+/// call. This gives the same two formats a proactive path: a short
+/// example in the system prompt, in the model's own native syntax,
+/// before it generates anything.
+///
+/// `Generic` — everything unrecognized, including Anthropic/OpenRouter
+/// models — adds no hint: those APIs' native tool-calling doesn't need a
+/// textual fallback example, and guessing wrong for an unrecognized
+/// Ollama model risks nudging it toward a syntax it was never trained on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelFamily {
+    /// qwen2.5/Hermes-style tagged JSON:
+    /// `<tool_call>{"name":...,"arguments":{...}}</tool_call>`.
+    QwenTagged,
+    /// qwen3-coder's bare XML grammar (designed to avoid JSON escaping in
+    /// code-carrying arguments):
+    /// `<function=name><parameter=key>value</parameter></function>`.
+    Qwen3CoderXml,
+    Generic,
+}
+
+impl ModelFamily {
+    /// Ollama naming convention: `family[:tag]` (e.g. `"qwen2.5:3b"`,
+    /// `"qwen3.5-coder:latest"`). Checked in most-specific-first order —
+    /// `"qwen3-coder"`/`"qwen3.5-coder"` before the bare `"qwen"`
+    /// substring both would otherwise match.
+    fn from_model_name(name: &str) -> Self {
+        let name = name.to_lowercase();
+        if name.contains("qwen3-coder") || name.contains("qwen3.5-coder") {
+            ModelFamily::Qwen3CoderXml
+        } else if name.contains("qwen") {
+            ModelFamily::QwenTagged
+        } else {
+            ModelFamily::Generic
+        }
+    }
+
+    /// A one-line, proactive example of this family's native tool-call
+    /// syntax, phrased as a fallback ("if your tool-calling template
+    /// isn't active") so it's inert noise for the common case where the
+    /// backend's structured `tool_calls` mechanism already works, and a
+    /// concrete example for the leak-mode case the rescue exists for —
+    /// deliberately short given small models' weak, non-monotonic ICL
+    /// (docs/SOTA-2026-07.md's SLM survey adenda: few-shot content in the
+    /// prompt can *hurt* small models, and every token here also competes
+    /// with the tiny prompt budget Grupo P just calibrated for
+    /// `num_ctx`-constrained backends).
+    fn tool_call_hint(self) -> Option<&'static str> {
+        match self {
+            ModelFamily::QwenTagged => Some(
+                "If your tool-calling template isn't active, emit a call as \
+                 <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call> \
+                 instead of describing it in prose.",
+            ),
+            ModelFamily::Qwen3CoderXml => Some(
+                "If your tool-calling template isn't active, emit a call as \
+                 <function=tool_name><parameter=arg_name>value</parameter></function> \
+                 instead of describing it in prose (the parser tolerates the \
+                 grammar's usual newlines between tags too).",
+            ),
+            ModelFamily::Generic => None,
+        }
+    }
+}
+
 /// Default system prompt, used unless `Config::system_prompt` overrides
-/// it.
+/// it. `model_name` (Ollama's `family[:tag]` naming; `None` for
+/// Anthropic/OpenRouter or when no specific model is pinned) picks an
+/// optional family-specific tool-call hint — see [`ModelFamily`].
 ///
 /// Earlier versions of this shipped a single generic sentence with no
 /// tool-use guidance, no anti-loop rules, and no working directory — the
@@ -27,7 +102,13 @@ use std::path::Path;
 /// save a file, it kept restating the plan ("Voy a proceder con estos
 /// pasos ahora") across several turns, even after explicit confirmation,
 /// without ever emitting the `write_file` call.
-pub fn default_system_prompt(cwd: &Path) -> String {
+pub fn default_system_prompt(cwd: &Path, model_name: Option<&str>) -> String {
+    let family_hint = model_name
+        .map(ModelFamily::from_model_name)
+        .and_then(ModelFamily::tool_call_hint)
+        .map(|hint| format!("\n- {hint}"))
+        .unwrap_or_default();
+
     format!(
         "You are braze, an agentic CLI assistant. Working directory: {}.\n\
          \n\
@@ -43,16 +124,25 @@ pub fn default_system_prompt(cwd: &Path) -> String {
          command, edit something), call the tool for it in the same turn. \
          Do not just describe or restate the plan — an action you only \
          narrate never actually happens.\n\
-         - Relative paths are resolved against the working directory above.",
+         - Relative paths are resolved against the working directory above.{family_hint}",
         cwd.display()
     )
 }
 
-/// Headroom reserved out of `ollama_num_ctx` for the system prompt + tool
-/// schemas when computing `Engine::with_context_budget` — neither is part
-/// of what `Engine::load_messages`'s token estimate measures (durable
-/// summary + durable/tactical events only).
-const CONTEXT_BUDGET_MARGIN_TOKENS: u32 = 1024;
+/// Floor under the dynamic margin below, for a tiny/empty system prompt
+/// with no tools configured — a defensive minimum, not the primary
+/// mechanism (see [`ollama_context_budget_tokens`]).
+const MIN_CONTEXT_BUDGET_MARGIN_TOKENS: u32 = 256;
+
+/// Chars-per-token divisor for the prompt-side margin only (system prompt
+/// text + tool schema JSON) — denser than the ~4 chars/token
+/// `braze-engine`'s event-text estimator uses for natural-language
+/// content, since tool schemas are JSON, which tokenizes more tightly.
+/// Deliberately conservative (a smaller divisor rounds the margin up):
+/// underestimating this margin is the dangerous direction — a silent
+/// overflow past `num_ctx` — not overestimating it
+/// (docs/AUDITORIA-2026-07-v3.md, hallazgo B4).
+const PROMPT_SIDE_CHARS_PER_TOKEN: u32 = 3;
 
 /// The token budget a real `braze` invocation passes to
 /// `Engine::with_context_budget` when the active backend is Ollama (the
@@ -60,10 +150,28 @@ const CONTEXT_BUDGET_MARGIN_TOKENS: u32 = 1024;
 /// Anthropic's/OpenRouter's underlying models are large enough that raw
 /// event count remains a fine proxy on their own). Saturates rather than
 /// underflows if `max_tokens` and the margin together exceed `num_ctx`.
-pub fn ollama_context_budget_tokens(num_ctx: u32, max_tokens: u32) -> u32 {
-    num_ctx
-        .saturating_sub(max_tokens)
-        .saturating_sub(CONTEXT_BUDGET_MARGIN_TOKENS)
+///
+/// The margin reserved for the system prompt + tool definitions (neither
+/// is part of what `Engine::load_messages`'s token estimate measures) used
+/// to be a fixed constant — but a fixed margin can't grow with the number
+/// of MCP tools configured, so enough of them push the real prompt past
+/// `num_ctx` while this budget still reports "under"
+/// (docs/AUDITORIA-2026-07-v3.md, hallazgo B4). `system_prompt` and
+/// `tool_definitions_bytes` (see `braze_tools_core::tool_stub_definition_bytes`
+/// for the latter — this crate doesn't depend on `braze-tools-core`, so
+/// the caller sums it and passes a plain byte count) size the margin from
+/// what's actually being sent, with [`MIN_CONTEXT_BUDGET_MARGIN_TOKENS`]
+/// as a floor for the degenerate empty case.
+pub fn ollama_context_budget_tokens(
+    num_ctx: u32,
+    max_tokens: u32,
+    system_prompt: &str,
+    tool_definitions_bytes: usize,
+) -> u32 {
+    let prompt_side_chars = system_prompt.len().saturating_add(tool_definitions_bytes);
+    let margin = ((prompt_side_chars as u32) / PROMPT_SIDE_CHARS_PER_TOKEN)
+        .max(MIN_CONTEXT_BUDGET_MARGIN_TOKENS);
+    num_ctx.saturating_sub(max_tokens).saturating_sub(margin)
 }
 
 #[cfg(test)]
@@ -72,24 +180,101 @@ mod tests {
 
     #[test]
     fn default_system_prompt_includes_cwd_and_anti_loop_guidance() {
-        let prompt = default_system_prompt(Path::new("/home/user/project"));
+        let prompt = default_system_prompt(Path::new("/home/user/project"), None);
         assert!(prompt.contains("/home/user/project"));
         assert!(prompt.contains("Never call the same tool"));
     }
 
     #[test]
     fn default_system_prompt_tells_the_model_to_act_not_just_narrate() {
-        let prompt = default_system_prompt(Path::new("/home/user/project"));
+        let prompt = default_system_prompt(Path::new("/home/user/project"), None);
         assert!(prompt.contains("call the tool for it in the same turn"));
     }
 
+    // --- D1 (docs/AUDITORIA-2026-07-v3.md): family-specific tool-call hint ---
+
     #[test]
-    fn ollama_context_budget_reserves_max_tokens_and_margin() {
-        assert_eq!(ollama_context_budget_tokens(8192, 4096), 8192 - 4096 - 1024);
+    fn no_model_name_gets_no_family_hint() {
+        let prompt = default_system_prompt(Path::new("/p"), None);
+        assert!(!prompt.contains("tool_call"));
+        assert!(!prompt.contains("<function="));
+    }
+
+    #[test]
+    fn an_unrecognized_model_name_gets_no_family_hint() {
+        let prompt = default_system_prompt(Path::new("/p"), Some("llama3.1"));
+        assert!(!prompt.contains("tool_call"));
+        assert!(!prompt.contains("<function="));
+    }
+
+    #[test]
+    fn a_qwen2_model_gets_the_tagged_json_hint() {
+        let prompt = default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"));
+        assert!(prompt.contains("<tool_call>"));
+        assert!(!prompt.contains("<function="));
+    }
+
+    #[test]
+    fn a_qwen3_coder_model_gets_the_xml_hint_not_the_tagged_one() {
+        let prompt = default_system_prompt(Path::new("/p"), Some("qwen3.5-coder:latest"));
+        assert!(prompt.contains("<function="));
+        assert!(!prompt.contains("<tool_call>"));
+    }
+
+    #[test]
+    fn model_family_matching_is_case_insensitive() {
+        let prompt = default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"));
+        assert!(prompt.contains("<tool_call>"));
+    }
+
+    #[test]
+    fn model_family_from_name_prioritizes_qwen3_coder_over_bare_qwen() {
+        assert_eq!(
+            ModelFamily::from_model_name("qwen3-coder:30b"),
+            ModelFamily::Qwen3CoderXml
+        );
+        assert_eq!(
+            ModelFamily::from_model_name("qwen2.5:3b"),
+            ModelFamily::QwenTagged
+        );
+        assert_eq!(
+            ModelFamily::from_model_name("llama3.2:3b"),
+            ModelFamily::Generic
+        );
+    }
+
+    #[test]
+    fn ollama_context_budget_uses_the_floor_margin_for_a_tiny_prompt_and_no_tools() {
+        assert_eq!(
+            ollama_context_budget_tokens(8192, 4096, "", 0),
+            8192 - 4096 - MIN_CONTEXT_BUDGET_MARGIN_TOKENS
+        );
+    }
+
+    #[test]
+    fn ollama_context_budget_margin_grows_with_the_system_prompt_and_tool_definitions() {
+        let system_prompt = "x".repeat(900);
+        let tool_definitions_bytes = 300;
+        // prompt_side_chars = 1200, margin = 1200 / 3 = 400 (above the floor).
+        assert_eq!(
+            ollama_context_budget_tokens(8192, 4096, &system_prompt, tool_definitions_bytes),
+            8192 - 4096 - 400
+        );
+    }
+
+    #[test]
+    fn ollama_context_budget_shrinks_as_more_mcp_tools_are_configured() {
+        let system_prompt = "some real system prompt text";
+        let few_tools = ollama_context_budget_tokens(8192, 4096, system_prompt, 200);
+        let many_tools = ollama_context_budget_tokens(8192, 4096, system_prompt, 10_000);
+        assert!(
+            many_tools < few_tools,
+            "more tool-definition bytes must shrink the budget, not leave it flat"
+        );
     }
 
     #[test]
     fn ollama_context_budget_saturates_instead_of_underflowing() {
-        assert_eq!(ollama_context_budget_tokens(100, 1000), 0);
+        assert_eq!(ollama_context_budget_tokens(100, 1000, "", 0), 0);
     }
 }

@@ -440,19 +440,42 @@ impl OpenRouterStreamState {
         // continuation — displace the finished one instead of merging
         // the two into one corrupt buffer.
         let incoming_id = fragment.get("id").and_then(Value::as_str);
-        if let Some(slot) = &self.tool_calls[index]
-            && let (Some(existing), Some(incoming)) = (slot.id.as_deref(), incoming_id)
-            && !incoming.is_empty()
-            && existing != incoming
-        {
-            tracing::debug!(
-                index,
-                existing_id = existing,
-                incoming_id = incoming,
-                "openrouter stream: index reused for a new tool call — displacing the completed one"
+        let incoming_name = fragment
+            .get("function")
+            .and_then(|f| f.get("name"))
+            .and_then(Value::as_str);
+        if let Some(slot) = &self.tool_calls[index] {
+            let id_collision = matches!(
+                (slot.id.as_deref(), incoming_id),
+                (Some(existing), Some(incoming)) if !incoming.is_empty() && existing != incoming
             );
-            if let Some(displaced) = self.tool_calls[index].take() {
-                self.displaced_tool_calls.push(displaced);
+            // F4 (docs/AUDITORIA-2026-07-v3.md): an upstream that never
+            // sends `id` at all (the population N-21 already handles)
+            // can still reuse the same index for sequential calls,
+            // re-announcing only `name` — the id-based check above never
+            // fires (both sides are `None`), so the two calls'
+            // `arguments_buf`s concatenate into one corrupt call. Same
+            // "announcement over a finished call" criterion the no-index
+            // routing above already uses, plus one extra guard: only
+            // treat it as a new call if the existing slot's buffer
+            // already parses as complete, standalone JSON (the earlier
+            // call genuinely looks *done*, not merely paused mid-value).
+            let name_reannounce_on_a_finished_call = incoming_name.is_some()
+                && slot.name.is_some()
+                && serde_json::from_str::<Value>(&slot.arguments_buf).is_ok();
+            if id_collision || name_reannounce_on_a_finished_call {
+                tracing::debug!(
+                    index,
+                    existing_id = slot.id.as_deref(),
+                    incoming_id,
+                    incoming_name,
+                    id_collision,
+                    name_reannounce_on_a_finished_call,
+                    "openrouter stream: index reused for a new tool call — displacing the completed one"
+                );
+                if let Some(displaced) = self.tool_calls[index].take() {
+                    self.displaced_tool_calls.push(displaced);
+                }
             }
         }
         let slot = self.tool_calls[index].get_or_insert_with(PendingToolCall::default);
@@ -1057,11 +1080,23 @@ mod tests {
         ));
         let events =
             state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
-        assert_eq!(events.len(), 2, "expected two distinct calls, got {events:?}");
+        assert_eq!(
+            events.len(),
+            2,
+            "expected two distinct calls, got {events:?}"
+        );
         match (&events[0], &events[1]) {
             (
-                CompletionEvent::ToolCallRequested { id: id_a, arguments: args_a, .. },
-                CompletionEvent::ToolCallRequested { id: id_b, arguments: args_b, .. },
+                CompletionEvent::ToolCallRequested {
+                    id: id_a,
+                    arguments: args_a,
+                    ..
+                },
+                CompletionEvent::ToolCallRequested {
+                    id: id_b,
+                    arguments: args_b,
+                    ..
+                },
             ) => {
                 assert_eq!(id_a, "call_a");
                 assert_eq!(args_a, &serde_json::json!({"path": "a"}));
@@ -1069,6 +1104,81 @@ mod tests {
                 assert_eq!(args_b, &serde_json::json!({"path": "b"}));
             }
             other => panic!("expected two ToolCallRequested, got {other:?}"),
+        }
+    }
+
+    /// F4 (docs/AUDITORIA-2026-07-v3.md): an upstream that never sends
+    /// `id` at all reusing `index: 0` for two sequential calls,
+    /// re-announcing only `name` — the id-based collision check above
+    /// can't fire (both sides are `None`), so without the extra "name
+    /// reannounce on a finished call" check the two calls' argument
+    /// buffers would concatenate into one corrupt call.
+    #[test]
+    fn an_index_reused_without_any_id_still_yields_two_distinct_calls_via_name_reannounce() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "function": {"name": "read_file", "arguments": "{\"path\": \"a\"}"}}]}),
+            None,
+        ));
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "function": {"name": "read_file", "arguments": "{\"path\": \"b\"}"}}]}),
+            None,
+        ));
+        let events =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        assert_eq!(
+            events.len(),
+            2,
+            "expected two distinct calls, got {events:?}"
+        );
+        match (&events[0], &events[1]) {
+            (
+                CompletionEvent::ToolCallRequested {
+                    arguments: args_a, ..
+                },
+                CompletionEvent::ToolCallRequested {
+                    arguments: args_b, ..
+                },
+            ) => {
+                assert_eq!(args_a, &serde_json::json!({"path": "a"}));
+                assert_eq!(args_b, &serde_json::json!({"path": "b"}));
+            }
+            other => panic!("expected two ToolCallRequested, got {other:?}"),
+        }
+    }
+
+    /// F4 safety check: a `name` resent while the existing buffer is
+    /// still *incomplete* JSON must NOT be mistaken for a new call — the
+    /// extra "buffer already parses as complete JSON" guard exists
+    /// precisely to keep this a continuation, not a false displacement.
+    #[test]
+    fn a_name_resent_mid_stream_over_an_incomplete_buffer_does_not_falsely_displace() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "function": {"name": "read_file", "arguments": "{\"pa"}}]}),
+            None,
+        ));
+        // Same name resent, buffer so far ("{\"pa") is not valid JSON.
+        state.handle_chunk(&message_json(
+            0,
+            serde_json::json!({"tool_calls": [{"index": 0, "function": {"name": "read_file", "arguments": "th\": \"x\"}"}}]}),
+            None,
+        ));
+        let events =
+            state.handle_chunk(&message_json(0, serde_json::json!({}), Some("tool_calls")));
+        assert_eq!(
+            events.len(),
+            1,
+            "must stay one continued call, got {events:?}"
+        );
+        match &events[0] {
+            CompletionEvent::ToolCallRequested { arguments, .. } => {
+                assert_eq!(arguments, &serde_json::json!({"path": "x"}));
+            }
+            other => panic!("expected ToolCallRequested, got {other:?}"),
         }
     }
 

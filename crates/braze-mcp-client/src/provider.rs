@@ -93,6 +93,20 @@ pub struct McpToolProvider {
     /// re-fetch — the case a bare TTL wouldn't cover on its own (a brand new
     /// tool that just appeared).
     tool_cache: RwLock<Option<ToolCacheEntry>>,
+    /// Advertised names of every MCP tool [`Self::resolve_schema`] has
+    /// resolved at least once this connection's lifetime — used by
+    /// [`Self::list_stubs`] to promote a *previously-touched* tool's real
+    /// schema into the stub instead of the permissive placeholder
+    /// (docs/AUDITORIA-2026-07-v3.md, hallazgo C1): a model seeing only
+    /// `{"type":"object","additionalProperties":true}` for a tool it has
+    /// never used has no signal for required fields/argument names — it
+    /// only gets the real schema after failing once, on the schema-repair
+    /// round. For a tool it has already used, the real schema is already
+    /// sitting in `tool_cache` at zero extra cost — there's no reason to
+    /// keep hiding it on every subsequent round of the same turn/session.
+    /// Never removed once inserted (an MCP tool set essentially never
+    /// shrinks mid-session, matching this crate's other caching choices).
+    resolved_names: RwLock<std::collections::HashSet<String>>,
 }
 
 /// A cached `tools/list` result, timestamped so [`TOOL_CACHE_TTL`] can be
@@ -156,6 +170,7 @@ impl McpToolProvider {
             cache_ttl,
             service,
             tool_cache: RwLock::new(None),
+            resolved_names: RwLock::new(std::collections::HashSet::new()),
         })
     }
 
@@ -216,8 +231,8 @@ impl McpToolProvider {
 
 // `PermissionGuard` doesn't implement `Debug`, so this can no longer be
 // `#[derive(Debug)]`. `finish_non_exhaustive` signals that some fields
-// (`guard`, `service`, `tool_cache`) are intentionally omitted rather than
-// silently dropped by an oversight.
+// (`guard`, `service`, `tool_cache`, `resolved_names`) are intentionally
+// omitted rather than silently dropped by an oversight.
 impl std::fmt::Debug for McpToolProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("McpToolProvider")
@@ -249,17 +264,30 @@ impl ToolProvider for McpToolProvider {
     async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
         let tools = self.tools_respecting_ttl().await?;
         warn_on_intra_provider_collisions(&self.provider_id, &self.server_name, &tools);
+        let resolved = self.resolved_names.read().await;
         Ok(tools
             .iter()
-            .map(|tool| ToolStub {
-                name: advertised_name(&self.server_name, &tool.name),
-                summary: summarize(tool.description.as_deref().unwrap_or("")),
-                source: self.provider_id.clone(),
-                // Deferred by design, unlike the local built-ins: an MCP
-                // server's tool set is unbounded/dynamic, so including
-                // every real schema on every turn would bloat the prompt.
-                // Resolved on demand instead, via `resolve_schema` below.
-                input_schema: None,
+            .map(|tool| {
+                let name = advertised_name(&self.server_name, &tool.name);
+                // C1 (docs/AUDITORIA-2026-07-v3.md): a tool this provider
+                // has already resolved (the model used it, or hit the
+                // schema-repair round for it) gets its real schema
+                // up-front from now on — free, since it's already sitting
+                // in `tool_cache`. Everything else stays deferred: an
+                // MCP server's tool set is unbounded/dynamic, so including
+                // every real schema for every tool on every turn would
+                // bloat the prompt regardless of whether it's ever used.
+                let input_schema = if resolved.contains(&name) {
+                    Some(to_schema(tool).input_schema)
+                } else {
+                    None
+                };
+                ToolStub {
+                    name,
+                    summary: summarize(tool.description.as_deref().unwrap_or("")),
+                    source: self.provider_id.clone(),
+                    input_schema,
+                }
             })
             .collect())
     }
@@ -275,6 +303,7 @@ impl ToolProvider for McpToolProvider {
                 tool = name,
                 "resolved full tool schema from cache (respecting TTL)"
             );
+            self.resolved_names.write().await.insert(name.to_string());
             return Ok(Some(to_schema(tool)));
         }
 
@@ -290,10 +319,14 @@ impl ToolProvider for McpToolProvider {
             "tool not in TTL-respecting list, forcing a fresh fetch from the MCP server"
         );
         let tools = self.list_tools_fresh().await?;
-        Ok(tools
+        let Some(tool) = tools
             .into_iter()
             .find(|t| advertised_name(&self.server_name, &t.name) == name)
-            .map(|t| to_schema(&t)))
+        else {
+            return Ok(None);
+        };
+        self.resolved_names.write().await.insert(name.to_string());
+        Ok(Some(to_schema(&tool)))
     }
 
     async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {

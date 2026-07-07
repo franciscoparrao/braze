@@ -37,15 +37,35 @@ use braze_types::{ContentBlock, Message, Role};
 const NEVER_CLEAR_TOOLS: &[&str] = &[];
 
 /// How many of the tactical window's most recent observations
-/// (`ToolCallCompleted` results) are rendered in full; anything older is
-/// collapsed to its first line (see [`collapsed_observation_content`]).
-/// The value comes straight from SWE-agent/ACI (arXiv 2405.15793, Tabla
-/// 3): collapsing old observations to 1 line except the last 5 was worth
-/// +3.0 pp on SWE-bench Lite vs keeping full history — old file dumps and
-/// shell output mostly distract; what the model needs from them usually
-/// survives in its own subsequent text. Tactical-side only: durable
-/// results are already fully cleared by `event_to_block_cleared`.
+/// (`ToolCallCompleted` results) are *candidates* to be rendered in full;
+/// anything older is collapsed to its first line (see
+/// [`collapsed_observation_content`]). The count comes straight from
+/// SWE-agent/ACI (arXiv 2405.15793, Tabla 3): collapsing old observations
+/// to 1 line except the last 5 was worth +3.0 pp on SWE-bench Lite vs
+/// keeping full history — old file dumps and shell output mostly
+/// distract; what the model needs from them usually survives in its own
+/// subsequent text. Tactical-side only: durable results are already fully
+/// cleared by `event_to_block_cleared`.
+///
+/// "Candidate", not "guaranteed full": [`tactical_full_observation_indices`]
+/// also caps the *aggregate* size of these — 5 observations each near a
+/// single tool output's own cap can still add up to more tokens than a
+/// small local model's entire `num_ctx` (docs/AUDITORIA-2026-07-v3.md,
+/// hallazgo B1), a number this constant alone (borrowed from a paper
+/// measured against a large-context model) never accounted for.
 const TACTICAL_FULL_OBSERVATIONS: usize = 5;
+
+/// Aggregate cap (chars) across every observation
+/// [`tactical_full_observation_indices`] keeps full — without it,
+/// `TACTICAL_FULL_OBSERVATIONS` full-size dumps (`braze-tools-local`'s own
+/// per-output cap is ~8000 bytes) can add up to tens of thousands of
+/// tokens on their own, enough to overflow a small local model's entire
+/// `num_ctx` (8192 by default) before the event-count/token-budget
+/// compaction trigger even runs a whole turn later. Walked newest-first:
+/// the single newest observation always stays full regardless of its own
+/// size (the current turn's own output must stay visible), but older ones
+/// only join if the running total still fits.
+const MAX_FULL_OBSERVATIONS_TOTAL_CHARS: usize = 8_000;
 
 /// Builds the message history for the next model call from durable state
 /// (already-settled summary *and* settled events, never re-derived from
@@ -121,21 +141,27 @@ fn build_messages_with_never_clear(
         event_to_block_cleared(event, &tool_names, never_clear)
     });
 
-    // Colapso de observaciones viejas (ACI, ver
-    // `TACTICAL_FULL_OBSERVATIONS`): the i-th observation is "old" when
-    // at least `TACTICAL_FULL_OBSERVATIONS` observations come after it
-    // within this same tactical window. Counted over observations, not
-    // events — text/tool_use events in between don't consume slots.
-    let total_observations = tactical
-        .iter()
-        .filter(|event| matches!(event, AgentEvent::ToolCallCompleted { .. }))
-        .count();
-    let mut observations_seen = 0;
+    messages.extend(render_tactical_events(tactical));
+    messages
+}
+
+/// Renders the tactical slice alone — applying the same ACI collapse
+/// [`build_messages`] applies to it — so `Engine`'s token-budget estimator
+/// can size *what actually reaches the model* instead of the raw,
+/// uncollapsed observation payloads (mirrors [`render_durable_events`]'s
+/// reasoning on the durable side; see docs/AUDITORIA-2026-07-v3.md,
+/// hallazgo B2: sizing the tactical slice by its raw content could keep
+/// tripping repeated compaction well past the point where the actual,
+/// collapsed prompt was already back under budget).
+pub(crate) fn render_tactical_events(tactical: &[AgentEvent]) -> Vec<Message> {
+    let mut messages = Vec::with_capacity(tactical.len());
+    let full_indices = tactical_full_observation_indices(tactical);
+    let mut observations_seen = 0usize;
     push_grouped(&mut messages, tactical, |event| {
         if let AgentEvent::ToolCallCompleted { id, result } = event {
+            let idx = observations_seen;
             observations_seen += 1;
-            let newer_observations = total_observations - observations_seen;
-            if newer_observations >= TACTICAL_FULL_OBSERVATIONS {
+            if !full_indices.contains(&idx) {
                 return Some((
                     Role::User,
                     ContentBlock::ToolResult {
@@ -148,8 +174,43 @@ fn build_messages_with_never_clear(
         }
         event_to_block(event)
     });
-
     messages
+}
+
+/// Decides which `ToolCallCompleted` observations (identified by their
+/// 0-indexed position among all observations in `tactical`, oldest first)
+/// stay full rather than collapsing — both the recency rule
+/// ([`TACTICAL_FULL_OBSERVATIONS`]) and the aggregate size cap
+/// ([`MAX_FULL_OBSERVATIONS_TOTAL_CHARS`], hallazgo B1). Walks the
+/// newest-`TACTICAL_FULL_OBSERVATIONS` candidates from newest to oldest,
+/// admitting each into the full set while the running total still fits —
+/// the single newest observation is always admitted first regardless of
+/// its own size, so one oversized dump can never zero out the "at least
+/// the current turn's own output stays visible" guarantee.
+fn tactical_full_observation_indices(tactical: &[AgentEvent]) -> std::collections::HashSet<usize> {
+    let observation_lens: Vec<usize> = tactical
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolCallCompleted { result, .. } => Some(result.content.len()),
+            _ => None,
+        })
+        .collect();
+    let total = observation_lens.len();
+
+    let mut full = std::collections::HashSet::new();
+    let mut running_total = 0usize;
+    for (rev_i, &len) in observation_lens.iter().rev().enumerate() {
+        if rev_i >= TACTICAL_FULL_OBSERVATIONS {
+            break;
+        }
+        if running_total.saturating_add(len) > MAX_FULL_OBSERVATIONS_TOTAL_CHARS && !full.is_empty()
+        {
+            break;
+        }
+        running_total += len;
+        full.insert(total - 1 - rev_i);
+    }
+    full
 }
 
 /// Renders an old tactical observation as its first line plus a marker
@@ -697,6 +758,66 @@ mod tests {
 
         let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
         assert!(contents.iter().all(|c| c == &"z".repeat(400)));
+    }
+
+    // --- aggregate cap on full observations (hallazgo B1,
+    // docs/AUDITORIA-2026-07-v3.md) ---
+
+    #[test]
+    fn five_large_observations_do_not_all_stay_full_despite_being_within_the_last_five() {
+        // 5 observations at 3000 chars each = 15,000 chars — within the
+        // last-5 recency window, but the aggregate cap
+        // (MAX_FULL_OBSERVATIONS_TOTAL_CHARS = 8_000) can't fit all 5.
+        let mut tactical = Vec::new();
+        for i in 0..5 {
+            let id = format!("call-{i}");
+            tactical.push(tool_call_event(&id, "read_file"));
+            tactical.push(tool_completed_event(&id, &"x".repeat(3000)));
+        }
+
+        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        assert_eq!(contents.len(), 5);
+
+        let full_count = contents
+            .iter()
+            .filter(|c| c.len() == 3000 && !c.contains("collapsed"))
+            .count();
+        let collapsed_count = contents.iter().filter(|c| c.contains("collapsed")).count();
+
+        assert!(
+            full_count < 5,
+            "the aggregate cap must prevent all 5 large observations from staying full, got {full_count} full"
+        );
+        assert!(
+            full_count >= 1,
+            "the newest observation must always stay full"
+        );
+        assert_eq!(full_count + collapsed_count, 5);
+        // The newest one (last in iteration order) must be among the full
+        // ones — the current turn's own output must stay visible.
+        assert_eq!(contents.last().unwrap().len(), 3000);
+    }
+
+    #[test]
+    fn many_small_observations_within_the_aggregate_cap_all_stay_full() {
+        // Same shape as `old_tactical_observations_collapse_but_the_last_five_stay_full`
+        // but re-asserted here to pin that the aggregate cap doesn't
+        // regress the common case where observations are small: 5 × ~500
+        // chars is well under the 8,000-char cap.
+        let mut tactical = Vec::new();
+        for i in 0..5 {
+            let id = format!("call-{i}");
+            tactical.push(tool_call_event(&id, "read_file"));
+            tactical.push(tool_completed_event(&id, &"y".repeat(500)));
+        }
+
+        let contents = tool_result_contents(&build_messages(&empty_durable(), &tactical));
+        assert!(
+            contents
+                .iter()
+                .all(|c| c.len() == 500 && !c.contains("collapsed")),
+            "small observations under the aggregate cap must all stay full"
+        );
     }
 
     #[test]

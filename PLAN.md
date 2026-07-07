@@ -1782,6 +1782,272 @@ del plan con rol user como contexto en vez de assistant) con el mismo
 criterio A/B; si tampoco mueve `multi_step`/`error_recovery`, remoción
 completa.
 
+## Grupo O — la superficie de archivo usable (docs/AUDITORIA-2026-07-v3.md, 2026-07-06)
+
+La auditoría v3 (primera pasada SLM-first, no un bug-hunt) identificó que
+`read_file`/`write_file`/`edit_file` tenían una trampa estructural para el
+archivo *mediano* (no el enorme): `read_file` truncaba a 8 KB
+(`MAX_TOOL_OUTPUT_BYTES`, ~200 líneas) sin paginación, así que un ejecutor
+3-7B que necesitaba editar más allá del corte no podía — `edit_file` solo
+puede matchear texto que el modelo vio, y el steering "usa write_file con el
+contenido completo" presuponía un contenido completo que el modelo nunca
+recibió. Peor: si el modelo obedecía ese steering igual, `write_file`
+sobrescribía el archivo entero con lo poco que vio, destruyendo el resto en
+silencio.
+
+**Grupo O — ✅ CERRADO 2026-07-06.** Los cuatro hallazgos (A1-A4):
+
+- **A1 (paginación de `read_file`)**: `ReadFileArgs` gana `offset`/`limit`
+  (1-indexados, por línea). Sin argumentos y archivo ≤200 líneas
+  (`DEFAULT_PAGE_LINES`), comportamiento sin cambios (verbatim). Un archivo
+  más grande sin argumentos devuelve la primera página con un trailer
+  `[N more lines below — call read_file again with offset=X to continue]`;
+  con `offset`/`limit` explícitos, devuelve esa ventana con el encabezado
+  `[lines X-Y of N]`. `offset=0` y `offset` más allá del fin del archivo son
+  errores recuperables con mensaje explícito. Schema actualizado
+  (`schema.rs`) para que el modelo vea los dos parámetros nuevos.
+- **A2 (guarda en `write_file`)**: antes de escribir, se lee el tamaño previo
+  del archivo (si existe). Si el nuevo contenido es ≥500 bytes más chico que
+  el anterior, la escritura se aplica igual (no se bloquea — puede ser
+  intencional) pero el resultado exitoso lleva un `WARNING` explicando que
+  puede haber descartado el resto de un archivo que solo vio truncado/
+  paginado, con la sugerencia de usar `read_file` con `offset` o `edit_file`
+  la próxima vez.
+- **A3 (mejor error de matching en `edit_file`)**: `find_closest_line` hace
+  un best-effort "¿quisiste decir?" por solapamiento de palabras entre la
+  primera línea no vacía de `old_string` y cada línea del archivo; si hay
+  solapamiento, el mensaje de `NotFound` incluye `"The closest match in the
+  file is line N: ..."`. Sin solapamiento, el mensaje queda como antes (sin
+  ruido).
+- **A4 (steering al crear archivo)**: `edit_file` sobre una ruta inexistente
+  ya no propaga el `io::Error` crudo ("No such file or directory (os error
+  2)") — detecta `ErrorKind::NotFound` y responde con steering explícito a
+  `write_file`.
+
+12 tests de regresión nuevos entre `read_file.rs`, `write_file.rs` y
+`edit_file.rs` (paginación en sus 6 variantes — verbatim, primera página,
+ventana explícita, última página sin hint, offset fuera de rango, offset=0;
+warning de shrink en sus 3 variantes — shrink real, tamaño similar, archivo
+nuevo; hint de línea cercana en sus 2 variantes — con y sin solapamiento; y
+el steering de archivo inexistente). Workspace completo verde (`cargo test
+--workspace`), clippy limpio (`cargo clippy --workspace --all-targets -- -D
+warnings`).
+
+## Grupo P — calibrar la aritmética de contexto a `num_ctx=8192` (docs/AUDITORIA-2026-07-v3.md, 2026-07-06)
+
+Los cuatro hallazgos (B5, B1, B2, B4) — todos consecuencia de constantes
+copiadas de contextos grandes (SWE-agent/ACI mide contra GPT-4) o de un
+margen fijo que nunca se pensó para el `num_ctx=8192` default de Ollama.
+
+**Grupo P — ✅ CERRADO 2026-07-06.**
+
+- **B5 (max_tokens regala la mitad de la ventana)**: `max_tokens` es un
+  campo compartido por los tres backends (Anthropic/OpenRouter tienen
+  contexto grande y no lo necesitan chico) — bajar su *default* global
+  habría regresionado esos dos backends. En vez de eso,
+  `Config::validate` emite un `tracing::warn!` (no error — la config
+  default sigue siendo válida) cuando `default_backend == "ollama"` y
+  `max_tokens` reserva al menos la mitad de `ollama_num_ctx`, señalando el
+  lever real (bajar `max_tokens` en la config, no en el código).
+- **B1 (sin cap agregado sobre las 5 observaciones full)**: `history.rs`
+  gana `MAX_FULL_OBSERVATIONS_TOTAL_CHARS = 8_000` — `tactical_full_observation_indices`
+  camina las candidatas (últimas `TACTICAL_FULL_OBSERVATIONS`) de más
+  nueva a más vieja, admitiendo cada una al set "full" mientras el total
+  acumulado quepa; la más nueva siempre entra primero sin importar su
+  tamaño (la salida del turno actual nunca debe desaparecer). 5
+  observaciones de 3000 chars cada una (15.000 total, dentro de la
+  ventana de recencia) ya no quedan las 5 completas — solo las que caben
+  en el agregado, el resto colapsa aunque estén "dentro de las últimas
+  5".
+- **B2 (estimador mide la táctica en crudo)**: nueva `render_tactical_events`
+  (extraída del bloque que antes vivía inline en `build_messages_with_never_clear`,
+  aplica el mismo colapso ACI + el cap de B1) — `estimate_prompt_tokens`
+  ahora mide el lado táctico a través de ella (`estimate_message_tokens`),
+  igual que ya hacía con `render_durable_events` del lado durable (fix
+  N-6). Antes del fix, el estimador contaba el contenido crudo de
+  observaciones que el renderer ya había colapsado a una línea —
+  sobre-contaba y podía disparar compactación que no bajaba el prompt
+  real ni un token.
+- **B4 (margen fijo de 1024 no crece con tools MCP)**: nueva
+  `braze_tools_core::tool_stub_definition_bytes` (suma nombre+summary+schema
+  de cada stub) + `ollama_context_budget_tokens` en `braze-config` pasa de
+  una constante a un margen derivado del largo real del system prompt más
+  ese conteo de bytes de tools (divisor de 3 chars/token para el lado
+  JSON, más denso que el 4 chars/token del estimador de texto natural;
+  piso de 256 tokens para el caso degenerado). `braze-cli::main.rs` y
+  `braze-bench::runner.rs` computan `tool_stub_definition_bytes` antes de
+  mover `tools`/`system_prompt` a `Engine::new` y aplican el budget
+  después de construir el engine.
+
+12 tests de regresión nuevos: `braze-config::config` (4, el warning de
+B5), `braze-config::prompt` (2 nuevos + 1 renombrado, el margen dinámico
+de B4), `braze-tools-core::registry` (4, `tool_stub_definition_bytes`) y
+`braze-engine::history` (2, el cap agregado de B1) — más los 98 tests
+preexistentes de `braze-engine` re-verificados verdes bajo el nuevo
+estimador de B2 sin tocar ninguna aserción. Workspace completo verde
+(`cargo test --workspace`), clippy limpio (`cargo clippy --workspace
+--all-targets -- -D warnings`).
+
+## Grupo Q — hablarle al modelo en su plantilla (docs/AUDITORIA-2026-07-v3.md, 2026-07-06)
+
+El gap conceptual central de la v3: toda la inteligencia por-familia de
+`braze` vivía del lado de la *salida* (parsers de rescate), ninguna del
+lado de la *entrada* (prompt/formato) — al revés de donde la tesis del
+propio proyecto (Qwen3-Coder TR: los modelos chicos sobreajustan a su
+tool-template de entrenamiento) ubica el mayor retorno. Seis hallazgos
+(D1, D2, F2, C1, C2, F1).
+
+**Grupo Q — ✅ CERRADO 2026-07-06.**
+
+- **D1 (prompt/formato por familia)**: `default_system_prompt` gana un
+  segundo parámetro `model_name: Option<&str>`. Nuevo `ModelFamily`
+  (`braze-config/src/prompt.rs`) infiere `QwenTagged`/`Qwen3CoderXml`/
+  `Generic` del nombre del modelo (convención Ollama `family[:tag]`) y
+  añade una línea de hint proactivo con la sintaxis nativa de tool-call
+  de esa familia — movido del rescate puramente reactivo a una pista en
+  el prompt, antes de que el modelo genere nada. Solo se activa cuando
+  el backend activo es Ollama (`braze-cli::main.rs`,
+  `braze-bench::runner.rs`, este último vía el nuevo
+  `BackendSpec::executor_model_name`); Anthropic/OpenRouter no reciben
+  hint.
+- **D2 (sampling cableado a producción)**: `Config` gana
+  `ollama_temperature/seed/top_p/top_k/repeat_penalty` (todos
+  `Option<T>`, `None` = default de `OllamaBackend`), con soporte de env
+  var (`BRAZE_OLLAMA_*`) y `apply_overrides`. `build_model_backend` en
+  `braze-cli::main.rs` los aplica a la rama Ollama — los `with_*` ya
+  existían en `OllamaBackend` y en los flags de `braze-bench`, pero
+  nunca llegaban a `braze chat`/`braze run`: un sampling mejor
+  encontrado en un sweep podía medirse pero no aplicarse jamás en
+  producción.
+- **F2 (coerción de tipos del rescate XML)**: nueva
+  `coerce_arguments_to_schema` en `engine.rs`, invocada en
+  `dispatch_tool_calls` justo donde ya se resuelve el schema real, antes
+  de validar — corrige en las dos direcciones el defecto de
+  `parse_function_xml_tool_call` (sin tipo numérico/booleano nativo):
+  string→integer/number/boolean cuando el schema lo pide, y
+  object/array→string cuando el schema pide string (el caso espejo:
+  `<parameter=content>{"a":1}</parameter>` parseado como objeto en vez
+  de texto literal). No-op para llamadas ya bien tipadas (el caso wire).
+  Rompía sistemáticamente con qwen3.5-coder, el mejor modelo local del
+  proyecto, en cualquier tool con parámetro numérico/booleano.
+- **C1 (schema real para MCP ya tocadas)**: `McpToolProvider` gana
+  `resolved_names: RwLock<HashSet<String>>` — `resolve_schema` marca el
+  nombre como resuelto; `list_stubs` promueve el schema real (ya
+  disponible gratis en `tool_cache`) para cualquier tool en ese set, en
+  vez de seguir mostrando el placeholder permisivo
+  `{"type":"object","additionalProperties":true}` para siempre. Una tool
+  MCP nunca usada sigue diferida como antes.
+- **C2 (formato pythonic de Llama)**: nuevo `extract_pythonic_tool_calls`
+  en la escalera de rescate (entre el XML de qwen3-coder y el JSON
+  desnudo) — parsea `[nombre(k="v", n=5, b=true)]` (uno o más calls
+  separados por coma dentro de un único par de corchetes), con un
+  scanner manual consciente de comillas/paréntesis/corchetes anidados
+  para no partir un argumento en una coma interna ni cerrar el bloque en
+  un `]` dentro de un string. El wrapper `[...]` es lo que hace seguro
+  escanear sin marcador explícito (a diferencia de un `nombre(...)`
+  suelto, que colisionaría con prosa). Cubre Llama 3.x, una de las
+  familias de modelo local más instaladas y la única sin ninguna vía de
+  rescate hasta ahora.
+- **F1 (no ejecutar ejemplos fenceados / rechazar definiciones OpenAI)**:
+  `extract_tagged_tool_calls`/`extract_function_xml_tool_calls` ganan un
+  chequeo `is_inside_code_fence` — un bloque dentro de un fence ```` ``` ````
+  se deja como texto (el modelo mostrando un ejemplo, no una fuga real
+  del template) en vez de despacharse; y `parse_tool_call_json` rechaza
+  `parameters` con forma de definición JSON-Schema
+  (`{"type":"object","properties":{...}}`), el shape más común en
+  documentación de tool-calling, que antes pasaba el chequeo de forma y
+  se despachaba con el schema como si fueran los argumentos.
+
+36 tests de regresión nuevos: `braze-config` (8: 6 de D1 —
+`ModelFamily` + hint — y 2 de D2 — parsing de env de los cinco campos de
+sampling), `braze-mcp-client` (1, la promoción de schema en
+`list_stubs`), `braze-engine` (27: 9 de F2 — 8 unitarios + 1
+end-to-end —, 13 de C2 — 12 unitarios + 1 end-to-end —, 5 de F1) — más
+los tests preexistentes de los cinco crates tocados, todos
+re-verificados verdes. Workspace completo verde (`cargo test
+--workspace`), clippy limpio (`cargo clippy --workspace --all-targets --
+-D warnings`), `rustfmt` aplicado a los archivos tocados en la sesión.
+
+## Grupo R — economía de la escalación (docs/AUDITORIA-2026-07-v3.md, 2026-07-06)
+
+Ocho hallazgos sobre las palancas de escalación/prompting del loop:
+`F3, D3, D6, D4/F4, D5, F6, F7`.
+
+**Grupo R — ✅ CERRADO 2026-07-06.**
+
+- **F3 (la escalación es ciega al guardrail post-edit)**: nueva
+  `observation_is_a_failure` en `escalation.rs` — un `ToolResult` cuyo
+  contenido incluye el marcador literal `"[post-edit check]"` (ya
+  presente en `post_edit_check.rs`) cuenta como falla para
+  `trailing_failed_observations` aunque `is_error` sea `false` (el
+  guardrail nunca marca error — la edición sí se aplicó). Sin esto, un
+  worker cuyas ediciones aplican pero rompen el build nunca disparaba la
+  escalación al lead.
+- **D3 (no escalar por falla de entorno)**: la misma
+  `observation_is_a_failure` excluye del conteo los dos shapes que el
+  hallazgo nombra explícitamente — `shell_exec`'s JSON con `"exit_code"`
+  y los mensajes `"failed to read/write '...'"` de `read_file`/
+  `write_file` — vía `is_environment_signal`. Todo lo demás (validación
+  de schema, tool alucinada, ambigüedad de `edit_file`) sigue contando
+  igual que antes; alcance deliberadamente acotado a los dos shapes que
+  el propio hallazgo nombra, no una taxonomía general.
+- **D6 (best_of_n no gateado por backend)**: `braze-cli::main.rs` emite
+  un `tracing::warn!` cuando `default_backend == "ollama"` y
+  `best_of_n > 1` — el default (1) no se toca; solo avisa cuando el
+  usuario lo sube explícitamente contra un backend local ya
+  CPU-bound.
+- **D4 (contadores de escalación por candidato en vez de por ronda)**:
+  `EscalationState` gana `last_round_message_count`/`last_decision` —
+  `route()` detecta una llamada repetida de best-of-n (mismo
+  `req.messages.len()` que la llamada anterior) y reusa la decisión ya
+  tomada en vez de avanzar `calls`/`escalated_remaining` de nuevo. Los
+  dos tests preexistentes que repetían `request(vec![])` idéntico entre
+  rondas genuinamente distintas se reescribieron con un helper `filler`
+  que varía la longitud del mensaje por ronda, honrando la invariante
+  real del motor (el historial solo crece dentro de un turno).
+- **F4 (remap de índice sin id en OpenRouter)**: `accumulate_tool_call_fragment`
+  ahora también desplaza el slot cuando un fragmento reanuncia `name`
+  sobre un slot cuyo `arguments_buf` ya parsea como JSON completo (la
+  llamada previa "se ve terminada"), no solo cuando cambia el `id` — el
+  mismo criterio "anuncio sobre llamada terminada" que ya usa la ruta
+  sin índice, con la guarda extra de completitud del buffer para no
+  desplazar una continuación genuina a mitad de valor.
+- **D5 (narración cross-turn sin acción)**: nuevo campo
+  `Engine::consecutive_turns_without_tool_calls` (persiste entre
+  llamadas a `run_turn` sobre la misma instancia) — tras
+  `NARRATION_WITHOUT_ACTION_THRESHOLD` (2) turnos consecutivos que
+  terminan en texto plano sin ningún tool call, el turno siguiente
+  inyecta un `UserMessage` recordatorio adicional junto al mensaje real
+  del usuario. Un booleano local `any_tool_calls_this_turn` asegura que
+  un turno que sí llama una tool (aunque termine con texto en la última
+  ronda) resetee el contador en vez de seguir sumando.
+- **F6 (el nudge miente tras una mutación intermedia)**: nueva constante
+  `MUTATING_TOOL_NAMES` (`write_file`/`edit_file`/`shell_exec`) —
+  `dispatch_tool_calls` limpia todo `seen_calls` cuando una de estas
+  tools completa con éxito, así que un `read_file(x)` repetido tras un
+  `write_file(x)` intermedio se re-despacha de verdad en vez de quedar
+  bloqueado por el nudge con una afirmación ("el resultado no cambió")
+  que ya no es cierta.
+- **F7 (el rescate mutila el plan del planner)**: `complete_once_with`
+  gana un parámetro `rescue_enabled: bool` — el ejecutor sigue usando
+  `self.textual_rescue_enabled`, pero `attempt_planning_round` siempre
+  pasa `false`, así que un planner que emite su propio tool-template
+  nativo (p.ej. `<tool_call>` de Qwen) mientras nombra la tool que usaría
+  (justo lo que pide `planning_system_prompt`) sobrevive como texto del
+  plan en vez de que el rescate se lo extraiga.
+
+15 tests de regresión nuevos: `braze-model::escalation` (9: 7 de F3/D3 +
+2 de D4, más 2 tests preexistentes reescritos con message-length
+variable para reflejar la invariante real del motor), `braze-model::openrouter_wire`
+(2, F4 en su variante de ataque y su variante de seguridad-contra-falso-positivo),
+`braze-engine` (4: 1 de F6, 2 de D5, 1 de F7). Workspace completo verde
+(`cargo test --workspace`), clippy limpio (`cargo clippy --workspace
+--all-targets -- -D warnings`), `rustfmt` aplicado a los archivos
+tocados.
+
+Queda en el roadmap de la v3, no atacado en esta sesión: Grupo S
+(ablación en braze-bench para el paper — E1, E4, E6, E3, E2, E5).
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace
