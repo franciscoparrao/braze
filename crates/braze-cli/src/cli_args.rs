@@ -72,6 +72,17 @@ pub enum Command {
         /// Composes with `--planner` (proactive vs reactive).
         #[arg(long)]
         lead: Option<String>,
+        /// Force every action through the interactive confirmation
+        /// prompt, regardless of what `DefaultClassifier` would normally
+        /// rate it (a plain `write_file`/`edit_file` inside the
+        /// `WorkdirAllowlist` is ordinarily `Reversible` and never asks).
+        /// Meant for watching braze step-by-step in a high-stakes
+        /// session — e.g. a self-improvement exercise where braze edits
+        /// its own source in an isolated `git worktree` and a human
+        /// approves every write before it lands. See
+        /// `docs/self-improvement-guide.html`.
+        #[arg(long)]
+        supervised: bool,
     },
     /// One-shot: run a single prompt and exit.
     Run {
@@ -95,6 +106,10 @@ pub enum Command {
         /// `chat --lead`.
         #[arg(long)]
         lead: Option<String>,
+        /// Force every action through interactive confirmation — same
+        /// semantics as `chat --supervised`.
+        #[arg(long)]
+        supervised: bool,
     },
 }
 
@@ -157,6 +172,13 @@ impl Command {
             None => (raw, None),
         })
     }
+
+    /// Whether `--supervised` was passed, common to both subcommands.
+    pub fn supervised(&self) -> bool {
+        match self {
+            Command::Chat { supervised, .. } | Command::Run { supervised, .. } => *supervised,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -173,6 +195,7 @@ mod tests {
             theme: None,
             planner: planner.map(str::to_string),
             lead: None,
+            supervised: false,
         }
     }
 
@@ -216,5 +239,20 @@ mod tests {
     fn ollama_url_override_is_none_without_the_flag() {
         let cli = Cli::parse_from(["braze", "chat"]);
         assert_eq!(cli.command.ollama_url_override(), None);
+    }
+
+    #[test]
+    fn supervised_flag_parses_on_both_subcommands() {
+        let cli = Cli::parse_from(["braze", "chat", "--supervised"]);
+        assert!(cli.command.supervised());
+
+        let cli = Cli::parse_from(["braze", "run", "hola", "--supervised"]);
+        assert!(cli.command.supervised());
+    }
+
+    #[test]
+    fn supervised_defaults_to_false() {
+        let cli = Cli::parse_from(["braze", "chat"]);
+        assert!(!cli.command.supervised());
     }
 }

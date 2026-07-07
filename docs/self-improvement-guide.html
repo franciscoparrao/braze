@@ -1,0 +1,444 @@
+<title>Guía de auto-mejora supervisada — braze</title>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #f6f3ec;
+    --surface: #efe8d8;
+    --surface-2: #e6ddc7;
+    --ink: #221f19;
+    --ink-muted: #6e6656;
+    --accent: #1f6f6b;
+    --accent-soft: #d8e8e6;
+    --rule: #ddd2ba;
+    --ok: #3f7d4a;
+    --warn: #a06a12;
+    --crit: #a13c2f;
+    --font-display: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181a;
+      --surface: #1b2123;
+      --surface-2: #212829;
+      --ink: #e8e4da;
+      --ink-muted: #97948b;
+      --accent: #59c2bb;
+      --accent-soft: #1d3634;
+      --rule: #2b3234;
+      --ok: #6fc47e;
+      --warn: #d8a13c;
+      --crit: #e07361;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14181a;
+    --surface: #1b2123;
+    --surface-2: #212829;
+    --ink: #e8e4da;
+    --ink-muted: #97948b;
+    --accent: #59c2bb;
+    --accent-soft: #1d3634;
+    --rule: #2b3234;
+    --ok: #6fc47e;
+    --warn: #d8a13c;
+    --crit: #e07361;
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f3ec;
+    --surface: #efe8d8;
+    --surface-2: #e6ddc7;
+    --ink: #221f19;
+    --ink-muted: #6e6656;
+    --accent: #1f6f6b;
+    --accent-soft: #d8e8e6;
+    --rule: #ddd2ba;
+    --ok: #3f7d4a;
+    --warn: #a06a12;
+    --crit: #a13c2f;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  body {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 72ch);
+    gap: 3rem;
+    justify-content: center;
+    padding: 3.5rem 1.5rem 6rem;
+  }
+
+  @media (max-width: 900px) {
+    body { grid-template-columns: minmax(0, 72ch); }
+    nav.toc { display: none; }
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 3rem;
+    align-self: start;
+    font-size: 0.85rem;
+  }
+
+  nav.toc .eyebrow {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    margin: 0 0 0.9rem;
+  }
+
+  nav.toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    border-left: 2px solid var(--rule);
+  }
+
+  nav.toc a {
+    display: block;
+    padding: 0.1rem 0 0.1rem 0.9rem;
+    margin-left: -2px;
+    border-left: 2px solid transparent;
+    color: var(--ink-muted);
+    text-decoration: none;
+  }
+
+  nav.toc a:hover, nav.toc a:focus-visible {
+    color: var(--ink);
+    border-left-color: var(--accent);
+  }
+
+  main { min-width: 0; }
+
+  h1 {
+    font-family: var(--font-display);
+    font-size: 2.15rem;
+    font-weight: 600;
+    line-height: 1.15;
+    margin: 0 0 0.4rem;
+    text-wrap: balance;
+  }
+
+  .subtitle {
+    color: var(--ink-muted);
+    font-size: 1.05rem;
+    margin: 0 0 1rem;
+    max-width: 58ch;
+  }
+
+  .meta {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    padding-bottom: 1.6rem;
+    margin-bottom: 2.4rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  h2 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 3rem 0 0.9rem;
+    text-wrap: balance;
+    scroll-margin-top: 2rem;
+  }
+
+  h2 .num {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-weight: 500;
+    margin-right: 0.5rem;
+  }
+
+  h3 {
+    font-family: var(--font-body);
+    font-size: 1.02rem;
+    font-weight: 700;
+    margin: 1.9rem 0 0.6rem;
+    scroll-margin-top: 2rem;
+  }
+
+  p { margin: 0 0 1rem; }
+  ul, ol.plain { margin: 0 0 1rem; padding-left: 1.3rem; }
+  li { margin-bottom: 0.35rem; }
+
+  a { color: var(--accent); }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--surface);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.55;
+    background: var(--surface-2);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    margin: 0 0 1.2rem;
+  }
+
+  pre code { background: none; padding: 0; font-size: 1em; }
+
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    margin: 0 0 1.4rem;
+  }
+
+  .callout .eyebrow {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+    color: var(--accent);
+    margin: 0 0 0.5rem;
+  }
+
+  .callout pre, .callout p:last-child { margin-bottom: 0; }
+
+  .warn-callout {
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+    border: 1px solid var(--warn);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    margin: 0 0 1.4rem;
+  }
+  .warn-callout .eyebrow {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+    color: var(--warn);
+    margin: 0 0 0.5rem;
+  }
+  .warn-callout p:last-child { margin-bottom: 0; }
+
+  .step {
+    display: grid;
+    grid-template-columns: 2rem 1fr;
+    gap: 0 1rem;
+    margin: 0 0 1.4rem;
+  }
+
+  .step-num {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 1.05rem;
+  }
+
+  .step-body p:last-child { margin-bottom: 0; }
+  .step-body pre { margin-top: 0.4rem; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+    margin: 0 0 1.2rem;
+  }
+  .table-wrap { overflow-x: auto; margin: 0 0 1.2rem; }
+  .table-wrap table { margin-bottom: 0; }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-muted);
+  }
+
+  .pill {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .pill-easy { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .pill-medium { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+  .pill-hard { background: color-mix(in srgb, var(--crit) 16%, transparent); color: var(--crit); }
+
+  hr.rule { border: none; border-top: 1px solid var(--rule); margin: 2.6rem 0; }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-muted);
+    font-size: 0.82rem;
+  }
+</style>
+
+<nav class="toc">
+  <p class="eyebrow">En esta guía</p>
+  <ol>
+    <li><a href="#que-es">1. Qué es --supervised</a></li>
+    <li><a href="#flujo">2. Flujo paso a paso</a></li>
+    <li><a href="#ejercicios">3. Cola de ejercicios</a></li>
+    <li><a href="#vigilar">4. Qué vigilar al aprobar</a></li>
+    <li><a href="#cuando-no">5. Cuándo no usar esto</a></li>
+  </ol>
+</nav>
+
+<main>
+  <h1>Auto-mejora supervisada</h1>
+  <p class="subtitle">Que <code>braze</code> edite su propio motor — en un worktree descartable, con vos aprobando cada escritura antes de que ocurra.</p>
+  <div class="meta">
+    <span>commit de referencia: 9f21eb3</span>
+    <span>proyecto: /home/franciscoparrao/proyectos/braze</span>
+    <span>ver también: docs/usability-testing-guide.html, docs/self-improvement-exercises.md</span>
+  </div>
+
+  <p>La forma más honesta de probar si <code>braze</code> sirve para desarrollo real es dejarlo trabajar sobre <em>su propio</em> código — no un sandbox sintético del bench, el motor de verdad. Eso es más delicado que cualquier tarea del bench: un mal diff acá no rompe una tarea de prueba, rompe la herramienta. Esta guía documenta el modo pensado específicamente para ese riesgo: <code>--supervised</code> más un worktree aislado, de forma que nada llega a <code>main</code> sin que lo hayas visto venir, paso a paso.</p>
+
+  <h2 id="que-es"><span class="num">1</span>Qué es <code>--supervised</code></h2>
+
+  <p>Hoy, si <code>braze</code> corre parado dentro de su propio repo, cualquier <code>write_file</code>/<code>edit_file</code> ahí se clasifica <strong>Reversible</strong> (cae dentro del <code>WorkdirAllowlist</code>) — no pide confirmación, se aplica directo. Eso tiene sentido para un proyecto cualquiera del usuario, pero no para una sesión donde el "proyecto" es el motor que está ejecutando la sesión.</p>
+
+  <p><code>--supervised</code> reemplaza el clasificador por uno que marca <strong>todo</strong> como Irreversible (<code>AlwaysIrreversibleClassifier</code>, <code>crates/braze-permissions/src/classifier.rs</code>) — así que cada acción, sin excepción, pasa por el mismo overlay de aprobación (y/n) que hoy solo ven las acciones genuinamente irreversibles.</p>
+
+  <pre><code>braze chat --tui --supervised --backend anthropic --model claude-opus-4-6-20260805</code></pre>
+
+  <p>Funciona en <code>chat</code> y en <code>run</code>, con o sin <code>--tui</code> (el loop de texto plano también tiene confirmación interactiva por stdin). Sin <code>--tui</code>, cada aprobación es una pregunta y/n bloqueante en la terminal — perfectamente usable para esto, aunque el overlay de la TUI se lee más cómodo.</p>
+
+  <h2 id="flujo"><span class="num">2</span>Flujo paso a paso</h2>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <p>Crear un worktree nuevo, en una rama descartable — nunca el checkout activo, nunca <code>main</code>. Si algo sale mal, se tira el worktree entero y no pasó nada.</p>
+      <pre><code>cd ~/proyectos/braze
+git worktree add ../braze-self-improve-si1 -b self-improve/si-1
+cd ../braze-self-improve-si1</code></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <p>Arrancar <code>braze</code> parado en ese worktree, en modo supervisado, contra un backend capaz (esto es código real, no una tarea de bench — recomendado Anthropic o <code>openrouter:deepseek/deepseek-v4-flash</code>, no el Qwen local todavía).</p>
+      <pre><code>braze chat --tui --supervised --backend anthropic --model claude-opus-4-6-20260805</code></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <p>Pegar el prompt de un ejercicio de <code>docs/self-improvement-exercises.md</code> (sección 3, abajo).</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <p>Aprobar o denegar cada acción a medida que aparece — ver la sección 4 para qué mirar en cada una. Denegar no aborta la sesión: <code>braze</code> ve la denegación y puede intentar otra cosa.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <p>Al terminar, verificar en el worktree (el guardrail de <code>post_edit_check</code> ya corrió <code>cargo check</code> después de cada edición, pero conviene la pasada completa):</p>
+      <pre><code>cargo build --workspace && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings</code></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">6</div>
+    <div class="step-body">
+      <p>Revisar el diff completo con calma (<code>git diff main</code>). Si convence: <code>git push -u origin self-improve/si-1</code> y un PR normal. Si no: <code>cd ~/proyectos/braze && git worktree remove ../braze-self-improve-si1 --force</code> y listo, sin rastro.</p>
+    </div>
+  </div>
+
+  <div class="warn-callout">
+    <p class="eyebrow">Antes de arrancar</p>
+    <p><code>--supervised</code> te protege de una escritura que no viste venir, no de aprobar algo que en el momento parecía razonable pero no lo era. La revisión del paso 6 sigue siendo necesaria — el modo supervisado baja el riesgo de sorpresa, no reemplaza la revisión de código.</p>
+  </div>
+
+  <h2 id="ejercicios"><span class="num">3</span>Cola de ejercicios</h2>
+
+  <p>Contenido completo (prompt exacto + criterios de aceptación) en <code>docs/self-improvement-exercises.md</code>. Resumen:</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Título</th><th>Dificultad</th><th>Origen</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>SI-1</code></td>
+          <td>Ampliar la lista segura de comandos de shell</td>
+          <td><span class="pill pill-easy">fácil</span></td>
+          <td>Hallazgo U-5 (fricción de permisos en <code>lscpu</code>/<code>lsmem</code>/<code>lshw</code>)</td>
+        </tr>
+        <tr>
+          <td><code>SI-2</code></td>
+          <td>Sintaxis de spec <code>+lead:</code> en <code>braze-bench</code></td>
+          <td><span class="pill pill-medium">media</span></td>
+          <td>Backlog — A/B del <code>EscalatingBackend</code></td>
+        </tr>
+        <tr>
+          <td><code>SI-3</code></td>
+          <td>Iteración pre-registrada del planner</td>
+          <td><span class="pill pill-hard">difícil</span></td>
+          <td>Backlog — PLAN.md § "Split planificador/ejecutor"</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>No todo hallazgo se convierte en un ejercicio limpio — <code>docs/self-improvement-exercises.md</code> también lista los que quedaron como "no-ejercicio" (U-2, U-3, U-4: defectos de contenido del modelo, no del harness) y por qué.</p>
+
+  <h2 id="vigilar"><span class="num">4</span>Qué vigilar al aprobar</h2>
+
+  <ul>
+    <li><strong>Alcance del archivo</strong>: ¿la edición toca solo lo que el ejercicio pidió, o se metió a "mejorar" algo no pedido de paso?</li>
+    <li><strong>Tests nuevos, no solo código nuevo</strong>: si agrega una función pero no un test que la ejercite, es una señal de alerta — la convención del proyecto es "cada incremento se prueba".</li>
+    <li><strong>Comandos de shell</strong>: bajo <code>--supervised</code> hasta <code>ls</code> pide confirmación — no te acostumbres a aprobar por reflejo; seguí leyendo el comando exacto cada vez.</li>
+    <li><strong>Un "no" no es un fracaso</strong>: si algo no se ve bien a mitad de camino, denegar y dejar que el modelo reaccione es información útil — anotalo como si fuera un hallazgo de usabilidad más.</li>
+  </ul>
+
+  <h2 id="cuando-no"><span class="num">5</span>Cuándo no usar esto</h2>
+
+  <p><code>--supervised</code> es fricción a propósito — no es el modo para una sesión normal de <code>braze chat</code> sobre un proyecto cualquiera (ahí el clasificador por defecto ya distingue bien qué pedir y qué no). Tiene sentido específicamente para: braze editando su propio código fuente, o cualquier otra sesión de alto riesgo donde preferís ver cada paso aunque sea más lento.</p>
+
+  <footer>
+    Complementa <code>docs/usability-testing-guide.html</code> (probar braze como usuario) — acá el foco es distinto: no es encontrar fricción de uso, es dejar que braze *modifique su propio motor* con la menor sorpresa posible.
+  </footer>
+</main>

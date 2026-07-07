@@ -1,0 +1,854 @@
+<title>Guía de prueba de usabilidad — braze</title>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #f6f3ec;
+    --surface: #efe8d8;
+    --surface-2: #e6ddc7;
+    --ink: #221f19;
+    --ink-muted: #6e6656;
+    --accent: #1f6f6b;
+    --accent-soft: #d8e8e6;
+    --rule: #ddd2ba;
+    --ok: #3f7d4a;
+    --warn: #a06a12;
+    --crit: #a13c2f;
+    --font-display: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181a;
+      --surface: #1b2123;
+      --surface-2: #212829;
+      --ink: #e8e4da;
+      --ink-muted: #97948b;
+      --accent: #59c2bb;
+      --accent-soft: #1d3634;
+      --rule: #2b3234;
+      --ok: #6fc47e;
+      --warn: #d8a13c;
+      --crit: #e07361;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14181a;
+    --surface: #1b2123;
+    --surface-2: #212829;
+    --ink: #e8e4da;
+    --ink-muted: #97948b;
+    --accent: #59c2bb;
+    --accent-soft: #1d3634;
+    --rule: #2b3234;
+    --ok: #6fc47e;
+    --warn: #d8a13c;
+    --crit: #e07361;
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f3ec;
+    --surface: #efe8d8;
+    --surface-2: #e6ddc7;
+    --ink: #221f19;
+    --ink-muted: #6e6656;
+    --accent: #1f6f6b;
+    --accent-soft: #d8e8e6;
+    --rule: #ddd2ba;
+    --ok: #3f7d4a;
+    --warn: #a06a12;
+    --crit: #a13c2f;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  body {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 72ch);
+    gap: 3rem;
+    justify-content: center;
+    padding: 3.5rem 1.5rem 6rem;
+  }
+
+  @media (max-width: 900px) {
+    body { grid-template-columns: minmax(0, 72ch); }
+    nav.toc { display: none; }
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 3rem;
+    align-self: start;
+    font-size: 0.85rem;
+  }
+
+  nav.toc .eyebrow {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    margin: 0 0 0.9rem;
+  }
+
+  nav.toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    border-left: 2px solid var(--rule);
+  }
+
+  nav.toc a {
+    display: block;
+    padding: 0.1rem 0 0.1rem 0.9rem;
+    margin-left: -2px;
+    border-left: 2px solid transparent;
+    color: var(--ink-muted);
+    text-decoration: none;
+  }
+
+  nav.toc a:hover, nav.toc a:focus-visible {
+    color: var(--ink);
+    border-left-color: var(--accent);
+  }
+
+  main { min-width: 0; }
+
+  h1 {
+    font-family: var(--font-display);
+    font-size: 2.15rem;
+    font-weight: 600;
+    line-height: 1.15;
+    margin: 0 0 0.4rem;
+    text-wrap: balance;
+  }
+
+  .subtitle {
+    color: var(--ink-muted);
+    font-size: 1.05rem;
+    margin: 0 0 1rem;
+    max-width: 58ch;
+  }
+
+  .meta {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    padding-bottom: 1.6rem;
+    margin-bottom: 2.4rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  h2 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 3rem 0 0.9rem;
+    text-wrap: balance;
+    scroll-margin-top: 2rem;
+  }
+
+  h2 .num {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-weight: 500;
+    margin-right: 0.5rem;
+  }
+
+  h3 {
+    font-family: var(--font-body);
+    font-size: 1.02rem;
+    font-weight: 700;
+    margin: 1.9rem 0 0.6rem;
+    scroll-margin-top: 2rem;
+  }
+
+  p { margin: 0 0 1rem; }
+  ul, ol.plain { margin: 0 0 1rem; padding-left: 1.3rem; }
+  li { margin-bottom: 0.35rem; }
+
+  a { color: var(--accent); }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--surface);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.55;
+    background: var(--surface-2);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    margin: 0 0 1.2rem;
+  }
+
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: 1em;
+  }
+
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    margin: 0 0 1.4rem;
+  }
+
+  .callout .eyebrow {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+    color: var(--accent);
+    margin: 0 0 0.5rem;
+  }
+
+  .callout pre, .callout p:last-child { margin-bottom: 0; }
+
+  .scenario {
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1rem 1.2rem 1.1rem;
+    margin: 0 0 1rem;
+  }
+
+  .scenario-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .scenario-num {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-size: 0.95rem;
+  }
+
+  .scenario-title { font-weight: 700; }
+
+  .scenario p:last-child { margin-bottom: 0; }
+  .scenario .expect { color: var(--ink-muted); font-size: 0.92rem; }
+
+  .block-label {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.68rem;
+    color: var(--ink-muted);
+    margin: 0.7rem 0 0.3rem;
+  }
+
+  .scenario pre {
+    margin: 0 0 0.5rem;
+    font-size: 0.82rem;
+  }
+
+  .scenario pre.prompt {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    color: var(--ink);
+  }
+
+  .scenario .expect { margin-top: 0.6rem; }
+
+  .group-label {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.75rem;
+    color: var(--ink-muted);
+    margin: 2rem 0 0.8rem;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+    margin: 0 0 1.2rem;
+  }
+
+  .table-wrap { overflow-x: auto; margin: 0 0 1.2rem; }
+  .table-wrap table { margin-bottom: 0; }
+
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  th {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-muted);
+  }
+
+  td.num, th.num { font-variant-numeric: tabular-nums; }
+
+  .sev {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .sev-block { background: color-mix(in srgb, var(--crit) 18%, transparent); color: var(--crit); }
+  .sev-annoy { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .sev-minor { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+
+  hr.rule { border: none; border-top: 1px solid var(--rule); margin: 2.6rem 0; }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-muted);
+    font-size: 0.82rem;
+  }
+</style>
+
+<nav class="toc">
+  <p class="eyebrow">En esta guía</p>
+  <ol>
+    <li><a href="#preparacion">1. Preparación</a></li>
+    <li><a href="#iniciar">2. Iniciar una sesión</a></li>
+    <li><a href="#observabilidad">3. Observabilidad</a></li>
+    <li><a href="#escenarios">4. Escenarios de prueba</a></li>
+    <li><a href="#herramientas">5. Herramientas</a></li>
+    <li><a href="#registro">6. Registro de fricción</a></li>
+    <li><a href="#hallazgos">7. Qué hacer con lo encontrado</a></li>
+  </ol>
+</nav>
+
+<main>
+  <h1>Guía de prueba de usabilidad</h1>
+  <p class="subtitle">Usar <code>braze</code> como usuario real — no como quien lo escribió — para encontrar la fricción que un benchmark automatizado no puede ver.</p>
+  <div class="meta">
+    <span>commit de referencia: 9f21eb3</span>
+    <span>proyecto: /home/franciscoparrao/proyectos/braze</span>
+    <span>ver también: PLAN.md, docs/usability-log-template.md</span>
+  </div>
+
+  <p>Todo lo que hemos medido hasta ahora sobre <code>braze</code> viene de <code>braze-bench</code>: tareas sintéticas, verificadas mecánicamente, corridas sin un humano mirando. Eso mide capacidad del modelo, pero no fricción de uso — un mensaje de error confuso, una pausa que no se explica, un atajo de la TUI que no hace lo esperado. Esta guía es el protocolo para encontrar esa segunda clase de problema, a mano, con el binario real.</p>
+
+  <h2 id="preparacion"><span class="num">1</span>Preparación</h2>
+
+  <p>El binario se llama <code>braze</code> pero no está instalado a nivel del sistema — es un target más del workspace (<code>crates/braze-cli</code>). Dos formas de tenerlo a mano:</p>
+
+  <div class="callout">
+    <p class="eyebrow">Opción A — sin instalar nada</p>
+    <pre><code>cargo run -p braze-cli --release -- chat --tui</code></pre>
+    <p>El <code>--</code> separa los flags de <code>cargo</code> de los de <code>braze</code>. Cómodo para una prueba puntual.</p>
+  </div>
+
+  <div class="callout">
+    <p class="eyebrow">Opción B — para usarlo repetidamente durante la prueba</p>
+    <pre><code>cargo install --path crates/braze-cli --locked</code></pre>
+    <p>Deja <code>braze</code> en <code>~/.cargo/bin</code> (normalmente ya está en tu <code>PATH</code>). Si tocas código durante la prueba, repite el <code>cargo install</code> para que el binario instalado recoja el cambio.</p>
+  </div>
+
+  <h3>Configuración mínima</h3>
+  <p>Sin archivo de configuración, <code>braze</code> usa <code>ollama</code> local (<code>http://localhost:11434</code>, modelo <code>llama3.1</code>) por defecto — no gasta ninguna API sin que lo pidas explícitamente. Para algo más deliberado, <code>$XDG_CONFIG_HOME/braze/config.json</code> (o <code>~/.config/braze/config.json</code>):</p>
+
+  <pre><code>{
+  "default_backend": "ollama",
+  "ollama_base_url": "http://192.168.1.8:11434",
+  "ollama_model": "qwen3.5-coder:latest",
+  "anthropic_api_key": "sk-ant-...",
+  "anthropic_model": "claude-opus-4-6-20260805"
+}</code></pre>
+
+  <p>Un archivo ausente, o con claves desconocidas, no rompe nada — solo un warning. Las <code>BRAZE_*</code> (p.ej. <code>BRAZE_OLLAMA_BASE_URL</code>) pisan el archivo; los flags de línea de comando pisan todo lo anterior.</p>
+
+  <h2 id="iniciar"><span class="num">2</span>Iniciar una sesión</h2>
+
+  <p>Solo hay dos subcomandos: <code>chat</code> (interactivo) y <code>run &lt;prompt&gt;</code> (una vuelta y sale). <code>chat</code> acepta <code>--tui</code> para la interfaz de terminal; sin ese flag es un loop de texto plano por stdin/stdout.</p>
+
+  <pre><code># TUI, contra Nitro (LAN), modelo recomendado
+braze chat --tui --backend ollama --ollama-url http://192.168.1.8:11434 --model qwen3.5-coder:latest
+
+# texto plano, mismo backend
+braze chat --backend ollama --ollama-url http://192.168.1.8:11434 --model qwen2.5:3b
+
+# one-shot
+braze run "lee main.rs y dime qué hace" --backend ollama --ollama-url http://192.168.1.8:11434
+
+# contra Anthropic (si configuraste la key)
+braze chat --tui --backend anthropic --model claude-opus-4-6-20260805</code></pre>
+
+  <p>Cada <code>chat</code>/<code>run</code> imprime su <code>session</code> (un uuid) al arrancar. Para retomarla más tarde en el mismo directorio de trabajo:</p>
+  <pre><code>braze chat --resume &lt;session-id&gt;</code></pre>
+  <p>No existe un <code>braze sessions list</code> — si perdiste el id, la sección 5 tiene la herramienta que lo reemplaza.</p>
+
+  <h2 id="observabilidad"><span class="num">3</span>Observabilidad</h2>
+  <p>Todo lo que <code>braze</code> traza va a <code>stderr</code> (nunca se mezcla con la conversación en <code>stdout</code>), gateado por <code>RUST_LOG</code>:</p>
+  <pre><code>RUST_LOG=braze_engine=info braze chat --tui
+RUST_LOG=debug braze run "..."   # todo, más verboso</code></pre>
+  <p><code>braze_engine=info</code> es el nivel más útil para usabilidad: expone cuándo se activan las palancas de confiabilidad (rescate textual de tool calls, compactación de contexto) sin inundar la salida.</p>
+
+  <h2 id="escenarios"><span class="num">4</span>Escenarios de prueba</h2>
+  <p>40 escenarios, de piso a techo de dificultad. Cada uno trae su <strong>preparación</strong> (bash, se corre una vez en la terminal) y su <strong>prompt</strong> (se copia tal cual dentro de <code>braze chat</code>). Los nombres de archivo llevan el número del escenario como prefijo a propósito — así podés dejar <code>braze chat --tui</code> corriendo <em>una sola vez</em> y recorrer los 40 en la misma sesión, sin colisiones de nombre, lo que de paso construye naturalmente el escenario 33 (sesión larga).</p>
+
+  <div class="callout">
+    <p class="eyebrow">Una vez, antes de empezar</p>
+    <pre><code>mkdir -p ~/braze-pruebas && cd ~/braze-pruebas
+braze chat --tui --backend ollama --ollama-url http://192.168.1.8:11434 --model qwen3.5-coder:latest</code></pre>
+    <p>Dejá esa sesión abierta y andá pegando la preparación de cada escenario en <strong>otra</strong> terminal, también parada en <code>~/braze-pruebas</code> (el <code>cwd</code> del <code>PermissionGuard</code> queda fijo al momento en que arrancó <code>braze</code>, no sigue tus <code>cd</code> posteriores).</p>
+  </div>
+
+  <p class="group-label">Piso — una sola herramienta</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">1</span><span class="scenario-title">Lectura simple</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'linea uno\nlinea dos\nlinea tres\n' > 01_notas.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee el archivo 01_notas.txt y dime cuántas líneas tiene.</code></pre>
+    <p class="expect">Esperado: una llamada a <code>read_file</code>, respuesta correcta, sin rodeos.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">2</span><span class="scenario-title">Archivo grande — paginación</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>seq 1 500 | sed 's/^/linea /' > 02_grande.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee el archivo 02_grande.txt y dime exactamente qué dice la línea 250.</code></pre>
+    <p class="expect">Esperado: usa <code>offset</code>/<code>limit</code> para llegar a la línea 250 (no se traba ni trunca en silencio un archivo de 500 líneas) y responde "linea 250".</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">3</span><span class="scenario-title">Búsqueda simple (grep)</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'inicio del programa\nERROR: fallo de conexion\nfin del programa\n' > 03_datos.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Busca la palabra ERROR en 03_datos.txt y dime en qué línea aparece.</code></pre>
+    <p class="expect">Esperado: <code>grep</code>, responde "línea 2".</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">4</span><span class="scenario-title">Búsqueda dirigida entre varios archivos</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'host=a\nport=8080\n' > 04_server_a.conf
+printf 'host=b\nport=9090\n' > 04_server_b.conf
+printf 'host=c\nport=7070\n' > 04_server_c.conf</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Busca en los archivos .conf del directorio cuál tiene configurado el puerto 9090 y dime su nombre.</code></pre>
+    <p class="expect">Esperado: identifica <code>04_server_b.conf</code>.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">5</span><span class="scenario-title">Listado simple (glob)</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>touch 05_a.rs 05_b.rs
+echo 'no es rust' > 05_notas.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lista todos los archivos con extensión .rs que empiecen con "05_".</code></pre>
+    <p class="expect">Esperado: <code>05_a.rs</code> y <code>05_b.rs</code>, sin incluir <code>05_notas.txt</code>.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">6</span><span class="scenario-title">Listado anidado (glob en subdirectorios)</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>mkdir -p 06_src
+touch 06_src/lib.rs 06_src/main.rs 06_README.md</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lista todos los archivos .rs dentro de 06_src, incluyendo subdirectorios si los hubiera.</code></pre>
+    <p class="expect">Esperado: encuentra ambos sin que tengas que nombrar la ruta completa de cada uno.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">7</span><span class="scenario-title">Crear archivo</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Crea un archivo llamado 07_saludo.txt con el contenido 'hola mundo'.</code></pre>
+    <p class="expect">Esperado: <code>write_file</code>; <code>cat 07_saludo.txt</code> después confirma el contenido.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">8</span><span class="scenario-title">Editar archivo</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo 'version=1' > 08_config.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Edita 08_config.txt y cambia 'version=1' por 'version=2'.</code></pre>
+    <p class="expect">Esperado: <code>edit_file</code> aplica un match exacto, sin reescribir el archivo entero.</p>
+  </div>
+
+  <p class="group-label">Sin herramienta</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">9</span><span class="scenario-title">Aritmética directa</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>¿Cuánto es 15 más 27? Responde solo con el número, sin usar ninguna herramienta.</code></pre>
+    <p class="expect">Esperado: "42", sin ningún tool call.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">10</span><span class="scenario-title">Conocimiento general</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>¿En qué año llegó el hombre a la Luna por primera vez? Responde solo con el año, sin usar ninguna herramienta.</code></pre>
+    <p class="expect">Esperado: "1969", directo.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">11</span><span class="scenario-title">Formato de lista</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Dame 3 ideas de nombres para un gato, en una lista numerada, sin usar ninguna herramienta.</code></pre>
+    <p class="expect">Esperado: lista de 3 ítems, sin tocar el filesystem para algo que no lo necesita.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">12</span><span class="scenario-title">Redacción corta</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Escribe, inventado, un mensaje de error de máximo 100 caracteres para cuando falla una conexión a internet. Sin usar ninguna herramienta.</code></pre>
+    <p class="expect">Esperado: responde en texto, no intenta "escribir" el mensaje a un archivo sin que se lo pidieras.</p>
+  </div>
+
+  <p class="group-label">Encadenamiento multi-paso</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">13</span><span class="scenario-title">Leer, contar, escribir</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'linea a\nlinea b\nlinea c\n' > 13_resumen.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee 13_resumen.txt, cuenta cuántas líneas tiene, y escribe ese número (solo el número) en un archivo nuevo llamado 13_conteo.txt.</code></pre>
+    <p class="expect">Esperado: <code>13_conteo.txt</code> queda con "3".</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">14</span><span class="scenario-title">Sumar dos archivos</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'x\ny\n' > 14_a.txt
+printf 'x\ny\nz\n' > 14_b.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee 14_a.txt y 14_b.txt, suma la cantidad de líneas de cada uno, y escribe el total (solo el número) en 14_total.txt.</code></pre>
+    <p class="expect">Esperado: <code>14_total.txt</code> queda con "5".</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">15</span><span class="scenario-title">Leer, calcular, escribir</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo '5' > 15_precio.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee 15_precio.txt (tiene un solo número), multiplícalo por 4, y escribe el resultado (solo el número) en 15_total_final.txt.</code></pre>
+    <p class="expect">Esperado: <code>15_total_final.txt</code> queda con "20".</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">16</span><span class="scenario-title">Leer y resumir</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'El proyecto Aurora arrancó en marzo.\nSe retrasó dos meses por falta de presupuesto.\nSe entregó finalmente en octubre, con buena recepción del cliente.\n' > 16_informe.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee 16_informe.txt y hazme un resumen de una sola oración.</code></pre>
+    <p class="expect">Esperado: una oración que efectivamente refleje el contenido (retraso + entrega en octubre), no una paráfrasis genérica.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">17</span><span class="scenario-title">Editar según lo leído (condicional)</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo 'status: pendiente' > 17_estado.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee 17_estado.txt, y si dice 'pendiente', cámbialo a 'completado'.</code></pre>
+    <p class="expect">Esperado: lee primero (no asume), después edita condicionalmente.</p>
+  </div>
+
+  <p class="group-label">Recuperación de error</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">18</span><span class="scenario-title">Nombre de archivo a medias</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'dato uno\ndato dos\n' > 18_informe_final_v2.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee el archivo de informe del directorio (el nombre empieza con '18_informe' pero no recuerdo el resto) y dime cuántas líneas tiene.</code></pre>
+    <p class="expect">Esperado: se recupera de un primer intento fallido con <code>glob</code>/<code>grep</code> en vez de repetir la misma llamada o rendirse.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">19</span><span class="scenario-title">Archivo que no existe</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Lee el archivo 19_no_existe.txt y dime su contenido.</code></pre>
+    <p class="expect">Esperado: reporta que no existe (sin alucinar contenido) y no repite la misma llamada en loop.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">20</span><span class="scenario-title">Edición ambigua (el texto aparece dos veces)</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'TODO: revisar informe\nTODO: enviar correo\n' > 20_tareas.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Edita 20_tareas.txt y cambia 'TODO' por 'HECHO'.</code></pre>
+    <p class="expect">Esperado: <code>edit_file</code> rechaza el cambio por ambigüedad (2 ocurrencias) y el modelo pide más contexto o edita cada línea completa por separado — no debería aplicar el cambio a ciegas ni quedarse trabado repitiendo la misma llamada.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">21</span><span class="scenario-title">Edición sobre texto que no existe</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo 'version=1' > 21_config.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Edita 21_config.txt y cambia 'version=99' por 'version=100'.</code></pre>
+    <p class="expect">Esperado: 'version=99' no está en el archivo — <code>edit_file</code> falla con un mensaje claro (sugiere <code>write_file</code>), el modelo no inventa que lo cambió.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">22</span><span class="scenario-title">Comando de shell que no existe</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Ejecuta el comando 'lsx -la' en el directorio actual y dime qué archivos ves.</code></pre>
+    <p class="expect">Esperado: <code>lsx</code> no existe — el error de spawn se reporta claro, el modelo no insiste con el mismo comando roto ni inventa una lista de archivos.</p>
+  </div>
+
+  <p class="group-label">Distractores</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">23</span><span class="scenario-title">Elegir por palabra clave</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo 'necesitamos reservar el vuelo y el hotel' > 23_notas_viaje.txt
+echo 'el presupuesto total del proyecto es 5000' > 23_notas_presupuesto.txt
+echo 'el equipo tiene cuatro integrantes' > 23_notas_equipo.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Busca cuál de los archivos 23_notas_*.txt menciona la palabra 'presupuesto' y dime su nombre.</code></pre>
+    <p class="expect">Esperado: <code>23_notas_presupuesto.txt</code>, sin dudar entre los tres.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">24</span><span class="scenario-title">Elegir por valor de configuración</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'debug=true\nport=3000\n' > 24_config_dev.txt
+printf 'debug=false\nport=80\n' > 24_config_prod.txt
+printf 'debug=false\nport=8080\n' > 24_config_test.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Entre los archivos 24_config_*.txt, dime cuál tiene 'debug=true'.</code></pre>
+    <p class="expect">Esperado: <code>24_config_dev.txt</code>.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">25</span><span class="scenario-title">Señuelo con nombre engañoso</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo 'recordatorio: renovar el certificado SSL antes de fin de mes' > 25_IMPORTANTE.txt
+echo 'cliente: Acme Corp, contacto: Juana Perez' > 25_cliente_acme.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Busca en los archivos 25_*.txt cuál menciona el nombre del cliente y dime cuál es.</code></pre>
+    <p class="expect">Esperado: identifica "Acme Corp" en <code>25_cliente_acme.txt</code>, no se deja llevar por el nombre en mayúsculas de <code>25_IMPORTANTE.txt</code> (que suena más "importante" pero no tiene la respuesta).</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">26</span><span class="scenario-title">Elegir por fecha de modificación</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo 'log viejo' > 26_log_1.txt
+touch -d '2 days ago' 26_log_1.txt
+echo 'log nuevo' > 26_log_2.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>De 26_log_1.txt y 26_log_2.txt, dime cuál fue modificado más recientemente.</code></pre>
+    <p class="expect">Esperado: usa <code>shell_exec</code> (p.ej. <code>ls -la</code>) para consultar la fecha real en vez de adivinar por el nombre; responde <code>26_log_2.txt</code>.</p>
+  </div>
+
+  <p class="group-label">Ediciones más exigentes</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">27</span><span class="scenario-title">Edición dentro de código real</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>printf 'def saludar(nombre):\n    print(f"Hola, {nombre}!")\n\nsaludar("Ana")\n' > 27_saludo.py</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Edita 27_saludo.py: cambia el mensaje que imprime la función de 'Hola' a 'Adios'.</code></pre>
+    <p class="expect">Esperado: edita solo la línea del <code>print</code>, deja el resto de la función intacto (incluida la llamada <code>saludar("Ana")</code>).</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">28</span><span class="scenario-title">Edición sin decir el texto exacto</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo 'Estado: Activo' > 28_estado.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>En 28_estado.txt, cambia el estado a 'Inactivo'.</code></pre>
+    <p class="expect">Esperado: sin que le des el <code>old_string</code> exacto, lee el archivo primero y usa el casing real ("Activo", no "activo") para el reemplazo — si falla en el primer intento, se recupera en vez de insistir con el mismo <code>old_string</code> equivocado. Con <code>Ctrl+T</code> podés ver si el resultado del <code>edit_file</code> menciona "matched ignoring trailing whitespace/indentación" (la escalera difusa de Aider, ver PLAN.md).</p>
+  </div>
+
+  <p class="group-label">Seguridad y permisos</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">29</span><span class="scenario-title">Comando reversible (no debería preguntar)</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Ejecuta 'ls -la' en el directorio actual y dime qué archivos ves.</code></pre>
+    <p class="expect">Esperado: <code>ls</code> está en la lista segura del clasificador — corre sin pedir confirmación.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">30</span><span class="scenario-title">Comando destructivo dentro del sandbox</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo 'descartable' > 30_throwaway.txt</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Borra el archivo 30_throwaway.txt usando el comando de shell 'rm 30_throwaway.txt'.</code></pre>
+    <p class="expect">Esperado: un <code>rm</code> sin flags es Irreversible por diseño (aunque esté dentro del sandbox) — debe aparecer el overlay de aprobación real, no ejecutarse solo. Probá aprobarlo una vez y denegarlo otra (repetí la preparación entre intentos).</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">31</span><span class="scenario-title">Escritura fuera del directorio de trabajo</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Crea un archivo en /tmp/braze-fuera-del-sandbox.txt con el contenido 'prueba'.</code></pre>
+    <p class="expect">Esperado: <code>/tmp</code> queda fuera del <code>WorkdirAllowlist</code> anclado a <code>~/braze-pruebas</code> — pide confirmación igual que una acción irreversible, aunque "escribir en /tmp" se sienta inocuo.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">32</span><span class="scenario-title">Comando de red</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Ejecuta 'curl https://example.com' y dime qué responde.</code></pre>
+    <p class="expect">Esperado: <code>curl</code> no está en la lista segura — pide confirmación. Si lo denegás, el modelo debería explicarte que no pudo hacerlo, no reintentarlo en loop.</p>
+  </div>
+
+  <p class="group-label">Sesión y contexto</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">33</span><span class="scenario-title">Forzar compactación</span></div>
+    <p>Si fuiste completando los escenarios 1-32 en la misma sesión, ya llevás bastantes turnos. Si no, alterná 15-20 prompts triviales y de tools hasta cruzar <code>tactical_compaction_threshold</code> (40 eventos por defecto).</p>
+    <p class="expect">Esperado (con <code>RUST_LOG=braze_engine=info</code> en la terminal donde arrancó <code>braze</code>): se ve un log de compactación; pedile algo que dependa de un dato mencionado hace 15+ turnos y confirmá que lo recuerda.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">34</span><span class="scenario-title"><code>--resume</code></span></div>
+    <p>A mitad del escenario 13 (o cualquier tarea de varios pasos), salí de <code>braze</code> con <code>Ctrl+D</code>. Anotá el <code>session</code> que imprimió al arrancar, y retomala:</p>
+    <pre><code>braze chat --tui --resume &lt;session-id&gt;</code></pre>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Segui donde quedaste con la tarea anterior.</code></pre>
+    <p class="expect">Esperado: retoma con el contexto real (no repite preguntas ya respondidas), y no te vuelve a pedir permisos ya aprobados en la sesión original.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">35</span><span class="scenario-title">Tool call repetida tras una mutación intermedia</span></div>
+    <p class="block-label">Preparación</p>
+    <pre><code>echo '1' > 35_valor.txt</code></pre>
+    <p class="block-label">Prompt 1</p>
+    <pre class="prompt"><code>Lee 35_valor.txt.</code></pre>
+    <p class="block-label">Prompt 2</p>
+    <pre class="prompt"><code>Ahora escribe '2' en 35_valor.txt.</code></pre>
+    <p class="block-label">Prompt 3</p>
+    <pre class="prompt"><code>Lee 35_valor.txt de nuevo y decime el valor actual.</code></pre>
+    <p class="expect">Esperado: el tercer <code>read_file</code> se despacha de verdad y reporta "2" — no debería quedar bloqueado por el nudge de "resultado sin cambios" (Grupo R, hallazgo F6), que solo aplica antes de una escritura intermedia.</p>
+  </div>
+
+  <p class="group-label">Específicos de la TUI (<code>--tui</code>)</p>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">36</span><span class="scenario-title"><code>/model</code> — picker</span></div>
+    <p>Escribí <code>/model</code> y Enter.</p>
+    <p class="expect">Esperado: aparece un picker con candidatos reales — los backends configurados más los modelos instalados en el servidor Ollama al que estás apuntando (Nitro, si lo configuraste con <code>--ollama-url</code>).</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">37</span><span class="scenario-title"><code>/model</code> — directo</span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>/model ollama:qwen2.5:3b</code></pre>
+    <p class="expect">Esperado: cambia de modelo a mitad de sesión (reconstruye el <code>Engine</code>, mismo <code>session id</code>) sin que pierdas la conversación previa.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">38</span><span class="scenario-title">Mención con <code>@</code></span></div>
+    <p class="block-label">Prompt (copiar y pegar)</p>
+    <pre class="prompt"><code>Resume el contenido de @01_notas.txt</code></pre>
+    <p class="expect">Esperado: el buscador de menciones aparece al escribir <code>@</code> y resuelve al archivo correcto entre los del directorio.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">39</span><span class="scenario-title"><code>Ctrl+T</code> — output completo</span></div>
+    <p>Después de que corra la tool call del escenario 2 (el archivo de 500 líneas), presioná <code>Ctrl+T</code>.</p>
+    <p class="expect">Esperado: muestra el output completo de esa tool call, sin el truncado que se ve en la celda normal del historial.</p>
+  </div>
+
+  <div class="scenario">
+    <div class="scenario-head"><span class="scenario-num">40</span><span class="scenario-title">Backtrack (<code>Esc Esc</code>)</span></div>
+    <p>Con el composer vacío e inactivo, presioná <code>Esc</code> dos veces.</p>
+    <p class="expect">Esperado: retrocede al mensaje anterior para editarlo, sin perder el resto de la conversación previa a ese punto.</p>
+  </div>
+
+  <h2 id="herramientas"><span class="num">5</span>Herramientas</h2>
+
+  <p><code>braze_session::SessionStore</code> sabe listar sesiones, pero ningún subcomando de <code>braze-cli</code> lo expone — no hay <code>braze sessions ...</code>. <code>tools/braze_sessions.py</code> llena ese hueco desde afuera del binario, leyendo directo los <code>.jsonl</code> de <code>$XDG_DATA_HOME/braze/sessions</code> (o su fallback).</p>
+
+  <pre><code>python3 tools/braze_sessions.py list</code></pre>
+  <pre><code>session                                modificado           eventos  primer mensaje
+13a2d725-9312-4928-8082-0c871962f450   2026-07-06 18:37:05        7  Lee el archivo notas.txt del directorio actual y dime cuánta…
+20a1171e-b09f-4acc-ba79-2935e8e30b87   2026-07-05 22:47:55        3  responde solo con la palabra: hola</code></pre>
+
+  <pre><code>python3 tools/braze_sessions.py show 13a2d725-9312-4928-8082-0c871962f450</code></pre>
+  <pre><code>=== 13a2d725-9312-4928-8082-0c871962f450 (7 eventos) ===
+
+USER: Lee el archivo notas.txt del directorio actual y dime cuántas líneas tiene
+  (usage: in=683 out=16 stop=tool_calls)
+TOOL_CALL  read_file({"path": "notas.txt"})  [id=call_usK5HE0E9Hl911SOFv9Pn2Aw]
+  … iniciado (background)
+  -> RESULT [ok]: uno
+dos
+tres
+
+  (usage: in=714 out=13 stop=stop)
+ASSISTANT: El archivo `notas.txt` tiene 3 líneas.</code></pre>
+
+  <p><code>--full</code> desactiva el truncado de resultados largos de tools; <code>--session-dir</code> apunta a otro directorio si corriste braze con <code>BRAZE_SESSION_DIR</code> distinto. Cuando algo se ve raro en vivo, correr <code>show</code> sobre esa sesión suele ser más rápido que releer el scrollback de la terminal.</p>
+
+  <h2 id="registro"><span class="num">6</span>Registro de fricción</h2>
+
+  <p>Copia <code>docs/usability-log-template.md</code> a un archivo por sesión de prueba y anota ahí mismo, en el momento — la memoria de "qué se sintió raro" se degrada rápido. Estructura de la tabla:</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th class="num">#</th><th>Escenario</th><th>Qué esperaba</th><th>Qué pasó</th><th>Severidad</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">1</td>
+          <td>Nombre de archivo a medias</td>
+          <td>Reintenta con glob tras el primer read_file fallido</td>
+          <td>Repitió el mismo read_file tres veces antes de rendirse</td>
+          <td><span class="sev sev-block">Bloqueante</span></td>
+        </tr>
+        <tr>
+          <td class="num">2</td>
+          <td><code>/model</code> picker</td>
+          <td>Lista modelos de Nitro</td>
+          <td>Los lista, pero tarda ~2s en abrir sin indicar que está cargando</td>
+          <td><span class="sev sev-annoy">Molesto</span></td>
+        </tr>
+        <tr>
+          <td class="num">3</td>
+          <td>Mensaje de compactación</td>
+          <td>—</td>
+          <td>El wording es correcto pero no aparece sin <code>RUST_LOG</code></td>
+          <td><span class="sev sev-minor">Menor</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Guía de severidad: <span class="sev sev-block">Bloqueante</span> la tarea no se completa, o el resultado es incorrecto sin que se note; <span class="sev sev-annoy">Molesto</span> se completa pero con rodeos o mensajes confusos; <span class="sev sev-minor">Menor</span> cosmético.</p>
+
+  <h2 id="hallazgos"><span class="num">7</span>Qué hacer con lo encontrado</h2>
+  <p>No todo lo anotado amerita acción — algunas filas son solo preferencia. Lo que sí parezca un hallazgo real, dale un id corto (<code>U-1</code>, <code>U-2</code>, ...) y una frase, mismo estilo que los <code>N-xx</code>/<code>F-xx</code>/<code>E-xx</code> de <code>docs/AUDITORIA-2026-07*.md</code> — eso es lo que hace fácil promoverlo a un ítem real de <code>PLAN.md</code> si se decide actuar sobre él, sin tener que releer el log completo para reconstruir el contexto.</p>
+
+  <footer>
+    Complementa <code>braze-bench</code> — no lo reemplaza. El bench mide capacidad del modelo bajo condiciones controladas y repetibles; esta guía mide la experiencia de usar el harness de verdad, con todo lo que un benchmark sintético no puede capturar.
+  </footer>
+</main>

@@ -65,11 +65,21 @@ fn build_permission_guard(
     store: std::sync::Arc<dyn braze_session::SessionStore>,
     replayed_keys: &[braze_types::PermissionKey],
     tui_mode: bool,
+    supervised: bool,
     approval_tx: tokio::sync::mpsc::UnboundedSender<braze_tui::ApprovalRequest>,
 ) -> braze_permissions::PermissionGuard {
     let allowlist_for_classifier = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
     let allowlist_for_guard = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
-    let classifier = braze_permissions::DefaultClassifier::new(allowlist_for_classifier);
+    // `--supervised`: every action goes through the confirmation prompt
+    // below, regardless of what `DefaultClassifier` would normally rate
+    // it — see `AlwaysIrreversibleClassifier`'s doc comment.
+    let classifier: Box<dyn braze_permissions::ActionClassifier> = if supervised {
+        Box::new(braze_permissions::AlwaysIrreversibleClassifier)
+    } else {
+        Box::new(braze_permissions::DefaultClassifier::new(
+            allowlist_for_classifier,
+        ))
+    };
     let confirmation: Box<dyn braze_permissions::ConfirmationPrompt> = if tui_mode {
         // N-12 (docs/AUDITORIA-2026-07-v2.md): the TUI's confirmation
         // prompt reads the *current* session out of this shared handle
@@ -91,11 +101,8 @@ fn build_permission_guard(
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Box::new(TerminalConfirmationPrompt::new(session, store))
     };
-    let guard = braze_permissions::PermissionGuard::new(
-        allowlist_for_guard,
-        Box::new(classifier),
-        confirmation,
-    );
+    let guard =
+        braze_permissions::PermissionGuard::new(allowlist_for_guard, classifier, confirmation);
     guard.seed_remembered(replayed_keys.iter().cloned());
     guard
 }
@@ -246,6 +253,7 @@ async fn build_engine(
     store: std::sync::Arc<dyn braze_session::SessionStore>,
     approval_tx: tokio::sync::mpsc::UnboundedSender<braze_tui::ApprovalRequest>,
     tui_mode: bool,
+    supervised: bool,
     cwd: &std::path::Path,
 ) -> Result<(braze_engine::Engine, String), CliError> {
     let mut model = build_model_backend(config, &config.default_backend, None)?;
@@ -306,6 +314,7 @@ async fn build_engine(
         std::sync::Arc::clone(&store),
         &replayed_keys,
         tui_mode,
+        supervised,
         approval_tx.clone(),
     );
 
@@ -341,6 +350,7 @@ async fn build_engine(
             std::sync::Arc::clone(&store),
             &replayed_keys,
             tui_mode,
+            supervised,
             approval_tx.clone(),
         );
         match braze_mcp_client::McpToolProvider::connect(
@@ -565,6 +575,7 @@ async fn run() -> Result<(), CliError> {
     // `build_permission_guard`'s doc comment for why that changes which
     // `ConfirmationPrompt` gets built.
     let tui_mode = matches!(cli.command, Command::Chat { tui: true, .. });
+    let supervised = cli.command.supervised();
 
     // Resolved eagerly (fails fast on an unrecognized name, before any
     // engine/session work) even though it's only ever consumed by the
@@ -603,6 +614,7 @@ async fn run() -> Result<(), CliError> {
         std::sync::Arc::clone(&store),
         approval_tx.clone(),
         tui_mode,
+        supervised,
         &cwd,
     )
     .await?;
@@ -697,6 +709,7 @@ async fn run() -> Result<(), CliError> {
                         store,
                         approval_tx,
                         true,
+                        supervised,
                         &cwd,
                     )
                     .await

@@ -2147,10 +2147,60 @@ del `Cli` real), `braze-model::ollama` (4 de E6), `braze-bench::metadata`
 clippy limpio (`cargo clippy --workspace --all-targets -- -D warnings`),
 `rustfmt --check` sin diffs.
 
-Verificación en vivo pendiente: sweep corto contra Nitro comparando
-`ollama:qwen2.5:3b` baseline vs. una variante `+ablate:` — confirma que
-la infraestructura de ablación funciona end-to-end contra un servidor
-Ollama real, no solo que compila.
+Verificación en vivo — ✅ hecha 2026-07-06: sweep contra Nitro con
+`smoke.toml` comparando `ollama:qwen2.5:3b` baseline vs.
+`+ablate:no-rescue` vs. `+ablate:full-observations=1` — 3 filas, todas
+pasan, `display_name` distingue cada variante, y el JSON de salida trae
+metadata real (digest de `qwen2.5:3b` resuelto contra Nitro, commit de
+git, fingerprint del suite). Confirma que la infraestructura de ablación
+funciona end-to-end contra un servidor Ollama real, no solo que compila.
+
+## Fix U-1 — respuesta vacía tras una tool call ya exitosa (hallado en prueba de usabilidad, 2026-07-07)
+
+Primer hallazgo real de `docs/usability-testing-guide.html` (la guía de
+prueba de usabilidad creada el mismo día): una sesión real contra
+`qwen3.5-coder` en Nitro pidió un informe de hardware — el modelo llamó
+`shell_exec`×3 (`lscpu`, `lsmem`, `lshw -short`) y `write_file` (el
+archivo quedó bien escrito en disco), pero la ronda siguiente —
+preguntada por seguir sin más tool calls pendientes — volvió sin texto y
+sin tool calls. `run_turn` reportaba esto como
+`EngineError::EmptyModelResponse` y abortaba todo el turno con un error,
+aunque la tarea real ya se había completado con éxito.
+
+`EmptyModelResponse` existe a propósito (bajo de
+docs/AUDITORIA-2026-07-v2.md, "una completion vacía termina el turno
+como éxito silencioso") — el bug no era que existiera, sino que se
+lanzaba incondicionalmente, sin darle a un turno que YA hizo trabajo
+real la misma segunda oportunidad que `MAX_TURN_ITERATIONS` agotado ya
+recibía (`attempt_final_summary_round`, una ronda extra sin tools
+pidiendo un resumen de lo encontrado).
+
+Fix: `attempt_final_summary_round` se generalizó a
+`attempt_tools_free_summary_round` (devuelve `Result<bool, EngineError>`
+en vez de tragarse el error con un `EngineError::TurnDidNotConverge`
+hardcodeado) — ahora es un helper compartido por dos call sites:
+
+- El de siempre (agotamiento de `MAX_TURN_ITERATIONS`), que sigue
+  cayendo a `TurnDidNotConverge` si el intento de resumen también falla.
+- Uno nuevo: cuando una ronda intermedia viene vacía (ni texto ni tool
+  calls) **y** este turno ya despachó al menos una tool call
+  (`any_tool_calls_this_turn`), se intenta la misma ronda de resumen
+  antes de rendirse — si también viene vacía, sigue cayendo a
+  `EmptyModelResponse` (el riesgo de falso-positivo bajo best-of-n que
+  motivó el error en primer lugar sigue vigente para un turno sin ningún
+  progreso real).
+
+Deliberadamente acotado: un turno cuya *primera* ronda viene vacía (sin
+ninguna tool call despachada todavía) sigue fallando de inmediato — no
+hay nada que resumir, y ese caso es exactamente el que el hallazgo
+original de auditoría quería blindar.
+
+2 tests de regresión nuevos (`braze-engine::engine`): uno reproduce el
+escenario exacto (tool call exitosa → ronda vacía → recupera vía el
+resumen, con el `ToolCallCompleted` original todavía en el log) y otro
+confirma que si el resumen *también* viene vacío, el turno sigue
+fallando en vez de reportar éxito silencioso. Workspace completo verde,
+clippy limpio, `rustfmt --check` sin diffs.
 
 ## Archivos críticos
 

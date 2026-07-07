@@ -125,6 +125,24 @@ impl ActionClassifier for DefaultClassifier {
     }
 }
 
+/// Rates every action `Irreversible` unconditionally — used by `braze
+/// chat --supervised` so a human watching step-by-step (e.g. a
+/// self-improvement session where braze edits its own source) sees a
+/// confirmation prompt before *every* action, including a plain
+/// `write_file`/`edit_file` inside the `WorkdirAllowlist` that
+/// [`DefaultClassifier`] would otherwise wave through as `Reversible`
+/// without asking. Not a replacement for `DefaultClassifier` in normal
+/// use — it turns off the "safe, no need to ask" fast path entirely,
+/// which is the point for this one high-stakes mode, not something a
+/// regular session wants.
+pub struct AlwaysIrreversibleClassifier;
+
+impl ActionClassifier for AlwaysIrreversibleClassifier {
+    fn classify(&self, _action: &ActionDescriptor) -> Reversibility {
+        Reversibility::Irreversible
+    }
+}
+
 /// Matches `git push` and any `git push ...` invocation carrying a
 /// `--force`/`-f` flag anywhere in the remaining args (order-independent).
 /// Plain `git push` with no force flag is still flagged irreversible: a
@@ -598,5 +616,29 @@ mod tests {
                 "expected {parts:?} to be Reversible"
             );
         }
+    }
+
+    // --- AlwaysIrreversibleClassifier (`braze chat --supervised`) ---
+
+    #[test]
+    fn always_irreversible_classifier_rates_a_normally_reversible_write_as_irreversible() {
+        let action = ActionDescriptor::WriteFile {
+            path: PathBuf::from("src/main.rs"),
+        };
+        // Same action `write_file_inside_allowlist_is_reversible` (above)
+        // asserts is Reversible under `DefaultClassifier` — the whole
+        // point of `--supervised` is that it isn't, under this one.
+        assert_eq!(
+            AlwaysIrreversibleClassifier.classify(&action),
+            Reversibility::Irreversible
+        );
+    }
+
+    #[test]
+    fn always_irreversible_classifier_rates_a_known_safe_shell_command_as_irreversible() {
+        assert_eq!(
+            AlwaysIrreversibleClassifier.classify(&shell(&["ls"])),
+            Reversibility::Irreversible
+        );
     }
 }

@@ -44,7 +44,9 @@ mod guard;
 
 pub use action::ActionDescriptor;
 pub use allowlist::WorkdirAllowlist;
-pub use classifier::{ActionClassifier, DefaultClassifier, Reversibility};
+pub use classifier::{
+    ActionClassifier, AlwaysIrreversibleClassifier, DefaultClassifier, Reversibility,
+};
 pub use confirm::ConfirmationPrompt;
 pub use error::PermissionError;
 pub use guard::{PermissionGuard, derive_permission_key};

@@ -851,6 +851,39 @@ impl Engine {
                 // Treat it as a failure to converge for this round rather
                 // than a silent no-op success.
                 if text_buffer.is_empty() {
+                    // U-1 (docs/usability-log-template.md, hallado en vivo
+                    // 2026-07-07 contra qwen3.5-coder/Nitro): a real session
+                    // asked for a hardware report; the model called
+                    // `shell_exec`×3 and `write_file` (all persisted, the
+                    // file landed on disk), then its *next* round — asked
+                    // to wrap up with no further tool calls pending — came
+                    // back with neither text nor a tool call. Failing the
+                    // whole turn here reported an error even though the
+                    // actual task had already succeeded. If this turn
+                    // already made real progress (dispatched at least one
+                    // tool call), give it the same one-more-shot fallback
+                    // `MAX_TURN_ITERATIONS` exhaustion gets below, instead
+                    // of discarding that progress behind a hard failure. A
+                    // turn whose *very first* round comes back empty (no
+                    // progress at all) still fails immediately — nothing to
+                    // summarize, and the best-of-n false-convergence risk
+                    // this error exists for still applies in full.
+                    if any_tool_calls_this_turn {
+                        tracing::warn!(
+                            round,
+                            "round produced neither text nor a tool call after this turn already \
+                             dispatched at least one; attempting a tools-free summary round \
+                             instead of discarding that progress"
+                        );
+                        if self
+                            .attempt_tools_free_summary_round(session, &messages, observer)
+                            .await?
+                        {
+                            self.consecutive_turns_without_tool_calls
+                                .store(0, std::sync::atomic::Ordering::SeqCst);
+                            return Ok(());
+                        }
+                    }
                     return Err(EngineError::EmptyModelResponse);
                 }
                 // Final response: no further tool calls requested.
@@ -904,8 +937,17 @@ impl Engine {
         self.consecutive_turns_without_tool_calls
             .store(0, std::sync::atomic::Ordering::SeqCst);
 
-        self.attempt_final_summary_round(session, &messages, observer)
-            .await
+        tracing::warn!(
+            max_iterations = MAX_TURN_ITERATIONS,
+            "turn did not converge; attempting a final tools-free summary round instead of failing outright"
+        );
+        if self
+            .attempt_tools_free_summary_round(session, &messages, observer)
+            .await?
+        {
+            return Ok(());
+        }
+        Err(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS))
     }
 
     /// The optional planning round (PLAN.md § "Split
@@ -1016,35 +1058,37 @@ impl Engine {
         Ok(true)
     }
 
-    /// Called once the main loop exhausts [`MAX_TURN_ITERATIONS`] without
-    /// the model converging on a text-only response. Rather than failing
-    /// the turn outright with nothing to show for it, makes one last
-    /// tools-free request asking the model to summarize whatever it
-    /// learned and answer with that — persisted as a normal
-    /// `AssistantText` on success. Falls back to
-    /// `EngineError::TurnDidNotConverge` only if this final attempt itself
-    /// fails or produces nothing usable, so a legitimate hard failure
-    /// (e.g. the backend is unreachable) is still surfaced as an error
-    /// rather than silently swallowed.
-    async fn attempt_final_summary_round(
+    /// Makes one last tools-free request asking the model to summarize
+    /// whatever it learned and answer with that — persisted as a normal
+    /// `AssistantText` (`Ok(true)`) on success. Two call sites, both
+    /// "the turn didn't converge normally but there may already be real
+    /// progress worth summarizing instead of just failing outright":
+    /// [`Engine::run_turn`] exhausting [`MAX_TURN_ITERATIONS`], and (U-1,
+    /// found live 2026-07-07 against qwen3.5-coder/Nitro) a round mid-turn
+    /// coming back with neither text nor a tool call *after* this turn
+    /// already dispatched at least one successful tool call — each caller
+    /// logs its own context and picks its own `EngineError` fallback on
+    /// `Ok(false)`, since "exhausted the iteration cap" and "went empty
+    /// right after real work" are different failures worth telling apart
+    /// in logs.
+    ///
+    /// `Ok(false)` when this attempt itself fails or produces nothing
+    /// usable — a legitimate hard failure (e.g. the backend is
+    /// unreachable) is surfaced by the caller as an error rather than
+    /// silently swallowed here.
+    async fn attempt_tools_free_summary_round(
         &self,
         session: &SessionId,
         messages: &[Message],
         observer: &mut dyn TurnObserver,
-    ) -> Result<(), EngineError> {
-        tracing::warn!(
-            max_iterations = MAX_TURN_ITERATIONS,
-            "turn did not converge; attempting a final tools-free summary round instead of failing outright"
-        );
-
+    ) -> Result<bool, EngineError> {
         let req = CompletionRequest {
             messages: messages.to_vec(),
             tool_stubs: Vec::new(),
             system_prompt: format!(
-                "{}\n\nYou have used all available tool-call rounds for this turn. Do not \
-                 call any tool — none are available in this request. Summarize what you \
-                 found so far and answer the user with the best answer you can give from \
-                 the information already gathered.",
+                "{}\n\nDo not call any tool — none are available in this request. Summarize \
+                 what you found so far and answer the user with the best answer you can give \
+                 from the information already gathered.",
                 self.system_prompt
             ),
             max_tokens: self.max_tokens,
@@ -1054,19 +1098,17 @@ impl Engine {
         // traga el error real"): both error paths below used to discard
         // the actual cause (a real backend failure — auth, network,
         // rate limit — looked identical to "the model just didn't
-        // produce anything usable"). Logging it here doesn't change the
-        // returned `EngineError` variant (still `TurnDidNotConverge`,
-        // to avoid rippling a bigger error-type change through this
-        // already-degraded fallback path) but makes the real cause
-        // visible in logs instead of silently lost.
+        // produce anything usable"). Logging it here makes the real cause
+        // visible instead of silently lost, regardless of which
+        // `EngineError` the caller ultimately raises on `Ok(false)`.
         let mut stream = match self.model.complete(req).await {
             Ok(stream) => stream,
             Err(err) => {
                 tracing::warn!(
                     error = %err,
-                    "final summary round's model call itself failed; turn will be reported as not converged"
+                    "tools-free summary round's model call itself failed"
                 );
-                return Err(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS));
+                return Ok(false);
             }
         };
 
@@ -1091,7 +1133,7 @@ impl Engine {
                 Err(err) => {
                     tracing::warn!(
                         error = %err,
-                        "final summary round's stream failed mid-response; turn will be reported as not converged"
+                        "tools-free summary round's stream failed mid-response"
                     );
                     break;
                 }
@@ -1105,10 +1147,10 @@ impl Engine {
                 observer,
             )
             .await?;
-            return Ok(());
+            return Ok(true);
         }
 
-        Err(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS))
+        Ok(false)
     }
 
     /// Records each requested tool call, spawns it as a background task via
@@ -3470,6 +3512,122 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    /// Regression test for U-1 (docs/usability-log-template.md, hallado en
+    /// vivo 2026-07-07 contra qwen3.5-coder/Nitro): a turn that already
+    /// dispatched a successful tool call, then gets a completely empty
+    /// round (no text, no tool calls) — the exact shape a real session
+    /// hit right after `write_file` succeeded — must recover via the
+    /// tools-free summary round instead of discarding that already-done
+    /// work behind a hard `EmptyModelResponse` error.
+    #[tokio::test]
+    async fn an_empty_round_after_a_dispatched_tool_call_recovers_via_the_summary_round() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                CompletionEvent::Done,
+            ],
+            // The round right after the tool call comes back with
+            // nothing at all — no text, no further tool calls.
+            vec![CompletionEvent::Done],
+            // The tools-free summary attempt.
+            vec![
+                CompletionEvent::TextDelta("listo, ya lo hice".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            result.is_ok(),
+            "expected the turn to recover via the summary round, got {result:?}"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text == "listo, ya lo hice"
+            )),
+            "expected the summary round's text to be persisted, got: {events:?}"
+        );
+        // The already-dispatched tool call's own result must still be
+        // there too — this is the actual work the original bug threw away.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolCallCompleted { .. }))
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Same shape as the recovery test above, but the tools-free summary
+    /// attempt *also* comes back empty — the turn must still surface
+    /// `EmptyModelResponse` rather than silently reporting success with
+    /// nothing to show for the follow-up round.
+    #[tokio::test]
+    async fn an_empty_round_after_a_dispatched_tool_call_still_fails_if_the_summary_round_is_also_empty()
+     {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![CompletionEvent::Done],
+            // The tools-free summary attempt is ALSO empty.
+            vec![CompletionEvent::Done],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            matches!(result, Err(EngineError::EmptyModelResponse)),
+            "expected the still-empty summary round to surface as an error, got {result:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     #[tokio::test]
     async fn run_turn_with_no_tool_calls_streams_text_and_persists_it() {
         let (store, dir) = temp_store();
@@ -4293,7 +4451,10 @@ mod tests {
 
     /// Degradation rule 4: an empty planner response degrades to an
     /// unplanned turn (contrast with the *executor*, where an empty
-    /// completion is a hard `EmptyModelResponse` error).
+    /// completion on the turn's very first round is a hard
+    /// `EmptyModelResponse` error — one occurring after the turn already
+    /// dispatched a tool call instead gets one tools-free summary attempt,
+    /// see `attempt_tools_free_summary_round`).
     #[tokio::test]
     async fn an_empty_planner_response_degrades_to_an_unplanned_turn() {
         let (store, dir) = temp_store();
