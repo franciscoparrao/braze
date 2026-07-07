@@ -66,7 +66,8 @@ impl DefaultClassifier {
             return false;
         };
         match program {
-            "ls" | "pwd" | "echo" | "wc" | "whoami" | "date" | "which" | "true" | "false" => true,
+            "ls" | "pwd" | "echo" | "wc" | "whoami" | "date" | "which" | "true" | "false"
+            | "lscpu" | "lsmem" | "lshw" => true,
             "cat" | "head" | "tail" | "file" | "diff" | "grep" => {
                 self.all_path_like_args_allowed(command)
             }
@@ -412,6 +413,17 @@ mod tests {
             &["file", "file.txt"][..],
             &["grep", "-r", "needle", "."][..],
         ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Reversible,
+                "expected {parts:?} to be Reversible"
+            );
+        }
+    }
+
+    #[test]
+    fn safe_hardware_info_commands_are_reversible() {
+        for parts in [&["lscpu"][..], &["lsmem"][..], &["lshw"][..]] {
             assert_eq!(
                 classifier().classify(&shell(parts)),
                 Reversibility::Reversible,
