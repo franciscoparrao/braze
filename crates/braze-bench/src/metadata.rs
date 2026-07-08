@@ -28,7 +28,7 @@ pub struct RunMetadata {
     /// tarball) or if `git` itself isn't on `PATH`.
     pub braze_git_commit: Option<String>,
     /// One entry per distinct Ollama model referenced by any backend spec
-    /// in this sweep (executor and/or planner), resolved via
+    /// in this sweep (executor, planner, and/or lead), resolved via
     /// `braze_model::ollama_model_digest`. Empty when the sweep touches
     /// no Ollama backend.
     pub ollama_model_digests: Vec<OllamaModelDigest>,

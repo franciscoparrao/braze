@@ -147,7 +147,7 @@ pub async fn run_task(
         .with_edit_strict_mode(ablation.edit_strict_mode);
     let tools = braze_tools_core::ToolRegistry::new(vec![Box::new(tools_provider)]);
 
-    let model = spec.build(config, sampling)?;
+    let model = spec.build_agent_model(config, sampling)?;
     // N-36 (docs/AUDITORIA-2026-07-v2.md): the exact same anti-loop system
     // prompt `braze chat`/`braze run` build by default — a bare one-line
     // prompt with no tool-use guidance measured a different (worse)

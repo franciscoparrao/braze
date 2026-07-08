@@ -5,11 +5,15 @@
 //! same construction logic `braze-cli/src/main.rs` uses, just
 //! parameterized per spec instead of per process.
 //!
-//! Planner/executor split (PLAN.md § "Split planificador/ejecutor"): a
-//! spec may carry a planner sub-spec after the literal `"+plan:"` — e.g.
-//! `ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash` — so a
-//! sweep can put the baseline and the planned variant side by side in the
-//! same run, apples-to-apples. The `"+plan:"` token was chosen over a
+//! Planner/executor split (PLAN.md § "Split planificador/ejecutor") and
+//! reactive lead/worker escalation: a spec may carry a planner sub-spec
+//! after the literal `"+plan:"` — e.g.
+//! `ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash` — and/or
+//! a lead sub-spec after `"+lead:"` — e.g.
+//! `ollama:qwen2.5:3b+lead:openrouter:anthropic/claude-sonnet-5`. That
+//! lets one sweep put the small-worker baseline, planned variant, led
+//! variant, and combined planned+led variant side by side,
+//! apples-to-apples. The `"+plan:"`/`"+lead:"` tokens were chosen over a
 //! bare separator character because model ids legitimately contain `:`
 //! (Ollama tags) and `/` (OpenRouter), and `,` is already `--backends`'
 //! entry delimiter.
@@ -22,12 +26,14 @@
 //! rescue" meant two separate `braze-bench` processes with different env
 //! vars, which is also a paired-sample statistics problem: different
 //! process, different moment, not a controlled A/B). Always the last
-//! suffix on the string — stripped before the `"+plan:"` split, so it
-//! never has to compose with the planner sub-spec's own grammar. See
+//! suffix on the string — stripped before the `"+plan:"`/`"+lead:"`
+//! split, so it never has to compose with child sub-spec grammars. See
 //! [`AblationOverrides`] for the recognized keys.
 
 use braze_config::Config;
-use braze_model::{AnthropicBackend, ModelBackend, OllamaBackend, OpenRouterBackend};
+use braze_model::{
+    AnthropicBackend, EscalatingBackend, ModelBackend, OllamaBackend, OpenRouterBackend,
+};
 
 use crate::error::BenchError;
 
@@ -39,15 +45,16 @@ enum Provider {
 }
 
 /// One `--backends` entry, already split into provider + optional model
-/// override — plus, when the entry carried a `"+plan:"` suffix, the
-/// planner sub-spec (never itself nested: one planner per entry), and
-/// whatever `"+ablate:"` overrides it carried (E1,
-/// docs/AUDITORIA-2026-07-v3.md).
+/// override — plus, when the entry carried `"+plan:"` and/or `"+lead:"`
+/// suffixes, the planner/lead sub-specs (never themselves nested: one
+/// planner and one lead per entry), and whatever `"+ablate:"` overrides
+/// it carried (E1, docs/AUDITORIA-2026-07-v3.md).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendSpec {
     provider: Provider,
     model_override: Option<String>,
     planner: Option<Box<BackendSpec>>,
+    lead: Option<Box<BackendSpec>>,
     ablation: AblationOverrides,
 }
 
@@ -55,11 +62,13 @@ impl BackendSpec {
     /// Parses one comma-separated entry: `"ollama:qwen2.5:3b"`, a planned
     /// variant like
     /// `"ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash"`,
-    /// and/or an ablated variant like
+    /// a led variant like
+    /// `"ollama:qwen2.5:3b+lead:openrouter:anthropic/claude-sonnet-5"`,
+    /// a combined planned+led variant, and/or an ablated variant like
     /// `"ollama:qwen2.5:3b+ablate:no-rescue;strict-edit"` — `"+ablate:"`
     /// (if present) is always the trailing suffix, stripped first; the
-    /// remainder is then split on the literal `"+plan:"` as before (see
-    /// the module doc comment for why that token).
+    /// remainder is then split on the literal `"+plan:"`/`"+lead:"`
+    /// tokens (see the module doc comment for why those tokens).
     pub fn parse(spec: &str) -> Result<Self, BenchError> {
         let (base, ablation) = match spec.rfind("+ablate:") {
             Some(idx) => (
@@ -69,26 +78,65 @@ impl BackendSpec {
             None => (spec, AblationOverrides::default()),
         };
 
-        let mut parsed = match base.split_once("+plan:") {
-            Some((executor, planner)) => {
-                if executor.is_empty() || planner.is_empty() {
-                    return Err(BenchError::Startup(format!(
-                        "invalid '+plan:' spec '{spec}': expected \
-                         '<executor>+plan:<planner>' with both halves non-empty"
-                    )));
-                }
-                if planner.contains("+plan:") {
-                    return Err(BenchError::Startup(format!(
-                        "invalid spec '{spec}': only one '+plan:' planner per entry"
-                    )));
-                }
-                let mut parsed = Self::parse_single(executor)?;
-                parsed.planner = Some(Box::new(Self::parse_single(planner)?));
-                parsed
-            }
-            None => Self::parse_single(base)?,
-        };
+        let mut parsed = Self::parse_composite(base, spec)?;
         parsed.ablation = ablation;
+        Ok(parsed)
+    }
+
+    fn parse_composite(base: &str, original: &str) -> Result<Self, BenchError> {
+        let plan_count = base.matches("+plan:").count();
+        if plan_count > 1 {
+            return Err(BenchError::Startup(format!(
+                "invalid spec '{original}': only one '+plan:' planner per entry"
+            )));
+        }
+        let lead_count = base.matches("+lead:").count();
+        if lead_count > 1 {
+            return Err(BenchError::Startup(format!(
+                "invalid spec '{original}': only one '+lead:' lead per entry"
+            )));
+        }
+
+        let mut suffixes = Vec::new();
+        if let Some(idx) = base.find("+plan:") {
+            suffixes.push(("plan", idx, "+plan:".len()));
+        }
+        if let Some(idx) = base.find("+lead:") {
+            suffixes.push(("lead", idx, "+lead:".len()));
+        }
+        suffixes.sort_by_key(|(_, idx, _)| *idx);
+
+        let Some((_, first_suffix_idx, _)) = suffixes.first().copied() else {
+            return Self::parse_single(base);
+        };
+
+        let executor = &base[..first_suffix_idx];
+        if executor.is_empty() {
+            return Err(BenchError::Startup(format!(
+                "invalid backend spec '{original}': expected a non-empty executor before suffixes"
+            )));
+        }
+
+        let mut parsed = Self::parse_single(executor)?;
+        for (i, (kind, idx, token_len)) in suffixes.iter().copied().enumerate() {
+            let value_start = idx + token_len;
+            let value_end = suffixes
+                .get(i + 1)
+                .map(|(_, next_idx, _)| *next_idx)
+                .unwrap_or(base.len());
+            let value = &base[value_start..value_end];
+            if value.is_empty() {
+                return Err(BenchError::Startup(format!(
+                    "invalid '+{kind}:' spec '{original}': expected a non-empty {kind} backend"
+                )));
+            }
+            let child = Self::parse_single(value)?;
+            match kind {
+                "plan" => parsed.planner = Some(Box::new(child)),
+                "lead" => parsed.lead = Some(Box::new(child)),
+                _ => unreachable!("known backend suffix kind"),
+            }
+        }
         Ok(parsed)
     }
 
@@ -114,6 +162,7 @@ impl BackendSpec {
             provider,
             model_override,
             planner: None,
+            lead: None,
             ablation: AblationOverrides::default(),
         })
     }
@@ -128,6 +177,8 @@ impl BackendSpec {
     /// Name shown in the comparison report, e.g. `"ollama:qwen2.5:3b"`,
     /// `"anthropic"`, a planned variant like
     /// `"ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash"`,
+    /// a led variant like
+    /// `"ollama:qwen2.5:3b+lead:openrouter:anthropic/claude-sonnet-5"`,
     /// and/or (E1, docs/AUDITORIA-2026-07-v3.md) an ablated variant like
     /// `"ollama:qwen2.5:3b+ablate:no-rescue"` — without echoing the
     /// active ablation here, a sweep's baseline and ablated rows would
@@ -136,12 +187,16 @@ impl BackendSpec {
     /// there's no override, so the report never shows a bare, ambiguous
     /// provider name.
     pub fn display_name(&self, config: &Config) -> String {
-        let base = self.display_name_single(config);
-        let with_plan = match &self.planner {
-            Some(planner) => format!("{base}+plan:{}", planner.display_name_single(config)),
-            None => base,
-        };
-        format!("{with_plan}{}", self.ablation.display_suffix())
+        let mut name = self.display_name_single(config);
+        if let Some(planner) = &self.planner {
+            name.push_str("+plan:");
+            name.push_str(&planner.display_name_single(config));
+        }
+        if let Some(lead) = &self.lead {
+            name.push_str("+lead:");
+            name.push_str(&lead.display_name_single(config));
+        }
+        format!("{name}{}", self.ablation.display_suffix())
     }
 
     fn display_name_single(&self, config: &Config) -> String {
@@ -165,8 +220,8 @@ impl BackendSpec {
         }
     }
 
-    /// Every local Ollama model this spec would load — executor and/or
-    /// planner — so the sweep can `ollama stop` all of them before the
+    /// Every local Ollama model this spec would load — executor, planner,
+    /// and/or lead — so the sweep can `ollama stop` all of them before the
     /// next backend row starts (memory contention shows up as [Timeout],
     /// not as a reasoning failure — see `main.rs`'s `no_ollama_stop`).
     /// Empty for specs that touch no local model.
@@ -184,6 +239,9 @@ impl BackendSpec {
         push_if_ollama(self);
         if let Some(planner) = &self.planner {
             push_if_ollama(planner);
+        }
+        if let Some(lead) = &self.lead {
+            push_if_ollama(lead);
         }
         models.dedup();
         models
@@ -223,6 +281,36 @@ impl BackendSpec {
             .as_ref()
             .map(|planner| planner.build(config, sampling))
             .transpose()
+    }
+
+    /// Builds the lead backend, if this spec carries one — same
+    /// `sampling` as the worker/executor (N-34: one sampling regime per
+    /// sweep, lead included).
+    pub fn build_lead(
+        &self,
+        config: &Config,
+        sampling: SamplingSpec,
+    ) -> Result<Option<Box<dyn ModelBackend>>, BenchError> {
+        self.lead
+            .as_ref()
+            .map(|lead| lead.build(config, sampling))
+            .transpose()
+    }
+
+    /// Builds the executor, wrapping it in [`EscalatingBackend`] when the
+    /// spec carries a `"+lead:"` suffix. This mirrors `braze-cli`'s
+    /// production composition root: the primary backend is the worker,
+    /// and the lead opens/escalates reactively.
+    pub fn build_agent_model(
+        &self,
+        config: &Config,
+        sampling: SamplingSpec,
+    ) -> Result<Box<dyn ModelBackend>, BenchError> {
+        let worker = self.build(config, sampling)?;
+        match self.build_lead(config, sampling)? {
+            Some(lead) => Ok(Box::new(EscalatingBackend::new(lead, worker))),
+            None => Ok(worker),
+        }
     }
 
     /// Builds the `ModelBackend` this spec names, with `sampling` applied
@@ -633,6 +721,133 @@ mod tests {
         let spec = BackendSpec::parse("ollama:qwen2.5:3b+plan:openrouter:deepseek/x").unwrap();
         let result = spec.build_planner(&config(), sampling());
         assert!(matches!(result, Err(BenchError::Startup(_))));
+    }
+
+    // --- specs con lead reactivo (EscalatingBackend) ---
+
+    #[test]
+    fn parses_a_lead_spec_into_executor_and_lead_halves() {
+        let spec =
+            BackendSpec::parse("ollama:qwen2.5:3b+lead:openrouter:anthropic/claude-sonnet-5")
+                .unwrap();
+        assert_eq!(spec.provider, Provider::Ollama);
+        assert_eq!(spec.model_override.as_deref(), Some("qwen2.5:3b"));
+        let lead = spec.lead.as_deref().expect("lead half expected");
+        assert_eq!(lead.provider, Provider::OpenRouter);
+        assert_eq!(
+            lead.model_override.as_deref(),
+            Some("anthropic/claude-sonnet-5")
+        );
+    }
+
+    #[test]
+    fn display_name_of_a_lead_spec_shows_both_halves() {
+        let spec =
+            BackendSpec::parse("ollama:qwen2.5:3b+lead:openrouter:anthropic/claude-sonnet-5")
+                .unwrap();
+        assert_eq!(
+            spec.display_name(&config()),
+            "ollama:qwen2.5:3b+lead:openrouter:anthropic/claude-sonnet-5"
+        );
+    }
+
+    #[test]
+    fn a_lead_spec_with_an_empty_half_is_a_startup_error() {
+        assert!(matches!(
+            BackendSpec::parse("+lead:openrouter:x"),
+            Err(BenchError::Startup(_))
+        ));
+        assert!(matches!(
+            BackendSpec::parse("ollama:x+lead:"),
+            Err(BenchError::Startup(_))
+        ));
+    }
+
+    #[test]
+    fn a_spec_with_two_leads_is_a_startup_error() {
+        assert!(matches!(
+            BackendSpec::parse("ollama:x+lead:ollama:y+lead:ollama:z"),
+            Err(BenchError::Startup(_))
+        ));
+    }
+
+    #[test]
+    fn plan_and_lead_suffixes_compose_in_either_order() {
+        let spec =
+            BackendSpec::parse("ollama:qwen2.5:3b+lead:ollama:qwen2.5:14b+plan:ollama:qwen2.5:7b")
+                .unwrap();
+        assert_eq!(
+            spec.planner
+                .as_deref()
+                .and_then(|planner| planner.model_override.as_deref()),
+            Some("qwen2.5:7b")
+        );
+        assert_eq!(
+            spec.lead
+                .as_deref()
+                .and_then(|lead| lead.model_override.as_deref()),
+            Some("qwen2.5:14b")
+        );
+        assert_eq!(
+            spec.display_name(&config()),
+            "ollama:qwen2.5:3b+plan:ollama:qwen2.5:7b+lead:ollama:qwen2.5:14b"
+        );
+    }
+
+    #[test]
+    fn ollama_models_reports_executor_local_planner_and_local_lead() {
+        let spec =
+            BackendSpec::parse("ollama:qwen2.5:3b+plan:ollama:qwen2.5:7b+lead:ollama:qwen2.5:14b")
+                .unwrap();
+        assert_eq!(
+            spec.ollama_models(&config()),
+            vec![
+                "qwen2.5:3b".to_string(),
+                "qwen2.5:7b".to_string(),
+                "qwen2.5:14b".to_string(),
+            ]
+        );
+
+        let remote_lead =
+            BackendSpec::parse("ollama:qwen2.5:3b+lead:openrouter:anthropic/x").unwrap();
+        assert_eq!(
+            remote_lead.ollama_models(&config()),
+            vec!["qwen2.5:3b".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_lead_is_none_for_a_plain_spec_and_some_for_a_lead_spec() {
+        let plain = BackendSpec::parse("ollama:qwen2.5:3b").unwrap();
+        assert!(
+            plain
+                .build_lead(&config(), sampling())
+                .expect("plain spec must not error")
+                .is_none()
+        );
+
+        let led = BackendSpec::parse("ollama:qwen2.5:3b+lead:ollama:qwen2.5:7b").unwrap();
+        assert!(
+            led.build_lead(&config(), sampling())
+                .expect("ollama lead must build without credentials")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn build_lead_without_credentials_is_a_startup_error() {
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b+lead:openrouter:anthropic/x").unwrap();
+        let result = spec.build_lead(&config(), sampling());
+        assert!(matches!(result, Err(BenchError::Startup(_))));
+    }
+
+    #[test]
+    fn build_agent_model_wraps_executor_when_lead_is_configured() {
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b+lead:ollama:qwen2.5:7b").unwrap();
+        let model = spec
+            .build_agent_model(&config(), sampling())
+            .expect("ollama lead and worker must build");
+        assert_eq!(model.name(), "escalating(ollama->ollama)");
     }
 
     // --- ablation matrix (E1, docs/AUDITORIA-2026-07-v3.md) ---

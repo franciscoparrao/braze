@@ -34,9 +34,10 @@ struct Cli {
     suite: PathBuf,
     /// Backends a comparar, separados por coma. Cada uno es
     /// "anthropic", "anthropic:<modelo>", "ollama", "ollama:<modelo>",
-    /// "openrouter" o "openrouter:<modelo>". Sufijos componibles (en ese
-    /// orden si se usan ambos): "+plan:<spec>" adjunta un planner
-    /// (PLAN.md § "Split planificador/ejecutor");
+    /// "openrouter" o "openrouter:<modelo>". Sufijos componibles antes
+    /// de ablations: "+plan:<spec>" adjunta un planner (PLAN.md §
+    /// "Split planificador/ejecutor"); "+lead:<spec>" adjunta un modelo
+    /// líder reactivo estilo `EscalatingBackend`;
     /// "+ablate:<clave>[=<valor>];..." (nota: separador ';', no ',' —
     /// la coma ya delimita entradas de --backends) override de palancas
     /// del harness para esta fila del sweep — claves: no-rescue,
@@ -185,8 +186,8 @@ async fn run() -> Result<(), BenchError> {
             repeat_penalty: cli.repeat_penalty,
         };
         if let Err(err) = spec
-            .build(&config, probe_sampling)
-            .and(spec.build_planner(&config, probe_sampling))
+            .build_agent_model(&config, probe_sampling)
+            .and_then(|_| spec.build_planner(&config, probe_sampling).map(|_| ()))
         {
             eprintln!("braze-bench: omitiendo backend '{raw_spec}' ({display_name}): {err}");
             continue;
