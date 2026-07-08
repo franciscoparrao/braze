@@ -65,17 +65,24 @@ const NEVER_CLEAR_TOOLS: &[&str] = &[];
 /// small local model's tiny `num_ctx`.
 pub(crate) const TACTICAL_FULL_OBSERVATIONS: usize = 5;
 
-/// Aggregate cap (chars) across every observation
-/// [`tactical_full_observation_indices`] keeps full — without it,
+/// Default aggregate cap (chars) across every observation
+/// [`tactical_full_observation_indices`] keeps full — without *some* cap,
 /// `TACTICAL_FULL_OBSERVATIONS` full-size dumps (`braze-tools-local`'s own
 /// per-output cap is ~8000 bytes) can add up to tens of thousands of
 /// tokens on their own, enough to overflow a small local model's entire
 /// `num_ctx` (8192 by default) before the event-count/token-budget
-/// compaction trigger even runs a whole turn later. Walked newest-first:
-/// the single newest observation always stays full regardless of its own
-/// size (the current turn's own output must stay visible), but older ones
-/// only join if the running total still fits.
-const MAX_FULL_OBSERVATIONS_TOTAL_CHARS: usize = 8_000;
+/// compaction trigger even runs a whole turn later.
+///
+/// This is a *default*, not a hard limit — `Engine::load_messages`
+/// (docs/usability-log-2026-07-07-si2.md, hallazgo U-17) scales the actual
+/// budget it passes down from this value only when a small, fixed context
+/// window is genuinely in play (`context_budget_tokens` configured, i.e.
+/// Ollama today); a cloud backend with no such budget gets a much more
+/// generous one instead of inheriting a cap tuned for an 8192-token local
+/// model. Every call site in this module still defaults to this constant
+/// when it doesn't have (or care about) that context — see
+/// [`build_messages_with_full_observations`].
+pub(crate) const MAX_FULL_OBSERVATIONS_TOTAL_CHARS: usize = 8_000;
 
 /// Builds the message history for the next model call from durable state
 /// (already-settled summary *and* settled events, never re-derived from
@@ -98,12 +105,26 @@ const MAX_FULL_OBSERVATIONS_TOTAL_CHARS: usize = 8_000;
 /// own field (which defaults to that same constant), while
 /// `braze-bench`'s `+ablate:full-observations=N` (E1,
 /// docs/AUDITORIA-2026-07-v3.md) can override it per sweep row.
+///
+/// `full_observations_byte_budget` is the aggregate cap on full
+/// observations' combined size — see [`MAX_FULL_OBSERVATIONS_TOTAL_CHARS`]'s
+/// doc comment and `Engine::load_messages` (hallazgo U-17,
+/// docs/usability-log-2026-07-07-si2.md) for why callers with no small,
+/// fixed context window to protect should pass a bigger one instead of
+/// that constant.
 pub fn build_messages_with_full_observations(
     durable: &DurableState,
     tactical: &[AgentEvent],
     full_observations: usize,
+    full_observations_byte_budget: usize,
 ) -> Vec<Message> {
-    build_messages_with_never_clear(durable, tactical, NEVER_CLEAR_TOOLS, full_observations)
+    build_messages_with_never_clear(
+        durable,
+        tactical,
+        NEVER_CLEAR_TOOLS,
+        full_observations,
+        full_observations_byte_budget,
+    )
 }
 
 /// Renders `durable_events` alone — no leading summary placeholder, no
@@ -133,6 +154,7 @@ fn build_messages_with_never_clear(
     tactical: &[AgentEvent],
     never_clear: &[&str],
     full_observations: usize,
+    full_observations_byte_budget: usize,
 ) -> Vec<Message> {
     let mut messages = Vec::with_capacity(durable.durable_events.len() + tactical.len() + 1);
 
@@ -164,7 +186,11 @@ fn build_messages_with_never_clear(
         event_to_block_cleared(event, &tool_names, never_clear)
     });
 
-    messages.extend(render_tactical_events(tactical, full_observations));
+    messages.extend(render_tactical_events(
+        tactical,
+        full_observations,
+        full_observations_byte_budget,
+    ));
     messages
 }
 
@@ -179,9 +205,14 @@ fn build_messages_with_never_clear(
 pub(crate) fn render_tactical_events(
     tactical: &[AgentEvent],
     full_observations: usize,
+    full_observations_byte_budget: usize,
 ) -> Vec<Message> {
     let mut messages = Vec::with_capacity(tactical.len());
-    let full_indices = tactical_full_observation_indices(tactical, full_observations);
+    let full_indices = tactical_full_observation_indices(
+        tactical,
+        full_observations,
+        full_observations_byte_budget,
+    );
     let mut observations_seen = 0usize;
     push_grouped(&mut messages, tactical, |event| {
         if let AgentEvent::ToolCallCompleted { id, result } = event {
@@ -216,6 +247,7 @@ pub(crate) fn render_tactical_events(
 fn tactical_full_observation_indices(
     tactical: &[AgentEvent],
     full_observations: usize,
+    full_observations_byte_budget: usize,
 ) -> std::collections::HashSet<usize> {
     let observation_lens: Vec<usize> = tactical
         .iter()
@@ -232,8 +264,7 @@ fn tactical_full_observation_indices(
         if rev_i >= full_observations {
             break;
         }
-        if running_total.saturating_add(len) > MAX_FULL_OBSERVATIONS_TOTAL_CHARS && !full.is_empty()
-        {
+        if running_total.saturating_add(len) > full_observations_byte_budget && !full.is_empty() {
             break;
         }
         running_total += len;
@@ -452,6 +483,7 @@ mod tests {
             &empty_durable(),
             &[],
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
         assert!(messages.is_empty());
     }
@@ -467,7 +499,7 @@ mod tests {
         }];
 
         let messages =
-            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS);
+            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS, MAX_FULL_OBSERVATIONS_TOTAL_CHARS);
 
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, Role::User);
@@ -490,6 +522,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
         assert_eq!(messages.len(), 1);
     }
@@ -522,6 +555,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
 
         assert_eq!(messages.len(), 4);
@@ -577,6 +611,8 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 5,
                 stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
         ];
 
@@ -584,6 +620,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
         assert!(messages.is_empty());
     }
@@ -607,6 +644,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
 
         assert_eq!(messages.len(), 2);
@@ -651,7 +689,7 @@ mod tests {
         };
 
         let messages =
-            build_messages_with_full_observations(&durable, &[], TACTICAL_FULL_OBSERVATIONS);
+            build_messages_with_full_observations(&durable, &[], TACTICAL_FULL_OBSERVATIONS, MAX_FULL_OBSERVATIONS_TOTAL_CHARS);
 
         // N-2 fix: a leading placeholder `User` message is now prepended
         // whenever `durable_events` is non-empty and `summary` is still
@@ -707,6 +745,7 @@ mod tests {
             &[],
             &["keep_me"],
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
 
         // N-2 fix: leading placeholder shifts real content from [0..4) to
@@ -739,6 +778,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
 
         assert_eq!(messages.len(), 1);
@@ -783,6 +823,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
         let contents = tool_result_contents(&messages);
         assert_eq!(contents.len(), 7);
@@ -824,6 +865,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         ));
         assert!(contents.iter().all(|c| c == &"z".repeat(400)));
     }
@@ -851,6 +893,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             1,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         ));
 
         assert_eq!(contents.len(), 5);
@@ -885,6 +928,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         ));
         assert_eq!(contents.len(), 5);
 
@@ -908,6 +952,38 @@ mod tests {
         assert_eq!(contents.last().unwrap().len(), 3000);
     }
 
+    /// Regression test for U-17 (docs/usability-log-2026-07-07-si2.md): the
+    /// exact same 5 large observations as the test above, but with a wider
+    /// budget — the shape `Engine::full_observations_byte_budget` produces
+    /// when no small context window is configured. All 5 must now stay
+    /// full instead of collapsing down to essentially one.
+    #[test]
+    fn a_wider_budget_lets_all_five_large_observations_stay_full() {
+        let mut tactical = Vec::new();
+        for i in 0..5 {
+            let id = format!("call-{i}");
+            tactical.push(tool_call_event(&id, "read_file"));
+            tactical.push(tool_completed_event(&id, &"x".repeat(3000)));
+        }
+
+        let contents = tool_result_contents(&build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS * 10,
+        ));
+        assert_eq!(contents.len(), 5);
+
+        let full_count = contents
+            .iter()
+            .filter(|c| c.len() == 3000 && !c.contains("collapsed"))
+            .count();
+        assert_eq!(
+            full_count, 5,
+            "a wide-enough budget must keep every one of the last 5 observations full, got {full_count}"
+        );
+    }
+
     #[test]
     fn many_small_observations_within_the_aggregate_cap_all_stay_full() {
         // Same shape as `old_tactical_observations_collapse_but_the_last_five_stay_full`
@@ -925,6 +1001,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         ));
         assert!(
             contents
@@ -952,6 +1029,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
         match &messages[0].content[0] {
             ContentBlock::ToolResult {
@@ -981,6 +1059,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         ));
         assert_eq!(contents[0], "ok");
     }
@@ -998,6 +1077,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         ));
         assert!(contents[0].len() < 400, "got len {}", contents[0].len());
         assert!(contents[0].contains("collapsed"));
@@ -1048,6 +1128,7 @@ mod tests {
             &empty_durable(),
             &tactical,
             TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
 
         // [user text, one Assistant message with 3 ToolUse blocks, one
@@ -1107,7 +1188,7 @@ mod tests {
         ];
 
         let messages =
-            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS);
+            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS, MAX_FULL_OBSERVATIONS_TOTAL_CHARS);
 
         // [resumen, mensaje viejo, tool_use viejo, tool_result viejo
         // (cleared), mensaje reciente, respuesta reciente] — durable
@@ -1199,7 +1280,7 @@ mod tests {
         ];
 
         let messages =
-            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS);
+            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS, MAX_FULL_OBSERVATIONS_TOTAL_CHARS);
 
         crate::protocol_check::check_anthropic_message_protocol(&messages).expect(
             "build_messages_with_full_observations must produce an Anthropic-valid sequence \

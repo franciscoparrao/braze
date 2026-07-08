@@ -28,6 +28,8 @@ cargo test -p braze-permissions al final y confirma que todo pasa.
 - `cargo test -p braze-permissions` pasa con los tests nuevos incluidos.
 - `cargo clippy -p braze-permissions --all-targets -- -D warnings` limpio.
 
+**Estado**: **Resuelto** 2026-07-07. `openrouter:deepseek/deepseek-v4-flash` falló en 4 intentos sobre la misma sesión (loop de no-convergencia, y dos alucinaciones consecutivas incluso citando "texto literal" con procedencia falsa — U-6, U-7, U-8). Un quinto intento, cambiando de modelo a mitad de la misma sesión a `openrouter:anthropic/claude-sonnet-5` vía `/model`, sí produjo un diff correcto — verificado de forma independiente (no confiando en el resumen del modelo, que seguía siendo inexacto — U-9): toca solo `classifier.rs`, agrega `lscpu\|lsmem\|lshw` a la rama correcta, `cargo test -p braze-permissions` 61/61, `cargo clippy -p braze-permissions --all-targets -- -D warnings` limpio. Ver `docs/usability-log-2026-07-07-si1.md` (hallazgos U-6 a U-9). Diff en `../braze-self-improve-si1` (rama `self-improve/si-1`), pendiente de push/PR.
+
 ---
 
 ### SI-2 — Sintaxis de spec `+lead:` en `braze-bench` (origen: backlog, A/B del `EscalatingBackend`)

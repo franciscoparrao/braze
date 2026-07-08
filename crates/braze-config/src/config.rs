@@ -9,16 +9,70 @@ use crate::overrides::ConfigOverrides;
 use crate::paths;
 
 /// Minimal description of an MCP server to connect to by default.
-///
-/// `braze-mcp-client` (Fase 4) will consume this to spawn stdio-based MCP
-/// servers; nothing reads it yet, but the shape needs to exist now so the
-/// config file/env/override plumbing has somewhere to put it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct McpServerConfigStub {
     pub name: String,
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
+}
+
+/// Runtime command for `post_edit_check` to run after a matching file is
+/// edited (v4 P1.6: generalizes the Rust-only `cargo check` guardrail
+/// into a declarative map of `extensions → command`, so any stack gets
+/// the same feedback loop — `ruff check`, `prettier --check`,
+/// `tsc --noEmit`, etc.). Each command runs from the edited file's
+/// parent directory (`cargo`はwalks ancestors looking for `Cargo.toml`;
+/// `ruff`/`prettier`/`tsc` likewise walk up to their project roots), so
+/// no separate `cwd` strategy is required. Failure posture preserved:
+/// the guardrail only ever *adds* feedback — missing binary, timeout,
+/// non-zero exit with no `error:` lines all silently skip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FormatterConfig {
+    /// Command + args to run after a matching file is edited. Executed
+    /// with `cwd = edited_file.parent()`. First element is the program
+    /// (resolved via `PATH`); rest are args.
+    pub command: Vec<String>,
+    /// File extensions (with leading dot, lowercase — matching is
+    /// case-insensitive on the extension) that this formatter applies
+    /// to. `[".rs"]` for Rust; `[".py", ".pyi"]` extends to `.pyi`
+    /// stubs too.
+    pub extensions: Vec<String>,
+    /// Timeout in seconds — same semantics as `CHECK_TIMEOUT` (original
+    /// hardcoded const), silent skip past this. Defaults to 60.
+    #[serde(default = "default_formatter_timeout_secs")]
+    pub timeout_secs: u64,
+    /// `true` skips this entry (preserves the opt-out behavior of
+    /// `Config::disable_post_edit_check` granularly per-entry instead of
+    /// blanket-off).
+    #[serde(default)]
+    pub disabled: bool,
+}
+
+fn default_formatter_timeout_secs() -> u64 {
+    60
+}
+
+fn default_formatters() -> Vec<FormatterConfig> {
+    vec![FormatterConfig {
+        command: vec![
+            "cargo".to_string(),
+            "check".to_string(),
+            "--quiet".to_string(),
+            "--message-format=short".to_string(),
+        ],
+        extensions: vec![".rs".to_string()],
+        timeout_secs: default_formatter_timeout_secs(),
+        disabled: false,
+    }]
+}
+
+/// `#[serde(default = "...")]` needs a named function, not a literal —
+/// used by fields (like `enable_prompt_caching`) whose sane default is
+/// `true`, unlike the `disable_*`-style flags elsewhere in this struct
+/// that default to `false` via the plain `#[serde(default)]` shorthand.
+fn default_true() -> bool {
+    true
 }
 
 /// Fully-resolved `braze` configuration.
@@ -147,6 +201,22 @@ pub struct Config {
     /// `braze_engine::Engine::with_textual_rescue_enabled`.
     #[serde(default)]
     pub disable_textual_tool_call_rescue: bool,
+    /// Whether OpenRouter requests carry explicit `cache_control` markers
+    /// for models that need one to cache at all (Anthropic/Qwen — see
+    /// `braze_model::openrouter_wire::model_supports_explicit_caching`).
+    /// `true` by default: almost every `braze` turn is multi-round
+    /// tool-calling, so the ~25% premium on the first request that
+    /// establishes a cache entry is recovered many times over across the
+    /// rest of the turn (docs/usability-log-2026-07-07-si2.md,
+    /// prompt-caching design — measured live: 481,714 cumulative input
+    /// tokens across one 40-round investigation turn, with zero caching).
+    /// Every other provider OpenRouter routes to (OpenAI, DeepSeek,
+    /// Moonshot/Kimi, Grok, Gemini 2.5) caches automatically server-side
+    /// regardless of this flag — it only changes the request bytes sent
+    /// for Anthropic/Qwen models. See
+    /// `braze_model::openrouter::OpenRouterBackend::with_prompt_caching_enabled`.
+    #[serde(default = "default_true")]
+    pub enable_prompt_caching: bool,
     /// Disables the post-edit `cargo check` guardrail
     /// (`braze-tools-local`, ítem 5 del backlog 2026-07-06): after a
     /// successful `write_file`/`edit_file` on a `.rs` file inside a
@@ -181,6 +251,68 @@ pub struct Config {
     /// `planner_model`.
     #[serde(default)]
     pub lead_model: Option<String>,
+    /// Tope de iteraciones agentic por turno antes de forzar una respuesta
+    /// text-only (`Engine::run_turn`'s `MAX_TURN_ITERATIONS`). Default 20,
+    /// el histórico valor hardcoded; acá expuesto (v4 P0.2/mitad rondas)
+    /// porque el óptimo depende de la capacidad del modelo — un SLM que
+    /// converge en ~3-5 rondas para `single_tool` pero se enreda en 15-20
+    /// benefit del tope más alto, mientras `distactor_selection` con 20
+    /// ya evidence floundering. Override por backend/familia en `Engine`
+    /// vía `EngineBuilder::with_max_turn_iterations`.
+    #[serde(default = "default_max_turn_iterations")]
+    pub max_turn_iterations: u32,
+    /// Tope de tokens output para una ronda del planner
+    /// (`Engine::attempt_planning_round`'s `PLANNER_MAX_TOKENS`). Default
+    /// 1024 — el valor hardcoded previo. Acá expuesto para apretar/aflojar
+    /// el presupuesto del plan sin recompilar, mismo razonamiento que
+    /// `max_turn_iterations`.
+    #[serde(default = "default_planner_max_tokens")]
+    pub planner_max_tokens: u32,
+    /// Per-tool-result byte budget before `LocalToolsProvider::wrap`
+    /// truncates and appends an actionable "narrow your query" trailer
+    /// (v4 P2.4). Default 8000 — the historical `MAX_TOOL_OUTPUT_BYTES`
+    /// const, tuned for Ollama's `num_ctx=8192`. A larger context window
+    /// or a paper sweep that needs more output per round can override
+    /// here (`BRAZE_TOOL_OUTPUT_MAX_BYTES`).
+    #[serde(default = "default_tool_output_max_bytes")]
+    pub tool_output_max_bytes: u32,
+    /// Per-tool-result line budget (v4 P2.4). `None` (the default) is
+    /// **not** a cap — only the byte cap applies. Setting this makes
+    /// `truncate_output` additionally truncate at `max_lines` lines if
+    /// the byte cap hasn't already hit; useful for outputs that are
+    /// many short lines (a `grep -r` over thousands of files) where a
+    /// byte-only cap can still show 100k+ lines before triggering.
+    #[serde(default)]
+    pub tool_output_max_lines: Option<u32>,
+    /// Post-edit command map: per file extension, the command to run
+    /// after `write_file`/`edit_file` lands (v4 P1.6 — generalizes
+    /// `post_edit_check.rs`'s previously Rust-only `cargo check`).
+    /// Defaults to the bare Rust `cargo check --quiet
+    /// --message-format=short` entry — equivalent to the hardcoded
+    /// behavior before this field existed. `disable_post_edit_check`
+    /// (still honored) blanket-skips every entry when true.
+    #[serde(default = "default_formatters")]
+    pub formatters: Vec<FormatterConfig>,
+}
+
+/// Default helper for `Config::tool_output_max_bytes` — matches the
+/// hardcoded const `MAX_TOOL_OUTPUT_BYTES` in `braze-tools-local/provider.rs`.
+fn default_tool_output_max_bytes() -> u32 {
+    8_000
+}
+
+/// Default helper for `Config::max_turn_iterations` — named so the
+/// `#[serde(default = "...")]` attribute can reference it. Matches the
+/// historical `MAX_TURN_ITERATIONS` const in `braze-engine/src/engine.rs`.
+fn default_max_turn_iterations() -> u32 {
+    20
+}
+
+/// Default helper for `Config::planner_max_tokens` — same shape as
+/// `default_max_turn_iterations`. Matches the historical `PLANNER_MAX_TOKENS`
+/// const in `braze-engine/src/engine.rs`.
+fn default_planner_max_tokens() -> u32 {
+    1024
 }
 
 impl Default for Config {
@@ -215,11 +347,17 @@ impl Default for Config {
             best_of_n: 1,
             tui_theme: "dark".to_string(),
             disable_textual_tool_call_rescue: false,
+            enable_prompt_caching: true,
             disable_post_edit_check: false,
             planner_backend: None,
             planner_model: None,
             lead_backend: None,
             lead_model: None,
+            max_turn_iterations: default_max_turn_iterations(),
+            planner_max_tokens: default_planner_max_tokens(),
+            tool_output_max_bytes: default_tool_output_max_bytes(),
+            tool_output_max_lines: None,
+            formatters: default_formatters(),
         }
     }
 }
@@ -397,6 +535,9 @@ impl Config {
         if let Some(v) = overrides.disable_textual_tool_call_rescue {
             self.disable_textual_tool_call_rescue = v;
         }
+        if let Some(v) = overrides.enable_prompt_caching {
+            self.enable_prompt_caching = v;
+        }
         if let Some(v) = overrides.disable_post_edit_check {
             self.disable_post_edit_check = v;
         }
@@ -411,6 +552,25 @@ impl Config {
         }
         if let Some(v) = overrides.lead_model {
             self.lead_model = Some(v);
+        }
+        if let Some(v) = overrides.max_turn_iterations {
+            self.max_turn_iterations = v;
+        }
+        if let Some(v) = overrides.planner_max_tokens {
+            self.planner_max_tokens = v;
+        }
+        if let Some(v) = overrides.tool_output_max_bytes {
+            self.tool_output_max_bytes = v;
+        }
+        if let Some(v) = overrides.tool_output_max_lines {
+            self.tool_output_max_lines = Some(v);
+        }
+        // `formatters` is a Vec, not Option — overrides only specify the
+        // full replacement list. `None` means "use whatever's already
+        // there" (Config default or file-loaded entry). We do NOT merge
+        // per-extension.
+        if let Some(v) = overrides.formatters {
+            self.formatters = v;
         }
     }
 }

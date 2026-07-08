@@ -324,6 +324,12 @@ impl AnthropicStreamState {
                         input_tokens: self.input_tokens,
                         output_tokens: self.output_tokens,
                         stop_reason: self.stop_reason.clone(),
+                        // Anthropic-native caching is out of scope for
+                        // this pass (docs/usability-log-2026-07-07-si2.md
+                        // — v1 targets the OpenRouter path, which is how
+                        // this project actually gets used).
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
                     },
                     CompletionEvent::Done,
                 ]
@@ -615,6 +621,7 @@ mod tests {
                 input_tokens,
                 output_tokens,
                 stop_reason,
+                ..
             } => {
                 assert_eq!(*input_tokens, 10);
                 assert_eq!(*output_tokens, 5);

@@ -17,6 +17,17 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "ollama_base_url",
     "ollama_model",
     "ollama_num_ctx",
+    // v5 H-9: these five sampling keys existed in ConfigOverrides and
+    // applied correctly via env, but were missing here — a config FILE
+    // that used them triggered `tracing::warn!("unrecognized config file
+    // key; ignored")` even though the value silently went through anyway
+    // (serde_json::from_value ignores our warning). Fix: add them so the
+    // warning no longer misleads.
+    "ollama_temperature",
+    "ollama_seed",
+    "ollama_top_p",
+    "ollama_top_k",
+    "ollama_repeat_penalty",
     "openrouter_api_key",
     "openrouter_model",
     "openrouter_base_url",
@@ -29,11 +40,24 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "best_of_n",
     "tui_theme",
     "disable_textual_tool_call_rescue",
+    "enable_prompt_caching",
     "disable_post_edit_check",
     "planner_backend",
     "planner_model",
     "lead_backend",
     "lead_model",
+    // v4 P0.2 (mitad rondas) — `max_turn_iterations` and
+    // `planner_max_tokens` stop being engine.rs hardcoded constants, now
+    // configurable.
+    "max_turn_iterations",
+    "planner_max_tokens",
+    // v4 P2.4 — `tool_output_max_bytes`/`tool_output_max_lines` configurable
+    // truncation limits (previously `MAX_TOOL_OUTPUT_BYTES` hardcoded).
+    "tool_output_max_bytes",
+    "tool_output_max_lines",
+    // v4 P1.6 — per-extension formatter map (generalizes the Rust-only
+    // cargo check guardrail).
+    "formatters",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

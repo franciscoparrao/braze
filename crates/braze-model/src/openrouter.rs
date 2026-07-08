@@ -36,6 +36,12 @@ pub struct OpenRouterBackend {
     temperature: Option<f32>,
     /// `None` omits the field. See [`OpenRouterBackend::with_seed`].
     seed: Option<u64>,
+    /// See [`OpenRouterBackend::with_prompt_caching_enabled`]. Default
+    /// `true` — only has an effect for models
+    /// `openrouter_wire::model_supports_explicit_caching` recognizes
+    /// (Anthropic/Qwen), so leaving it on doesn't change the request sent
+    /// for any other provider.
+    prompt_caching_enabled: bool,
 }
 
 impl OpenRouterBackend {
@@ -48,6 +54,7 @@ impl OpenRouterBackend {
             base_url: OPENROUTER_DEFAULT_BASE_URL.to_string(),
             temperature: None,
             seed: None,
+            prompt_caching_enabled: true,
         }
     }
 
@@ -61,6 +68,7 @@ impl OpenRouterBackend {
             base_url,
             temperature: None,
             seed: None,
+            prompt_caching_enabled: true,
         }
     }
 
@@ -82,6 +90,17 @@ impl OpenRouterBackend {
         self.seed = Some(seed);
         self
     }
+
+    /// Overrides whether requests carry explicit `cache_control` markers
+    /// for models that need one (Anthropic/Qwen —
+    /// `openrouter_wire::model_supports_explicit_caching`). Default
+    /// `true`; see `Config.enable_prompt_caching`
+    /// (`BRAZE_ENABLE_PROMPT_CACHING`) for the config-file/env-var
+    /// surface. Chainable, same shape as `with_temperature`.
+    pub fn with_prompt_caching_enabled(mut self, enabled: bool) -> Self {
+        self.prompt_caching_enabled = enabled;
+        self
+    }
 }
 
 #[async_trait]
@@ -99,7 +118,13 @@ impl ModelBackend for OpenRouterBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let body = build_request(&req, &self.model, self.temperature, self.seed);
+        let body = build_request(
+            &req,
+            &self.model,
+            self.temperature,
+            self.seed,
+            self.prompt_caching_enabled,
+        );
         tracing::info!(
             tool_count = body.tools.len(),
             "starting openrouter completion turn"

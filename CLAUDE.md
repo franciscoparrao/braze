@@ -125,6 +125,15 @@ compactación) — braze-bench instala subscriber de tracing.
   qwen3.5-coder 6/6 vs qwen2.5:3b 0-2/6 en las skills débiles como
   contraste central; suite ampliada de tareas de edición pendiente.
 - Infra Nitro: IP fija en el router, `OLLAMA_KEEP_ALIVE`.
+- Circuit breaker por costo acumulado por turno (idea de
+  `@openrouter/agent`'s `maxCost(amount)` stop condition,
+  docs/usability-log-2026-07-07-si2.md): `MAX_TURN_ITERATIONS` corta por
+  cantidad de rondas pero no por gasto — un turno de investigación puede
+  acumular cientos de miles de tokens sin que nada lo frene antes (caso
+  real: 481K tokens de entrada en un turno de 40 rondas, sesión
+  `ccd4621b`). Con `cache_read_tokens`/`cache_write_tokens` ya fluyendo
+  por `AgentEvent::Usage` (prompt-caching, cerrado hoy), agregar un tope
+  de costo acumulado sería una extensión barata. No diseñado todavía.
 
 ## Modelos locales recomendados (Ollama)
 

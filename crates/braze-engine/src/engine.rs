@@ -16,6 +16,7 @@ use braze_types::{ContentBlock, Message, SessionId, ToolCall, ToolResult, ToolSt
 
 use crate::error::EngineError;
 use crate::history::{
+    MAX_FULL_OBSERVATIONS_TOTAL_CHARS, TACTICAL_FULL_OBSERVATIONS,
     build_messages_with_full_observations, render_durable_events, render_tactical_events,
 };
 
@@ -24,9 +25,14 @@ use crate::history::{
 /// [`Engine::new`].
 pub const DEFAULT_TACTICAL_COMPACTION_THRESHOLD: usize = 40;
 
-/// Safety cap on model/tool-call round trips within a single
+/// Default safety cap on model/tool-call round trips within a single
 /// [`Engine::run_turn`] call, so a model that never converges on a
-/// text-only response can't hang the turn forever.
+/// text-only response can't hang the turn forever. Now exposed as
+/// [`Engine::max_turn_iterations`] (defaults to this constant) —
+/// configurable via `Config::max_turn_iterations`
+/// (`BRAZE_MAX_TURN_ITERATIONS`, v4 P0.2/healf rounds) because the
+/// optimum depends on model capacity (a SLM converging in ~3-5 rondas
+/// benefits less from a high cap than one prone to floundering).
 const MAX_TURN_ITERATIONS: usize = 20;
 
 /// How long to wait for a single background tool task to complete before
@@ -64,12 +70,15 @@ const MUTATING_TOOL_NAMES: &[&str] = &["write_file", "edit_file", "shell_exec"];
 /// pattern actually observed.
 const NARRATION_WITHOUT_ACTION_THRESHOLD: u32 = 2;
 
-/// Cap on the planning round's `max_tokens` (PLAN.md § "Split
+/// Default cap on the planning round's `max_tokens` (PLAN.md § "Split
 /// planificador/ejecutor") — plans are short numbered lists; letting the
 /// planner spend the executor's full `max_tokens` budget would just be
 /// cost with no benefit. The effective value is
-/// `min(self.max_tokens, PLANNER_MAX_TOKENS)`, so a caller with a
-/// *smaller* overall budget is still respected.
+/// `min(self.max_tokens, self.planner_max_tokens)`, so a caller with a
+/// *smaller* overall budget is still respected. Now exposed as
+/// [`Engine::planner_max_tokens`] (defaults to this constant) —
+/// configurable via `Config::planner_max_tokens`
+/// (`BRAZE_PLANNER_MAX_TOKENS`, v4 P0.2/healf rounds).
 const PLANNER_MAX_TOKENS: u32 = 1024;
 
 /// The agentic loop. Orchestrates model calls, tool dispatch (via
@@ -114,6 +123,17 @@ pub struct Engine {
     /// the timeout-then-abort path in `dispatch_tool_calls` without
     /// actually waiting 120 real seconds.
     tool_completion_timeout: Duration,
+    /// Safety cap on model/tool-call round trips within a single
+    /// [`Engine::run_turn`] call. Defaults to [`MAX_TURN_ITERATIONS`];
+    /// overridden via [`Engine::with_max_turn_iterations`] from
+    /// `Config::max_turn_iterations` (v4 P0.2/mitad rondas).
+    max_turn_iterations: usize,
+    /// Cap on the planning round's `max_tokens` (effective value is
+    /// `min(self.max_tokens, self.planner_max_tokens)`). Defaults to
+    /// [`PLANNER_MAX_TOKENS`]; overridden via
+    /// [`Engine::with_planner_max_tokens`] from `Config::planner_max_tokens`
+    /// (v4 P0.2/mitad rondas).
+    planner_max_tokens: u32,
     /// Set for the duration of a [`Engine::run_turn`] call, cleared on
     /// every exit path via [`TurnGuard`]'s `Drop`. N-17
     /// (docs/AUDITORIA-2026-07-v2.md): two concurrent `run_turn` calls on
@@ -157,10 +177,25 @@ pub struct Engine {
 /// round loop in [`Engine::run_turn`] needs to decide what happens next,
 /// whether it came from a single attempt ([`Engine::complete_once`]) or
 /// was chosen by vote among several ([`Engine::complete_with_best_of_n`]).
+/// One round's `Usage` report — a named struct instead of a growing tuple
+/// so the ~4 sites that build/sum/destructure it (`complete_once_with`,
+/// `complete_with_best_of_n`, `run_turn`'s persist call) can't mix up
+/// positional fields (docs/usability-log-2026-07-07-si2.md, prompt-caching
+/// design — this grew from 3 fields to 5 when cache token counts were
+/// added, past the point a tuple stays readable).
+#[derive(Debug, Clone)]
+struct RoundUsage {
+    input_tokens: u32,
+    output_tokens: u32,
+    stop_reason: Option<String>,
+    cache_read_tokens: Option<u32>,
+    cache_write_tokens: Option<u32>,
+}
+
 struct RoundOutcome {
     text_buffer: String,
     tool_calls: Vec<ToolCall>,
-    usage: Option<(u32, u32, Option<String>)>,
+    usage: Option<RoundUsage>,
     /// Set when the backend reported `stop_reason: "max_tokens"`/`"length"`
     /// for this round — N-24 (docs/AUDITORIA-2026-07-v2.md): `run_turn`
     /// checks this before treating an empty-`tool_calls` round as a
@@ -247,6 +282,8 @@ impl Engine {
             context_budget_tokens: None,
             best_of_n: 1,
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
+            max_turn_iterations: MAX_TURN_ITERATIONS,
+            planner_max_tokens: PLANNER_MAX_TOKENS,
             turn_in_progress: std::sync::atomic::AtomicBool::new(false),
             consecutive_turns_without_tool_calls: std::sync::atomic::AtomicU32::new(0),
             textual_rescue_enabled: true,
@@ -297,6 +334,26 @@ impl Engine {
     /// Chainable, same shape as [`Engine::with_context_budget`].
     pub fn with_tool_completion_timeout(mut self, timeout: Duration) -> Self {
         self.tool_completion_timeout = timeout;
+        self
+    }
+
+    /// Overrides [`MAX_TURN_ITERATIONS`] — the safety cap on
+    /// model/tool-call round trips within a single [`Engine::run_turn`]
+    /// call. Configurable via `Config::max_turn_iterations`
+    /// (`BRAZE_MAX_TURN_ITERATIONS`, v4 P0.2/mitad rondas). Chainable,
+    /// same shape as [`Engine::with_context_budget`].
+    pub fn with_max_turn_iterations(mut self, cap: usize) -> Self {
+        self.max_turn_iterations = cap;
+        self
+    }
+
+    /// Overrides [`PLANNER_MAX_TOKENS`] — the cap on the planning
+    /// round's `max_tokens` (effective `min(self.max_tokens, self.planner_max_tokens)`).
+    /// Configurable via `Config::planner_max_tokens`
+    /// (`BRAZE_PLANNER_MAX_TOKENS`, v4 P0.2/mitad rondas). Chainable,
+    /// same shape as [`Engine::with_context_budget`].
+    pub fn with_planner_max_tokens(mut self, cap: u32) -> Self {
+        self.planner_max_tokens = cap;
         self
     }
 
@@ -398,7 +455,7 @@ impl Engine {
 
         let mut text_buffer = String::new();
         let mut tool_calls: Vec<ToolCall> = Vec::new();
-        let mut usage: Option<(u32, u32, Option<String>)> = None;
+        let mut usage: Option<RoundUsage> = None;
         let mut saw_done = false;
         let mut truncated = false;
 
@@ -425,11 +482,15 @@ impl Engine {
                     input_tokens,
                     output_tokens,
                     stop_reason,
+                    cache_read_tokens,
+                    cache_write_tokens,
                 }) => {
                     tracing::debug!(
                         input_tokens,
                         output_tokens,
                         stop_reason = stop_reason.as_deref(),
+                        cache_read_tokens,
+                        cache_write_tokens,
                         "model usage this round"
                     );
                     // "max_tokens"/"length" means the round's output
@@ -449,7 +510,13 @@ impl Engine {
                         );
                         truncated = true;
                     }
-                    usage = Some((input_tokens, output_tokens, stop_reason));
+                    usage = Some(RoundUsage {
+                        input_tokens,
+                        output_tokens,
+                        stop_reason,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                    });
                 }
                 Ok(CompletionEvent::Done) => {
                     saw_done = true;
@@ -612,7 +679,7 @@ impl Engine {
         }
 
         if candidates.is_empty() {
-            return Err(last_error.unwrap_or(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS)));
+            return Err(last_error.unwrap_or(EngineError::TurnDidNotConverge(self.max_turn_iterations)));
         }
 
         let signatures: Vec<Vec<(String, String)>> =
@@ -630,18 +697,32 @@ impl Engine {
         let total_input_tokens: u32 = candidates
             .iter()
             .filter_map(|c| c.usage.as_ref())
-            .map(|u| u.0)
+            .map(|u| u.input_tokens)
             .sum();
         let total_output_tokens: u32 = candidates
             .iter()
             .filter_map(|c| c.usage.as_ref())
-            .map(|u| u.1)
+            .map(|u| u.output_tokens)
             .sum();
+        // Cache tokens sum the same way input/output do, for the same
+        // reason: this is cost accounting, and every candidate's request
+        // really was sent (and really did read/write cache), not just the
+        // winner's — summing `None`s as 0 would understate real spend, so
+        // stay `None` unless at least one candidate reported a cache
+        // token count.
+        let total_cache_read_tokens = sum_optional_u32(
+            candidates.iter().filter_map(|c| c.usage.as_ref().and_then(|u| u.cache_read_tokens)),
+        );
+        let total_cache_write_tokens = sum_optional_u32(
+            candidates
+                .iter()
+                .filter_map(|c| c.usage.as_ref().and_then(|u| u.cache_write_tokens)),
+        );
         let any_usage_reported = candidates.iter().any(|c| c.usage.is_some());
         let winner_stop_reason = candidates[winner_index]
             .usage
             .as_ref()
-            .and_then(|u| u.2.clone());
+            .and_then(|u| u.stop_reason.clone());
 
         tracing::debug!(
             winner_index,
@@ -651,11 +732,13 @@ impl Engine {
         );
 
         let mut winner = candidates.swap_remove(winner_index);
-        winner.usage = any_usage_reported.then_some((
-            total_input_tokens,
-            total_output_tokens,
-            winner_stop_reason,
-        ));
+        winner.usage = any_usage_reported.then_some(RoundUsage {
+            input_tokens: total_input_tokens,
+            output_tokens: total_output_tokens,
+            stop_reason: winner_stop_reason,
+            cache_read_tokens: total_cache_read_tokens,
+            cache_write_tokens: total_cache_write_tokens,
+        });
 
         if !winner.text_buffer.is_empty() {
             observer.on_text_delta(&winner.text_buffer);
@@ -777,7 +860,7 @@ impl Engine {
         // *last* round happened to have no tool calls.
         let mut any_tool_calls_this_turn = false;
 
-        for round in 0..MAX_TURN_ITERATIONS {
+        for round in 0..self.max_turn_iterations {
             // N-16 (docs/AUDITORIA-2026-07-v2.md): the lossy variant
             // degrades a provider that fails to list its stubs (e.g. an
             // MCP server that died mid-session) instead of aborting every
@@ -814,13 +897,15 @@ impl Engine {
             // reflects the *summed* cost of every candidate this round
             // generated, not just the winner's — see
             // `complete_with_best_of_n`.
-            if let Some((input_tokens, output_tokens, stop_reason)) = usage {
+            if let Some(round_usage) = usage {
                 self.append_and_notify(
                     session,
                     &AgentEvent::Usage {
-                        input_tokens,
-                        output_tokens,
-                        stop_reason,
+                        input_tokens: round_usage.input_tokens,
+                        output_tokens: round_usage.output_tokens,
+                        stop_reason: round_usage.stop_reason,
+                        cache_read_tokens: round_usage.cache_read_tokens,
+                        cache_write_tokens: round_usage.cache_write_tokens,
                     },
                     observer,
                 )
@@ -938,7 +1023,7 @@ impl Engine {
             .store(0, std::sync::atomic::Ordering::SeqCst);
 
         tracing::warn!(
-            max_iterations = MAX_TURN_ITERATIONS,
+            max_iterations = self.max_turn_iterations,
             "turn did not converge; attempting a final tools-free summary round instead of failing outright"
         );
         if self
@@ -947,7 +1032,7 @@ impl Engine {
         {
             return Ok(());
         }
-        Err(EngineError::TurnDidNotConverge(MAX_TURN_ITERATIONS))
+        Err(EngineError::TurnDidNotConverge(self.max_turn_iterations))
     }
 
     /// The optional planning round (PLAN.md § "Split
@@ -991,7 +1076,7 @@ impl Engine {
             messages: messages.to_vec(),
             tool_stubs: Vec::new(),
             system_prompt: planning_system_prompt(&self.system_prompt, &tool_stubs),
-            max_tokens: self.max_tokens.min(PLANNER_MAX_TOKENS),
+            max_tokens: self.max_tokens.min(self.planner_max_tokens),
         };
 
         // `emit_deltas: false`: the plan reaches frontends once, as the
@@ -1016,13 +1101,15 @@ impl Engine {
             }
         };
 
-        if let Some((input_tokens, output_tokens, stop_reason)) = outcome.usage {
+        if let Some(round_usage) = outcome.usage {
             self.append_and_notify(
                 session,
                 &AgentEvent::Usage {
-                    input_tokens,
-                    output_tokens,
-                    stop_reason,
+                    input_tokens: round_usage.input_tokens,
+                    output_tokens: round_usage.output_tokens,
+                    stop_reason: round_usage.stop_reason,
+                    cache_read_tokens: round_usage.cache_read_tokens,
+                    cache_write_tokens: round_usage.cache_write_tokens,
                 },
                 observer,
             )
@@ -1112,12 +1199,20 @@ impl Engine {
             }
         };
 
+        // Deltas are *not* streamed live here (unlike the main round in
+        // `complete_once_with`) — same trade-off `complete_with_best_of_n`
+        // already makes and documents: there is no single "the" answer to
+        // show token-by-token until the full response is in hand and
+        // known-clean. Here that's because a leaked tool-call block
+        // (hallazgo U-16 below) can only be detected and stripped once the
+        // whole buffer has arrived; streaming it live first would show the
+        // user the raw garbage regardless of what happens to the
+        // *persisted* text afterward.
         let mut text_buffer = String::new();
         let mut saw_done = false;
         while let Some(event) = stream.next().await {
             match event {
                 Ok(CompletionEvent::TextDelta(delta)) => {
-                    observer.on_text_delta(&delta);
                     text_buffer.push_str(&delta);
                 }
                 Ok(CompletionEvent::Done) => {
@@ -1141,9 +1236,26 @@ impl Engine {
         }
 
         if saw_done && !text_buffer.is_empty() {
+            // U-16 (docs/usability-log-2026-07-07-si2.md): this request
+            // explicitly carries no tool stubs and tells the model not to
+            // call any tool, but a model habituated to its own native
+            // tool-call template (`z-ai/glm-5.2`, observed live) can still
+            // emit one as plain text anyway. Unlike the main round, this
+            // one has no rescue ladder to dispatch it to — there is
+            // nothing to dispatch it *to* — so the only choice is between
+            // showing the leaked block to the user as if it were the real
+            // answer, or stripping it. Showing it is strictly worse: it
+            // turns a recoverable "the model tried to call a tool it
+            // couldn't" into "the turn succeeded" with garbage as the
+            // punchline.
+            let cleaned = strip_leaked_tool_call_shapes(&text_buffer);
+            if cleaned.trim().is_empty() {
+                return Ok(false);
+            }
+            observer.on_text_delta(&cleaned);
             self.append_and_notify(
                 session,
-                &AgentEvent::AssistantText { text: text_buffer },
+                &AgentEvent::AssistantText { text: cleaned },
                 observer,
             )
             .await?;
@@ -1583,9 +1695,23 @@ impl Engine {
 
         let (durable, tactical) = self.compactor.split(&events);
 
-        let over_event_count_threshold = tactical.len() > self.tactical_compaction_threshold;
+        let full_observations_budget = full_observations_byte_budget(self.context_budget_tokens);
+        let effective_full_observations = effective_tactical_full_observations(
+            self.tactical_full_observations,
+            self.context_budget_tokens,
+        );
+        let effective_compaction_threshold = effective_tactical_compaction_threshold(
+            self.tactical_compaction_threshold,
+            self.context_budget_tokens,
+        );
+        let over_event_count_threshold = tactical.len() > effective_compaction_threshold;
         let over_token_budget = self.context_budget_tokens.is_some_and(|budget| {
-            estimate_prompt_tokens(&durable, &tactical, self.tactical_full_observations) > budget
+            estimate_prompt_tokens(
+                &durable,
+                &tactical,
+                effective_full_observations,
+                full_observations_budget,
+            ) > budget
         });
         // N-6 (docs/AUDITORIA-2026-07-v2.md): compacting only ever folds
         // `tactical` — it can't shrink `durable.summary` or
@@ -1609,7 +1735,7 @@ impl Engine {
             // `RUST_LOG=debug` instead of only inferable after the fact.
             tracing::warn!(
                 tactical_len = tactical.len(),
-                tactical_compaction_threshold = self.tactical_compaction_threshold,
+                tactical_compaction_threshold = effective_compaction_threshold,
                 over_event_count_threshold,
                 over_token_budget,
                 "context compaction triggered"
@@ -1641,13 +1767,15 @@ impl Engine {
             Ok(build_messages_with_full_observations(
                 &effective_durable,
                 live_tail,
-                self.tactical_full_observations,
+                effective_full_observations,
+                full_observations_budget,
             ))
         } else {
             Ok(build_messages_with_full_observations(
                 &durable,
                 &tactical,
-                self.tactical_full_observations,
+                effective_full_observations,
+                full_observations_budget,
             ))
         }
     }
@@ -1838,6 +1966,24 @@ fn merge_summary(mut durable: DurableState, summary: String) -> DurableState {
     durable
 }
 
+/// Sums an optional-per-item `u32` (a cache token count some backends
+/// don't report at all) into a single optional total: `None` only if
+/// *every* item was `None` (nothing reported anything — stay silent
+/// rather than claim "0 tokens cached"), `Some(sum)` treating any
+/// individual `None` as 0 once at least one item did report a value.
+/// Shared by `Engine::complete_with_best_of_n`'s cache-token summing —
+/// see that call site's comment for why this differs from just summing
+/// `u32`s directly.
+fn sum_optional_u32(values: impl Iterator<Item = u32>) -> Option<u32> {
+    let mut sum = 0u32;
+    let mut any = false;
+    for v in values {
+        sum += v;
+        any = true;
+    }
+    any.then_some(sum)
+}
+
 /// Canonical signature of a completion outcome for técnica G10's vote
 /// (`Engine::complete_with_best_of_n`): the sorted set of (tool name,
 /// canonical arguments) pairs it requested — sorted so two candidates
@@ -1977,11 +2123,16 @@ fn extract_tagged_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
             continue;
         }
 
-        // The wrapper admits two inner grammars: qwen2.5's JSON object,
-        // and qwen3-coder's `<function=...>` XML (which its template
-        // nests inside the same `<tool_call>` tags).
+        // The wrapper admits three inner grammars: qwen2.5's JSON object,
+        // qwen3-coder's `<function=...>` XML (which its template nests
+        // inside the same `<tool_call>` tags), and z-ai/glm-5.2's
+        // `name<arg_key>K</arg_key><arg_value>V</arg_value>...` tags
+        // (docs/usability-log-2026-07-07-si2.md, hallazgo U-15 — observed
+        // via OpenRouter when GLM's native tool-calling template isn't
+        // honored end-to-end).
         match parse_tool_call_json(trim_json_fences(inner))
             .or_else(|| parse_function_xml_tool_call(inner))
+            .or_else(|| parse_glm_arg_tag_tool_call(inner))
         {
             Some(call) => {
                 calls.push(call);
@@ -2125,6 +2276,79 @@ fn parse_function_xml_tool_call(block: &str) -> Option<ToolCall> {
     })
 }
 
+/// Parses `z-ai/glm-5.2`'s tool-call grammar as observed inside the
+/// shared `<tool_call>...</tool_call>` wrapper (docs/usability-log-2026-07-07-si2.md,
+/// hallazgo U-15): the tool name as bare text, followed by zero or more
+/// `<arg_key>NAME</arg_key><arg_value>VALUE</arg_value>` pairs — distinct
+/// from both qwen2.5's JSON payload and qwen3-coder's `<function=...>`
+/// XML the same wrapper already covers:
+///
+/// ```text
+/// <tool_call>read_file<arg_key>limit</arg_key><arg_value>120</arg_value><arg_key>offset</arg_key><arg_value>63</arg_value></tool_call>
+/// ```
+///
+/// Requires at least one `<arg_key>` pair to fire — a bare name with no
+/// tags at all is indistinguishable from ordinary prose (the same
+/// ambiguity [`extract_pythonic_tool_calls`]'s doc comment calls out for
+/// unbracketed `name(...)`), so a genuinely argument-less tool call in
+/// this grammar isn't rescued; nothing in the observed leak shows that
+/// shape yet. Argument values are kept as strings (trimmed) unless
+/// clearly structured JSON (starts with `{`/`[` and parses) — same rule
+/// [`parse_function_xml_tool_call`] uses, for the same reason: coercing a
+/// scalar-looking value into a JSON number/bool would break a
+/// `path: String`-style schema downstream. `None` for anything that
+/// doesn't match the grammar, including a key/value pair that isn't
+/// immediately adjacent (only whitespace between `</arg_key>` and the
+/// next `<arg_value>`) — inventing a repair for a shape this rescue
+/// wasn't built for risks running something the model didn't say.
+fn parse_glm_arg_tag_tool_call(inner: &str) -> Option<ToolCall> {
+    const KEY_OPEN: &str = "<arg_key>";
+    const KEY_CLOSE: &str = "</arg_key>";
+    const VALUE_OPEN: &str = "<arg_value>";
+    const VALUE_CLOSE: &str = "</arg_value>";
+
+    let first_tag = inner.find(KEY_OPEN)?;
+    let name = inner[..first_tag].trim();
+    if name.is_empty() || name.contains(['<', '\n']) {
+        return None;
+    }
+
+    let mut arguments = serde_json::Map::new();
+    let mut cursor = &inner[first_tag..];
+    while let Some(key_start) = cursor.find(KEY_OPEN) {
+        let after_key_open = &cursor[key_start + KEY_OPEN.len()..];
+        let key_len = after_key_open.find(KEY_CLOSE)?;
+        let key = after_key_open[..key_len].trim();
+        if key.is_empty() || key.contains(['<', '\n']) {
+            return None;
+        }
+        let after_key = &after_key_open[key_len + KEY_CLOSE.len()..];
+
+        let value_start = after_key.find(VALUE_OPEN)?;
+        if !after_key[..value_start].trim().is_empty() {
+            return None;
+        }
+        let after_value_open = &after_key[value_start + VALUE_OPEN.len()..];
+        let value_len = after_value_open.find(VALUE_CLOSE)?;
+        let raw_value = after_value_open[..value_len].trim();
+        let value = if raw_value.starts_with(['{', '[']) {
+            serde_json::from_str(raw_value)
+                .unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()))
+        } else {
+            serde_json::Value::String(raw_value.to_string())
+        };
+        arguments.insert(key.to_string(), value);
+
+        cursor = &after_value_open[value_len + VALUE_CLOSE.len()..];
+    }
+
+    Some(ToolCall {
+        id: format!("rescued-{}", uuid::Uuid::new_v4()),
+        name: name.to_string(),
+        arguments: serde_json::Value::Object(arguments),
+    })
+}
+
 /// Rescue for Llama 3.x's native "pythonic" tool-call format — distinct
 /// from Qwen's tagged/XML formats above: one or more comma-separated
 /// `name(key=value, ...)` call expressions wrapped in a single pair of
@@ -2173,6 +2397,34 @@ fn extract_pythonic_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
     }
     remaining.push_str(rest);
     (calls, remaining.trim().to_string())
+}
+
+/// Strips any tool-call-shaped block the rescue ladder recognizes,
+/// keeping only the surrounding prose — used by
+/// [`Engine::attempt_tools_free_summary_round`] only, whose request
+/// explicitly carries `tool_stubs: Vec::new()` and tells the model no
+/// tool is available: a recognized block there can never be legitimately
+/// dispatched (there is nothing to dispatch it *to*), so the choice is
+/// between showing it to the user as if it were the real answer or
+/// discarding it. Showing it is strictly worse — it replaces one
+/// confusing failure (`EmptyModelResponse`) with a worse one (garbage
+/// presented as a successful summary). docs/usability-log-2026-07-07-si2.md,
+/// hallazgo U-16: `z-ai/glm-5.2` emitted its native (malformed)
+/// `<tool_call>` syntax even after being told not to call any tool, and
+/// this round — unlike the main one in [`Engine::complete_once_with`] —
+/// had no rescue logic at all to catch it before persisting it verbatim.
+fn strip_leaked_tool_call_shapes(text: &str) -> String {
+    for extract in [
+        extract_tagged_tool_calls as fn(&str) -> (Vec<ToolCall>, String),
+        extract_function_xml_tool_calls,
+        extract_pythonic_tool_calls,
+    ] {
+        let (calls, remaining) = extract(text);
+        if !calls.is_empty() {
+            return remaining;
+        }
+    }
+    text.to_string()
 }
 
 /// Finds the byte offset of a `[` in `text` that's immediately (modulo
@@ -2523,6 +2775,121 @@ fn event_text_len(event: &AgentEvent) -> usize {
     }
 }
 
+/// How generous a flat, literature/local-model-tuned default (either
+/// [`crate::history::MAX_FULL_OBSERVATIONS_TOTAL_CHARS`] or
+/// [`DEFAULT_TACTICAL_COMPACTION_THRESHOLD`]) gets scaled up when the
+/// caller *hasn't* configured a small, fixed context budget — see
+/// [`full_observations_byte_budget`] and
+/// [`effective_tactical_compaction_threshold`]'s doc comments for the two
+/// concrete failure modes this addresses.
+const NO_CONTEXT_BUDGET_SCALE_MULTIPLIER: usize = 10;
+
+/// The aggregate byte cap [`crate::history::render_tactical_events`]
+/// enforces across the observations it keeps full, sized to whether this
+/// session actually has a small, fixed context window to protect
+/// (`context_budget_tokens`, set only for Ollama today — see
+/// [`Engine::with_context_budget`]).
+///
+/// docs/usability-log-2026-07-07-si2.md, hallazgo U-17: the flat
+/// `MAX_FULL_OBSERVATIONS_TOTAL_CHARS` (8 000 chars) default was applied
+/// unconditionally to *every* backend, including cloud ones with context
+/// windows two orders of magnitude bigger than the small local model it
+/// was tuned for. Once `read_file` pages routinely land near
+/// `braze_tools_local`'s own ~8 000-byte per-call cap (as they do for any
+/// real source file bigger than one default page), a *single* such
+/// observation already consumes the entire budget — the newest stays
+/// full unconditionally, but the very next one already blows past 8 000
+/// combined and gets excluded. In practice this collapsed "the last 5
+/// observations stay full" down to "the last 1 does", for exactly the
+/// backends least likely to need that protection. Five different models
+/// hit the resulting thrash trying to read a single ~700-line file
+/// (hallazgo U-6 and its repeats) before this was diagnosed.
+///
+/// A backend with a real small-context concern keeps the original,
+/// literature-adjacent 8 000-char default unchanged — this only widens
+/// the budget when there's no configured reason to keep it tight.
+fn full_observations_byte_budget(context_budget_tokens: Option<u32>) -> usize {
+    match context_budget_tokens {
+        Some(_) => MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
+        None => MAX_FULL_OBSERVATIONS_TOTAL_CHARS * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER,
+    }
+}
+
+/// The event-count threshold past which [`Engine::load_messages`] folds
+/// the whole tactical window into a fresh `CompactionOccurred` summary,
+/// scaled the same way [`full_observations_byte_budget`] is — unchanged
+/// when a small, fixed context window is actually configured
+/// (`context_budget_tokens`, Ollama today), scaled up otherwise.
+///
+/// docs/usability-log-2026-07-07-si2.md, hallazgo U-18: U-17 (the byte
+/// budget above) turned out to only be half the story. `configured`
+/// defaults to [`DEFAULT_TACTICAL_COMPACTION_THRESHOLD`] (40 raw events)
+/// regardless of backend — and unlike the per-observation collapse U-17
+/// addresses (which still keeps a short excerpt), a full compaction
+/// discards *everything*: `SimpleContextCompactor::compact_tactical`'s
+/// summary is a bare "Tools used: read_file(path), read_file(path), ..."
+/// list with no content, no line ranges, nothing the model could use to
+/// avoid re-reading. A task needing ~3 tool-call events per `read_file`
+/// round trip (request/started/completed) blows through 40 events after
+/// roughly a dozen reads — well short of what a multi-file real-code
+/// investigation needs — forcing a full memory wipe mid-task, observed
+/// live to repeat 3 times across 36 `read_file` calls in one turn against
+/// `z-ai/glm-5.2` (which explicitly narrated noticing this: "the read_file
+/// results keep getting cleared from context").
+///
+/// Only scales `configured` when it's still exactly
+/// [`DEFAULT_TACTICAL_COMPACTION_THRESHOLD`] — i.e. nobody set it to
+/// anything else. Without this guard, the very first version of this fix
+/// silently multiplied *any* value by 10, including an explicit
+/// `+ablate:tactical-threshold=N` from `braze-bench` (`AblationOverrides`,
+/// `crates/braze-bench/src/backend_spec.rs`) — a knob that exists
+/// specifically so a sweep can study the effect of *that exact* value.
+/// Corrupting a deliberately-chosen ablation value is worse than not
+/// scaling at all: it makes the sweep measure a different experiment than
+/// the one requested, silently. The equality check isn't perfectly
+/// precise (an override that happens to equal the default still gets
+/// scaled), but that's a low-stakes false positive compared to the
+/// alternative.
+fn effective_tactical_compaction_threshold(
+    configured: usize,
+    context_budget_tokens: Option<u32>,
+) -> usize {
+    if context_budget_tokens.is_some() || configured != DEFAULT_TACTICAL_COMPACTION_THRESHOLD {
+        return configured;
+    }
+    configured * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+}
+
+/// Same reasoning and the same corruption risk as
+/// [`effective_tactical_compaction_threshold`], for
+/// [`Engine::tactical_full_observations`] instead — `braze-bench`'s
+/// `+ablate:full-observations=N` (`AblationOverrides`) exists to study
+/// this exact value too, so this only scales the untouched
+/// [`crate::history::TACTICAL_FULL_OBSERVATIONS`] default, never an
+/// explicit override.
+///
+/// docs/usability-log-2026-07-07-si2.md, hallazgo U-19: U-17/U-18 fixed
+/// the byte-budget and compaction-threshold layers, but
+/// `tactical_full_observation_indices` (`crates/braze-engine/src/history.rs`)
+/// has a *third*, independent cap this project hadn't touched yet — only
+/// the newest `full_observations` (5 by default) observations are even
+/// *candidates* to stay full, regardless of how generous the byte budget
+/// is. A retry against `z-ai/glm-5.2` with U-17+U-18 both live confirmed
+/// this: zero compactions fired (U-18 held), yet the model still re-read
+/// the same ~700-line file 3 times over within a single 20-round-trip
+/// turn — the count-based cap, not the byte budget or compaction, was the
+/// binding constraint the whole time for a task needing ~10-12 reads to
+/// cover its files once.
+fn effective_tactical_full_observations(
+    configured: usize,
+    context_budget_tokens: Option<u32>,
+) -> usize {
+    if context_budget_tokens.is_some() || configured != TACTICAL_FULL_OBSERVATIONS {
+        return configured;
+    }
+    configured * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+}
+
 /// Rough token estimate for the *entire* durable+tactical portion of the
 /// next model request — everything [`crate::history::build_messages`]
 /// would turn into `Message`s, not just the tactical slice about to be
@@ -2548,12 +2915,16 @@ fn estimate_prompt_tokens(
     durable: &DurableState,
     tactical: &[AgentEvent],
     full_observations: usize,
+    full_observations_byte_budget: usize,
 ) -> u32 {
     let summary_tokens = (durable.summary.len() / 4) as u32;
     let durable_events_tokens =
         estimate_message_tokens(&render_durable_events(&durable.durable_events));
-    let tactical_tokens =
-        estimate_message_tokens(&render_tactical_events(tactical, full_observations));
+    let tactical_tokens = estimate_message_tokens(&render_tactical_events(
+        tactical,
+        full_observations,
+        full_observations_byte_budget,
+    ));
     summary_tokens + durable_events_tokens + tactical_tokens
 }
 
@@ -3450,6 +3821,8 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 100,
                 stop_reason: Some("max_tokens".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
             CompletionEvent::Done,
         ]]);
@@ -3681,6 +4054,8 @@ mod tests {
                 input_tokens: 42,
                 output_tokens: 7,
                 stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: Some(30),
+                cache_write_tokens: Some(5),
             },
             CompletionEvent::Done,
         ]]);
@@ -3709,10 +4084,14 @@ mod tests {
                 input_tokens,
                 output_tokens,
                 stop_reason,
+                cache_read_tokens,
+                cache_write_tokens,
             } => {
                 assert_eq!(*input_tokens, 42);
                 assert_eq!(*output_tokens, 7);
                 assert_eq!(stop_reason.as_deref(), Some("end_turn"));
+                assert_eq!(*cache_read_tokens, Some(30));
+                assert_eq!(*cache_write_tokens, Some(5));
             }
             other => panic!("expected Usage, got {other:?}"),
         }
@@ -4272,6 +4651,8 @@ mod tests {
                 input_tokens: 50,
                 output_tokens: 12,
                 stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
             CompletionEvent::Done,
         ]]);
@@ -4403,6 +4784,8 @@ mod tests {
                 input_tokens: 40,
                 output_tokens: 1024,
                 stop_reason: Some("max_tokens".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
             CompletionEvent::Done,
         ]]);
@@ -5437,6 +5820,163 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    /// `Engine::with_max_turn_iterations` (v4 P0.2/mitad rondas,
+    /// `Config::max_turn_iterations` / `BRAZE_MAX_TURN_ITERATIONS`):
+    /// reducing the cap from the default 20 to 2 must make `run_turn`
+    /// abort after exactly 2 non-converging rounds and emit the
+    /// tools-free summary fallback — instead of the default cap's
+    /// 20 rounds. The scripted model below has only 2 tool-call rounds
+    /// + 1 fallback round, so if the cap weren't honored the engine
+    /// would exhaust its script and panic; that's the failure mode the
+    /// test catches by construction.
+    #[tokio::test]
+    async fn a_lower_max_turn_iterations_caps_the_loop_instead_of_20() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Two tool-call rounds (the new cap), then one fallback summary
+        // round — exactly the three rounds a correctly-capped engine
+        // needs. Were `max_turn_iterations` still hardcoded at 20, the
+        // engine would keep pulling from an exhausted script.
+        let rounds: Vec<Vec<CompletionEvent>> = vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-0".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({"text": "r0"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({"text": "r1"}),
+                },
+                CompletionEvent::Done,
+            ],
+            // After the cap: the tools-free summary round that degrades
+            // gracefully instead of failing outright.
+            vec![
+                CompletionEvent::TextDelta("fallback summary".to_string()),
+                CompletionEvent::Done,
+            ],
+        ];
+
+        let model = ScriptedModel::new(rounds);
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_iterations(2);
+
+        let mut streamed = String::new();
+        engine
+            .run_turn(
+                &session,
+                "hola",
+                &mut TextDeltaObserver(|chunk| streamed.push_str(chunk)),
+            )
+            .await
+            .expect("the turn should degrade gracefully to a summary");
+
+        assert_eq!(streamed, "fallback summary");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        // Two tool-call rounds produced two `AssistantToolCall`s — the
+        // cap must have been exactly 2, not the default 20, or else
+        //ScriptedModel would have panicked pulling from an exhausted
+        // vec and this assertion point would be unreachable.
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, AgentEvent::AssistantToolCall { .. }))
+                .count(),
+            2,
+            "the cap must stop the loop after exactly 2 tool-call rounds"
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::AssistantText { text } if text == "fallback summary"
+        )));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for U-16 (docs/usability-log-2026-07-07-si2.md):
+    /// `z-ai/glm-5.2` kept emitting its native (malformed) `<tool_call>`
+    /// syntax even in the tools-free summary round, which explicitly tells
+    /// the model no tool is available — before the fix, that leaked block
+    /// was persisted verbatim as the turn's final answer instead of being
+    /// stripped like it is in every other round.
+    #[tokio::test]
+    async fn a_leaked_tool_call_in_the_summary_round_is_stripped_not_shown_verbatim() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let mut rounds: Vec<Vec<CompletionEvent>> = (0..MAX_TURN_ITERATIONS)
+            .map(|i| {
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: format!("call-{i}"),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({ "text": format!("attempt {i}") }),
+                    },
+                    CompletionEvent::Done,
+                ]
+            })
+            .collect();
+        rounds.push(vec![
+            CompletionEvent::TextDelta(
+                "Esto es lo que encontré.\n<tool_call>read_file<arg_key>path</arg_key>\
+                 <arg_value>x.txt</arg_value></tool_call>"
+                    .to_string(),
+            ),
+            CompletionEvent::Done,
+        ]);
+
+        let model = ScriptedModel::new(rounds);
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let mut streamed = String::new();
+        engine
+            .run_turn(
+                &session,
+                "hola",
+                &mut TextDeltaObserver(|chunk| streamed.push_str(chunk)),
+            )
+            .await
+            .expect("the turn should degrade gracefully instead of erroring");
+
+        assert!(
+            !streamed.contains("<tool_call>"),
+            "the leaked block must never reach the user verbatim: {streamed}"
+        );
+        assert_eq!(streamed, "Esto es lo que encontré.");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     /// Regression test for C4: an `AssistantToolCall` with no matching
     /// `ToolCallCompleted` anywhere in the log (what an interrupted
     /// process leaves behind — see `dispatch_tool_calls`, which persists
@@ -5574,10 +6114,17 @@ mod tests {
         let (store, dir) = temp_store();
         let session = SessionId::new();
 
-        // Seed a backlog well past the default compaction threshold with
-        // plain, non-durable-typed events (the orphan types that never
-        // leave `tactical` on their own).
-        for i in 0..(DEFAULT_TACTICAL_COMPACTION_THRESHOLD + 10) {
+        // Seed a backlog well past the *effective* compaction threshold
+        // (hallazgo U-18: with no `context_budget_tokens` configured — the
+        // case here — the real threshold `load_messages` applies is
+        // `DEFAULT_TACTICAL_COMPACTION_THRESHOLD` scaled up, not the raw
+        // constant) with plain, non-durable-typed events (the orphan types
+        // that never leave `tactical` on their own).
+        let threshold = effective_tactical_compaction_threshold(
+            DEFAULT_TACTICAL_COMPACTION_THRESHOLD,
+            None,
+        );
+        for i in 0..(threshold + 10) {
             store
                 .append(
                     &session,
@@ -5797,6 +6344,75 @@ mod tests {
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- full_observations_byte_budget (hallazgo U-17,
+    // docs/usability-log-2026-07-07-si2.md) ---
+
+    #[test]
+    fn a_configured_context_budget_keeps_the_original_protective_default() {
+        assert_eq!(
+            full_observations_byte_budget(Some(8192)),
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS
+        );
+    }
+
+    #[test]
+    fn no_configured_context_budget_gets_a_wider_default() {
+        assert_eq!(
+            full_observations_byte_budget(None),
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+        );
+        assert!(full_observations_byte_budget(None) > full_observations_byte_budget(Some(8192)));
+    }
+
+    #[test]
+    fn a_configured_context_budget_keeps_the_compaction_threshold_unchanged() {
+        assert_eq!(
+            effective_tactical_compaction_threshold(40, Some(8192)),
+            40
+        );
+    }
+
+    #[test]
+    fn no_configured_context_budget_widens_the_compaction_threshold() {
+        assert_eq!(
+            effective_tactical_compaction_threshold(DEFAULT_TACTICAL_COMPACTION_THRESHOLD, None),
+            DEFAULT_TACTICAL_COMPACTION_THRESHOLD * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+        );
+    }
+
+    /// Regression test for the ablation-corruption risk documented on
+    /// `effective_tactical_compaction_threshold`'s own doc comment: an
+    /// explicit override (e.g. `+ablate:tactical-threshold=8`) must
+    /// survive verbatim even with no context budget configured — only the
+    /// untouched default gets scaled.
+    #[test]
+    fn an_explicit_non_default_compaction_threshold_is_never_scaled() {
+        assert_eq!(effective_tactical_compaction_threshold(8, None), 8);
+    }
+
+    #[test]
+    fn a_configured_context_budget_keeps_full_observations_unchanged() {
+        assert_eq!(
+            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, Some(8192)),
+            TACTICAL_FULL_OBSERVATIONS
+        );
+    }
+
+    #[test]
+    fn no_configured_context_budget_widens_full_observations() {
+        assert_eq!(
+            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, None),
+            TACTICAL_FULL_OBSERVATIONS * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+        );
+    }
+
+    /// Same regression as `an_explicit_non_default_compaction_threshold_is_never_scaled`,
+    /// for `+ablate:full-observations=N`.
+    #[test]
+    fn an_explicit_non_default_full_observations_is_never_scaled() {
+        assert_eq!(effective_tactical_full_observations(1, None), 1);
     }
 
     /// Without a configured budget, a large event does NOT trigger
@@ -6263,6 +6879,68 @@ mod tests {
         assert_eq!(remaining, "la función f(x) = x + 1 es creciente");
     }
 
+    // --- gramática <arg_key>/<arg_value> de z-ai/glm-5.2 (hallazgo U-15,
+    // docs/usability-log-2026-07-07-si2.md — observada 2026-07-07 vía
+    // OpenRouter) ---
+
+    /// The exact shape observed leaking from `z-ai/glm-5.2`: no
+    /// `<function=...>` wrapper, just the bare name followed by
+    /// `<arg_key>`/`<arg_value>` pairs, all inside the same `<tool_call>`
+    /// tags qwen2.5/qwen3-coder use.
+    #[test]
+    fn glm_arg_tags_inside_tool_call_wrapper_parses() {
+        let text = "<tool_call>read_file<arg_key>limit</arg_key><arg_value>120</arg_value><arg_key>offset</arg_key><arg_value>63</arg_value><arg_key>path</arg_key><arg_value>crates/braze-bench/src/backend_spec.rs</arg_value></tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read_file");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({
+                "limit": "120",
+                "offset": "63",
+                "path": "crates/braze-bench/src/backend_spec.rs",
+            })
+        );
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn glm_arg_tags_with_prose_around_are_preserved() {
+        let text = "Voy a leerlo.\n<tool_call>read_file<arg_key>path</arg_key><arg_value>x.txt</arg_value></tool_call>\ndespués te cuento";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "x.txt"}));
+        assert_eq!(remaining, "Voy a leerlo.\n\ndespués te cuento");
+    }
+
+    /// Scalar-looking values stay strings, same rule as the qwen3-coder
+    /// XML rescue — a `path: String` schema downstream must not receive a
+    /// JSON number just because the raw text looked numeric.
+    #[test]
+    fn glm_arg_tags_coerce_only_clearly_structured_values() {
+        let text = "<tool_call>echo<arg_key>text</arg_key><arg_value>42</arg_value><arg_key>options</arg_key><arg_value>{\"deep\": true}</arg_value></tool_call>";
+        let (calls, _) = extract_tagged_tool_calls(text);
+        assert_eq!(calls[0].arguments["text"], serde_json::json!("42"));
+        assert_eq!(calls[0].arguments["options"], serde_json::json!({"deep": true}));
+    }
+
+    #[test]
+    fn glm_arg_tags_without_any_arg_key_are_not_mistaken_for_the_grammar() {
+        // No `<arg_key>` at all: indistinguishable from prose that merely
+        // mentions a tool by name — must fall through unrescued rather
+        // than being guessed at as a zero-argument call.
+        assert!(parse_glm_arg_tag_tool_call("read_file").is_none());
+    }
+
+    #[test]
+    fn malformed_glm_arg_tags_stay_in_the_text() {
+        // Missing the closing </arg_value>.
+        let text = "<tool_call>echo<arg_key>text</arg_key><arg_value>hola</tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
     // --- extract_pythonic_tool_calls (hallazgo C2, Llama's native format) ---
 
     #[test]
@@ -6366,6 +7044,32 @@ mod tests {
         let (calls, remaining) = extract_pythonic_tool_calls(text);
         assert!(calls.is_empty());
         assert_eq!(remaining, text);
+    }
+
+    // --- strip_leaked_tool_call_shapes (hallazgo U-16,
+    // docs/usability-log-2026-07-07-si2.md: attempt_tools_free_summary_round
+    // had no rescue logic at all, so a leaked tool-call block there used
+    // to get persisted verbatim as if it were the model's real answer) ---
+
+    #[test]
+    fn a_leaked_tagged_call_with_no_other_text_strips_to_empty() {
+        let text = "<tool_call>read_file<arg_key>path</arg_key><arg_value>x.txt</arg_value></tool_call>";
+        assert_eq!(strip_leaked_tool_call_shapes(text), "");
+    }
+
+    #[test]
+    fn a_leaked_call_alongside_real_prose_keeps_only_the_prose() {
+        let text = "Basado en lo que leí hasta ahora, el fix consiste en...\n<tool_call>read_file<arg_key>path</arg_key><arg_value>x.txt</arg_value></tool_call>";
+        assert_eq!(
+            strip_leaked_tool_call_shapes(text),
+            "Basado en lo que leí hasta ahora, el fix consiste en..."
+        );
+    }
+
+    #[test]
+    fn plain_prose_with_no_leaked_call_is_returned_unchanged() {
+        let text = "No hay nada raro acá, solo texto normal.";
+        assert_eq!(strip_leaked_tool_call_shapes(text), text);
     }
 
     /// Regression test for the rescue escalera's ordering: a `<tool_call>`
@@ -6915,6 +7619,12 @@ mod tests {
                     input_tokens: 10,
                     output_tokens: 5,
                     stop_reason: Some("end_turn".to_string()),
+                    // Deliberately mismatched Some/None across candidates
+                    // — exercises `sum_optional_u32`'s "at least one
+                    // candidate reported it" rule, not just the trivial
+                    // both-Some or both-None cases.
+                    cache_read_tokens: Some(6),
+                    cache_write_tokens: None,
                 },
                 CompletionEvent::Done,
             ],
@@ -6924,6 +7634,8 @@ mod tests {
                     input_tokens: 20,
                     output_tokens: 8,
                     stop_reason: Some("stop_sequence".to_string()),
+                    cache_read_tokens: Some(4),
+                    cache_write_tokens: Some(2),
                 },
                 CompletionEvent::Done,
             ],
@@ -6955,6 +7667,8 @@ mod tests {
                 input_tokens,
                 output_tokens,
                 stop_reason,
+                cache_read_tokens,
+                cache_write_tokens,
             }) => {
                 assert_eq!(
                     *input_tokens, 30,
@@ -6965,6 +7679,16 @@ mod tests {
                     stop_reason.as_deref(),
                     Some("end_turn"),
                     "stop_reason must reflect the winning candidate specifically"
+                );
+                assert_eq!(
+                    *cache_read_tokens,
+                    Some(10),
+                    "cache_read_tokens must sum across candidates like input/output do"
+                );
+                assert_eq!(
+                    *cache_write_tokens,
+                    Some(2),
+                    "one candidate's None must not zero out the other's reported value"
                 );
             }
             other => panic!("expected a Usage event, got {other:?}"),

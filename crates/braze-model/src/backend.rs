@@ -38,6 +38,22 @@ pub enum CompletionEvent {
         /// matters (diagnosing a tool call's JSON getting cut off by
         /// `max_tokens` instead of it just silently vanishing).
         stop_reason: Option<String>,
+        /// OpenRouter's `usage.prompt_tokens_details.cached_tokens` —
+        /// tokens of this request's prompt that hit an existing cache
+        /// entry, billed at a fraction of the normal input price.
+        /// `None` for backends/responses that don't report it (Ollama,
+        /// Anthropic-native today, or an OpenRouter provider that doesn't
+        /// support caching at all) — never fabricated as `Some(0)`, so a
+        /// caller can tell "no caching happened" apart from "this
+        /// backend doesn't report caching" (docs/usability-log-2026-07-07-si2.md).
+        cache_read_tokens: Option<u32>,
+        /// OpenRouter's `usage.prompt_tokens_details.cache_write_tokens`
+        /// — tokens newly written to cache by this request (billed at a
+        /// premium over normal input price), expected non-zero on the
+        /// first request establishing a cache entry and typically zero
+        /// on the requests that read it back. Same `None`-means-"not
+        /// reported" contract as `cache_read_tokens`.
+        cache_write_tokens: Option<u32>,
     },
     Done,
 }

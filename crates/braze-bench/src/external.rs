@@ -117,6 +117,12 @@ pub fn external_outcome_to_task_result(
             expected_files_found,
             input_tokens: 0,
             output_tokens: 0,
+            // No `AgentEvent` log for a black-box external harness, so
+            // no round reported cache tokens either — `None` (not
+            // reported), same as `harness_error_result`. See
+            // `TaskResult::cache_read_tokens`'s doc comment.
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             wall_time_ms: outcome.wall_time.as_millis(),
             passed: false,
         };
@@ -164,6 +170,11 @@ pub fn external_outcome_to_task_result(
         expected_files_found,
         input_tokens: 0,
         output_tokens: 0,
+        // Same as the early-return arm above: a black-box external
+        // harness reports no `AgentEvent` log, so no round reported
+        // cache tokens. `None`, not `Some(0)`.
+        cache_read_tokens: None,
+        cache_write_tokens: None,
         wall_time_ms: outcome.wall_time.as_millis(),
         passed: assertions_passed,
     }

@@ -79,11 +79,77 @@ pub(crate) struct OpenRouterMessage {
     /// tool calls — the OpenAI shape distinguishes "no content" from "empty
     /// content".
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
+    pub content: Option<OpenRouterContent>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<OpenRouterToolCallOut>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+/// A message's `content` in the OpenAI-compatible shape: either a plain
+/// string (the common case — every provider accepts this, and it's what
+/// every message gets by default) or an array of parts, needed only when
+/// a specific block carries a `cache_control` marker (prompt-caching
+/// design, docs/usability-log-2026-07-07-si2.md). `#[serde(untagged)]` —
+/// no other precedent in this workspace (`AnthropicRequest.system` uses
+/// "always an array" instead, see that type's doc comment for why this
+/// case is different), but here the duality is a real part of the
+/// OpenAI-compatible standard, not a shim invented for caching: forcing
+/// every message into array form risks breaking some provider behind
+/// OpenRouter that only tolerates a plain string, and this project
+/// deliberately tests many different providers through this one backend.
+/// `Text` is what every message still gets by default; `Parts` is
+/// constructed only for the handful of messages a cache breakpoint
+/// actually marks, and only when caching is enabled for a model known to
+/// need it (`model_supports_explicit_caching`).
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub(crate) enum OpenRouterContent {
+    Text(String),
+    Parts(Vec<OpenRouterContentPart>),
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct OpenRouterContentPart {
+    #[serde(rename = "type")]
+    pub part_type: &'static str,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
+}
+
+/// Anthropic's (and, via OpenRouter, Qwen's) explicit prompt-caching
+/// marker — everything up to and including the block it's attached to
+/// becomes a cacheable prefix. Other providers OpenRouter routes to cache
+/// automatically server-side and never need this marker at all (OpenAI,
+/// DeepSeek, Moonshot/Kimi, Grok, Gemini 2.5 — see
+/// `model_supports_explicit_caching`'s doc comment).
+#[derive(Debug, Serialize, Clone, Copy)]
+pub(crate) struct CacheControl {
+    #[serde(rename = "type")]
+    pub control_type: &'static str,
+}
+
+impl CacheControl {
+    fn ephemeral() -> Self {
+        Self {
+            control_type: "ephemeral",
+        }
+    }
+}
+
+#[cfg(test)]
+impl OpenRouterContent {
+    /// Test-only convenience: the plain text of a `Text` variant, or
+    /// `None` for `Parts` (existing tests assert on plain uncached
+    /// content; a test that cares about a `Parts` breakpoint inspects the
+    /// vec directly instead of going through this helper).
+    fn as_text(&self) -> Option<&str> {
+        match self {
+            OpenRouterContent::Text(s) => Some(s),
+            OpenRouterContent::Parts(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -108,6 +174,8 @@ pub(crate) struct OpenRouterTool {
     #[serde(rename = "type")]
     pub kind: &'static str,
     pub function: OpenRouterFunctionDef,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,18 +191,29 @@ pub(crate) struct OpenRouterFunctionDef {
 /// Like Ollama (and unlike Anthropic), OpenAI-compatible APIs have no
 /// separate top-level "system" field — the system prompt is just the first
 /// message in the array, with `role: "system"`.
+///
+/// `enable_caching` only has an effect when [`model_supports_explicit_caching`]
+/// says this `model` needs an explicit marker (Anthropic/Qwen) — for any
+/// other provider, this function's output is byte-identical to what it
+/// produced before caching support existed, regardless of the flag
+/// (prompt-caching design, docs/usability-log-2026-07-07-si2.md: most
+/// providers behind OpenRouter cache automatically server-side and gain
+/// nothing from the marker, while restructuring `content` into array form
+/// for every provider risks breaking one that only tolerates a plain
+/// string).
 pub(crate) fn build_request(
     req: &CompletionRequest,
     model: &str,
     temperature: Option<f32>,
     seed: Option<u64>,
+    enable_caching: bool,
 ) -> OpenRouterRequest {
     let mut messages = Vec::new();
 
     if !req.system_prompt.is_empty() {
         messages.push(OpenRouterMessage {
             role: "system",
-            content: Some(req.system_prompt.clone()),
+            content: Some(OpenRouterContent::Text(req.system_prompt.clone())),
             ..Default::default()
         });
     }
@@ -143,7 +222,7 @@ pub(crate) fn build_request(
         messages.extend(to_openrouter_messages(message));
     }
 
-    OpenRouterRequest {
+    let mut request = OpenRouterRequest {
         model: model.to_string(),
         messages,
         tools: build_tools(&req.tool_stubs),
@@ -154,7 +233,74 @@ pub(crate) fn build_request(
         },
         temperature,
         seed,
+    };
+
+    if enable_caching && model_supports_explicit_caching(model) {
+        apply_cache_breakpoints(&mut request);
     }
+
+    request
+}
+
+/// Only Anthropic (Claude) and Alibaba (Qwen) models routed through
+/// OpenRouter need an explicit `cache_control` marker to cache at all —
+/// every other provider this project has tested through OpenRouter
+/// (OpenAI, DeepSeek, Moonshot/Kimi, Grok, Gemini 2.5) caches
+/// automatically server-side with no client action, per OpenRouter's own
+/// documentation (docs/usability-log-2026-07-07-si2.md, prompt-caching
+/// design — <https://openrouter.ai/docs/features/prompt-caching>).
+/// `model` is the raw `"provider/model-name"` string this project already
+/// passes straight through to OpenRouter (e.g.
+/// `"anthropic/claude-sonnet-5"`, `"z-ai/glm-5.2"`) — matched by prefix
+/// since the exact model name after the slash doesn't matter here.
+fn model_supports_explicit_caching(model: &str) -> bool {
+    model.starts_with("anthropic/") || model.starts_with("qwen/")
+}
+
+/// Marks the 3 cache breakpoints in place: the last tool definition, the
+/// system message (if present, always `messages[0]` given how
+/// `build_request` constructs it), and the last message in the array —
+/// recomputed fresh on every call, not pinned to a fixed message index,
+/// so the breakpoint always tracks "everything sent so far" as the
+/// conversation grows round to round. Only called once the caller has
+/// already confirmed caching applies to this model
+/// ([`model_supports_explicit_caching`]) — this function itself doesn't
+/// re-check that.
+fn apply_cache_breakpoints(request: &mut OpenRouterRequest) {
+    if let Some(tool) = request.tools.last_mut() {
+        tool.cache_control = Some(CacheControl::ephemeral());
+    }
+    if let Some(system_message) = request.messages.first_mut()
+        && system_message.role == "system"
+    {
+        mark_content_cacheable(&mut system_message.content);
+    }
+    if let Some(last_message) = request.messages.last_mut() {
+        mark_content_cacheable(&mut last_message.content);
+    }
+}
+
+/// Converts `content` (if present — a tool-only message with no content
+/// block is left alone, there's nothing to mark) into the array form with
+/// `cache_control` on its last part. Idempotent-ish: applying this twice
+/// to the same field (e.g. the system message also being the only/last
+/// message) just re-marks the same block, harmless.
+fn mark_content_cacheable(content: &mut Option<OpenRouterContent>) {
+    let Some(existing) = content.take() else {
+        return;
+    };
+    let mut parts = match existing {
+        OpenRouterContent::Text(text) => vec![OpenRouterContentPart {
+            part_type: "text",
+            text,
+            cache_control: None,
+        }],
+        OpenRouterContent::Parts(parts) => parts,
+    };
+    if let Some(last) = parts.last_mut() {
+        last.cache_control = Some(CacheControl::ephemeral());
+    }
+    *content = Some(OpenRouterContent::Parts(parts));
 }
 
 /// One internal [`Message`] can map to *multiple* OpenRouter messages, same
@@ -183,7 +329,7 @@ fn to_openrouter_messages(message: &Message) -> Vec<OpenRouterMessage> {
             let content = if text_buf.is_empty() {
                 None
             } else {
-                Some(std::mem::take(text_buf))
+                Some(OpenRouterContent::Text(std::mem::take(text_buf)))
             };
             out.push(OpenRouterMessage {
                 role,
@@ -220,11 +366,11 @@ fn to_openrouter_messages(message: &Message) -> Vec<OpenRouterMessage> {
                     // The OpenAI shape has no standard "is_error" field on
                     // tool messages either; surface it in the content so
                     // the model still sees it, same approach as Ollama.
-                    content: Some(if *is_error {
+                    content: Some(OpenRouterContent::Text(if *is_error {
                         format!("[error] {content}")
                     } else {
                         content.clone()
-                    }),
+                    })),
                     tool_calls: Vec::new(),
                     tool_call_id: Some(tool_use_id.clone()),
                 });
@@ -256,6 +402,7 @@ fn build_tools(stubs: &[ToolStub]) -> Vec<OpenRouterTool> {
                     .clone()
                     .unwrap_or_else(permissive_fallback_schema),
             },
+            cache_control: None,
         })
         .collect()
 }
@@ -299,6 +446,17 @@ pub(crate) struct OpenRouterStreamState {
     displaced_tool_calls: Vec<PendingToolCall>,
     input_tokens: u32,
     output_tokens: u32,
+    /// `usage.prompt_tokens_details.cached_tokens`/`cache_write_tokens` —
+    /// reported uniformly by OpenRouter regardless of which underlying
+    /// provider served the request (some cache automatically server-side
+    /// with no client action needed — OpenAI, DeepSeek, Moonshot/Kimi,
+    /// Grok, Gemini 2.5 — others need an explicit `cache_control` marker
+    /// in the request, Anthropic/Qwen — this field reports the outcome
+    /// either way). `None` until a chunk actually reports the sub-object;
+    /// stays `None` for a provider that never reports it at all
+    /// (docs/usability-log-2026-07-07-si2.md, prompt-caching design).
+    cache_read_tokens: Option<u32>,
+    cache_write_tokens: Option<u32>,
     stop_reason: Option<String>,
     pub done: bool,
     /// Set by a top-level `"error"` field in a chunk. The caller
@@ -316,6 +474,8 @@ impl OpenRouterStreamState {
             displaced_tool_calls: Vec::new(),
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             stop_reason: None,
             done: false,
             stream_error: None,
@@ -349,6 +509,14 @@ impl OpenRouterStreamState {
             }
             if let Some(tokens) = usage.get("completion_tokens").and_then(Value::as_u64) {
                 self.output_tokens = tokens as u32;
+            }
+            if let Some(details) = usage.get("prompt_tokens_details") {
+                if let Some(tokens) = details.get("cached_tokens").and_then(Value::as_u64) {
+                    self.cache_read_tokens = Some(tokens as u32);
+                }
+                if let Some(tokens) = details.get("cache_write_tokens").and_then(Value::as_u64) {
+                    self.cache_write_tokens = Some(tokens as u32);
+                }
             }
         }
 
@@ -553,6 +721,8 @@ impl OpenRouterStreamState {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
             stop_reason: self.stop_reason.clone(),
+            cache_read_tokens: self.cache_read_tokens,
+            cache_write_tokens: self.cache_write_tokens,
         });
         events.push(CompletionEvent::Done);
         events
@@ -610,10 +780,13 @@ mod tests {
             system_prompt: "be terse".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "openai/gpt-4o-mini", None, None);
+        let wire = build_request(&req, "openai/gpt-4o-mini", None, None, true);
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
-        assert_eq!(wire.messages[0].content.as_deref(), Some("be terse"));
+        assert_eq!(
+            wire.messages[0].content.as_ref().and_then(OpenRouterContent::as_text),
+            Some("be terse")
+        );
         assert_eq!(wire.messages[1].role, "user");
         assert!(wire.stream);
         assert!(wire.stream_options.include_usage);
@@ -633,9 +806,124 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "openai/gpt-4o-mini", Some(0.2), Some(42));
+        let wire = build_request(&req, "openai/gpt-4o-mini", Some(0.2), Some(42), true);
         assert_eq!(wire.temperature, Some(0.2));
         assert_eq!(wire.seed, Some(42));
+    }
+
+    // --- prompt-caching breakpoints (docs/usability-log-2026-07-07-si2.md,
+    // prompt-caching design) ---
+
+    fn caching_test_request() -> CompletionRequest {
+        CompletionRequest {
+            messages: vec![
+                Message::text(Role::User, "primera pregunta"),
+                Message::text(Role::Assistant, "primera respuesta"),
+                Message::text(Role::User, "segunda pregunta"),
+            ],
+            tool_stubs: vec![
+                ToolStub {
+                    name: "read_file".to_string(),
+                    summary: "Reads a file".to_string(),
+                    source: "local".to_string(),
+                    input_schema: None,
+                },
+                ToolStub {
+                    name: "grep".to_string(),
+                    summary: "Searches files".to_string(),
+                    source: "local".to_string(),
+                    input_schema: None,
+                },
+            ],
+            system_prompt: "sos un agente de código".to_string(),
+            max_tokens: 100,
+        }
+    }
+
+    /// The one case this whole design exists for: an Anthropic model
+    /// routed through OpenRouter gets all 3 breakpoints when caching is
+    /// enabled.
+    #[test]
+    fn build_request_marks_all_3_breakpoints_for_an_anthropic_model() {
+        let req = caching_test_request();
+        let wire = build_request(&req, "anthropic/claude-sonnet-5", None, None, true);
+
+        // Breakpoint 1: last tool.
+        assert!(wire.tools[0].cache_control.is_none(), "only the LAST tool should be marked");
+        assert!(wire.tools.last().unwrap().cache_control.is_some());
+
+        // Breakpoint 2: system message (always messages[0] given how
+        // build_request constructs it).
+        assert_eq!(wire.messages[0].role, "system");
+        match wire.messages[0].content.as_ref().unwrap() {
+            OpenRouterContent::Parts(parts) => {
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].text, "sos un agente de código");
+                assert!(parts[0].cache_control.is_some());
+            }
+            other => panic!("expected the system message to be marked Parts, got {other:?}"),
+        }
+
+        // Breakpoint 3: last message.
+        match wire.messages.last().unwrap().content.as_ref().unwrap() {
+            OpenRouterContent::Parts(parts) => {
+                assert_eq!(parts.last().unwrap().text, "segunda pregunta");
+                assert!(parts.last().unwrap().cache_control.is_some());
+            }
+            other => panic!("expected the last message to be marked Parts, got {other:?}"),
+        }
+
+        // The *middle* message (not first, not last) must stay untouched
+        // — only the 3 designated breakpoints get marked.
+        assert!(matches!(
+            wire.messages[1].content.as_ref().unwrap(),
+            OpenRouterContent::Text(_)
+        ));
+    }
+
+    /// Same model family via the other explicit-caching provider (Qwen).
+    #[test]
+    fn build_request_marks_breakpoints_for_a_qwen_model_too() {
+        let req = caching_test_request();
+        let wire = build_request(&req, "qwen/qwen3.5-coder", None, None, true);
+        assert!(wire.tools.last().unwrap().cache_control.is_some());
+    }
+
+    /// The whole point of scoping this to `anthropic/`/`qwen/`: every
+    /// other provider tested through OpenRouter (this project has tried
+    /// GLM, Kimi, GPT-4o-mini/5-mini) gets a byte-identical request to
+    /// what `build_request` produced before caching support existed —
+    /// `content` never becomes `Parts`, no tool ever gets a
+    /// `cache_control`, even with `enable_caching=true`.
+    #[test]
+    fn build_request_does_not_mark_breakpoints_for_a_provider_that_caches_automatically() {
+        let req = caching_test_request();
+        let wire = build_request(&req, "openai/gpt-4o-mini", None, None, true);
+
+        assert!(wire.tools.iter().all(|t| t.cache_control.is_none()));
+        for message in &wire.messages {
+            if let Some(content) = &message.content {
+                assert!(
+                    matches!(content, OpenRouterContent::Text(_)),
+                    "content must stay a plain string for a provider that doesn't need explicit caching"
+                );
+            }
+        }
+    }
+
+    /// `enable_caching=false` must behave identically regardless of
+    /// model — even for Anthropic, where the flag would otherwise apply.
+    #[test]
+    fn build_request_marks_nothing_when_caching_is_disabled() {
+        let req = caching_test_request();
+        let wire = build_request(&req, "anthropic/claude-sonnet-5", None, None, false);
+
+        assert!(wire.tools.iter().all(|t| t.cache_control.is_none()));
+        for message in &wire.messages {
+            if let Some(content) = &message.content {
+                assert!(matches!(content, OpenRouterContent::Text(_)));
+            }
+        }
     }
 
     #[test]
@@ -686,7 +974,7 @@ mod tests {
         let out = to_openrouter_messages(&message);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].role, "tool");
-        assert_eq!(out[0].content.as_deref(), Some("sunny, 20C"));
+        assert_eq!(out[0].content.as_ref().and_then(OpenRouterContent::as_text), Some("sunny, 20C"));
         assert_eq!(out[0].tool_call_id.as_deref(), Some("call-1"));
     }
 
@@ -748,7 +1036,7 @@ mod tests {
         let out = to_openrouter_messages(&message);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].role, "assistant");
-        assert_eq!(out[0].content.as_deref(), Some("Let me check."));
+        assert_eq!(out[0].content.as_ref().and_then(OpenRouterContent::as_text), Some("Let me check."));
         assert_eq!(out[0].tool_calls.len(), 1);
         assert_eq!(out[0].tool_calls[0].function.name, "get_weather");
     }
@@ -793,6 +1081,7 @@ mod tests {
                 input_tokens,
                 output_tokens,
                 stop_reason,
+                ..
             } => {
                 assert_eq!(*input_tokens, 10);
                 assert_eq!(*output_tokens, 5);
@@ -887,6 +1176,7 @@ mod tests {
                 input_tokens,
                 output_tokens,
                 stop_reason,
+                ..
             } => {
                 assert_eq!(*input_tokens, 0);
                 assert_eq!(*output_tokens, 0);
@@ -895,6 +1185,70 @@ mod tests {
             other => panic!("expected Usage, got {other:?}"),
         }
         assert!(matches!(events[1], CompletionEvent::Done));
+    }
+
+    // --- prompt_tokens_details / cache token reporting (hallazgo
+    // docs/usability-log-2026-07-07-si2.md, diseño de prompt-caching) ---
+
+    #[test]
+    fn stream_state_reports_cache_tokens_when_the_provider_sends_them() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(0, serde_json::json!({"content": "hi"}), None));
+        state.handle_chunk(&message_json(0, serde_json::json!({}), Some("stop")));
+        state.handle_chunk(&serde_json::json!({
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 10339,
+                "completion_tokens": 60,
+                "prompt_tokens_details": {
+                    "cached_tokens": 10318,
+                    "cache_write_tokens": 0
+                }
+            }
+        }));
+        let events = state.handle_done_sentinel();
+
+        match &events[0] {
+            CompletionEvent::Usage {
+                input_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                ..
+            } => {
+                assert_eq!(*input_tokens, 10339);
+                assert_eq!(*cache_read_tokens, Some(10318));
+                assert_eq!(*cache_write_tokens, Some(0));
+            }
+            other => panic!("expected Usage, got {other:?}"),
+        }
+    }
+
+    /// Most providers behind OpenRouter don't report cache stats at all
+    /// (no `prompt_tokens_details` key, or the key is present but neither
+    /// of the two sub-fields are) — both cache fields must stay `None`,
+    /// never fabricated as `Some(0)`, so a caller can tell "no caching
+    /// happened" apart from "this provider doesn't report caching".
+    #[test]
+    fn stream_state_without_prompt_tokens_details_reports_no_cache_data() {
+        let mut state = OpenRouterStreamState::new();
+        state.handle_chunk(&message_json(0, serde_json::json!({"content": "hi"}), None));
+        state.handle_chunk(&message_json(0, serde_json::json!({}), Some("stop")));
+        state.handle_chunk(
+            &serde_json::json!({"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5}}),
+        );
+        let events = state.handle_done_sentinel();
+
+        match &events[0] {
+            CompletionEvent::Usage {
+                cache_read_tokens,
+                cache_write_tokens,
+                ..
+            } => {
+                assert_eq!(*cache_read_tokens, None);
+                assert_eq!(*cache_write_tokens, None);
+            }
+            other => panic!("expected Usage, got {other:?}"),
+        }
     }
 
     #[test]

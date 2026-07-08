@@ -192,11 +192,14 @@ fn build_model_backend(
                             .to_string(),
                     )
                 })?;
-            Ok(Box::new(braze_model::OpenRouterBackend::with_base_url(
-                api_key.expose_secret().to_string(),
-                model_name,
-                config.openrouter_base_url.clone(),
-            )))
+            Ok(Box::new(
+                braze_model::OpenRouterBackend::with_base_url(
+                    api_key.expose_secret().to_string(),
+                    model_name,
+                    config.openrouter_base_url.clone(),
+                )
+                .with_prompt_caching_enabled(config.enable_prompt_caching),
+            ))
         }
         other => Err(CliError::Startup(format!(
             "unknown backend '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
@@ -319,7 +322,10 @@ async fn build_engine(
     );
 
     let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard)
-        .with_post_edit_check(!config.disable_post_edit_check);
+        .with_post_edit_check(!config.disable_post_edit_check)
+        .with_output_budget(config.tool_output_max_bytes as usize)
+        .with_output_max_lines(config.tool_output_max_lines)
+        .with_formatters(config.formatters.clone());
     let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
         vec![Box::new(local_provider)];
 
@@ -450,7 +456,9 @@ async fn build_engine(
     )
     .with_tactical_compaction_threshold(config.tactical_compaction_threshold)
     .with_best_of_n(config.best_of_n)
-    .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue);
+    .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue)
+    .with_max_turn_iterations(config.max_turn_iterations as usize)
+    .with_planner_max_tokens(config.planner_max_tokens);
 
     if let Some(budget) = ollama_budget {
         engine = engine.with_context_budget(budget);

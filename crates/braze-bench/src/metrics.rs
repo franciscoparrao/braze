@@ -102,6 +102,41 @@ pub struct TaskResult {
     pub expected_files_found: Option<bool>,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Tokens of this task's prompts that hit an existing cache entry,
+    /// summed across every round that reported a cache-read count — the
+    /// bench's view of OpenRouter's `usage.prompt_tokens_details.cached_tokens`
+    /// (docs/usability-log-2026-07-07-si2.md, prompt-caching design).
+    ///
+    /// `None` means *no* round reported a cache-read count (a backend
+    /// that doesn't expose caching at all — Ollama, Anthropic-native today
+    /// — or an OpenRouter provider that didn't serve any cache hit this
+    /// task). `Some(0)` is a different signal: at least one round did
+    /// report cache stats and the cached total was genuinely zero (a
+    /// first request establishing a cache entry, before any hit). Keeping
+    /// these apart is exactly why this field is `Option<u32>` rather than
+    /// `u32` with a "0 means absent" convention — the same contract
+    /// `AgentEvent::Usage::cache_read_tokens` and
+    /// `CompletionEvent::Usage::cache_read_tokens` already enforce
+    /// end-to-end, so the bench can't silently collapse them.
+    ///
+    /// The aggregation rule: a round that reports `None` (not reported)
+    /// contributes 0 to the sum but does *not* flip `None`-overall to
+    /// `Some`; only a round that reports `Some(N)` does that, and from
+    /// then on the running sum is `Some`-typed (further `None`s add 0,
+    /// further `Some`s add N). Matches `Engine::complete_with_best_of_n`'s
+    /// `sum_optional_u32` so a single best-of-n candidate reporting cache
+    /// tokens doesn't get zeroed-out by its siblings not reporting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u32>,
+    /// Tokens newly written to cache by this task's prompts (billed at a
+    /// premium over normal input price by OpenRouter's underlying
+    /// providers, when the model is one that needs an explicit
+    /// `cache_control` marker — Anthropic/Qwen via OpenRouter). Same
+    /// `None`-means-"not reported" / `Some(N)`-means-"at least one round
+    /// reported, summed" contract as [`Self::cache_read_tokens`], for the
+    /// same reason. See that field's doc comment for the full rationale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u32>,
     pub wall_time_ms: u128,
     pub passed: bool,
 }
@@ -137,6 +172,12 @@ pub fn harness_error_result(
         expected_files_found: None,
         input_tokens: 0,
         output_tokens: 0,
+        // Nothing ran, so no provider reported cache tokens at all —
+        // `None` (not reported), not `Some(0)` (genuinely zero cache
+        // hits). Same distinction `TaskResult::cache_read_tokens`'s doc
+        // comment calls out.
+        cache_read_tokens: None,
+        cache_write_tokens: None,
         wall_time_ms: 0,
         passed: false,
     }
@@ -235,6 +276,31 @@ pub fn compute_metrics(
                 } => (inp + input_tokens, out + output_tokens),
                 _ => (inp, out),
             });
+
+    // Cache tokens use a different aggregation rule than input/output:
+    // `None` per-round means "this backend doesn't report caching for
+    // this round" (Ollama, Anthropic-native today, any OpenRouter
+    // provider without explicit `cache_control`), not "zero cache
+    // tokens happened". Summing them as plain `u32` would conflate the
+    // two and understate cost on a real cache write. Instead, stay
+    // `None`-overall unless at least one round reported a value — then
+    // sum every round's contribution (`None` rounds add 0, `Some(N)`
+    // rounds add N) and expose the result as `Some`. Same semantics as
+    // `Engine::complete_with_best_of_n`'s `sum_optional_u32`, so a
+    // best-of-n turn where only one candidate reports cache tokens
+    // still surfaces here rather than being zeroed by its siblings.
+    let cache_read_tokens = sum_optional_u32(
+        events.iter().map(|event| match event {
+            AgentEvent::Usage { cache_read_tokens, .. } => *cache_read_tokens,
+            _ => None,
+        }),
+    );
+    let cache_write_tokens = sum_optional_u32(
+        events.iter().map(|event| match event {
+            AgentEvent::Usage { cache_write_tokens, .. } => *cache_write_tokens,
+            _ => None,
+        }),
+    );
 
     // One `Usage` event is persisted per model completion round (see
     // `Engine::run_turn`) — a direct proxy for how many rounds this turn
@@ -336,9 +402,31 @@ pub fn compute_metrics(
         expected_files_found,
         input_tokens,
         output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
         wall_time_ms: wall_time.as_millis(),
         passed,
     }
+}
+
+/// Sums an optional-per-item `u32` (cache token counts that some
+/// `AgentEvent::Usage` rounds report and others don't — Ollama never
+/// does, OpenRouter does for some providers, Anthropic-native today
+/// doesn't) into a single optional total. `None` only when *every* item
+/// was `None` (nothing reported anything — stay silent rather than claim
+/// "0 tokens cached"); `Some(sum)` once at least one item is `Some`,
+/// treating any further `None` as 0. Mirrors
+/// `Engine::complete_with_best_of_n`'s private `sum_optional_u32` so the
+/// bench's aggregation of cache tokens across rounds matches the
+/// engine's own across best-of-n candidates end-to-end.
+fn sum_optional_u32(values: impl Iterator<Item = Option<u32>>) -> Option<u32> {
+    let mut sum = 0u32;
+    let mut any_reported = false;
+    for n in values.flatten() {
+        sum += n;
+        any_reported = true;
+    }
+    any_reported.then_some(sum)
 }
 
 #[cfg(test)]
@@ -651,16 +739,154 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 2,
                 stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
             AgentEvent::Usage {
                 input_tokens: 15,
                 output_tokens: 3,
                 stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
         ];
         let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
         assert_eq!(result.input_tokens, 25);
         assert_eq!(result.output_tokens, 5);
+    }
+
+    // --- cache token aggregation (hallazgo H-1,
+    // docs/AUDITORIA-2026-07-v5.md: `TaskResult::cache_read_tokens`/
+    // `cache_write_tokens` were missing from `compute_metrics`, so the
+    // WIP that added cache tokens to `AgentEvent::Usage` — across
+    // `CompletionEvent::Usage`, `Engine::RoundUsage`, and the event log
+    // — never reached the bench's per-row JSON. These tests pin the
+    // aggregation rule end-to-end: `None` per-round means "this backend
+    // doesn't report caching", not "zero cache tokens happened"; only a
+    // round reporting `Some(N)` flips the overall to `Some`, and further
+    // `None`s add 0 rather than zeroing the running sum. Mirrors
+    // `Engine::complete_with_best_of_n`'s `sum_optional_u32` so a
+    // best-of-n turn where only some candidates report cache tokens
+    // still surfaces in the bench's sum.) ---
+
+    /// The basic case a paper A/B "with vs without prompt caching" needs
+    /// to read off the JSON: two rounds, one writes the cache entry, the
+    /// next reads it back. The bench's per-row total must be the sum,
+    /// separately for cache-read and cache-write.
+    #[test]
+    fn cache_tokens_are_summed_across_rounds_when_any_round_reports_them() {
+        let events = vec![
+            AgentEvent::Usage {
+                input_tokens: 10_000,
+                output_tokens: 100,
+                stop_reason: Some("tool_use".to_string()),
+                cache_read_tokens: Some(0),
+                cache_write_tokens: Some(9_500),
+            },
+            AgentEvent::Usage {
+                input_tokens: 10_200,
+                output_tokens: 50,
+                stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: Some(10_100),
+                cache_write_tokens: Some(0),
+            },
+        ];
+        let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
+        assert_eq!(result.cache_read_tokens, Some(10_100));
+        assert_eq!(result.cache_write_tokens, Some(9_500));
+    }
+
+    /// `None` overall when *no* round reported cache tokens — the case
+    /// for any backend that doesn't expose caching (Ollama, Anthropic-native
+    /// today). Caller can tell "this backend doesn't report caching" apart
+    /// from "this task genuinely had zero cache hits".
+    #[test]
+    fn cache_tokens_stay_none_when_no_round_reports_them() {
+        let events = vec![
+            AgentEvent::Usage {
+                input_tokens: 10_000,
+                output_tokens: 100,
+                stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            },
+            AgentEvent::Usage {
+                input_tokens: 10_200,
+                output_tokens: 50,
+                stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            },
+        ];
+        let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
+        assert_eq!(result.cache_read_tokens, None);
+        assert_eq!(result.cache_write_tokens, None);
+    }
+
+    /// The key distinction `Option<u32>` (not `u32`) exists to preserve:
+    /// a backend that reports `Some(0)` for every round ("the cache is
+    /// empty but the API DID tell us that") must surface as `Some(0)`,
+    /// not collapse to `None` and become indistinguishable from a
+    /// backend that never reported cache stats at all. This is the exact
+    /// regression that would sneak in if a future refactor used
+    /// `.unwrap_or(0)`-then-`sum` instead of the `sum_optional_u32`
+    /// rule.
+    #[test]
+    fn cache_tokens_with_some_zero_is_distinguishable_from_not_reported() {
+        let events = vec![AgentEvent::Usage {
+            input_tokens: 100,
+            output_tokens: 10,
+            stop_reason: Some("end_turn".to_string()),
+            cache_read_tokens: Some(0),
+            cache_write_tokens: Some(0),
+        }];
+        let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
+        assert_eq!(result.cache_read_tokens, Some(0));
+        assert_eq!(result.cache_write_tokens, Some(0));
+        assert_ne!(result.cache_read_tokens, None);
+    }
+
+    /// Mixed Some/None across rounds: a mid-turn round from a backend
+    /// that doesn't report cache (e.g. a summary-fallback round that
+    /// went through a different provider) must not zero out the cache
+    /// total the earlier rounds DID report. Same rule `Engine::complete_with_best_of_n`
+    /// applies across its candidates so a single `Some` survives.
+    #[test]
+    fn cache_tokens_with_mixed_some_and_none_rounds_keep_the_reported_sum() {
+        let events = vec![
+            AgentEvent::Usage {
+                input_tokens: 10_100,
+                output_tokens: 100,
+                stop_reason: Some("tool_use".to_string()),
+                cache_read_tokens: Some(10_000),
+                cache_write_tokens: Some(0),
+            },
+            // Round 2 from a degraded fallback path that doesn't report
+            // cache stats — `None` here must contribute 0, not reset the
+            // running total back to `None`.
+            AgentEvent::Usage {
+                input_tokens: 500,
+                output_tokens: 50,
+                stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            },
+        ];
+        let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
+        assert_eq!(result.cache_read_tokens, Some(10_000));
+        assert_eq!(result.cache_write_tokens, Some(0));
+    }
+
+    /// `harness_error_result` (sandbox setup failure, etc.) never ran a
+    /// single round, so it can't have reported cache tokens either —
+    /// `None`, not `Some(0)`. Same contract as `compute_metrics` above.
+    #[test]
+    fn harness_error_result_reports_none_for_cache_tokens() {
+        let t = task(None, false, None);
+        let error = crate::error::BenchError::Startup("sandbox setup failed".to_string());
+        let result = harness_error_result("ollama:x", &t, 0, &error);
+        assert_eq!(result.cache_read_tokens, None);
+        assert_eq!(result.cache_write_tokens, None);
     }
 
     /// PLAN.md § "Split planificador/ejecutor", oleada 4: `planned`
@@ -699,6 +925,8 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 2,
                 stop_reason: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
             AgentEvent::AssistantToolCall {
                 id: "1".to_string(),
@@ -709,6 +937,8 @@ mod tests {
                 input_tokens: 12,
                 output_tokens: 3,
                 stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             },
         ];
         let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);

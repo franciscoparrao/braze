@@ -19,7 +19,7 @@ use ratatui::Terminal;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use ratatui_textarea::{CursorMove, TextArea};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -56,6 +56,17 @@ const POPUP_MAX_VISIBLE: usize = 3;
 /// "Esc-Esc" (backtrack) rather than two unrelated single presses —
 /// matches typical double-tap conventions (double-click, etc.).
 const DOUBLE_ESC_WINDOW: Duration = Duration::from_millis(600);
+
+/// Braille-dot spinner frames — the same de-facto standard cadence used
+/// by most terminal coding agents (Claude Code included). Purely
+/// cosmetic, so no theming: unlike `Theme`'s 4 semantic colors, these
+/// glyphs render the same regardless of dark/light/high-contrast.
+const SPINNER_FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/// One full cycle at this cadence takes `SPINNER_FRAMES.len() *
+/// SPINNER_FRAME_DURATION` ≈ 800ms — lively enough to read as "alive"
+/// without being distracting.
+const SPINNER_FRAME_DURATION: Duration = Duration::from_millis(80);
 
 /// Drives the interactive TUI chat loop against an already-configured
 /// `Engine` for `session` until the user quits (Ctrl+C, or Ctrl+D on an
@@ -199,6 +210,15 @@ struct App {
     /// enough ago (or this is the first one this session).
     last_esc_at: Option<Instant>,
     turn_running: bool,
+    /// Advanced by `run()`'s spinner tick (only while `turn_running` or
+    /// `switching_model` — see the `tokio::select!` branch's `if` guard)
+    /// and read by `spinner_glyph` to animate the wait hints. Before this
+    /// field existed, the only feedback during a long tool-calling turn
+    /// was static text — no visual confirmation braze was still alive
+    /// (docs/usability-log-2026-07-07-si2.md, comparación contra el
+    /// cookbook de OpenRouter). Wraps via modulo in `spinner_glyph`, so
+    /// the exact integer value here never matters past that.
+    spinner_frame: usize,
     /// The spawned turn's handle, so Esc can `abort()` it — see
     /// `interrupt_turn`. `None` whenever no turn is in flight.
     current_turn: Option<JoinHandle<()>>,
@@ -256,6 +276,14 @@ impl App {
         let session = *live_session
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // "bordered" input style: plain `─` lines above/below, no
+        // OSC 11 background-color detection needed — works on any
+        // terminal, same portability reasoning `theme.rs` already
+        // documents for colors. Set once here (not re-set every `draw`,
+        // which only borrows `&self`) since the style never changes
+        // mid-session.
+        let mut composer = TextArea::default();
+        composer.set_block(Block::default().borders(Borders::TOP | Borders::BOTTOM));
         Self {
             engine,
             session,
@@ -267,11 +295,12 @@ impl App {
             total_output_tokens: 0,
             markdown: MarkdownStreamCollector::default(),
             pending_tool_names: HashMap::new(),
-            composer: TextArea::default(),
+            composer,
             popup: None,
             mentionable_files: None,
             last_esc_at: None,
             turn_running: false,
+            spinner_frame: 0,
             current_turn: None,
             engine_factory,
             model_candidates,
@@ -286,8 +315,23 @@ impl App {
         }
     }
 
+    /// Current animation frame for the wait hints — wraps via modulo, so
+    /// `spinner_frame` can grow unbounded for the life of the process
+    /// without ever needing to reset. Delegates to a free function (same
+    /// pattern as `truncate_for_display`/`backtrack_preview` below) so
+    /// the cycling logic is testable without constructing a full `App`.
+    fn spinner_glyph(&self) -> char {
+        spinner_glyph_at(self.spinner_frame)
+    }
+
     async fn run(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
         let mut events = EventStream::new();
+        // Ticks every `SPINNER_FRAME_DURATION` — but the `select!` branch
+        // below only polls it (`, if self.turn_running ||
+        // self.switching_model`) while there's actually something to
+        // animate, so it costs nothing while idle: the branch is simply
+        // never evaluated, no ticks accumulate to "catch up" on later.
+        let mut spinner_interval = tokio::time::interval(SPINNER_FRAME_DURATION);
 
         loop {
             terminal.draw(|frame| self.draw(frame))?;
@@ -325,6 +369,9 @@ impl App {
                 }
                 Some(update) = self.update_rx.recv() => {
                     self.apply_update(update, terminal)?;
+                }
+                _ = spinner_interval.tick(), if self.turn_running || self.switching_model => {
+                    self.spinner_frame = self.spinner_frame.wrapping_add(1);
                 }
                 Some((spec, result)) = self.switch_rx.recv() => {
                     self.finish_model_switch(spec, result, terminal)?;
@@ -1349,13 +1396,17 @@ impl App {
                     .areas(hint_area);
 
             let hint = if !self.pending_approvals.is_empty() {
-                "esperando tu decisión... (y permitir · n/Esc denegar)"
+                "esperando tu decisión... (y permitir · n/Esc denegar)".to_string()
             } else if self.switching_model {
-                "cambiando de modelo... (Ctrl+C salir)"
+                format!("{} cambiando de modelo... (Ctrl+C salir)", self.spinner_glyph())
             } else if self.turn_running {
-                "esperando respuesta del modelo... (Ctrl+C salir · Esc interrumpir)"
+                format!(
+                    "{} esperando respuesta del modelo... (Ctrl+C salir · Esc interrumpir)",
+                    self.spinner_glyph()
+                )
             } else {
                 "Enter enviar · Ctrl+J salto de linea · / comandos · @ archivos · Ctrl+T output · Ctrl+C salir"
+                    .to_string()
             };
             frame.render_widget(
                 Paragraph::new(hint).style(Style::default().fg(self.theme.muted)),
@@ -1382,29 +1433,33 @@ impl App {
             if self.pending_approvals.len() > 1 {
                 answer_hint.push_str(&format!("  ({} pendientes)", self.pending_approvals.len()));
             }
-            // N-31 (docs/AUDITORIA-2026-07-v2.md): `composer_area` is a
-            // fixed few rows tall — a long or multi-line description
-            // (e.g. a multi-line `shell_exec` command) can wrap past it,
-            // silently pushing the y/n hint line off-screen with no
-            // indication the user is approving something they can't
-            // fully see. Reserve the last row for the hint always, and
-            // cap the description to what provably fits in the rest
-            // (word-wrapping can only use *fewer* rows than this
-            // char-budget estimate, never more), with a visible "…"
-            // marker if anything had to be cut.
+            // Same bordered treatment as the composer itself (`App::new`'s
+            // `TextArea::set_block`) — this area is the same slot, so it
+            // should read as "the same input area, showing something
+            // else right now" rather than switching to an unbordered
+            // look just because a `TextArea` isn't what's rendering.
+            let border = Block::default().borders(Borders::TOP | Borders::BOTTOM);
+            let inner_area = border.inner(composer_area);
+            frame.render_widget(border, composer_area);
+            // N-31 (docs/AUDITORIA-2026-07-v2.md): `inner_area` is a fixed
+            // few rows tall — a long or multi-line description (e.g. a
+            // multi-line `shell_exec` command) can wrap past it, silently
+            // pushing the y/n hint line off-screen with no indication the
+            // user is approving something they can't fully see. Reserve
+            // the last row for the hint always, and cap the description
+            // to what provably fits in the rest (word-wrapping can only
+            // use *fewer* rows than this char-budget estimate, never
+            // more), with a visible "…" marker if anything had to be cut.
             let available_rows_for_description =
-                usize::from(composer_area.height.saturating_sub(1).max(1));
+                usize::from(inner_area.height.saturating_sub(1).max(1));
             let max_chars = available_rows_for_description
-                .saturating_mul(usize::from(composer_area.width.max(1)));
+                .saturating_mul(usize::from(inner_area.width.max(1)));
             let description = truncate_for_display(&request.description, max_chars);
             let lines = vec![
                 Line::from(description),
                 Line::from(answer_hint).style(Style::default().fg(self.theme.warning)),
             ];
-            frame.render_widget(
-                Paragraph::new(lines).wrap(Wrap { trim: false }),
-                composer_area,
-            );
+            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner_area);
         } else {
             frame.render_widget(&self.composer, composer_area);
         }
@@ -1501,6 +1556,13 @@ fn popup_window_start(selected: usize, len: usize, visible: usize) -> usize {
         .min(len.saturating_sub(visible))
 }
 
+/// The pure cycling logic behind `App::spinner_glyph` — `frame` is
+/// `App.spinner_frame`, an ever-incrementing counter; this is what
+/// actually wraps it into a valid `SPINNER_FRAMES` index.
+fn spinner_glyph_at(frame: usize) -> char {
+    SPINNER_FRAMES[frame % SPINNER_FRAMES.len()]
+}
+
 /// Longest single line shown per entry in the backtrack popup before
 /// truncating — a message's own first line stands in for the whole
 /// thing, same "keep it scannable" rationale as
@@ -1565,6 +1627,30 @@ fn truncate_for_display(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- spinner_glyph_at (comparación contra el cookbook de OpenRouter,
+    // docs/usability-log-2026-07-07-si2.md) ---
+
+    #[test]
+    fn spinner_glyph_at_zero_is_the_first_frame() {
+        assert_eq!(spinner_glyph_at(0), SPINNER_FRAMES[0]);
+    }
+
+    #[test]
+    fn spinner_glyph_at_wraps_around_after_the_last_frame() {
+        let len = SPINNER_FRAMES.len();
+        assert_eq!(spinner_glyph_at(len), SPINNER_FRAMES[0]);
+        assert_eq!(spinner_glyph_at(len + 1), SPINNER_FRAMES[1]);
+    }
+
+    /// `App.spinner_frame` only ever grows (`wrapping_add` on every
+    /// tick, never reset) — this pins that a large, multi-cycle value
+    /// still lands on a valid index instead of panicking.
+    #[test]
+    fn spinner_glyph_at_handles_a_large_frame_count() {
+        let len = SPINNER_FRAMES.len();
+        assert_eq!(spinner_glyph_at(len * 137 + 3), SPINNER_FRAMES[3]);
+    }
 
     #[test]
     fn backtrack_preview_shows_only_the_first_line() {

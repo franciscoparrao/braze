@@ -84,6 +84,7 @@ pub async fn run(
     engine_factory: EngineFactory,
     model_candidates: Vec<String>,
 ) -> Result<(), TuiError> {
+    print_banner(&theme, &status_line);
     let mut guard = terminal::setup()?;
     app::run(
         &mut guard.terminal,
@@ -97,4 +98,98 @@ pub async fn run(
         model_candidates,
     )
     .await
+}
+
+/// Small block-icon + wordmark, printed once *before* `terminal::setup()`
+/// switches the terminal into raw/inline-viewport mode — a plain stdout
+/// write here becomes permanent native scrollback with zero interaction
+/// with the inline-viewport machinery (`terminal.rs`'s module doc:
+/// deliberately no alternate screen, so anything printed before raw mode
+/// began just... stays, like any other line the shell already had).
+/// Reuses `theme`'s existing semantic colors rather than adding a new
+/// "brand" slot to `Theme`, and the same "backend:model" `status_line`
+/// the status bar shows all session — so the banner always reflects
+/// what's actually running instead of a hardcoded placeholder
+/// (docs/usability-log-2026-07-07-si2.md, comparación contra el cookbook
+/// de OpenRouter).
+fn print_banner(theme: &Theme, status_line: &str) {
+    use crossterm::style::Stylize;
+
+    let icon = to_crossterm_color(theme.success);
+    let text = to_crossterm_color(theme.muted);
+
+    println!();
+    println!("  {}", "▛▀▜".with(icon));
+    println!("  {}  {}", "▙ ▟".with(icon), "braze".bold());
+    println!(
+        "  {}  {}",
+        "▘▀▘".with(icon),
+        format!("motor agéntico en Rust · {status_line}").with(text)
+    );
+    println!();
+}
+
+/// `Theme` deliberately stays on `ratatui::style::Color` (what every
+/// `HistoryCell`/widget actually renders with) — `print_banner` is the
+/// one place that needs the `crossterm::style::Color` equivalent, since
+/// it writes plain ANSI-styled text before any `ratatui::Terminal`
+/// exists to render through. Only the variants `Theme`'s three presets
+/// actually use are covered (`theme.rs`); anything else falls back to
+/// the terminal's default foreground rather than guessing.
+fn to_crossterm_color(color: ratatui::style::Color) -> crossterm::style::Color {
+    use crossterm::style::Color as CColor;
+    use ratatui::style::Color as RColor;
+    match color {
+        RColor::Green => CColor::Green,
+        RColor::Red => CColor::Red,
+        RColor::Yellow => CColor::Yellow,
+        RColor::Magenta => CColor::Magenta,
+        RColor::Cyan => CColor::Cyan,
+        RColor::White => CColor::White,
+        RColor::DarkGray => CColor::DarkGrey,
+        _ => CColor::Reset,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every color every built-in `Theme` preset actually uses
+    /// (`theme.rs`'s `dark`/`light`/`high_contrast`) must round-trip to
+    /// its named crossterm equivalent, not the `Reset` fallback — the
+    /// whole point of a hand-written match instead of a generic
+    /// conversion.
+    #[test]
+    fn to_crossterm_color_covers_every_color_the_built_in_themes_use() {
+        for theme in [Theme::dark(), Theme::light(), Theme::high_contrast()] {
+            for color in [theme.success, theme.error, theme.warning, theme.muted] {
+                assert_ne!(
+                    to_crossterm_color(color),
+                    crossterm::style::Color::Reset,
+                    "{color:?} from a built-in theme must not fall back to Reset"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn to_crossterm_color_maps_known_variants_correctly() {
+        assert_eq!(
+            to_crossterm_color(ratatui::style::Color::Green),
+            crossterm::style::Color::Green
+        );
+        assert_eq!(
+            to_crossterm_color(ratatui::style::Color::DarkGray),
+            crossterm::style::Color::DarkGrey
+        );
+    }
+
+    #[test]
+    fn to_crossterm_color_falls_back_to_reset_for_an_uncovered_variant() {
+        assert_eq!(
+            to_crossterm_color(ratatui::style::Color::Rgb(1, 2, 3)),
+            crossterm::style::Color::Reset
+        );
+    }
 }

@@ -70,8 +70,9 @@ pub async fn read_file(args: ReadFileArgs) -> Result<String, String> {
         ));
     }
 
-    let page_size = args.limit.unwrap_or(DEFAULT_PAGE_LINES).max(1);
-    let end_line = start_line.saturating_add(page_size).min(total_lines);
+    let requested_page_size = args.limit.unwrap_or(DEFAULT_PAGE_LINES).max(1);
+    let requested_end = start_line.saturating_add(requested_page_size).min(total_lines);
+    let end_line = clamp_to_output_budget(&lines, start_line, requested_end);
     let page = &lines[start_line..end_line];
 
     let mut out = format!("[lines {}-{end_line} of {total_lines}]\n", start_line + 1);
@@ -87,6 +88,39 @@ pub async fn read_file(args: ReadFileArgs) -> Result<String, String> {
         ));
     }
     Ok(out)
+}
+
+/// Shrinks a requested `[start_line, requested_end)` page so its formatted
+/// body fits under `provider.rs::wrap`'s per-tool-result byte cap
+/// (docs/usability-log-2026-07-07-si2.md, hallazgo U-6 and its repeats —
+/// five different models stuck in the same overlapping-reread thrash on
+/// real source files). Without this, a caller-requested `limit` big
+/// enough to blow past that cap makes `end_line` land on `requested_end ==
+/// total_lines` — looks like the whole request fit — which skips this
+/// function's own "more lines below, use offset=X" trailer entirely;
+/// `wrap`'s *generic* byte-cap truncation fires instead, and its "narrow
+/// your query" trailer is correct advice for a grep/glob dump but wrong
+/// here: the actual fix is paging forward with `offset`, not narrowing
+/// anything. Always keeps at least one line, even if that line alone
+/// exceeds the budget — an empty page is a worse failure than one
+/// oversized line.
+fn clamp_to_output_budget(lines: &[&str], start_line: usize, requested_end: usize) -> usize {
+    // Headroom for the `[lines X-Y of Z]` header and the continuation
+    // trailer this function wraps around the page body.
+    const HEADROOM_BYTES: usize = 200;
+    let budget = crate::provider::MAX_TOOL_OUTPUT_BYTES.saturating_sub(HEADROOM_BYTES);
+
+    let mut used = 0usize;
+    let mut end_line = start_line;
+    for line in &lines[start_line..requested_end] {
+        let cost = line.len() + 1; // +1 for the newline `join` re-adds
+        if end_line > start_line && used + cost > budget {
+            break;
+        }
+        used += cost;
+        end_line += 1;
+    }
+    end_line
 }
 
 #[cfg(test)]
@@ -235,6 +269,96 @@ mod tests {
 
         assert!(result.contains("[lines 451-500 of 500]"));
         assert!(!result.contains("more lines below"), "got: {result}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- output-budget clamping (docs/usability-log-2026-07-07-si2.md,
+    // hallazgo U-6 and its repeats: an oversized `limit` used to make
+    // `end_line` land on `total_lines`, skipping this file's own
+    // continuation trailer and letting `provider.rs::wrap`'s generic
+    // "narrow your query" truncation fire instead — actively wrong advice
+    // when the real fix is paging forward with `offset`) ---
+
+    #[tokio::test]
+    async fn a_limit_larger_than_the_output_budget_is_clamped_and_hints_a_continuation() {
+        let dir = unique_temp_dir("read-file-oversized-limit");
+        let total = 2000;
+        let file_path = write_numbered_lines(&dir, "big.txt", total).await;
+
+        // Exactly the shape a model reaches for when it asks for "the
+        // rest of the file in one shot" — offset=1, limit=total.
+        let result = read_file(ReadFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            offset: Some(1),
+            limit: Some(total),
+        })
+        .await
+        .expect("read should succeed");
+
+        assert!(
+            result.len() < crate::provider::MAX_TOOL_OUTPUT_BYTES,
+            "clamped page should fit the tool-output budget: {} bytes",
+            result.len()
+        );
+        assert!(
+            result.contains("more lines below"),
+            "a clamped page must still hint how to continue: {result}"
+        );
+        assert!(result.starts_with("[lines 1-"));
+        assert!(
+            !result.contains(&format!("line {total}")),
+            "must not have silently returned the whole file"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn a_page_that_genuinely_reaches_the_end_of_the_file_is_not_clamped() {
+        let dir = unique_temp_dir("read-file-small-explicit-limit");
+        let file_path = write_numbered_lines(&dir, "small.txt", 20).await;
+
+        let result = read_file(ReadFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            offset: Some(1),
+            limit: Some(20),
+        })
+        .await
+        .expect("read should succeed");
+
+        assert!(result.contains("[lines 1-20 of 20]"));
+        assert!(!result.contains("more lines below"), "got: {result}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn one_line_that_alone_exceeds_the_budget_is_still_returned_whole() {
+        let dir = unique_temp_dir("read-file-oversized-single-line");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let file_path = dir.join("huge-line.txt");
+        let huge_line = "x".repeat(crate::provider::MAX_TOOL_OUTPUT_BYTES * 2);
+        let content = format!("{huge_line}\nsecond line\n");
+        tokio::fs::write(&file_path, &content)
+            .await
+            .expect("write fixture file");
+
+        let result = read_file(ReadFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            offset: Some(1),
+            limit: Some(2),
+        })
+        .await
+        .expect("read should succeed");
+
+        assert!(
+            result.contains(&huge_line),
+            "the one oversized line must still come back whole"
+        );
+        assert!(result.contains("more lines below"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

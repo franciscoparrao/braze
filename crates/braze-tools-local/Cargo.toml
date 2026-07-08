@@ -11,6 +11,10 @@ authors.workspace = true
 braze-types = { workspace = true }
 braze-tools-core = { workspace = true }
 braze-permissions = { workspace = true }
+# v4 P1.6: `FormatterConfig` (per-extension post-edit command map) lives
+# here — no cycle: braze-config stays a Nivel-0 leaf (no deps on any
+# other braze-* crate), and braze-tools-local sits at Nivel 2.
+braze-config = { workspace = true }
 async-trait = { workspace = true }
 # Workspace tokio doesn't enable "fs" (see workspace Cargo.toml); this
 # crate's unit tests create/read/write throwaway fixture files via

@@ -93,6 +93,24 @@ pub enum AgentEvent {
         /// logs written before this field existed.
         #[serde(default)]
         stop_reason: Option<String>,
+        /// Tokens of this round's prompt that hit an existing cache entry
+        /// (OpenRouter's `usage.prompt_tokens_details.cached_tokens` —
+        /// reported for any underlying provider that supports caching,
+        /// whether it needed an explicit `cache_control` marker or cached
+        /// automatically). `None` means "not reported", never a
+        /// fabricated `Some(0)` — a caller needs to tell "this backend
+        /// doesn't report caching" apart from "this round genuinely had
+        /// no cache hit". `#[serde(default)]` for backward compat with
+        /// rollout logs written before this field existed.
+        #[serde(default)]
+        cache_read_tokens: Option<u32>,
+        /// Tokens newly written to cache by this round (billed at a
+        /// premium over normal input price) — OpenRouter's
+        /// `usage.prompt_tokens_details.cache_write_tokens`. Same
+        /// `None`-means-"not reported" contract and backward-compat
+        /// `#[serde(default)]` as `cache_read_tokens`.
+        #[serde(default)]
+        cache_write_tokens: Option<u32>,
     },
     /// A plan produced by the optional planner model before the turn's
     /// first executor round — PLAN.md § "Split planificador/ejecutor
@@ -208,6 +226,8 @@ mod tests {
             input_tokens: 123,
             output_tokens: 45,
             stop_reason: Some("end_turn".to_string()),
+            cache_read_tokens: Some(100),
+            cache_write_tokens: Some(20),
         };
         let json = serde_json::to_string(&event).unwrap();
         let round_tripped: AgentEvent = serde_json::from_str(&json).unwrap();
@@ -216,10 +236,14 @@ mod tests {
                 input_tokens,
                 output_tokens,
                 stop_reason,
+                cache_read_tokens,
+                cache_write_tokens,
             } => {
                 assert_eq!(input_tokens, 123);
                 assert_eq!(output_tokens, 45);
                 assert_eq!(stop_reason.as_deref(), Some("end_turn"));
+                assert_eq!(cache_read_tokens, Some(100));
+                assert_eq!(cache_write_tokens, Some(20));
             }
             other => panic!("expected Usage, got {other:?}"),
         }
@@ -234,6 +258,29 @@ mod tests {
         let event: AgentEvent = serde_json::from_str(json).expect("must deserialize");
         match event {
             AgentEvent::Usage { stop_reason, .. } => assert_eq!(stop_reason, None),
+            other => panic!("expected Usage, got {other:?}"),
+        }
+    }
+
+    /// Same backward-compat contract as `usage_without_a_stop_reason_field_deserializes_with_none`,
+    /// for the two cache-token fields added later (prompt-caching design,
+    /// docs/usability-log-2026-07-07-si2.md) — a rollout log written
+    /// before they existed must still deserialize, defaulting both to
+    /// `None` rather than failing the whole session load.
+    #[test]
+    fn usage_without_cache_token_fields_deserializes_with_none() {
+        let json =
+            r#"{"type":"usage","input_tokens":10,"output_tokens":5,"stop_reason":"stop"}"#;
+        let event: AgentEvent = serde_json::from_str(json).expect("must deserialize");
+        match event {
+            AgentEvent::Usage {
+                cache_read_tokens,
+                cache_write_tokens,
+                ..
+            } => {
+                assert_eq!(cache_read_tokens, None);
+                assert_eq!(cache_write_tokens, None);
+            }
             other => panic!("expected Usage, got {other:?}"),
         }
     }

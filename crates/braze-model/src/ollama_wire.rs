@@ -393,6 +393,9 @@ impl OllamaStreamState {
                 input_tokens,
                 output_tokens,
                 stop_reason,
+                // Ollama has no per-token billing/caching concept.
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             });
             events.push(CompletionEvent::Done);
             self.done = true;
@@ -845,7 +848,8 @@ mod tests {
             CompletionEvent::Usage {
                 input_tokens: 0,
                 output_tokens: 0,
-                stop_reason: None
+                stop_reason: None,
+                ..
             }
         )));
     }

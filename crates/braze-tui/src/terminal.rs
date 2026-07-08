@@ -24,10 +24,15 @@ pub type Backend = CrosstermBackend<Stdout>;
 pub const ACTIVE_ROWS: u16 = 2;
 /// The hint/status line above the composer.
 const HINT_ROWS: u16 = 1;
-/// Rows the composer itself gets. A composer that grows with pasted or
+/// Rows the composer itself gets, border included: 3 rows of actual
+/// typing space (unchanged since the plain-prompt design) plus 2 for the
+/// `─` lines the "bordered" input style draws above and below it
+/// (`App::new`'s `TextArea::set_block` — works on any terminal, unlike
+/// OSC 11 background-color detection, deliberately avoided in this crate
+/// per `theme.rs`'s doc comment). A composer that grows with pasted or
 /// wrapped content (rather than this fixed height) is deferred alongside
 /// the rest of "fase TUI 2" (PLAN.md).
-const COMPOSER_ROWS: u16 = 3;
+const COMPOSER_ROWS: u16 = 5;
 
 pub const VIEWPORT_HEIGHT: u16 = ACTIVE_ROWS + HINT_ROWS + COMPOSER_ROWS;
 

@@ -376,6 +376,12 @@ mod tests {
             expected_files_found: None,
             input_tokens,
             output_tokens,
+            // This test helper builds a synthetic result from
+            // `report.rs`'s view — it doesn't run any rounds, so no
+            // backend reported cache tokens. `None` (not reported),
+            // same as `harness_error_result`.
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             wall_time_ms,
             passed,
         }
@@ -504,5 +510,40 @@ mod tests {
 
         assert_eq!(summary.median_wall_time_ms, 100.0);
         assert!(summary.avg_wall_time_ms > summary.median_wall_time_ms);
+    }
+
+    /// `TaskResult`'s cache-token fields are `#[serde(skip_serializing_if =
+    /// "Option::is_none")]` (docs/AUDITORIA-2026-07-v5.md, H-1): a row from
+    /// a backend that doesn't report caching (Ollama, Anthropic-native
+    /// today, a harness-error row, ...) must NOT emit the fields at all in
+    /// the JSON — keeping them apart from a backend that DID report
+    /// `Some(0)` (genuinely zero cache hits, still serialized). This pins
+    /// the skip behavior so a future refactor that drops the attribute
+    /// (and starts emitting `"cache_read_tokens": null` for every
+    /// non-caching row) breaks this test instead of silently bloating
+    /// every JSON file.
+    #[test]
+    fn task_result_skips_cache_token_fields_in_json_when_none() {
+        // `None` (not reported): the fields must be absent from the JSON.
+        let none_row = result(true, 100, 0, 0);
+        let json = serde_json::to_value(&none_row).expect("serialize");
+        assert!(
+            json.get("cache_read_tokens").is_none(),
+            "None cache_read_tokens must be skipped, not serialized as null: {json}"
+        );
+        assert!(
+            json.get("cache_write_tokens").is_none(),
+            "None cache_write_tokens must be skipped, not serialized as null: {json}"
+        );
+
+        // `Some(N)` (genuinely reported): the fields must appear, with
+        // their integer values, so a paper A/B reader can sum/compare
+        // them across rows.
+        let mut some_row = none_row;
+        some_row.cache_read_tokens = Some(10_100);
+        some_row.cache_write_tokens = Some(9_500);
+        let json = serde_json::to_value(&some_row).expect("serialize");
+        assert_eq!(json.get("cache_read_tokens"), Some(&serde_json::json!(10_100)));
+        assert_eq!(json.get("cache_write_tokens"), Some(&serde_json::json!(9_500)));
     }
 }

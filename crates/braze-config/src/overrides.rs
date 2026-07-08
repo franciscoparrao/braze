@@ -67,6 +67,8 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub disable_textual_tool_call_rescue: Option<bool>,
     #[serde(default)]
+    pub enable_prompt_caching: Option<bool>,
+    #[serde(default)]
     pub disable_post_edit_check: Option<bool>,
     #[serde(default)]
     pub planner_backend: Option<String>,
@@ -76,6 +78,21 @@ pub struct ConfigOverrides {
     pub lead_backend: Option<String>,
     #[serde(default)]
     pub lead_model: Option<String>,
+    #[serde(default)]
+    pub max_turn_iterations: Option<u32>,
+    #[serde(default)]
+    pub planner_max_tokens: Option<u32>,
+    #[serde(default)]
+    pub tool_output_max_bytes: Option<u32>,
+    #[serde(default)]
+    pub tool_output_max_lines: Option<u32>,
+    /// Replacement formatter list (overrides the full `Config::formatters`
+    /// without merging — see that field). No `BRAZE_FORMATTERS` env var
+    /// (parsing a list of vectors from a single string is awkward; arrays
+    /// arrive via the config FILE or direct `ConfigOverrides` construction
+    /// from `braze-cli`).
+    #[serde(default)]
+    pub formatters: Option<Vec<crate::config::FormatterConfig>>,
 }
 
 impl ConfigOverrides {
@@ -235,6 +252,46 @@ impl ConfigOverrides {
                 "PLANNER_MODEL" => overrides.planner_model = Some(value.to_string()),
                 "LEAD_BACKEND" => overrides.lead_backend = Some(value.to_string()),
                 "LEAD_MODEL" => overrides.lead_model = Some(value.to_string()),
+                "MAX_TURN_ITERATIONS" => {
+                    let parsed = value
+                        .parse::<u32>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.max_turn_iterations = Some(parsed);
+                }
+                "PLANNER_MAX_TOKENS" => {
+                    let parsed = value
+                        .parse::<u32>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.planner_max_tokens = Some(parsed);
+                }
+                "TOOL_OUTPUT_MAX_BYTES" => {
+                    let parsed = value
+                        .parse::<u32>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.tool_output_max_bytes = Some(parsed);
+                }
+                "TOOL_OUTPUT_MAX_LINES" => {
+                    let parsed = value
+                        .parse::<u32>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.tool_output_max_lines = Some(parsed);
+                }
                 "DISABLE_TEXTUAL_TOOL_CALL_RESCUE" => {
                     let parsed =
                         value
@@ -245,6 +302,17 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.disable_textual_tool_call_rescue = Some(parsed);
+                }
+                "ENABLE_PROMPT_CACHING" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.enable_prompt_caching = Some(parsed);
                 }
                 "DISABLE_POST_EDIT_CHECK" => {
                     let parsed =
@@ -420,6 +488,20 @@ mod tests {
     #[test]
     fn from_env_rejects_invalid_disable_textual_tool_call_rescue() {
         let vars = [("BRAZE_DISABLE_TEXTUAL_TOOL_CALL_RESCUE", "not-a-bool")];
+        let err = ConfigOverrides::from_env(vars).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
+    }
+
+    #[test]
+    fn from_env_parses_enable_prompt_caching() {
+        let vars = [("BRAZE_ENABLE_PROMPT_CACHING", "false")];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(overrides.enable_prompt_caching, Some(false));
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_enable_prompt_caching() {
+        let vars = [("BRAZE_ENABLE_PROMPT_CACHING", "not-a-bool")];
         let err = ConfigOverrides::from_env(vars).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
     }

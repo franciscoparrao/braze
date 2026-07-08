@@ -62,6 +62,26 @@ pub struct LocalToolsProvider {
     /// is an ablation knob for `braze-bench`, not something a real
     /// `braze` invocation has a reason to set.
     edit_strict_mode: bool,
+    /// Per-tool-result byte budget before `wrap` truncates and appends
+    /// an actionable "narrow your query" trailer. Defaults to
+    /// [`MAX_TOOL_OUTPUT_BYTES`] (v4 P2.4 — configurable via
+    /// `Config::tool_output_max_bytes` / `BRAZE_TOOL_OUTPUT_MAX_BYTES`).
+    output_budget: usize,
+    /// Per-tool-result line budget (v4 P2.4). `None` is **not** a cap —
+    /// only `output_budget` applies. `Some(N)` additionally truncates at
+    /// `N` lines if the byte cap hasn't hit yet, useful for many-short-
+    /// line outputs (a `grep -r` over a thousands-file repo) where a
+    /// byte-only cap can still show 100k+ lines. Configurable via
+    /// `Config::tool_output_max_lines` / `BRAZE_TOOL_OUTPUT_MAX_LINES`.
+    output_max_lines: Option<u32>,
+    /// Per-extension formatter map for the post-edit guardrail (v4
+    /// P1.6 — generalizes the previously Rust-only `cargo check`).
+    /// Defaults to [`crate::post_edit_check::default_rust_formatters`]
+    /// (a single Rust `cargo check` entry, equivalent to the
+    /// pre-generalization hardcoded behavior). Overridable via
+    /// [`LocalToolsProvider::with_formatters`] from
+    /// `Config::formatters`.
+    formatters: Vec<braze_config::FormatterConfig>,
 }
 
 impl LocalToolsProvider {
@@ -77,6 +97,9 @@ impl LocalToolsProvider {
             workdir,
             post_edit_check: true,
             edit_strict_mode: false,
+            output_budget: MAX_TOOL_OUTPUT_BYTES,
+            output_max_lines: None,
+            formatters: crate::post_edit_check::default_rust_formatters(),
         }
     }
 
@@ -90,6 +113,9 @@ impl LocalToolsProvider {
             workdir: workdir.into(),
             post_edit_check: true,
             edit_strict_mode: false,
+            output_budget: MAX_TOOL_OUTPUT_BYTES,
+            output_max_lines: None,
+            formatters: crate::post_edit_check::default_rust_formatters(),
         }
     }
 
@@ -108,6 +134,31 @@ impl LocalToolsProvider {
         self
     }
 
+    /// Overrides the per-tool-result byte budget (v4 P2.4) — see
+    /// `output_budget`'s field doc comment. Chainable, same shape as
+    /// [`Self::with_post_edit_check`].
+    pub fn with_output_budget(mut self, budget: usize) -> Self {
+        self.output_budget = budget;
+        self
+    }
+
+    /// Overrides the per-tool-result line budget (v4 P2.4) — see
+    /// `output_max_lines`'s field doc comment. `None` is **not** a cap.
+    /// Chainable, same shape as [`Self::with_output_budget`].
+    pub fn with_output_max_lines(mut self, max_lines: Option<u32>) -> Self {
+        self.output_max_lines = max_lines;
+        self
+    }
+
+    /// Overrides the post-edit formatter list (v4 P1.6 — generalizes
+    /// Rust-only `cargo check` into a per-extension map). See
+    /// `formatters`'s field doc comment. Chainable, same shape as
+    /// [`Self::with_output_budget`].
+    pub fn with_formatters(mut self, formatters: Vec<braze_config::FormatterConfig>) -> Self {
+        self.formatters = formatters;
+        self
+    }
+
     /// Joins `path` onto [`Self::workdir`] if relative; returns `path`
     /// unchanged if already absolute.
     fn resolve(&self, path: &str) -> String {
@@ -123,7 +174,7 @@ impl LocalToolsProvider {
         let mut args: ReadFileArgs = parse_args(call)?;
         args.path = self.resolve(&args.path);
         self.check_read(call, &args.path).await?;
-        Ok(wrap(call, read_file::read_file(args).await))
+        Ok(self.wrap(call, read_file::read_file(args).await))
     }
 
     async fn invoke_write_file(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
@@ -131,7 +182,7 @@ impl LocalToolsProvider {
         args.path = self.resolve(&args.path);
         self.check_write(call, &args.path).await?;
         let path = args.path.clone();
-        let result = wrap(call, write_file::write_file(args).await);
+        let result = self.wrap(call, write_file::write_file(args).await);
         Ok(self.append_post_edit_feedback(result, &path).await)
     }
 
@@ -140,7 +191,7 @@ impl LocalToolsProvider {
         args.path = self.resolve(&args.path);
         self.check_write(call, &args.path).await?;
         let path = args.path.clone();
-        let result = wrap(
+        let result = self.wrap(
             call,
             edit_file::edit_file(args, self.edit_strict_mode).await,
         );
@@ -156,7 +207,7 @@ impl LocalToolsProvider {
     async fn append_post_edit_feedback(&self, mut result: ToolResult, path: &str) -> ToolResult {
         if self.post_edit_check
             && !result.is_error
-            && let Some(feedback) = crate::post_edit_check::post_edit_feedback(path).await
+            && let Some(feedback) = crate::post_edit_check::post_edit_feedback(path, &self.formatters).await
         {
             result.content.push_str(&feedback);
         }
@@ -175,7 +226,7 @@ impl LocalToolsProvider {
                 name: call.name.clone(),
                 message: err.to_string(),
             })?;
-        Ok(wrap(
+        Ok(self.wrap(
             call,
             shell_exec::shell_exec(args, &self.workdir).await,
         ))
@@ -185,14 +236,14 @@ impl LocalToolsProvider {
         let mut args: GrepArgs = parse_args(call)?;
         args.path = self.resolve(&args.path);
         self.check_read(call, &args.path).await?;
-        Ok(wrap(call, grep::grep(args).await))
+        Ok(self.wrap(call, grep::grep(args).await))
     }
 
     async fn invoke_glob(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
         let mut args: GlobArgs = parse_args(call)?;
         args.path = self.resolve(&args.path);
         self.check_read(call, &args.path).await?;
-        Ok(wrap(call, glob::glob(args).await))
+        Ok(self.wrap(call, glob::glob(args).await))
     }
 
     /// Shared by `write_file` and `edit_file`: both are writes for
@@ -278,18 +329,31 @@ fn parse_args<T: DeserializeOwned>(call: &ToolCall) -> Result<T, ToolError> {
 /// per-tool, so a large `read_file`/`grep`/`shell_exec` output can't blow
 /// the model's context budget on its own regardless of which tool
 /// produced it. See docs/AUDITORIA-2026-07.md hallazgo D2.
-fn wrap(call: &ToolCall, outcome: Result<String, String>) -> ToolResult {
-    match outcome {
-        Ok(content) => ToolResult {
-            tool_call_id: call.id.clone(),
-            content: truncate_output(content),
-            is_error: false,
-        },
-        Err(content) => ToolResult {
-            tool_call_id: call.id.clone(),
-            content: truncate_output(content),
-            is_error: true,
-        },
+impl LocalToolsProvider {
+    /// The single seam every one of the six local tools' output passes
+    /// through (hallazgo D2, docs/AUDITORIA-2026-07.md) — now an
+    /// `impl` method so it can honor this provider's configured
+    /// `output_budget` / `output_max_lines` (v4 P2.4), overriding the
+    /// hardcoded `MAX_TOOL_OUTPUT_BYTES` when a caller wires them via
+    /// [`LocalToolsProvider::with_output_budget`] /
+    /// [`LocalToolsProvider::with_output_max_lines`]. Truncation
+    /// strategy: `max_lines` (if `Some`) truncates by line count first
+    /// (useful for many-short-line outputs); the byte cap applies
+    /// second. Either side gets an actionable trailer telling a small
+    /// model *what to do differently*, never just "truncated".
+    fn wrap(&self, call: &ToolCall, outcome: Result<String, String>) -> ToolResult {
+        match outcome {
+            Ok(content) => ToolResult {
+                tool_call_id: call.id.clone(),
+                content: truncate_output(content, self.output_budget, self.output_max_lines),
+                is_error: false,
+            },
+            Err(content) => ToolResult {
+                tool_call_id: call.id.clone(),
+                content: truncate_output(content, self.output_budget, self.output_max_lines),
+                is_error: true,
+            },
+        }
     }
 }
 
@@ -300,18 +364,38 @@ fn wrap(call: &ToolCall, outcome: Result<String, String>) -> ToolResult {
 /// small local model's entire context window and trigger the silent
 /// truncation-from-the-front that `num_ctx` already documents as
 /// dangerous (loses the system prompt and tool definitions first).
-const MAX_TOOL_OUTPUT_BYTES: usize = 8_000;
+pub(crate) const MAX_TOOL_OUTPUT_BYTES: usize = 8_000;
 
-/// Truncates `content` to [`MAX_TOOL_OUTPUT_BYTES`] at a UTF-8-safe
-/// boundary, appending an actionable trailer (not just "truncated" — a
-/// small model needs to be told *what to do differently*, per
+/// Truncates `content` to `budget` bytes at a UTF-8-safe boundary,
+/// appending an actionable trailer (not just "truncated" — a small
+/// model needs to be told *what to do differently*, per
 /// docs/AUDITORIA-2026-07.md's finding that terse errors get retried
-/// verbatim instead of corrected).
-fn truncate_output(content: String) -> String {
-    if content.len() <= MAX_TOOL_OUTPUT_BYTES {
+/// verbatim instead of corrected). If `max_lines` is `Some(N)`, also
+/// truncates at `N` lines when the byte cap hasn't already hit (v4
+/// P2.4 — useful for many-short-line outputs like a `grep -r` over a
+/// thousands-file repo where a byte-only cap can still show 100k+
+/// lines before triggering).
+fn truncate_output(content: String, budget: usize, max_lines: Option<u32>) -> String {
+    let max_lines = max_lines.unwrap_or(0) as usize;
+    if max_lines > 0 {
+        let mut lines: Vec<&str> = content.lines().collect();
+        if lines.len() > max_lines {
+            let omitted_lines = lines.len() - max_lines;
+            lines.truncate(max_lines);
+            let retained = lines.join("\n");
+            return format!(
+                "{}\n\n[output truncated: {omitted_lines} of {} lines omitted. Narrow your \
+                 query — a more specific path/pattern, or a smaller file — instead of retrying \
+                 this exact call.]",
+                retained,
+                content.lines().count(),
+            );
+        }
+    }
+    if content.len() <= budget {
         return content;
     }
-    let mut cut = MAX_TOOL_OUTPUT_BYTES;
+    let mut cut = budget;
     while !content.is_char_boundary(cut) {
         cut -= 1;
     }
@@ -782,20 +866,20 @@ mod tests {
     #[test]
     fn short_content_passes_through_unchanged() {
         let content = "hello world".to_string();
-        assert_eq!(truncate_output(content.clone()), content);
+        assert_eq!(truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None), content);
     }
 
     #[test]
     fn content_at_exactly_the_cap_is_unchanged() {
         let content = "x".repeat(MAX_TOOL_OUTPUT_BYTES);
-        assert_eq!(truncate_output(content.clone()), content);
+        assert_eq!(truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None), content);
     }
 
     #[test]
     fn oversized_content_is_truncated_with_an_actionable_trailer() {
         let original_len = MAX_TOOL_OUTPUT_BYTES * 3;
         let content = "x".repeat(original_len);
-        let truncated = truncate_output(content);
+        let truncated = truncate_output(content, MAX_TOOL_OUTPUT_BYTES, None);
         // Retained content is capped exactly at MAX_TOOL_OUTPUT_BYTES; the
         // trailer on top is small relative to the (much larger) original.
         assert!(truncated.len() < original_len);
@@ -818,6 +902,55 @@ mod tests {
             "x".repeat(MAX_TOOL_OUTPUT_BYTES - 1),
             "y".repeat(50)
         );
-        let _ = truncate_output(content);
+        let _ = truncate_output(content, MAX_TOOL_OUTPUT_BYTES, None);
+    }
+
+    // --- tool_output knobs (v4 P2.4, configurable via
+    // `Config::tool_output_max_bytes` / `tool_output_max_lines`) ---
+
+    /// A reduced byte budget actually shrinks truncation, not just the
+    /// default `MAX_TOOL_OUTPUT_BYTES`. Pins that `with_output_budget`
+    /// is honored by `wrap` end-to-end.
+    #[test]
+    fn truncate_output_uses_a_caller_supplied_byte_budget() {
+        let small_budget = 100usize;
+        let content = "x".repeat(500);
+        let truncated = truncate_output(content.clone(), small_budget, None);
+        assert!(truncated.starts_with(&"x".repeat(small_budget)));
+        assert!(truncated.contains("output truncated"));
+        assert!(truncated.contains("400 of 500 bytes"));
+    }
+
+    /// `max_lines: Some(N)` truncates by line count even when content fits
+    /// the byte budget. This is the case that needs the separate cap:
+    /// many short lines (each ~3 bytes) can fit the byte budget but blow
+    /// the model's context with thousands of repetitions — `grep -r`
+    /// over a big repo is the canonical example.
+    #[test]
+    fn truncate_output_caps_at_max_lines_independently_of_the_byte_budget() {
+        let content = (0..1000).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        // 5-char lines + newline = 6 bytes/line × 1000 = 6000 bytes — well
+        // below the byte cap (8000), so without `max_lines` this passes
+        // through untruncated.
+        assert!(content.len() < MAX_TOOL_OUTPUT_BYTES);
+        let truncated = truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, Some(5));
+        assert!(truncated.contains("output truncated"), "must trigger the trailer: {truncated}");
+        assert!(truncated.contains("lines"));
+        // The first 5 lines are retained; "line0".."line4".
+        assert!(truncated.contains("line0"));
+        assert!(truncated.contains("line4"));
+        assert!(!truncated.contains("line5"), "5th-line-onward must be truncated: {truncated}");
+    }
+
+    /// `max_lines: None` (the default) keeps the byte-cap-only behavior —
+    /// confirming the new line-cap doesn't regress the existing
+    /// happy path where 1000 short lines (under the byte budget) stay
+    /// untruncated.
+    #[test]
+    fn truncate_output_with_no_max_lines_does_not_apply_a_line_cap() {
+        let content = (0..1000).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        assert!(content.len() < MAX_TOOL_OUTPUT_BYTES);
+        let pass_through = truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None);
+        assert_eq!(pass_through, content, "max_lines=None must not truncate");
     }
 }
