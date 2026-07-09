@@ -374,6 +374,11 @@ mod tests {
             expected_tool_called: None,
             expected_text_found: None,
             expected_files_found: None,
+            // No budget asserted on this synthetic helper — same `None`
+            // (not evaluated) semantics `TaskResult::expected_rounds_
+            // within_budget`'s doc comment pins.
+            expected_rounds_within_budget: None,
+            expected_tokens_within_budget: None,
             input_tokens,
             output_tokens,
             // This test helper builds a synthetic result from

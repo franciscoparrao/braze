@@ -45,6 +45,18 @@ pub enum FailureCause {
     /// The turn converged, but `expect_file_contains` didn't match the
     /// sandbox's actual filesystem state.
     AssertionFiles,
+    /// The turn converged, but used more model rounds than
+    /// `expect_max_rounds` allowed (v4 P0.4 — budget assertions). A
+    /// config that passes the correctness checks in 14 rounds is worse
+    /// than one that converges in 3, and a flat pass-rate can't tell
+    /// them apart.
+    AssertionMaxRounds,
+    /// The turn converged, but used more total tokens
+    /// (`input_tokens + output_tokens`) than `expect_max_tokens` allowed
+    /// (v4 P0.4). Same budget-assertion rationale as
+    /// [`FailureCause::AssertionMaxRounds`]. Cache tokens are reported
+    /// separately and aren't part of this budget.
+    AssertionMaxTokens,
     /// Something failed *outside* the model/tool loop entirely — sandbox
     /// setup, reading back the session log, etc. Not attributable to the
     /// model at all; the task should generally be re-run rather than
@@ -100,6 +112,21 @@ pub struct TaskResult {
     pub expected_tool_called: Option<bool>,
     pub expected_text_found: Option<bool>,
     pub expected_files_found: Option<bool>,
+    /// v4 P0.4 (docs/AUDITORIA-2026-07-v4.md): whether the turn stayed
+    /// within `expect_max_rounds`. `None` — no rounds budget declared on
+    /// the `TaskDef` (so the budget was trivially satisfied and not
+    /// reported); `Some(true)` — budget declared and met; `Some(false)` —
+    /// budget declared and blown (turn used more rounds than allowed).
+    /// Same `Option<bool>` "not asserted / asserted-passed / asserted-
+    /// failed" contract as `expected_tool_called`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_rounds_within_budget: Option<bool>,
+    /// v4 P0.4: whether the turn stayed within `expect_max_tokens`
+    /// (`input_tokens + output_tokens` summed across rounds; cache
+    /// read/write tokens aren't part of this budget). Same `Option<bool>`
+    /// contract as [`Self::expected_rounds_within_budget`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_tokens_within_budget: Option<bool>,
     pub input_tokens: u32,
     pub output_tokens: u32,
     /// Tokens of this task's prompts that hit an existing cache entry,
@@ -170,6 +197,11 @@ pub fn harness_error_result(
         expected_tool_called: None,
         expected_text_found: None,
         expected_files_found: None,
+        // Nothing ran, so no budget assertion was evaluated either —
+        // `None` (not asserted) rather than `Some(false)` (budget blown).
+        // Same "not reported" semantics as the cache fields below.
+        expected_rounds_within_budget: None,
+        expected_tokens_within_budget: None,
         input_tokens: 0,
         output_tokens: 0,
         // Nothing ran, so no provider reported cache tokens at all —
@@ -357,10 +389,35 @@ pub fn compute_metrics(
         contains_as_a_bounded_token(&final_text.to_lowercase(), &expected.to_lowercase())
     });
 
+    // v4 P0.4 (docs/AUDITORIA-2026-07-v4.md): budget assertions. A
+    // turn that converges with the right answer in 14 rounds / 50k
+    // tokens is *not* as good as one that does it in 3 rounds / 4k
+    // tokens — the bench must be able to say "better", not just
+    // "passes". `expect_max_rounds` checks against `rounds` (one
+    // `AgentEvent::Usage` per model completion round, computed above);
+    // `expect_max_tokens` checks against `input_tokens + output_tokens`
+    // summed across rounds (cache read/write tokens are reported
+    // separately in `TaskResult` and aren't counted here — billing
+    // concern, not model-efficiency concern).
+    //
+    // `None` always means "no budget asserted" (and thus `Some(true)`
+    // — within budget — trivially), mirroring the other `Option<bool>`
+    // assertion results so a report can distinguish "no budget was
+    // declared" from "budget declared and blown".
+    let expected_rounds_within_budget = task
+        .expect_max_rounds
+        .map(|max| rounds <= max);
+    let total_tokens = input_tokens + output_tokens;
+    let expected_tokens_within_budget = task
+        .expect_max_tokens
+        .map(|max| total_tokens <= max);
+
     let assertions_passed = expected_tool_called.unwrap_or(true)
         && (!task.expect_no_tool_call || tool_call_names.is_empty())
         && expected_text_found.unwrap_or(true)
-        && expected_files_found.unwrap_or(true);
+        && expected_files_found.unwrap_or(true)
+        && expected_rounds_within_budget.unwrap_or(true)
+        && expected_tokens_within_budget.unwrap_or(true);
 
     let passed = converged && assertions_passed;
 
@@ -378,6 +435,10 @@ pub fn compute_metrics(
             Some(FailureCause::AssertionText)
         } else if expected_files_found == Some(false) {
             Some(FailureCause::AssertionFiles)
+        } else if expected_rounds_within_budget == Some(false) {
+            Some(FailureCause::AssertionMaxRounds)
+        } else if expected_tokens_within_budget == Some(false) {
+            Some(FailureCause::AssertionMaxTokens)
         } else {
             None
         }
@@ -400,6 +461,8 @@ pub fn compute_metrics(
         expected_tool_called,
         expected_text_found,
         expected_files_found,
+        expected_rounds_within_budget,
+        expected_tokens_within_budget,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -449,6 +512,9 @@ mod tests {
             expect_text_contains: expect_text_contains.map(str::to_string),
             expect_file_contains: HashMap::new(),
             skill: None,
+            expect_max_rounds: None,
+            expect_max_tokens: None,
+            expect_max_cost_usd: None,
         }
     }
 
@@ -991,5 +1057,130 @@ mod tests {
         assert!(!result.converged);
         assert_eq!(result.failure_cause, Some(FailureCause::HarnessError));
         assert!(result.run_error.unwrap().contains("sandbox setup failed"));
+    }
+
+    // --- v4 P0.4 budget assertions (expect_max_rounds /
+    // expect_max_tokens), docs/AUDITORIA-2026-07-v4.md § P0.4. The bench
+    // must be able to say a config is "better" not just "passes" — a
+    // turn that converges with the right answer in 14 rounds / 50k
+    // tokens is worse than one that does it in 3 rounds / 4k tokens,
+    // and a flat pass-rate can't tell them apart. `expected_*_within_
+    // budget` follows the same `Option<bool>` "not asserted / asserted-
+    // passed / asserted-failed" contract as `expected_tool_called`. ---
+
+    fn usage_round(input: u32, output: u32) -> AgentEvent {
+        AgentEvent::Usage {
+            input_tokens: input,
+            output_tokens: output,
+            stop_reason: Some("end_turn".to_string()),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        }
+    }
+
+    /// `None`-overall when the `TaskDef` declared no budget — the same
+    /// "not asserted" semantics as `expected_tool_called == None`, so a
+    /// report can tell "no budget was declared" apart from "budget was
+    /// declared and blown".
+    #[test]
+    fn budget_assertions_stay_none_when_not_declared_on_the_task() {
+        let events = vec![usage_round(10, 2), usage_round(15, 3)];
+        let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
+        assert_eq!(result.expected_rounds_within_budget, None);
+        assert_eq!(result.expected_tokens_within_budget, None);
+        assert!(result.passed);
+    }
+
+    #[test]
+    fn expect_max_rounds_passes_when_the_turn_used_fewer_rounds_than_the_budget() {
+        // 2 Usage events => 2 rounds; budget 8 is comfortably above.
+        let events = vec![usage_round(10, 2), usage_round(15, 3)];
+        let mut t = task(None, false, None);
+        t.expect_max_rounds = Some(8);
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        assert_eq!(result.rounds, 2);
+        assert_eq!(result.expected_rounds_within_budget, Some(true));
+        assert!(result.passed);
+    }
+
+    #[test]
+    fn expect_max_rounds_equal_to_the_count_is_within_budget_inclusive() {
+        // Budget == actual is within (<=), matching the "at most" wording
+        // on the field's doc comment.
+        let events = vec![usage_round(10, 2), usage_round(15, 3)];
+        let mut t = task(None, false, None);
+        t.expect_max_rounds = Some(2);
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        assert_eq!(result.expected_rounds_within_budget, Some(true));
+        assert!(result.passed);
+    }
+
+    #[test]
+    fn expect_max_rounds_fails_the_task_when_the_turn_used_more_rounds() {
+        let events = vec![usage_round(10, 2), usage_round(15, 3), usage_round(12, 1)];
+        let mut t = task(None, false, None);
+        t.expect_max_rounds = Some(2);
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        assert!(!result.passed);
+        assert_eq!(result.expected_rounds_within_budget, Some(false));
+        assert_eq!(result.failure_cause, Some(FailureCause::AssertionMaxRounds));
+    }
+
+    #[test]
+    fn expect_max_tokens_passes_when_total_tokens_stay_under_the_budget() {
+        // 10+2 + 15+3 = 30 total (input + output). Cache tokens aren't
+        // counted even when reported — see the field's doc comment.
+        let events = vec![
+            AgentEvent::Usage {
+                input_tokens: 10,
+                output_tokens: 2,
+                stop_reason: Some("tool_use".to_string()),
+                cache_read_tokens: Some(8),
+                cache_write_tokens: Some(4),
+            },
+            usage_round(15, 3),
+        ];
+        let mut t = task(None, false, None);
+        t.expect_max_tokens = Some(40);
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        // cache tokens surfaced separately, not folded into the budget.
+        assert_eq!(result.cache_read_tokens, Some(8));
+        assert_eq!(result.cache_write_tokens, Some(4));
+        assert_eq!(result.input_tokens, 25);
+        assert_eq!(result.output_tokens, 5);
+        assert_eq!(result.expected_tokens_within_budget, Some(true));
+        assert!(result.passed);
+    }
+
+    #[test]
+    fn expect_max_tokens_fails_the_task_when_total_tokens_exceed_the_budget() {
+        // 10+2 + 15+3 = 30 total; budget 25 <= blown.
+        let events = vec![usage_round(10, 2), usage_round(15, 3)];
+        let mut t = task(None, false, None);
+        t.expect_max_tokens = Some(25);
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        assert!(!result.passed);
+        assert_eq!(result.expected_tokens_within_budget, Some(false));
+        assert_eq!(result.failure_cause, Some(FailureCause::AssertionMaxTokens));
+    }
+
+    /// The priority order in `compute_metrics`'s failure-cause chain:
+    /// a correctness failure is reported *over* a budget failure when
+    /// both would fail (a small model that got the wrong answer AND took
+    /// too many rounds is broken on correctness first — the budget
+    /// wouldn't have rescued it). Exactly mirrors how `AssertionFiles`
+    /// already takes priority over `AssertionMaxRounds` below it.
+    #[test]
+    fn a_correctness_failure_takes_priority_over_a_budget_failure_in_the_reported_cause() {
+        let events = vec![usage_round(10, 2), usage_round(15, 3), usage_round(12, 1)];
+        let mut t = task(None, false, Some("respuesta-correcta"));
+        t.expect_max_rounds = Some(2);
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        assert!(!result.passed);
+        // Both the text check and the rounds budget fail here — the
+        // report should name the correctness one, not the budget one.
+        assert_eq!(result.expected_text_found, Some(false));
+        assert_eq!(result.expected_rounds_within_budget, Some(false));
+        assert_eq!(result.failure_cause, Some(FailureCause::AssertionText));
     }
 }

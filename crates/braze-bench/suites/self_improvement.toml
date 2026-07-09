@@ -1,0 +1,249 @@
+# Suite de auto-mejora de braze (v4 P0.4,
+# docs/AUDITORIA-2026-07-v4.md § P0.4, docs/AUDITORIA-2026-07-v5.md §
+# "Paquete 1 — Medición y harness"): ejercicios SI-1 y SI-2 del backlog
+# de self-improvement (`docs/self-improvement-exercises.md`) convertidos
+# en `TaskDef`s permanentes, para que el bench pueda medir no solo *si*
+# una config pasa, sino *con cuántas rondas / tokens / coste* — que es
+# justo lo que distingue a un harness para modelos chicos de uno para
+# modelos grandes.
+#
+# A diferencia de `default.toml` (tareas sintéticas de un solo archivo y
+# unos pocos pasos), estas son tareas de edición multi-step sobre un
+# *análogo* recortado del propio código de `braze` — sembrado en el
+# sandbox como `setup_files`, no sobre el repo real (determinismo: el
+# bench no puede depender de en qué estado está `crates/braze-bench` en
+# el momento del sweep). El análogo conserva la estructura del archivo
+# real sin los ~700 líneas de detalle, así la tarea sigue exigiendo
+# navegación + edición incremental + preservación de la API existente.
+#
+# SI-2 en particular es el prerequisito que cerró d89b134 (`+lead:` en
+# bench); acá se mide si un modelo chico puede reproducir ese cambio a
+# partir de un prompt análogo al que resolvió SI-2 originalmente — el
+# mismo multi-step que el log SI-2 (`docs/usability-log-2026-07-07-si2.md`)
+# mostró que modelos de 3-8B no lograron completar. Con
+# `expect_max_rounds`/`expect_max_tokens` declarados, el reporte puede
+# además decir cuán *cerca* estuvo (convergió pero en 14 rondas vs. 3),
+# no solo pass/fail.
+
+# --- SI-1 — Ampliar la lista segura de comandos de shell ---
+# Origen: docs/self-improvement-exercises.md § SI-1, U-5 del log SI-1.
+# Skill: edición puntual sobre un solo archivo, single-concept. Es el
+# "warm-up" de la suite — un modelo que no despeja SI-1 no tiene chance
+# en SI-2.
+[[tasks]]
+id = "si_1_safe_shell_commands"
+prompt = """
+Lee el archivo classifier.rs del directorio actual. Encontrarás la función
+is_safe_shell_command que clasifica comandos como seguros (ls, pwd, wc,
+whoami, date, which, true, false) — son comandos de solo lectura sin
+argumentos de ruta que validar. Agregá lscpu, lsmem y lshw a esa misma
+lista de comandos siempre-seguros: son comandos de introspección de
+hardware, también sin argumentos de ruta, mismos criterios que los ya
+listados. No toques la rama cat/head/tail/grep (esa sí valida rutas, no
+es el caso de estos tres). Explica brevemente el criterio en un
+comentario si hace falta, manteniendo el estilo de los comentarios
+existentes.
+"""
+expect_tool_call = "edit_file"
+skill = "self_improvement"
+expect_max_rounds = 6
+expect_max_tokens = 6000
+# Declarado pero aún no enforceado (ver TaskDef::expect_max_cost_usd):
+# cuando H-3 + E5 pongan pricing por backend, este valor se convierte
+# en un coterry real que la tarea también puede fallar.
+expect_max_cost_usd = 0.02
+
+[tasks.setup_files]
+"classifier.rs" = '''
+//! Mini classifier — analogue of crates/braze-permissions/src/classifier.rs
+//! trimmed for the self-improvement bench. Only the safe-shell-command
+//! branch is kept; the rest of the classifier is irrelevant here.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiskClass {
+    /// Read-only / sandbox-bounded action, no confirmation needed.
+    Reversible,
+    /// Anything that mutates state outside the sandbox, exfiltrates, or
+    /// otherwise can't be auto-approved by the bench's DenyAll guard.
+    Irreversible,
+}
+
+pub fn is_safe_shell_command(cmd: &str) -> bool {
+    // Bare-name, no-argument commands: read-only introspection, no path
+    // arguments to validate. Keep this list alphabetized.
+    let safe_no_arg: &[&str] = &[
+        "date",
+        "false",
+        "ls",
+        "pwd",
+        "true",
+        "wc",
+        "which",
+        "whoami",
+    ];
+    let name = cmd.split_whitespace().next().unwrap_or("");
+    if safe_no_arg.contains(&name) {
+        return true;
+    }
+    // Commands that DO take path arguments — validated separately before
+    // they're considered safe. Not in scope for this exercise.
+    match name {
+        "cat" | "head" | "tail" | "grep" => false, // would need path checks
+        _ => false,
+    }
+}
+'''
+
+[tasks.expect_file_contains]
+"classifier.rs" = ["lscpu", "lshw"]
+
+# --- SI-2 — Sintaxis de spec `+lead:` en braze-bench ---
+# Origen: docs/self-improvement-exercises.md § SI-2, backlog A/B del
+# EscalatingBackend. YA está resuelto en el repo real (d89b134); acá se
+# mide si un modelo puede reproducir ese cambio sobre el análogo
+# recortado. Skill: edición multi-step sobre un solo archivo (análogo del
+# spec parser), preservando la API `+plan:` ya existente.
+[[tasks]]
+id = "si_2_lead_suffix"
+prompt = """
+Lee el archivo backend_spec.rs del directorio actual. Es un parser de specs
+de backend para un bench, análogo recortado del real de braze-bench. Hoy
+soporta un sufijo `+plan:<spec>` que adjunta un planner al executor
+(parse_composite/find(\"+plan:\")/build_planner/display_name).
+
+Agregá un sufijo análogo `+lead:<spec>` con la MISMA gramática: mismo
+split en el primer ':' después del token, mismo manejo de errores para
+specs duplicados (`+lead:` aparece > 1 vez) o vacíos (executor vacío
+antes de `+lead:`, o spec de lead vacío después). En particular:
+
+1. Añadir un campo `lead: Option<Box<BackendSpec>>` al struct, igual al
+   `planner` existente, e inicializarlo a `None` en parse_single.
+2. En `parse`, contar `+lead:` y rechazar duplicados con el mismo
+   patrón de error que usa `+plan:`. Separar el suffix que aparezca
+   primero; si ambos sufijos coexisten, dividir en el primero y dejar
+   que el recursion maneje el otro.
+3. Añadir un método público `build_lead` análogo a `build_planner`.
+4. Actualizar `display_name` para que refleje `+lead:` igual que ya
+   hace con `+plan:`.
+5. No romper el comportamiento existente de `+plan:` — debe seguir
+   funcionando exactamente igual, solo o combinado con `+lead:`.
+"""
+expect_tool_call = "edit_file"
+skill = "self_improvement"
+expect_max_rounds = 15
+expect_max_tokens = 20000
+expect_max_cost_usd = 0.05
+
+[tasks.setup_files]
+"backend_spec.rs" = '''
+//! Mini backend spec parser — analogue of crates/braze-bench/src/backend_spec.rs
+//! trimmed for the self-improvement bench. Supports a `+plan:<spec>` suffix
+//! that attaches a planner sub-spec to the executor; `+lead:` is NOT yet
+//! implemented — your job is to add it following exactly the same pattern.
+//!
+//! The `"+plan:"`/`"+lead:"` tokens (rather than a bare separator char) are
+//! deliberate: model ids legitimately contain `:` (Ollama tags) and `/`
+//! (OpenRouter), so neither could serve as a separator.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Provider {
+    Anthropic,
+    Ollama,
+    OpenRouter,
+}
+
+/// One backend spec, parsed: an executor plus, optionally, a planner
+/// sub-spec carried after the literal `"+plan:"` token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendSpec {
+    provider: Provider,
+    model_override: Option<String>,
+    planner: Option<Box<BackendSpec>>,
+}
+
+impl BackendSpec {
+    /// Parses a spec like `"ollama:qwen2.5:3b"` or its planned variant
+    /// `"ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash"`.
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let plan_count = spec.matches("+plan:").count();
+        if plan_count > 1 {
+            return Err(format!(
+                "invalid spec '{spec}': only one '+plan:' planner per entry"
+            ));
+        }
+        let Some(idx) = spec.find("+plan:") else {
+            return Self::parse_single(spec);
+        };
+        let executor = &spec[..idx];
+        let planner_spec = &spec[idx + "+plan:".len()..];
+        if executor.is_empty() {
+            return Err(format!(
+                "invalid backend spec '{spec}': expected a non-empty executor before '+plan:'"
+            ));
+        }
+        if planner_spec.is_empty() {
+            return Err(format!(
+                "invalid backend spec '{spec}': expected a non-empty planner after '+plan:'"
+            ));
+        }
+        let parsed = Self::parse_single(executor)?;
+        let planner = Box::new(Self::parse(planner_spec)?);
+        Ok(Self {
+            planner: Some(planner),
+            ..parsed
+        })
+    }
+
+    fn parse_single(spec: &str) -> Result<Self, String> {
+        let (provider_str, model) = match spec.split_once(':') {
+            Some((p, m)) => (p, Some(m.to_string())),
+            None => (spec, None),
+        };
+        let provider = match provider_str {
+            "anthropic" => Provider::Anthropic,
+            "ollama" => Provider::Ollama,
+            "openrouter" => Provider::OpenRouter,
+            other => return Err(format!("unknown provider '{other}'")),
+        };
+        Ok(Self {
+            provider,
+            model_override: model,
+            planner: None,
+        })
+    }
+
+    /// Returns the planner sub-spec, if this spec carried a `"+plan:"` suffix.
+    pub fn build_planner(&self) -> Option<&BackendSpec> {
+        self.planner.as_deref()
+    }
+
+    pub fn display_name(&self) -> String {
+        let mut name = match self.provider {
+            Provider::Anthropic => "anthropic".to_string(),
+            Provider::Ollama => "ollama".to_string(),
+            Provider::OpenRouter => "openrouter".to_string(),
+        };
+        if let Some(m) = &self.model_override {
+            name.push(':');
+            name.push_str(m);
+        }
+        if let Some(p) = &self.planner {
+            name.push_str("+plan:");
+            name.push_str(&p.display_name());
+        }
+        name
+    }
+}
+'''
+
+# Three invariants on the same file: `+lead:` and `build_lead` prove the
+# new lead parser/method actually landed; `+plan:` is a regression guard
+# — the model must NOT delete the existing `+plan:` support while adding
+# `+lead:`, same acceptance criterion as the original SI-2
+# (docs/self-improvement-exercises.md § SI-2: "preserve the API while
+# extending it"). One substring per line would have been impossible
+# here (TOML forbids duplicate keys in a table), which is exactly why
+# `expect_file_contains` is a `Vec<String>` per file rather than a single
+# string — see `TaskDef::expect_file_contains`'s doc comment.
+[tasks.expect_file_contains]
+"backend_spec.rs" = ["+lead:", "build_lead", "+plan:"]

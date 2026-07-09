@@ -45,14 +45,23 @@ pub struct TaskDef {
     #[serde(default)]
     pub expect_text_contains: Option<String>,
     /// If non-empty, the task only passes if every named file (path
-    /// relative to the sandbox root) exists and contains the given
-    /// substring (same bounded-token matching as `expect_text_contains`)
-    /// — checked against the sandbox's actual filesystem state after the
-    /// run, not just "was some tool called". This is what makes a
-    /// write/edit task's pass/fail track the real outcome instead of a
-    /// proxy that a failed or no-op call could still satisfy.
+    /// relative to the sandbox root) exists and contains *every*
+    /// substring in its associated list (each matched as a bounded
+    /// token, same rule as `expect_text_contains`) — checked against the
+    /// sandbox's actual filesystem state after the run, not just "was
+    /// some tool called". This is what makes a write/edit task's
+    /// pass/fail track the real outcome instead of a proxy that a
+    /// failed or no-op call could still satisfy.
+    ///
+    /// A list (not a single string) per file lets one task assert
+    /// multiple independent invariants on the same file — e.g. a coding
+    /// task can require that the new method `build_lead` *was* added
+    /// AND that the old `+plan:` support wasn't removed in the process.
+    /// TOML doesn't permit duplicate keys in a table, so a one-string-
+    /// per-file field can't express that without duplicating the path;
+    /// the list form is the natural representation.
     #[serde(default)]
-    pub expect_file_contains: HashMap<String, String>,
+    pub expect_file_contains: HashMap<String, Vec<String>>,
     /// Optional free-form label (e.g. `"single_tool"`, `"multi_step"`,
     /// `"error_recovery"`) grouping tasks by the kind of capability they
     /// probe, so a report can break results down by skill instead of only
@@ -61,6 +70,40 @@ pub struct TaskDef {
     /// pass/fail.
     #[serde(default)]
     pub skill: Option<String>,
+    /// If set, the task only passes if the turn converged in **at most**
+    /// this many model rounds (one `AgentEvent::Usage` per round — see
+    /// `TaskResult::rounds`). A budget assertion: a config that passes
+    /// the correctness checks but takes 14 rounds to get there is worse
+    /// than one that converges in 3, and a flat pass-rate can't tell them
+    /// apart. v4 P0.4 (docs/AUDITORIA-2026-07-v4.md): the bench must be
+    /// able to say "better" not just "passes".
+    #[serde(default)]
+    pub expect_max_rounds: Option<u32>,
+    /// If set, the task only passes if the turn's total tokens
+    /// (`input_tokens + output_tokens` summed across rounds) stayed at
+    /// or below this number. Cache-read/write tokens are reported
+    /// separately in `TaskResult` and are *not* counted here — they are a
+    /// backend-billing concern (H-18, `+ablate:no-caching` for the A/B),
+    /// not a model-efficiency concern. Same budget-assertion rationale
+    /// as `expect_max_rounds`.
+    #[serde(default)]
+    pub expect_max_tokens: Option<u32>,
+    /// If set, the task only passes if the turn's estimated cost in USD
+    /// stayed at or below this number. **Currently parsed and stored but
+    /// NOT enforced** — per-backend/model pricing is the H-3 + E5
+    /// deliverable (docs/AUDITORIA-2026-07-v5.md § "Tradeoff
+    /// costo/calidad por skill"), and enforcing against a price that
+    /// isn't wired yet would be cargo-cult. Once pricing lands in
+    /// `metrics`, flip this to an actual assertion the same way
+    /// `expect_max_rounds`/`expect_max_tokens` already are. Carrying the
+    /// field now lets a self-improvement suite declare its cost budget
+    /// up front (and lets us audit how often a real run would have
+    /// blown it) without lying about enforcement that doesn't exist.
+    #[serde(default)]
+    // Parsed and stored; enforcement waits on H-3 + E5 per-backend
+    // pricing (see this field's doc comment).
+    #[allow(dead_code)]
+    pub expect_max_cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,12 +131,15 @@ mod tests {
             expect_tool_call = "read_file"
             expect_text_contains = "3"
             skill = "single_tool"
+            expect_max_rounds = 8
+            expect_max_tokens = 4000
+            expect_max_cost_usd = 0.05
 
             [tasks.setup_files]
             "notas.txt" = "uno\ndos\ntres\n"
 
             [tasks.expect_file_contains]
-            "notas.txt" = "tres"
+            "notas.txt" = ["tres"]
         "#;
         let suite: TaskSuiteFile = toml::from_str(toml_src).unwrap();
         assert_eq!(suite.tasks.len(), 1);
@@ -103,11 +149,14 @@ mod tests {
         assert_eq!(task.expect_text_contains.as_deref(), Some("3"));
         assert!(!task.expect_no_tool_call);
         assert_eq!(task.skill.as_deref(), Some("single_tool"));
+        assert_eq!(task.expect_max_rounds, Some(8));
+        assert_eq!(task.expect_max_tokens, Some(4000));
+        assert_eq!(task.expect_max_cost_usd, Some(0.05));
         assert_eq!(
             task.expect_file_contains
                 .get("notas.txt")
-                .map(String::as_str),
-            Some("tres")
+                .map(Vec::as_slice),
+            Some(&["tres".to_string()][..])
         );
         assert_eq!(
             task.setup_files.get("notas.txt").map(String::as_str),
@@ -130,6 +179,11 @@ mod tests {
         assert_eq!(task.expect_text_contains, None);
         assert!(task.expect_file_contains.is_empty());
         assert_eq!(task.skill, None);
+        // v4 P0.4 budget fields default to `None` when absent — same
+        // "no budget declared" semantics the metrics tests pin.
+        assert_eq!(task.expect_max_rounds, None);
+        assert_eq!(task.expect_max_tokens, None);
+        assert_eq!(task.expect_max_cost_usd, None);
     }
 
     #[test]
@@ -247,6 +301,100 @@ mod tests {
         assert!(
             editing_tasks >= 2,
             "expected at least 2 tasks verifying real file content, got {editing_tasks}"
+        );
+    }
+
+    /// v4 P0.4 (docs/AUDITORIA-2026-07-v4.md § P0.4,
+    /// docs/AUDITORIA-2026-07-v5.md § "Paquete 1 — Medición y harness"):
+    /// the shipped `self_improvement.toml` suite — which turns the SI-1
+    /// and SI-2 self-improvement exercises into permanent bench tasks —
+    /// must actually parse, and each of its tasks must declare at least
+    /// one budget assertion (`expect_max_rounds`/`expect_max_tokens`).
+    /// That budget declaration is the whole point of the suite: the
+    /// bench must be able to say a config is "better" not just "passes",
+    /// and a coding task with no budget declared can't.
+    #[test]
+    fn self_improvement_suite_parses_and_declares_budgets() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites/self_improvement.toml");
+        let tasks = load_suite(&path)
+            .expect("self_improvement.toml must parse; check for TOML syntax issues");
+
+        // The suite carries at least the two resolved SI exercises (SI-1
+        // warm-up, SI-2 multi-step coding). Future exercises would push
+        // this number up, never below.
+        assert!(
+            tasks.len() >= 2,
+            "expected at least 2 tasks in self_improvement.toml, got {}",
+            tasks.len()
+        );
+
+        // Every task in this suite must be on the `self_improvement`
+        // skill — distinguishing it from the synthetic skills of
+        // `default.toml` so a report can break results down separately.
+        for task in &tasks {
+            assert_eq!(
+                task.skill.as_deref(),
+                Some("self_improvement"),
+                "self_improvement.toml task '{}' is missing the 'self_improvement' skill \
+                 label (got {:?})",
+                task.id,
+                task.skill
+            );
+            // The v4 P0.4 contract for this suite: every task must
+            // declare a rounds/token budget so the report can compare
+            // configs on efficiency, not just correctness. `cost_usd` is
+            // optional (parsed but not enforced — see that field's doc
+            // comment), so it's NOT asserted here.
+            assert!(
+                task.expect_max_rounds.is_some(),
+                "self_improvement.toml task '{}' must declare expect_max_rounds",
+                task.id
+            );
+            assert!(
+                task.expect_max_tokens.is_some(),
+                "self_improvement.toml task '{}' must declare expect_max_tokens",
+                task.id
+            );
+            // Coding tasks need filesystem verification — there's no
+            // other honest way to score "did the model actually add
+            // `+lead:`" than checking the resulting file content.
+            assert!(
+                !task.expect_file_contains.is_empty(),
+                "self_improvement.toml task '{}' must verify real file content \
+                 via expect_file_contains",
+                task.id
+            );
+        }
+
+        // SI-2 specifically must exist and verify the `+lead:` addition
+        // (the whole point of the exercise this suite makes permanent).
+        // The guard "+plan:" assertion also lives here to catch a model
+        // that achieves `+lead:` by deleting the existing `+plan:`
+        // support — same regression check SI-2's acceptance criteria
+        // demand (docs/self-improvement-exercises.md § SI-2).
+        let si_2 = tasks
+            .iter()
+            .find(|t| t.id == "si_2_lead_suffix")
+            .expect("self_improvement.toml must carry the si_2_lead_suffix task");
+        let backend_spec_asserts = si_2
+            .expect_file_contains
+            .get("backend_spec.rs")
+            .expect("si_2_lead_suffix must assert against backend_spec.rs");
+        assert!(
+            backend_spec_asserts.iter().any(|s| s.contains("+lead:")),
+            "si_2_lead_suffix must verify '+lead:' landed on backend_spec.rs \
+             (asserts: {backend_spec_asserts:?})"
+        );
+        assert!(
+            backend_spec_asserts.iter().any(|s| s.contains("build_lead")),
+            "si_2_lead_suffix must verify build_lead was added to backend_spec.rs \
+             (asserts: {backend_spec_asserts:?})"
+        );
+        assert!(
+            backend_spec_asserts.iter().any(|s| s.contains("+plan:")),
+            "si_2_lead_suffix must guard the existing '+plan:' support wasn't removed \
+             (asserts: {backend_spec_asserts:?})"
         );
     }
 }

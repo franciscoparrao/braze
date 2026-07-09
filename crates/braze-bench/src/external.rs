@@ -115,12 +115,15 @@ pub fn external_outcome_to_task_result(
             expected_tool_called: None,
             expected_text_found: None,
             expected_files_found,
+            // No `AgentEvent` log for a black-box external harness, so
+            // neither rounds nor tokens are measured — any
+            // `expect_max_rounds`/`expect_max_tokens` budget stays
+            // `None` (not evaluated) rather than `Some(false)` (blown),
+            // same "not reported" contract as the cache fields below.
+            expected_rounds_within_budget: None,
+            expected_tokens_within_budget: None,
             input_tokens: 0,
             output_tokens: 0,
-            // No `AgentEvent` log for a black-box external harness, so
-            // no round reported cache tokens either — `None` (not
-            // reported), same as `harness_error_result`. See
-            // `TaskResult::cache_read_tokens`'s doc comment.
             cache_read_tokens: None,
             cache_write_tokens: None,
             wall_time_ms: outcome.wall_time.as_millis(),
@@ -168,6 +171,12 @@ pub fn external_outcome_to_task_result(
         expected_tool_called,
         expected_text_found,
         expected_files_found,
+        // No round/token counts are measured for a black-box external
+        // harness, so any budget assertion stays `None` (not evaluated)
+        // — matches the run-error branch above and the `None` semantics
+        // `TaskResult::expected_rounds_within_budget` documents.
+        expected_rounds_within_budget: None,
+        expected_tokens_within_budget: None,
         input_tokens: 0,
         output_tokens: 0,
         // Same as the early-return arm above: a black-box external
@@ -195,6 +204,9 @@ mod tests {
             expect_text_contains: expect_text_contains.map(str::to_string),
             expect_file_contains: HashMap::new(),
             skill: Some("no_tool".to_string()),
+            expect_max_rounds: None,
+            expect_max_tokens: None,
+            expect_max_cost_usd: None,
         }
     }
 

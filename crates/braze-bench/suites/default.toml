@@ -59,7 +59,7 @@ skill = "single_tool"
 # write_file" — una llamada fallida o un no-op también satisfarían
 # expect_tool_call, pero no esto (ver hallazgo F4).
 [tasks.expect_file_contains]
-"saludo.txt" = "hola mundo"
+"saludo.txt" = ["hola mundo"]
 
 [[tasks]]
 id = "edit_file_basic"
@@ -71,7 +71,7 @@ skill = "single_tool"
 "config.txt" = "version=1\n"
 
 [tasks.expect_file_contains]
-"config.txt" = "version=2"
+"config.txt" = ["version=2"]
 
 [[tasks]]
 id = "shell_exec_basic"
@@ -99,7 +99,7 @@ skill = "multi_step"
 "resumen.txt" = "linea a\nlinea b\nlinea c\n"
 
 [tasks.expect_file_contains]
-"conteo.txt" = "3"
+"conteo.txt" = ["3"]
 
 [[tasks]]
 id = "error_recovery_wrong_filename"
@@ -136,7 +136,7 @@ skill = "single_tool"
 "saludo.py" = "def saludar(nombre):\n    print(f\"Hola, {nombre}!\")\n\nsaludar(\"Ana\")\n"
 
 [tasks.expect_file_contains]
-"saludo.py" = "Adios"
+"saludo.py" = ["Adios"]
 
 [[tasks]]
 id = "no_tool_capital_question"
@@ -162,7 +162,7 @@ skill = "multi_step"
 "b.txt" = "linea 1\nlinea 2\nlinea 3\n"
 
 [tasks.expect_file_contains]
-"total.txt" = "5"
+"total.txt" = ["5"]
 
 [[tasks]]
 id = "multi_step_multiply_and_write"
@@ -173,7 +173,7 @@ skill = "multi_step"
 "precio.txt" = "5\n"
 
 [tasks.expect_file_contains]
-"total_final.txt" = "15"
+"total_final.txt" = ["15"]
 
 [[tasks]]
 id = "error_recovery_wrong_config_extension"
@@ -199,7 +199,7 @@ skill = "error_recovery"
 "ajustes_app.ini" = "timeout=30\n"
 
 [tasks.expect_file_contains]
-"ajustes_app.ini" = "timeout=60"
+"ajustes_app.ini" = ["timeout=60"]
 
 [[tasks]]
 id = "distractor_selection_log_with_error"

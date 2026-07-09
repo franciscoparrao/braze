@@ -253,15 +253,18 @@ pub async fn run_task(
         Some(
             task.expect_file_contains
                 .iter()
-                .all(|(relative_path, expected_substring)| {
-                    std::fs::read_to_string(sandbox.path().join(relative_path))
-                        .map(|contents| {
-                            crate::metrics::contains_as_a_bounded_token(
-                                &contents,
-                                expected_substring,
-                            )
-                        })
-                        .unwrap_or(false)
+                .all(|(relative_path, expected_substrings)| {
+                    let Ok(contents) =
+                        std::fs::read_to_string(sandbox.path().join(relative_path))
+                    else {
+                        return false;
+                    };
+                    // Every expected substring must match as a bounded
+                    // token — one miss fails the whole file, matching
+                    // the AND semantics the field's doc comment pins.
+                    expected_substrings
+                        .iter()
+                        .all(|needle| crate::metrics::contains_as_a_bounded_token(&contents, needle))
                 }),
         )
     };
