@@ -2,7 +2,19 @@
 
 Fecha: 2026-07-09
 Contexto: SI-2 (`docs/self-improvement-exercises.md` § SI-2) agregó la sintaxis `+lead:<spec>` a `BackendSpec` (commit `d89b134`) y quedó permanentemente medido como tarea de bench en `self_improvement.toml` (commit `00b3ab1`), pero ninguno de los dos cierra el loop real: ¿la escalación reactiva `EscalatingBackend` efectivamente mueve el pass rate, y a qué costo? Este documento es ese A/B.
-Estado: **CERRADO** — datos crudos en `docs/sweep-si2-lead-ab-2026-07-09.json`/`.log`.
+Estado: **CERRADO, con corrección de interpretación** — ver § "CORRECCIÓN (2026-07-10)" antes de citar este documento. Datos crudos en `docs/sweep-si2-lead-ab-2026-07-09.json`/`.log`.
+
+## ⚠ CORRECCIÓN (2026-07-10) — el mecanismo NO fue escalación reactiva
+
+Hallazgo I-1 de `docs/AUDITORIA-2026-07-v6.md`, confirmado con un re-sweep instrumentado (H-3, mismo diseño de 3 backends × 19 tareas × 5 reps; datos en `docs/sweep-si2-lead-ab-h3-2026-07-09.json`/`.log`, `braze_git_commit: e11d628`):
+
+- Este documento atribuye la mejora a la "escalación reactiva estilo Goose". **Eso es incorrecto.** Los knobs de `EscalatingBackend` no estaban expuestos en ningún composition root, y todo `+lead:` corrió con `DEFAULT_LEAD_TURNS = 3`: el lead maneja los primeros 3 rounds de cada turno **proactivamente**. Como las tareas del suite convergen en 2-4 rounds, el lead manejó casi todos los turnos completos.
+- El re-sweep instrumentado lo cuantifica: en 190 corridas con `+lead:`, hubo **1 sola escalación reactiva** (`leader_escalations = 1`, en `distractor_selection` de gemma4:e4b). En `error_recovery` — la skill que pasa de 0-3/15 a 15/15 — hubo **cero**: el 100% de esa mejora es apertura proactiva del lead, no rescate reactivo del worker.
+- La replicación del efecto agregado sí es sólida (re-sweep: baseline 63/95, `+lead:qwen3.5-coder` 91/95, `+lead:gemma4:e4b` 90/95 — consistente con las cifras de abajo dentro de los intervalos). Lo que cambia no son los números sino **qué palanca los produjo**: este A/B midió "lead proactivo los primeros 3 turnos" vs baseline, no "escalación reactiva" vs baseline.
+- Dato adicional del re-sweep: `rescued_tool_calls = 0` en las 285 corridas — el rescate textual nunca se activó con estos modelos en este suite (los fallos de qwen2.5:3b son de validación de schema, no de formato textual de tool call).
+- El A/B que sí separa los dos mecanismos (baseline / lead proactivo / lead puramente reactivo vía `+ablate:lead-turns=0`, habilitado por el cierre de I-1 en `9aff6aa`) corre como `docs/sweep-lead-3brazos-2026-07-10.*`.
+
+Las secciones siguientes se conservan como estaban (los números son válidos); leer "lead proactivo" donde diga "escalación reactiva".
 Reproducibilidad: `braze_git_commit: adbc9a4` (post-auditoría de los commits del corte de créditos, ver commit "Audita y corrige el trabajo de otros modelos..."), `suite_fingerprint: 8deba9d2bffdf3c1`, temp 0.2, sin seed fijo, sin `--top-p/--top-k/--repeat-penalty`.
 
 ## Diseño
