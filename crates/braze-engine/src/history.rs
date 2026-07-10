@@ -393,17 +393,23 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         AgentEvent::AssistantText { text } => {
             Some((Role::Assistant, ContentBlock::Text { text: text.clone() }))
         }
-        // The planner's plan renders as the assistant's *own* text — the
-        // "model follows its own plan" framing (PLAN.md § "Split
-        // planificador/ejecutor"). This produces an assistant Text
-        // message right before the first round's tool_use message —
-        // consecutive assistant messages, which is already the exact
-        // shape a text-before-tools round produces today (verified live
-        // against the real Anthropic API), not a new protocol risk.
+        // Iteración pre-registrada del planner (PLAN.md § "Split
+        // planificador/ejecutor"; ejecutada 2026-07-10): the plan renders
+        // as USER-role context, not as the assistant's own text. The
+        // matrix sweep (docs/sweep-matriz-4brazos-2026-07-10.md) diagnosed
+        // the old assistant-role render's dominant failure as
+        // degeneration — empty responses in the round right after the
+        // plan, worst on tasks whose correct output was plain text — the
+        // signature of a small model treating "its own" plan message as
+        // having already answered. As user-role context, the plan is
+        // something to act on, not something already said.
         AgentEvent::PlanCreated { plan } => Some((
-            Role::Assistant,
+            Role::User,
             ContentBlock::Text {
-                text: format!("Plan:\n{plan}"),
+                text: format!(
+                    "Plan for this request (context from a planning pass — you have NOT \
+                     executed any of it yet):\n{plan}"
+                ),
             },
         )),
         AgentEvent::AssistantToolCall {
@@ -667,12 +673,13 @@ mod tests {
         assert!(messages.is_empty());
     }
 
-    /// PLAN.md § "Split planificador/ejecutor", oleada 1: `PlanCreated`
-    /// renders as the assistant's own text block, prefixed so the model
-    /// (and anyone reading the raw request) can tell it apart from an
-    /// ordinary reply.
+    /// Iteración pre-registrada del planner (2026-07-10): `PlanCreated`
+    /// renders as USER-role context — the old assistant-role render was
+    /// diagnosed as the degeneration artifact (the model treats "its
+    /// own" plan as having already answered; see the arm in
+    /// docs/sweep-matriz-4brazos-2026-07-10.md).
     #[test]
-    fn plan_created_renders_as_assistant_text_with_a_plan_prefix() {
+    fn plan_created_renders_as_user_context_with_a_plan_prefix() {
         let tactical = vec![
             AgentEvent::UserMessage {
                 text: "haz tres cosas".to_string(),
@@ -689,11 +696,14 @@ mod tests {
             MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
 
+        // Two user messages (text events don't group like tool blocks
+        // do) — the request, then the plan as user-role context.
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[1].role, Role::Assistant);
+        assert_eq!(messages[1].role, Role::User);
         match &messages[1].content[0] {
             ContentBlock::Text { text } => {
-                assert!(text.starts_with("Plan:\n"), "got: {text}");
+                assert!(text.starts_with("Plan for this request"), "got: {text}");
+                assert!(text.contains("you have NOT executed any of it yet"));
                 assert!(text.contains("2. editar"));
             }
             other => panic!("expected a Text block, got {other:?}"),

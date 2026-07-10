@@ -1374,6 +1374,26 @@ impl Engine {
             tracing::warn!("planner returned no usable text; proceeding without a plan");
             return Ok(false);
         }
+        // Iteración pre-registrada del planner (PLAN.md § "Split
+        // planificador/ejecutor"; ejecutada 2026-07-10): a plan with
+        // fewer than two numbered steps is discarded instead of
+        // persisted. The planning prompt itself asks for "just that
+        // single step" on trivial requests — but a single-step plan adds
+        // nothing the executor's first round wouldn't do anyway, costs
+        // prompt tokens, and the matrix sweep
+        // (docs/sweep-matriz-4brazos-2026-07-10.md) measured the
+        // plan-in-prompt as the trigger of a degeneration artifact
+        // precisely on trivial tasks (`no_tool` 15/15 → 6/15, all empty
+        // responses in the round right after the plan). Prose with no
+        // numbered steps counts as single-step: no structure worth
+        // paying for.
+        if count_numbered_steps(plan) < 2 {
+            tracing::info!(
+                "planner produced a single-step (or unstructured) plan; discarding it — \
+                 the executor's first round covers it without the plan-in-prompt cost"
+            );
+            return Ok(false);
+        }
 
         self.append_and_notify(
             session,
@@ -3048,6 +3068,21 @@ fn coerce_arguments_to_schema(arguments: &mut serde_json::Value, schema: &serde_
 /// only, deferred-loading style), minus the ability to call any of them.
 /// The triviality clause keeps `no_tool`/`single_tool` requests from
 /// being inflated with overhead plans.
+/// Counts lines that start (after leading whitespace) with `N.` or `N)`
+/// — the numbered-step shape `planning_system_prompt` asks for. Used by
+/// the single-step discard in [`Engine::attempt_planning_round`]; pure
+/// and free-standing so the counting rule is unit-testable on its own.
+fn count_numbered_steps(plan: &str) -> usize {
+    plan.lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            let digit_count = trimmed.chars().take_while(char::is_ascii_digit).count();
+            digit_count > 0
+                && trimmed[digit_count..].starts_with(['.', ')'])
+        })
+        .count()
+}
+
 fn planning_system_prompt(base: &str, stubs: &[ToolStub]) -> String {
     let mut tools_list = String::new();
     for stub in stubs {
@@ -5041,11 +5076,11 @@ mod tests {
         assert!(
             messages
                 .iter()
-                .any(|m| m.role == braze_types::Role::Assistant
+                .any(|m| m.role == braze_types::Role::User
                     && m.content.iter().any(
-                        |b| matches!(b, ContentBlock::Text { text } if text.starts_with("Plan:\n"))
+                        |b| matches!(b, ContentBlock::Text { text } if text.starts_with("Plan for this request"))
                     )),
-            "the plan must actually reach the rendered request, got: {messages:#?}"
+            "the plan must reach the rendered request as user-role context, got: {messages:#?}"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -5133,7 +5168,7 @@ mod tests {
             let requests = executor_requests.lock().unwrap();
             assert!(
                 requests[0].messages.iter().any(|m| m.content.iter().any(
-                    |b| matches!(b, ContentBlock::Text { text } if text.starts_with("Plan:\n1. echo hi"))
+                    |b| matches!(b, ContentBlock::Text { text } if text.contains("1. echo hi") && text.starts_with("Plan for this request"))
                 )),
                 "the executor's first request must contain the rendered plan"
             );
@@ -5309,7 +5344,7 @@ mod tests {
                 name: "echo".to_string(),
                 arguments: serde_json::json!({ "text": "should never run" }),
             },
-            CompletionEvent::TextDelta("1. hacer echo de hi".to_string()),
+            CompletionEvent::TextDelta("1. hacer echo de hi\n2. responder".to_string()),
             CompletionEvent::Done,
         ]]);
         let executor = ScriptedModel::new(vec![vec![
@@ -5347,9 +5382,79 @@ mod tests {
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                AgentEvent::PlanCreated { plan } if plan == "1. hacer echo de hi"
+                AgentEvent::PlanCreated { plan } if plan == "1. hacer echo de hi\n2. responder"
             )),
             "the planner's text must still be used as the plan"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Iteración pre-registrada del planner (2026-07-10): the numbered-
+    /// step counting rule the single-step discard keys on — `N.`/`N)`
+    /// after optional indentation; prose without numbers counts zero.
+    #[test]
+    fn count_numbered_steps_recognizes_dot_and_paren_forms_and_ignores_prose() {
+        assert_eq!(count_numbered_steps("1. leer\n2. editar\n3. verificar"), 3);
+        assert_eq!(count_numbered_steps("  1) leer\n  2) editar"), 2);
+        assert_eq!(count_numbered_steps("1. único paso"), 1);
+        assert_eq!(
+            count_numbered_steps("primero leo el archivo y después respondo"),
+            0
+        );
+        assert_eq!(count_numbered_steps("10. paso\n11. otro"), 2);
+    }
+
+    /// A single-step plan is discarded, not persisted — the executor's
+    /// first round covers a trivial request without paying the
+    /// plan-in-prompt cost (and without the degeneration artifact the
+    /// matrix sweep measured on exactly those tasks).
+    #[tokio::test]
+    async fn a_single_step_plan_is_discarded_and_the_turn_proceeds_without_it() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("1. responder al usuario".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("listo".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should succeed without the plan");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. })),
+            "a single-step plan must not be persisted"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { text } if text == "listo")),
+            "the executor must still answer normally"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

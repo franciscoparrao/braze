@@ -1782,6 +1782,25 @@ del plan con rol user como contexto en vez de assistant) con el mismo
 criterio A/B; si tampoco mueve `multi_step`/`error_recovery`, remoción
 completa.
 
+**Iteración pre-registrada: EJECUTADA (2026-07-10), pendiente su A/B.**
+La matriz de 4 brazos (`docs/sweep-matriz-4brazos-2026-07-10.md`) volvió
+la iteración decisiva: el planner solo RESTA 22pp (49.5% vs 71.6%
+baseline) y su modo de falla dominante es degeneración — respuestas
+vacías en la ronda inmediatamente posterior al plan, peor en tareas de
+respuesta de texto plano (`no_tool` 15/15 → 6/15); a 1b es letal (0/95,
+`docs/sweep-curva-multiescala-2026-07-10.partial-1b.json`). Los dos
+cambios pre-registrados se implementaron tal cual: (1)
+`count_numbered_steps` — un plan con <2 pasos numerados se descarta en
+`attempt_planning_round` en vez de persistirse (el prompt pide "un solo
+paso" para lo trivial, exactamente donde el plan-en-prompt dispara la
+degeneración); (2) `PlanCreated` se renderiza con **rol user** como
+contexto ("Plan for this request... you have NOT executed any of it
+yet") en vez de texto del assistant — el render viejo hacía que el
+modelo chico tratara "su propio" plan como si ya hubiera respondido.
+Falta el A/B (baseline / +plan nuevo, mismo diseño de la matriz);
+criterio intacto: si no mueve `multi_step`/`error_recovery`, remoción
+completa.
+
 ## Grupo O — la superficie de archivo usable (docs/AUDITORIA-2026-07-v3.md, 2026-07-06)
 
 La auditoría v3 (primera pasada SLM-first, no un bug-hunt) identificó que
