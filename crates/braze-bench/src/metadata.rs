@@ -32,6 +32,15 @@ pub struct RunMetadata {
     /// `braze_model::ollama_model_digest`. Empty when the sweep touches
     /// no Ollama backend.
     pub ollama_model_digests: Vec<OllamaModelDigest>,
+    /// The full display name of every backend row this sweep ran —
+    /// executor, `+plan:`/`+lead:` halves, AND the `+ablate:` suffix
+    /// with every active ablation key (H-17,
+    /// docs/AUDITORIA-2026-07-v5.md): without this, nothing at the run
+    /// level said "this sweep was an ablation experiment at all" — the
+    /// suffix only survived inside each row's `backend` string, where a
+    /// reader aggregating across sweeps can silently mix ablated and
+    /// unablated rows. Same order `--backends` listed them in.
+    pub backend_specs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

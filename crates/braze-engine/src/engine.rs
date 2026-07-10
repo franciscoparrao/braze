@@ -100,6 +100,14 @@ pub struct Engine {
     /// [`Engine::with_tactical_full_observations`] for `braze-bench`'s
     /// `+ablate:full-observations=N` (E1, docs/AUDITORIA-2026-07-v3.md).
     tactical_full_observations: usize,
+    /// Gates the ACI collapse of old observations — `false` renders every
+    /// tactical observation full regardless of age/size. See
+    /// [`Engine::with_observation_collapse_enabled`] (`+ablate:no-prune`).
+    observation_collapse_enabled: bool,
+    /// Gates tactical compaction entirely (both the event-count and the
+    /// token-budget triggers) — see
+    /// [`Engine::with_compaction_enabled`] (`+ablate:no-compaction`).
+    compaction_enabled: bool,
     /// Approximate token budget for the durable+tactical portion of the
     /// prompt (i.e. excluding `system_prompt`/tool schemas, which the
     /// caller should already have reserved headroom for when computing
@@ -288,6 +296,8 @@ impl Engine {
             max_tokens,
             tactical_compaction_threshold: DEFAULT_TACTICAL_COMPACTION_THRESHOLD,
             tactical_full_observations: crate::history::TACTICAL_FULL_OBSERVATIONS,
+            observation_collapse_enabled: true,
+            compaction_enabled: true,
             context_budget_tokens: None,
             best_of_n: 1,
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
@@ -325,6 +335,28 @@ impl Engine {
     /// shape as [`Engine::with_context_budget`].
     pub fn with_tactical_full_observations(mut self, full_observations: usize) -> Self {
         self.tactical_full_observations = full_observations;
+        self
+    }
+
+    /// Disables the ACI collapse of old observations entirely — every
+    /// tactical observation renders full, no matter how old or large
+    /// (opencode ítem 2 / `+ablate:no-prune`, docs/AUDITORIA-2026-07-v6.md):
+    /// the collapse is a central lever of the SLM-first thesis, and its
+    /// contribution can't be measured without a way to turn it OFF for a
+    /// bench row. `true` (the default) keeps the existing behavior.
+    /// Chainable, same shape as [`Engine::with_tactical_full_observations`].
+    pub fn with_observation_collapse_enabled(mut self, enabled: bool) -> Self {
+        self.observation_collapse_enabled = enabled;
+        self
+    }
+
+    /// Disables tactical compaction entirely — both the event-count and
+    /// the token-budget triggers (E1 / `+ablate:no-compaction`,
+    /// docs/AUDITORIA-2026-07-v6.md § roadmap). A long turn can then blow
+    /// the model's real context window; that's the ablation's point.
+    /// `true` (the default) keeps the existing behavior. Chainable.
+    pub fn with_compaction_enabled(mut self, enabled: bool) -> Self {
+        self.compaction_enabled = enabled;
         self
     }
 
@@ -1822,11 +1854,23 @@ impl Engine {
 
         let (durable, tactical) = self.compactor.split(&events);
 
-        let full_observations_budget = full_observations_byte_budget(self.context_budget_tokens);
-        let effective_full_observations = effective_tactical_full_observations(
-            self.tactical_full_observations,
-            self.context_budget_tokens,
-        );
+        // `+ablate:no-prune` (opencode ítem 2, docs/AUDITORIA-2026-07-v6.md):
+        // with the collapse disabled, every observation renders full —
+        // expressed as unbounded caps rather than a separate render path,
+        // so the (well-tested) render pipeline stays identical and only
+        // its limits move.
+        let (full_observations_budget, effective_full_observations) =
+            if self.observation_collapse_enabled {
+                (
+                    full_observations_byte_budget(self.context_budget_tokens),
+                    effective_tactical_full_observations(
+                        self.tactical_full_observations,
+                        self.context_budget_tokens,
+                    ),
+                )
+            } else {
+                (usize::MAX, usize::MAX)
+            };
         let effective_compaction_threshold = effective_tactical_compaction_threshold(
             self.tactical_compaction_threshold,
             self.context_budget_tokens,
@@ -1852,7 +1896,15 @@ impl Engine {
         // token-budget one.
         let compaction_would_help = tactical.len() > KEEP_RAW_TAIL;
 
-        if (over_event_count_threshold || over_token_budget) && compaction_would_help {
+        if (over_event_count_threshold || over_token_budget)
+            && compaction_would_help
+            // `+ablate:no-compaction` (E1): gates BOTH triggers (event
+            // count and token budget) — a long turn can then genuinely
+            // blow the model's real context, which is the point of the
+            // ablation: measuring what compaction is worth requires
+            // letting its absence hurt.
+            && self.compaction_enabled
+        {
             // A9 (docs/AUDITORIA-2026-07.md): previously this branch had
             // no log statement at all — the only trace of a compaction
             // having happened was the resulting `AgentEvent::CompactionOccurred`
@@ -6734,6 +6786,135 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
             "no budget configured: a single large event below the count threshold must not compact"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// E1 `+ablate:no-compaction` (docs/AUDITORIA-2026-07-v6.md § roadmap):
+    /// with compaction disabled, NEITHER trigger fires — here the event
+    /// count blows well past the threshold and still no
+    /// `CompactionOccurred` lands.
+    #[tokio::test]
+    async fn with_compaction_disabled_even_the_event_count_trigger_does_not_fire() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Well past DEFAULT_TACTICAL_COMPACTION_THRESHOLD (40) — and past
+        // its ×10 no-budget scaling too.
+        for i in 0..450 {
+            store
+                .append(
+                    &session,
+                    &AgentEvent::AssistantText {
+                        text: format!("evento {i}"),
+                    },
+                )
+                .await
+                .expect("seed events");
+        }
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_compaction_enabled(false);
+
+        engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "compaction disabled: no amount of events may trigger it"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `+ablate:no-prune` (opencode ítem 2): with the collapse disabled,
+    /// an old observation far beyond the full-observations window renders
+    /// FULL — no "[old observation collapsed:" marker anywhere.
+    #[tokio::test]
+    async fn with_collapse_disabled_old_observations_render_full() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // 8 tool-call pairs (16 events) — with TACTICAL_FULL_OBSERVATIONS
+        // = 5, the oldest 3 observations would normally collapse. Each
+        // observation is large enough that collapsing saves space (the
+        // collapse is skipped for tiny contents).
+        for i in 0..8 {
+            let id = format!("call-{i}");
+            store
+                .append(
+                    &session,
+                    &AgentEvent::AssistantToolCall {
+                        id: id.clone(),
+                        name: "read_file".to_string(),
+                        arguments: serde_json::json!({"path": format!("f{i}.txt")}),
+                    },
+                )
+                .await
+                .expect("seed call");
+            store
+                .append(
+                    &session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: id.clone(),
+                        result: braze_types::ToolResult {
+                            tool_call_id: id,
+                            content: format!("contenido {i}\n{}", "línea\n".repeat(100)),
+                            is_error: false,
+                        },
+                    },
+                )
+                .await
+                .expect("seed result");
+        }
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_observation_collapse_enabled(false);
+
+        let messages = engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let rendered: String = messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                braze_types::ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !rendered.contains("[old observation collapsed:"),
+            "collapse disabled: every observation must render full"
+        );
+        assert!(
+            rendered.contains("contenido 0"),
+            "the oldest observation's real content must be present"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

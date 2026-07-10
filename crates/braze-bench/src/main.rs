@@ -286,6 +286,13 @@ async fn run() -> Result<(), BenchError> {
                 &ollama_models,
             )
             .await,
+            // H-17: the resolved display name carries the full spec —
+            // executor, +plan:/+lead: halves, and the +ablate: suffix —
+            // so the run itself records which ablations were active.
+            backend_specs: specs
+                .iter()
+                .map(|(_, spec)| spec.display_name(&config))
+                .collect(),
         };
 
         report::write_json(&metadata, &results, output_path)?;

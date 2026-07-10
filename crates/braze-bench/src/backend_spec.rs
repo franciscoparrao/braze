@@ -329,6 +329,13 @@ impl BackendSpec {
         config: &Config,
         sampling: SamplingSpec,
     ) -> Result<Option<EscalatingBackend>, BenchError> {
+        // E1 `+ablate:no-lead`: the row keeps its `+lead:` display
+        // identity (so the A/B pairs up in the report) but runs the bare
+        // worker — measuring what the lead is worth by removing exactly
+        // it and nothing else.
+        if self.ablation().disable_lead {
+            return Ok(None);
+        }
         let Some(lead) = self.build_lead(config, sampling)? else {
             return Ok(None);
         };
@@ -433,7 +440,17 @@ impl BackendSpec {
                     model,
                     config.openrouter_base_url.clone(),
                 )
-                .with_temperature(sampling.temperature);
+                .with_temperature(sampling.temperature)
+                // H-2 (docs/AUDITORIA-2026-07-v5.md): this call was
+                // missing entirely — the bench always ran the backend's
+                // default (caching ON), so `Config::enable_prompt_caching
+                // = false` was honored by braze-cli but silently ignored
+                // here, and no `+ablate:no-caching` row was possible.
+                // Same precedence as every other lever: explicit ablation
+                // wins, else config.
+                .with_prompt_caching_enabled(
+                    config.enable_prompt_caching && !self.ablation().disable_prompt_caching,
+                );
                 if let Some(seed) = sampling.seed {
                     backend = backend.with_seed(seed);
                 }
@@ -490,10 +507,38 @@ pub struct AblationOverrides {
     /// `+ablate:lead-window=N` — overrides `Config::lead_escalation_turns`
     /// (clamped to at least 1).
     pub lead_escalation_turns: Option<usize>,
+    /// `+ablate:no-caching` — disables OpenRouter prompt-caching
+    /// breakpoints for this row (H-2, docs/AUDITORIA-2026-07-v5.md:
+    /// `build` never called `with_prompt_caching_enabled`, so
+    /// `Config::enable_prompt_caching = false` was honored in production
+    /// but silently ignored in the bench — and the "with vs without
+    /// caching" A/B the cache-token metrics exist for was inexpressible).
+    /// No-op for backends without explicit caching (Ollama, Anthropic).
+    pub disable_prompt_caching: bool,
+    /// `+ablate:no-prune` — disables the ACI collapse of old observations
+    /// to one line (opencode ítem 2 resto, docs/AUDITORIA-2026-07-v6.md §
+    /// backlog opencode): the collapse is a central lever of the
+    /// SLM-first thesis and couldn't be turned OFF to measure its
+    /// contribution. `Engine::with_observation_collapse_enabled(false)`.
+    pub disable_observation_collapse: bool,
+    /// `+ablate:no-planner` — runs a `+plan:` spec WITHOUT attaching its
+    /// planner (E1): the row keeps the same display identity (so the A/B
+    /// pairs up in the report) but measures the executor alone.
+    pub disable_planner: bool,
+    /// `+ablate:no-lead` — runs a `+lead:` spec WITHOUT the
+    /// `EscalatingBackend` wrapper (E1): worker alone, same identity.
+    pub disable_lead: bool,
+    /// `+ablate:no-compaction` — disables tactical compaction entirely
+    /// (threshold `usize::MAX`; E1). The token-budget trigger is also
+    /// bypassed for the row, so a long turn CAN blow the model's real
+    /// context — that's the point of the ablation: measuring what
+    /// compaction is worth means letting its absence hurt.
+    pub disable_compaction: bool,
 }
 
 impl AblationOverrides {
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
+         no-caching, no-prune, no-planner, no-lead, no-compaction, \
          best-of-n=N, tactical-window=N, tactical-threshold=N, full-observations=N, \
          lead-turns=N, lead-threshold=N, lead-window=N";
 
@@ -512,6 +557,11 @@ impl AblationOverrides {
                 "no-rescue" => out.disable_textual_rescue = true,
                 "no-post-edit-check" => out.disable_post_edit_check = true,
                 "strict-edit" => out.edit_strict_mode = true,
+                "no-caching" => out.disable_prompt_caching = true,
+                "no-prune" => out.disable_observation_collapse = true,
+                "no-planner" => out.disable_planner = true,
+                "no-lead" => out.disable_lead = true,
+                "no-compaction" => out.disable_compaction = true,
                 "best-of-n" => out.best_of_n = Some(Self::parse_usize(key, value)?),
                 "tactical-window" => out.tactical_window = Some(Self::parse_usize(key, value)?),
                 "tactical-threshold" => {
@@ -563,6 +613,21 @@ impl AblationOverrides {
         }
         if self.edit_strict_mode {
             parts.push("strict-edit".to_string());
+        }
+        if self.disable_prompt_caching {
+            parts.push("no-caching".to_string());
+        }
+        if self.disable_observation_collapse {
+            parts.push("no-prune".to_string());
+        }
+        if self.disable_planner {
+            parts.push("no-planner".to_string());
+        }
+        if self.disable_lead {
+            parts.push("no-lead".to_string());
+        }
+        if self.disable_compaction {
+            parts.push("no-compaction".to_string());
         }
         if let Some(n) = self.best_of_n {
             parts.push(format!("best-of-n={n}"));
@@ -965,6 +1030,52 @@ mod tests {
             spec.build_escalating(&config(), sampling())
                 .expect("plain spec must not error")
                 .is_none()
+        );
+    }
+
+    /// The five boolean levers of the ablation matrix (H-2 no-caching,
+    /// opencode-2 no-prune, E1 no-planner/no-lead/no-compaction) parse
+    /// and round-trip through the display name — the row identity a
+    /// results.json reader dedupes on.
+    #[test]
+    fn parses_the_ablation_matrix_boolean_keys_and_displays_them_back() {
+        let spec = BackendSpec::parse(
+            "ollama:qwen2.5:3b+ablate:no-caching;no-prune;no-planner;no-lead;no-compaction",
+        )
+        .unwrap();
+        let ablation = spec.ablation();
+        assert!(ablation.disable_prompt_caching);
+        assert!(ablation.disable_observation_collapse);
+        assert!(ablation.disable_planner);
+        assert!(ablation.disable_lead);
+        assert!(ablation.disable_compaction);
+        let display = spec.display_name(&config());
+        for key in ["no-caching", "no-prune", "no-planner", "no-lead", "no-compaction"] {
+            assert!(display.contains(key), "missing {key} in: {display}");
+        }
+    }
+
+    /// E1 `+ablate:no-lead`: the spec keeps its `+lead:` half (display
+    /// identity, ollama_models listing) but composes NO EscalatingBackend
+    /// — the worker runs bare, so the pair (with/without the suffix)
+    /// differs in exactly one lever.
+    #[test]
+    fn an_ablate_no_lead_spec_builds_the_bare_worker() {
+        let spec =
+            BackendSpec::parse("ollama:qwen2.5:3b+lead:ollama:qwen2.5:7b+ablate:no-lead").unwrap();
+        assert!(
+            spec.build_escalating(&config(), sampling())
+                .expect("must build")
+                .is_none(),
+            "no-lead must suppress the EscalatingBackend wrapper"
+        );
+        let model = spec
+            .build_agent_model(&config(), sampling())
+            .expect("must build");
+        assert_eq!(
+            model.name(),
+            "ollama",
+            "the bare worker, not escalating(...)"
         );
     }
 

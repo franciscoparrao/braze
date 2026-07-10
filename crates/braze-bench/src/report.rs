@@ -357,6 +357,10 @@ mod tests {
             suite_fingerprint: "deadbeef".to_string(),
             braze_git_commit: Some("abc123".to_string()),
             ollama_model_digests: vec![],
+            backend_specs: vec![
+                "ollama:qwen2.5:3b".to_string(),
+                "ollama:qwen2.5:3b+lead:ollama:x+ablate:no-lead".to_string(),
+            ],
         }
     }
 
@@ -383,6 +387,12 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&contents).unwrap();
         assert_eq!(parsed["metadata"]["suite_path"], "suites/default.toml");
         assert_eq!(parsed["metadata"]["repetitions"], 3);
+        // H-17 (docs/AUDITORIA-2026-07-v5.md): the run-level record of
+        // which backend rows (ablations included) produced this file.
+        assert_eq!(
+            parsed["metadata"]["backend_specs"][1],
+            "ollama:qwen2.5:3b+lead:ollama:x+ablate:no-lead"
+        );
         assert_eq!(parsed["results"].as_array().unwrap().len(), 1);
         assert_eq!(parsed["results"][0]["task_id"], "t");
 

@@ -199,7 +199,13 @@ pub async fn run_task(
     )
     .with_tactical_compaction_threshold(tactical_compaction_threshold)
     .with_best_of_n(best_of_n)
-    .with_textual_rescue_enabled(textual_rescue_enabled);
+    .with_textual_rescue_enabled(textual_rescue_enabled)
+    // E1 + opencode ítem 2 (docs/AUDITORIA-2026-07-v6.md § roadmap
+    // Paquete 1): the two levers the paper's ablation matrix couldn't
+    // turn off before — the ACI collapse (`+ablate:no-prune`) and
+    // tactical compaction (`+ablate:no-compaction`).
+    .with_observation_collapse_enabled(!ablation.disable_observation_collapse)
+    .with_compaction_enabled(!ablation.disable_compaction);
 
     if let Some(full_observations) = ablation.tactical_full_observations {
         engine = engine.with_tactical_full_observations(full_observations);
@@ -212,7 +218,12 @@ pub async fn run_task(
     // PLAN.md § "Split planificador/ejecutor", oleada 4: a spec with a
     // `+plan:` suffix runs the same engine with the planner attached —
     // baseline and planned variant differ in exactly one thing.
-    if let Some(planner) = spec.build_planner(config, sampling)? {
+    // `+ablate:no-planner` (E1) runs the row WITHOUT attaching it while
+    // keeping the `+plan:` display identity, so the pair lines up in the
+    // report as the exact same config minus one lever.
+    if !ablation.disable_planner
+        && let Some(planner) = spec.build_planner(config, sampling)?
+    {
         engine = engine.with_planner(planner);
     }
 
