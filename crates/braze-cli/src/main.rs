@@ -59,8 +59,10 @@ async fn main() -> ExitCode {
 /// `approval_tx` (the sending half of the channel `braze_tui::run`'s
 /// caller also holds the receiving half of) rather than blocking on
 /// stdin — same session-store persistence, different question channel.
+#[allow(clippy::too_many_arguments)] // composition-root helper: one param per collaborator
 fn build_permission_guard(
     cwd: &std::path::Path,
+    references: &[braze_config::ReferenceConfig],
     live_session: std::sync::Arc<std::sync::Mutex<braze_types::SessionId>>,
     store: std::sync::Arc<dyn braze_session::SessionStore>,
     replayed_keys: &[braze_types::PermissionKey],
@@ -68,8 +70,20 @@ fn build_permission_guard(
     supervised: bool,
     approval_tx: tokio::sync::mpsc::UnboundedSender<braze_tui::ApprovalRequest>,
 ) -> braze_permissions::PermissionGuard {
-    let allowlist_for_classifier = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
-    let allowlist_for_guard = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
+    // opencode-10 (docs/opencode-a-braze.md § 10): every configured
+    // reference directory is an extra allowlist root — OpenCode's
+    // implicit `external_directory: "allow"` — so reading the docs the
+    // system prompt just advertised doesn't cost a confirmation each.
+    let with_references = |mut allowlist: braze_permissions::WorkdirAllowlist| {
+        for reference in references {
+            allowlist = allowlist.with_extra_root(reference.path.clone());
+        }
+        allowlist
+    };
+    let allowlist_for_classifier =
+        with_references(braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf()));
+    let allowlist_for_guard =
+        with_references(braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf()));
     // `--supervised`: every action goes through the confirmation prompt
     // below, regardless of what `DefaultClassifier` would normally rate
     // it — see `AlwaysIrreversibleClassifier`'s doc comment.
@@ -325,6 +339,7 @@ async fn build_engine(
     // `replayed_keys`, seeded from the same session's own prior decisions.
     let local_guard = build_permission_guard(
         cwd,
+        &config.references,
         std::sync::Arc::clone(&live_session),
         std::sync::Arc::clone(&store),
         &replayed_keys,
@@ -364,6 +379,7 @@ async fn build_engine(
     for server in &config.mcp_servers {
         let mcp_guard = build_permission_guard(
             cwd,
+            &config.references,
             std::sync::Arc::clone(&live_session),
             std::sync::Arc::clone(&store),
             &replayed_keys,
@@ -397,13 +413,24 @@ async fn build_engine(
     // constant, so they can be tuned per backend without recompiling.
     let compactor = braze_session::SimpleContextCompactor::new(config.tactical_window);
 
-    // D1 (docs/AUDITORIA-2026-07-v3.md): only the Ollama executor gets a
-    // model-name hint — Anthropic/OpenRouter's native tool-calling needs
-    // no textual fallback example.
-    let model_hint_for_prompt =
-        (config.default_backend == "ollama").then(|| config.ollama_model.clone());
+    // D1 + I-4 (docs/AUDITORIA-2026-07-v6.md): the family hint is
+    // name-based, not backend-based — the GLM template leak (U-15/U-16)
+    // was observed via OpenRouter, so gating the hint on `backend ==
+    // "ollama"` withheld it exactly where it was needed. Every backend
+    // passes its model name; `ModelFamily::from_model_name` yields no
+    // hint for unrecognized names (Anthropic models included).
+    let model_hint_for_prompt = match config.default_backend.as_str() {
+        "ollama" => Some(config.ollama_model.clone()),
+        "openrouter" => config.openrouter_model.clone(),
+        "anthropic" => config.anthropic_model.clone(),
+        _ => None,
+    };
     let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
-        braze_config::default_system_prompt(cwd, model_hint_for_prompt.as_deref())
+        braze_config::default_system_prompt(
+            cwd,
+            model_hint_for_prompt.as_deref(),
+            &config.references,
+        )
     });
 
     // Only Ollama has a small, fixed context window worth budgeting for

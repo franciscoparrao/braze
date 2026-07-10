@@ -153,13 +153,17 @@ pub async fn run_task(
     // prompt with no tool-use guidance measured a different (worse)
     // system than the one users actually run. D1
     // (docs/AUDITORIA-2026-07-v3.md): mirrors production's model-family
-    // hint too, scoped the same way (Ollama executor only) — otherwise a
-    // sweep would measure a *different*, hint-free prompt than what a
-    // real `braze` invocation with this same config actually sends.
-    let model_hint = spec
-        .executor_is_ollama()
-        .then(|| spec.executor_model_name(config));
-    let system_prompt = braze_config::default_system_prompt(sandbox.path(), model_hint.as_deref());
+    // hint. I-4 (docs/AUDITORIA-2026-07-v6.md): the hint is name-based
+    // now — every executor passes its model name and
+    // `ModelFamily::from_model_name` decides (Generic = no hint), same
+    // ungating braze-cli got; an OpenRouter-served GLM/Qwen needs its
+    // native-template hint exactly like an Ollama-served one.
+    let model_hint = Some(spec.executor_model_name(config));
+    // No references (opencode-10): the bench sandbox is hermetic by
+    // design — a user's reference dirs leaking into the measured system
+    // prompt would make pass rates depend on local config.
+    let system_prompt =
+        braze_config::default_system_prompt(sandbox.path(), model_hint.as_deref(), &[]);
 
     // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget
     // — without it, a bench pass rate for an Ollama backend measured a

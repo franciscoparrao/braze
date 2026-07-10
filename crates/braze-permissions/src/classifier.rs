@@ -182,29 +182,25 @@ fn is_rm_rf(command: &[String]) -> bool {
     has_recursive && has_force
 }
 
-/// `env` is only safe when it has no trailing command to execute — i.e.
-/// every argument after `env` is a `NAME=VALUE` assignment (or there are
-/// none at all, the "print the environment" form). `env <program> ...`
-/// (with or without leading assignments) runs `<program>` as a child
-/// process, which is full, unaudited command execution wearing a
-/// read-only-looking mask — `env rm -rf /tmp/x` must never slip through
-/// as Reversible the way a bare `rm -rf` correctly does not.
-fn is_safe_env(command: &[String]) -> bool {
-    command[1..].iter().all(|arg| is_env_assignment(arg))
-}
-
-fn is_env_assignment(arg: &str) -> bool {
-    match arg.split_once('=') {
-        Some((name, _)) => {
-            !name.is_empty()
-                && name
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        }
-        None => false,
-    }
+/// `env` is never auto-approved (H-6, docs/AUDITORIA-2026-07-v5.md).
+/// Its two shapes are both problematic:
+///
+/// - **No trailing command** (bare `env`, or only `NAME=VALUE`
+///   assignments): PRINTS THE ENTIRE ENVIRONMENT — API keys included —
+///   straight into the model's context, and from there into the session
+///   log persisted on disk. The previous version classified exactly this
+///   shape as safe ("read-only", vacuously true for zero args), which is
+///   backwards: this is the secret-leaking shape.
+/// - **With a trailing command** (`env VAR=x program ...`): runs
+///   `program` as a child process — full, unaudited command execution
+///   wearing a read-only-looking mask. `env rm -rf /tmp/x` must never
+///   slip through as Reversible when a bare `rm -rf` correctly does not.
+///
+/// Classifying the wrapped command recursively would recover the benign
+/// `env VAR=x ls` case, but the marginal convenience isn't worth the
+/// extra recursion surface — confirmation for every `env` is cheap.
+fn is_safe_env(_command: &[String]) -> bool {
+    false
 }
 
 /// `find` is safe unless any argument requests a mutating/side-effecting
@@ -403,7 +399,9 @@ mod tests {
             &["diff", "a", "b"][..],
             &["whoami"][..],
             &["date"][..],
-            &["env"][..],
+            // `env` removed from this list — H-6: it dumps the entire
+            // environment (secrets included); see
+            // `bare_env_and_env_with_only_assignments_require_confirmation`.
             &["which", "cargo"][..],
             &["true"][..],
             &["false"][..],
@@ -503,8 +501,13 @@ mod tests {
         assert_eq!(classifier().classify(&action), Reversibility::Irreversible);
     }
 
+    /// H-6 (docs/AUDITORIA-2026-07-v5.md): bare `env` (and the
+    /// assignments-only form, which also dumps the environment) prints
+    /// every env var — API keys included — into the model's context and
+    /// the on-disk session log. It used to be classified Reversible;
+    /// now no `env` shape is auto-approved.
     #[test]
-    fn bare_env_and_env_with_only_assignments_are_reversible() {
+    fn bare_env_and_env_with_only_assignments_require_confirmation() {
         for parts in [
             &["env"][..],
             &["env", "FOO=bar"][..],
@@ -512,8 +515,8 @@ mod tests {
         ] {
             assert_eq!(
                 classifier().classify(&shell(parts)),
-                Reversibility::Reversible,
-                "expected {parts:?} to be Reversible"
+                Reversibility::Irreversible,
+                "expected {parts:?} to require confirmation (environment dump leaks secrets)"
             );
         }
     }

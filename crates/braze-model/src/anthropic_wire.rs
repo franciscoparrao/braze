@@ -252,6 +252,15 @@ enum BlockState {
 pub(crate) struct AnthropicStreamState {
     blocks: HashMap<u64, BlockState>,
     input_tokens: u32,
+    /// `usage.cache_read_input_tokens` from `message_start` (H-18,
+    /// docs/AUDITORIA-2026-07-v5.md). `None` when the field is absent
+    /// from the payload — never a fabricated `Some(0)`, matching
+    /// [`CompletionEvent::Usage`]'s "not reported" contract.
+    cache_read_tokens: Option<u32>,
+    /// `usage.cache_creation_input_tokens` from `message_start` — the
+    /// Anthropic-native name for what the Usage event calls cache
+    /// *write* tokens. Same `None`-means-absent contract.
+    cache_write_tokens: Option<u32>,
     output_tokens: u32,
     /// Captured from `message_delta.delta.stop_reason` — `"max_tokens"`
     /// means the response (including, possibly, a tool call's JSON
@@ -274,6 +283,8 @@ impl AnthropicStreamState {
         Self {
             blocks: HashMap::new(),
             input_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             output_tokens: 0,
             stop_reason: None,
             done: false,
@@ -287,13 +298,24 @@ impl AnthropicStreamState {
     pub fn handle_event(&mut self, json: &Value) -> Vec<CompletionEvent> {
         match json.get("type").and_then(Value::as_str) {
             Some("message_start") => {
-                if let Some(tokens) = json
-                    .get("message")
-                    .and_then(|m| m.get("usage"))
-                    .and_then(|u| u.get("input_tokens"))
-                    .and_then(Value::as_u64)
-                {
-                    self.input_tokens = tokens as u32;
+                if let Some(usage) = json.get("message").and_then(|m| m.get("usage")) {
+                    if let Some(tokens) =
+                        usage.get("input_tokens").and_then(Value::as_u64)
+                    {
+                        self.input_tokens = tokens as u32;
+                    }
+                    // H-18 (docs/AUDITORIA-2026-07-v5.md): the Anthropic
+                    // API reports cache traffic in `message_start`'s
+                    // usage, under its own names (`cache_creation_...`
+                    // is the Usage event's cache *write*).
+                    self.cache_read_tokens = usage
+                        .get("cache_read_input_tokens")
+                        .and_then(Value::as_u64)
+                        .map(|t| t as u32);
+                    self.cache_write_tokens = usage
+                        .get("cache_creation_input_tokens")
+                        .and_then(Value::as_u64)
+                        .map(|t| t as u32);
                 }
                 Vec::new()
             }
@@ -321,15 +343,27 @@ impl AnthropicStreamState {
                 self.done = true;
                 vec![
                     CompletionEvent::Usage {
-                        input_tokens: self.input_tokens,
+                        // The Usage event's contract is OpenRouter's
+                        // semantics: cache read/write tokens are PART of
+                        // `input_tokens`, re-billed at their own rate
+                        // (see `TaskResult::estimated_cost_usd`'s
+                        // formula, which subtracts them back out).
+                        // Anthropic reports them EXCLUDED from
+                        // `usage.input_tokens`, so add them here — a raw
+                        // pass-through would make the cost formula's
+                        // `uncached = input - read - write` go negative
+                        // (clamped to 0) and drop the uncached input
+                        // cost entirely.
+                        input_tokens: self.input_tokens
+                            + self.cache_read_tokens.unwrap_or(0)
+                            + self.cache_write_tokens.unwrap_or(0),
                         output_tokens: self.output_tokens,
                         stop_reason: self.stop_reason.clone(),
-                        // Anthropic-native caching is out of scope for
-                        // this pass (docs/usability-log-2026-07-07-si2.md
-                        // — v1 targets the OpenRouter path, which is how
-                        // this project actually gets used).
-                        cache_read_tokens: None,
-                        cache_write_tokens: None,
+                        // H-18 (docs/AUDITORIA-2026-07-v5.md): captured
+                        // from `message_start` — `None` only when the
+                        // API omitted the fields.
+                        cache_read_tokens: self.cache_read_tokens,
+                        cache_write_tokens: self.cache_write_tokens,
                         // Only `EscalatingBackend` (braze-model::escalation)
                         // ever sets this — a plain wire backend has no
                         // notion of escalation (H-3, docs/AUDITORIA-2026-07-v5.md).
@@ -625,15 +659,68 @@ mod tests {
                 input_tokens,
                 output_tokens,
                 stop_reason,
+                cache_read_tokens,
+                cache_write_tokens,
                 ..
             } => {
                 assert_eq!(*input_tokens, 10);
                 assert_eq!(*output_tokens, 5);
                 assert_eq!(stop_reason.as_deref(), Some("end_turn"));
+                // H-18: a payload without the cache fields reports
+                // `None` ("not reported"), never a fabricated `Some(0)`.
+                assert_eq!(*cache_read_tokens, None);
+                assert_eq!(*cache_write_tokens, None);
             }
             other => panic!("expected Usage, got {other:?}"),
         }
         assert!(matches!(all_events[3], CompletionEvent::Done));
+    }
+
+    /// H-18 (docs/AUDITORIA-2026-07-v5.md): Anthropic reports cache
+    /// traffic in `message_start`'s usage, EXCLUDED from
+    /// `input_tokens` — the emitted Usage must map
+    /// `cache_creation_input_tokens` → cache *write*, and re-add both
+    /// into `input_tokens` to honor the event's OpenRouter-semantics
+    /// contract (cache tokens are part of input; the cost formula
+    /// subtracts them back out).
+    #[test]
+    fn stream_state_maps_anthropic_native_cache_tokens_into_usage() {
+        let mut state = AnthropicStreamState::new();
+        let events_json = [
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {
+                    "input_tokens": 7,
+                    "cache_read_input_tokens": 100,
+                    "cache_creation_input_tokens": 20
+                }}
+            }),
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 5}
+            }),
+            serde_json::json!({"type": "message_stop"}),
+        ];
+
+        let mut all_events = Vec::new();
+        for json in &events_json {
+            all_events.extend(state.handle_event(json));
+        }
+
+        match &all_events[0] {
+            CompletionEvent::Usage {
+                input_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                ..
+            } => {
+                assert_eq!(*input_tokens, 127, "7 uncached + 100 read + 20 written");
+                assert_eq!(*cache_read_tokens, Some(100));
+                assert_eq!(*cache_write_tokens, Some(20));
+            }
+            other => panic!("expected Usage, got {other:?}"),
+        }
     }
 
     #[test]

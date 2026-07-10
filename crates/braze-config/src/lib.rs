@@ -31,7 +31,10 @@ mod paths;
 mod prompt;
 
 pub use api_key::ApiKey;
-pub use config::{Config, FormatterConfig, McpServerConfigStub, ModelPricing, default_formatters};
+pub use config::{
+    Config, FormatterConfig, McpServerConfigStub, ModelPricing, ReferenceConfig,
+    default_formatters,
+};
 pub use error::ConfigError;
 pub use overrides::ConfigOverrides;
 pub use paths::{config_file_path, default_session_dir};

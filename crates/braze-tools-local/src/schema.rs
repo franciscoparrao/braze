@@ -92,6 +92,10 @@ pub fn schema_for(name: &str) -> Option<ToolSchema> {
                 "content": {
                     "type": "string",
                     "description": "Full content to write to the file."
+                },
+                "allow_shrink": {
+                    "type": "boolean",
+                    "description": "Required (true) to overwrite an existing file with content much smaller than its current size — such writes are refused otherwise, before touching disk. Only set it when you intend to discard most of the file."
                 }
             },
             "required": ["path", "content"],

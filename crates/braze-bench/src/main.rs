@@ -162,6 +162,37 @@ async fn run() -> Result<(), BenchError> {
         .map(|raw| BackendSpec::parse(raw).map(|spec| (raw.clone(), spec)))
         .collect::<Result<_, _>>()?;
 
+    // H-13 (docs/AUDITORIA-2026-07-v5.md): `--top-p`/`--top-k`/
+    // `--repeat-penalty` only reach Ollama builders — a mixed sweep
+    // that sets them compares different sampling regimes in up to 3
+    // unflagged dimensions. Warn once per affected spec up front (not
+    // per task — that would repeat it `tasks × repetitions` times), so
+    // the imbalance is visible in the sweep log next to the results it
+    // taints.
+    let ollama_only_knobs: Vec<&str> = [
+        cli.top_p.map(|_| "--top-p"),
+        cli.top_k.map(|_| "--top-k"),
+        cli.repeat_penalty.map(|_| "--repeat-penalty"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !ollama_only_knobs.is_empty() {
+        for (_, spec) in &specs {
+            let ignoring = spec.non_ollama_halves();
+            if !ignoring.is_empty() {
+                eprintln!(
+                    "braze-bench: advertencia: {} solo aplican a backends Ollama — '{}' los \
+                     ignora en: {}. Ese brazo corre con el sampling default de su proveedor \
+                     en esas dimensiones.",
+                    ollama_only_knobs.join("/"),
+                    spec.display_name(&config),
+                    ignoring.join(", ")
+                );
+            }
+        }
+    }
+
     let mut results: Vec<TaskResult> = Vec::new();
     let task_timeout = Duration::from_secs(cli.task_timeout_secs);
     if cli.repetitions > 1 {

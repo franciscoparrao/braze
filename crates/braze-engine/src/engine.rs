@@ -728,10 +728,32 @@ impl Engine {
         // probability by `best_of_n`, backwards from what this technique
         // is for. Vote among whichever candidates actually succeeded;
         // only propagate an error if every single one failed.
+        //
+        // P1.4 (docs/AUDITORIA-2026-07-v6.md): candidates run
+        // concurrently — they are independent completions of the same
+        // request, deltas are suppressed (each gets its own
+        // `NoopObserver`; the caller's `observer` only ever sees the
+        // winner's text, below), and the vote's tie-break needs attempt
+        // ORDER, not attempt timing, which `join_all`'s input-order
+        // result preserves. The wall-clock win is real only on cloud
+        // backends — a local Ollama server serializes requests unless
+        // `OLLAMA_NUM_PARALLEL > 1`, so there this is at best neutral.
+        let attempts = futures::future::join_all((0..self.best_of_n).map(|attempt| {
+            let req = req.clone();
+            async move {
+                let mut candidate_observer = braze_events::NoopObserver;
+                (
+                    attempt,
+                    self.complete_once(req, &mut candidate_observer, false).await,
+                )
+            }
+        }))
+        .await;
+
         let mut candidates = Vec::with_capacity(self.best_of_n);
         let mut last_error = None;
-        for attempt in 0..self.best_of_n {
-            match self.complete_once(req.clone(), observer, false).await {
+        for (attempt, result) in attempts {
+            match result {
                 Ok(outcome) => {
                     tracing::debug!(
                         attempt,

@@ -89,6 +89,31 @@ pub struct ModelPricing {
     pub cache_write_usd_per_mtok: Option<f64>,
 }
 
+/// Un directorio de referencia fuera del working directory
+/// (opencode-10, docs/opencode-a-braze.md § 10) — el equivalente braze
+/// de las `references` de OpenCode, en su versión mínima:
+///
+/// - `path` se agrega como raíz extra del `WorkdirAllowlist`
+///   ([`braze_permissions::WorkdirAllowlist::with_extra_root`] es el
+///   seam que existía para exactamente esto), así el clasificador trata
+///   acciones ahí como dentro del workdir en vez de pedir confirmación
+///   por cada lectura.
+/// - `description` (si está) se anuncia en el system prompt: "un SLM no
+///   sabe dónde buscar" — decirle qué hay en ese directorio es steering
+///   barato. Una referencia SIN descripción queda permitida pero no
+///   anunciada — el equivalente funcional del `hidden: true` de
+///   OpenCode, que por eso no se replica como campo aparte.
+///
+/// Un `path` relativo se resuelve contra el cwd de la sesión (misma
+/// regla que el resto del allowlist) — para un config global como
+/// `~/.config/braze/config.json`, conviene usar rutas absolutas.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReferenceConfig {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
 /// Tabla default, fechada **2026-07-09** — los precios de API envejecen;
 /// al agregar un modelo nuevo a los sweeps, agregar su entrada acá (o en
 /// el config file) con el precio vigente. Un modelo sin entrada produce
@@ -405,6 +430,14 @@ pub struct Config {
     /// [`default_model_pricing`] (fechados; los precios envejecen).
     #[serde(default = "default_model_pricing")]
     pub model_pricing: Vec<ModelPricing>,
+    /// Directorios de referencia fuera del working directory
+    /// (opencode-10, docs/opencode-a-braze.md § 10): cada `path` entra al
+    /// `WorkdirAllowlist` (lecturas/escrituras ahí clasifican como dentro
+    /// del workdir), y los que traen `description` se anuncian en el
+    /// system prompt — el steering "aquí hay docs del API en ../docs"
+    /// que un SLM no puede inferir solo. Ver [`ReferenceConfig`].
+    #[serde(default)]
+    pub references: Vec<ReferenceConfig>,
 }
 
 /// Default helper for `Config::tool_output_max_bytes` — matches the
@@ -475,6 +508,7 @@ impl Default for Config {
             tool_output_max_lines: None,
             formatters: default_formatters(),
             model_pricing: default_model_pricing(),
+            references: Vec::new(),
         }
     }
 }
@@ -705,6 +739,9 @@ impl Config {
         if let Some(v) = overrides.model_pricing {
             self.model_pricing = v;
         }
+        if let Some(v) = overrides.references {
+            self.references = v;
+        }
     }
 
     /// Resuelve la entrada de pricing para `(backend, model)`: el backend
@@ -882,6 +919,34 @@ mod tests {
             config.system_prompt.as_deref(),
             Some("Eres un asistente de prueba.")
         );
+    }
+
+    /// opencode-10 (docs/opencode-a-braze.md § 10): `references` load
+    /// from the config file, `description` optional; default is empty.
+    #[test]
+    fn references_load_from_the_config_file() {
+        let dir = temp_dir("references_load_from_the_config_file");
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"references": [
+                {"path": "/home/user/api-docs", "description": "API docs"},
+                {"path": "/home/user/scratch"}
+            ]}"#,
+        )
+        .unwrap();
+
+        let config = Config::load_with(Some(&path), no_env()).unwrap();
+        assert_eq!(config.references.len(), 2);
+        assert_eq!(
+            config.references[0].path,
+            PathBuf::from("/home/user/api-docs")
+        );
+        assert_eq!(config.references[0].description.as_deref(), Some("API docs"));
+        assert_eq!(config.references[1].description, None);
+        assert!(Config::default().references.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

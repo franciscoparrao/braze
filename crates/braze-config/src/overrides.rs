@@ -105,6 +105,11 @@ pub struct ConfigOverrides {
     /// file-only posture as `formatters`, and for the same reason.
     #[serde(default)]
     pub model_pricing: Option<Vec<crate::config::ModelPricing>>,
+    /// External reference directories (opencode-10,
+    /// docs/opencode-a-braze.md § 10) — full replacement, same file-only
+    /// posture as `formatters`/`model_pricing`, and for the same reason.
+    #[serde(default)]
+    pub references: Option<Vec<crate::config::ReferenceConfig>>,
 }
 
 impl ConfigOverrides {

@@ -23,10 +23,19 @@ use std::path::Path;
 /// example in the system prompt, in the model's own native syntax,
 /// before it generates anything.
 ///
-/// `Generic` — everything unrecognized, including Anthropic/OpenRouter
-/// models — adds no hint: those APIs' native tool-calling doesn't need a
-/// textual fallback example, and guessing wrong for an unrecognized
-/// Ollama model risks nudging it toward a syntax it was never trained on.
+/// `Generic` — everything unrecognized — adds no hint: guessing wrong
+/// for an unrecognized model risks nudging it toward a syntax it was
+/// never trained on. That includes Gemma, deliberately (I-4,
+/// docs/AUDITORIA-2026-07-v6.md): no leak grammar has been observed for
+/// it in any live session (U-20 was a capability failure, not a template
+/// leak), so there's nothing evidence-based to hint.
+///
+/// Note the family inference is name-based, NOT backend-based — an
+/// OpenRouter-served Qwen or GLM overfits to its native template exactly
+/// like an Ollama-served one does (the GLM leak U-15/U-16 was observed
+/// *via OpenRouter*); which backend transports the tokens doesn't change
+/// what the weights were trained on. The old backend gating lived at the
+/// call sites and is gone (I-4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelFamily {
     /// qwen2.5/Hermes-style tagged JSON:
@@ -36,6 +45,12 @@ enum ModelFamily {
     /// code-carrying arguments):
     /// `<function=name><parameter=key>value</parameter></function>`.
     Qwen3CoderXml,
+    /// GLM's arg-tag grammar, observed live leaking as text via
+    /// OpenRouter (`z-ai/glm-5.2`, U-15/U-16,
+    /// docs/usability-log-2026-07-07-si2.md — braze-engine carries a
+    /// dedicated rescue rung for it, `parse_glm_arg_tag_tool_call`):
+    /// `tool_name<arg_key>key</arg_key><arg_value>value</arg_value>`.
+    GlmArgTags,
     Generic,
 }
 
@@ -50,6 +65,8 @@ impl ModelFamily {
             ModelFamily::Qwen3CoderXml
         } else if name.contains("qwen") {
             ModelFamily::QwenTagged
+        } else if name.contains("glm") {
+            ModelFamily::GlmArgTags
         } else {
             ModelFamily::Generic
         }
@@ -78,6 +95,11 @@ impl ModelFamily {
                  instead of describing it in prose (the parser tolerates the \
                  grammar's usual newlines between tags too).",
             ),
+            ModelFamily::GlmArgTags => Some(
+                "If your tool-calling template isn't active, emit a call as \
+                 tool_name<arg_key>arg_name</arg_key><arg_value>value</arg_value> \
+                 instead of describing it in prose.",
+            ),
             ModelFamily::Generic => None,
         }
     }
@@ -87,6 +109,12 @@ impl ModelFamily {
 /// it. `model_name` (Ollama's `family[:tag]` naming; `None` for
 /// Anthropic/OpenRouter or when no specific model is pinned) picks an
 /// optional family-specific tool-call hint — see [`ModelFamily`].
+/// `references` (opencode-10, docs/opencode-a-braze.md § 10) advertises
+/// the configured external reference directories that carry a
+/// `description` — "un SLM no sabe dónde buscar"; a directory it was
+/// never told about might as well not exist. Description-less entries
+/// are allowlisted but not advertised (see [`crate::ReferenceConfig`]);
+/// callers with no references (braze-bench's sandbox) pass `&[]`.
 ///
 /// Earlier versions of this shipped a single generic sentence with no
 /// tool-use guidance, no anti-loop rules, and no working directory — the
@@ -102,12 +130,38 @@ impl ModelFamily {
 /// save a file, it kept restating the plan ("Voy a proceder con estos
 /// pasos ahora") across several turns, even after explicit confirmation,
 /// without ever emitting the `write_file` call.
-pub fn default_system_prompt(cwd: &Path, model_name: Option<&str>) -> String {
+pub fn default_system_prompt(
+    cwd: &Path,
+    model_name: Option<&str>,
+    references: &[crate::ReferenceConfig],
+) -> String {
     let family_hint = model_name
         .map(ModelFamily::from_model_name)
         .and_then(ModelFamily::tool_call_hint)
         .map(|hint| format!("\n- {hint}"))
         .unwrap_or_default();
+
+    let described: Vec<&crate::ReferenceConfig> = references
+        .iter()
+        .filter(|reference| reference.description.is_some())
+        .collect();
+    let references_section = if described.is_empty() {
+        String::new()
+    } else {
+        let mut section =
+            String::from("\n\nReference directories (outside the working directory, also allowed):\n");
+        for reference in described {
+            section.push_str(&format!(
+                "- {}: {}\n",
+                reference.path.display(),
+                reference.description.as_deref().unwrap_or_default()
+            ));
+        }
+        // The trailing newline would dangle at the very end of the
+        // prompt; the section reads as a block either way.
+        section.pop();
+        section
+    };
 
     format!(
         "You are braze, an agentic CLI assistant. Working directory: {}.\n\
@@ -124,7 +178,7 @@ pub fn default_system_prompt(cwd: &Path, model_name: Option<&str>) -> String {
          command, edit something), call the tool for it in the same turn. \
          Do not just describe or restate the plan — an action you only \
          narrate never actually happens.\n\
-         - Relative paths are resolved against the working directory above.{family_hint}",
+         - Relative paths are resolved against the working directory above.{family_hint}{references_section}",
         cwd.display()
     )
 }
@@ -180,14 +234,14 @@ mod tests {
 
     #[test]
     fn default_system_prompt_includes_cwd_and_anti_loop_guidance() {
-        let prompt = default_system_prompt(Path::new("/home/user/project"), None);
+        let prompt = default_system_prompt(Path::new("/home/user/project"), None, &[]);
         assert!(prompt.contains("/home/user/project"));
         assert!(prompt.contains("Never call the same tool"));
     }
 
     #[test]
     fn default_system_prompt_tells_the_model_to_act_not_just_narrate() {
-        let prompt = default_system_prompt(Path::new("/home/user/project"), None);
+        let prompt = default_system_prompt(Path::new("/home/user/project"), None, &[]);
         assert!(prompt.contains("call the tool for it in the same turn"));
     }
 
@@ -195,36 +249,88 @@ mod tests {
 
     #[test]
     fn no_model_name_gets_no_family_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), None);
+        let prompt = default_system_prompt(Path::new("/p"), None, &[]);
         assert!(!prompt.contains("tool_call"));
         assert!(!prompt.contains("<function="));
     }
 
     #[test]
     fn an_unrecognized_model_name_gets_no_family_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("llama3.1"));
+        let prompt = default_system_prompt(Path::new("/p"), Some("llama3.1"), &[]);
         assert!(!prompt.contains("tool_call"));
         assert!(!prompt.contains("<function="));
     }
 
     #[test]
     fn a_qwen2_model_gets_the_tagged_json_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"));
+        let prompt = default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"), &[]);
         assert!(prompt.contains("<tool_call>"));
         assert!(!prompt.contains("<function="));
     }
 
     #[test]
     fn a_qwen3_coder_model_gets_the_xml_hint_not_the_tagged_one() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("qwen3.5-coder:latest"));
+        let prompt = default_system_prompt(Path::new("/p"), Some("qwen3.5-coder:latest"), &[]);
         assert!(prompt.contains("<function="));
         assert!(!prompt.contains("<tool_call>"));
     }
 
     #[test]
     fn model_family_matching_is_case_insensitive() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"));
+        let prompt = default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"), &[]);
         assert!(prompt.contains("<tool_call>"));
+    }
+
+    /// I-4 (docs/AUDITORIA-2026-07-v6.md): GLM — whose template leak was
+    /// observed live via OpenRouter (U-15/U-16) — gets its arg-tag
+    /// grammar as a proactive hint, matching the reactive rescue rung
+    /// braze-engine already carries for it. The OpenRouter-style name is
+    /// the one that matters: the old backend gating withheld the hint
+    /// exactly there.
+    #[test]
+    fn a_glm_model_gets_the_arg_tag_hint_including_openrouter_style_names() {
+        let prompt = default_system_prompt(Path::new("/p"), Some("z-ai/glm-5.2"), &[]);
+        assert!(prompt.contains("<arg_key>"), "got: {prompt}");
+        assert!(prompt.contains("<arg_value>"));
+        assert!(!prompt.contains("<tool_call>"));
+        assert!(!prompt.contains("<function="));
+    }
+
+    /// Gemma stays Generic deliberately — no leak grammar has been
+    /// observed for it in any live session (U-20 was a capability
+    /// failure, not a template leak), and hinting a guessed syntax risks
+    /// nudging the model toward something it was never trained on.
+    #[test]
+    fn a_gemma_model_gets_no_hint_no_observed_leak_grammar() {
+        let prompt = default_system_prompt(Path::new("/p"), Some("gemma4:e4b"), &[]);
+        assert!(!prompt.contains("<arg_key>"));
+        assert!(!prompt.contains("<tool_call>"));
+        assert!(!prompt.contains("<function="));
+    }
+
+    /// opencode-10 (docs/opencode-a-braze.md § 10): references with a
+    /// description are advertised in the system prompt; description-less
+    /// ones are allowlisted but NOT advertised (braze's equivalent of
+    /// OpenCode's `hidden`), and no references at all means no section.
+    #[test]
+    fn references_with_descriptions_are_advertised_and_bare_ones_are_not() {
+        let references = vec![
+            crate::ReferenceConfig {
+                path: std::path::PathBuf::from("/home/user/api-docs"),
+                description: Some("API reference docs for this project".to_string()),
+            },
+            crate::ReferenceConfig {
+                path: std::path::PathBuf::from("/home/user/scratch"),
+                description: None,
+            },
+        ];
+        let prompt = default_system_prompt(Path::new("/p"), None, &references);
+        assert!(prompt.contains("Reference directories"), "got: {prompt}");
+        assert!(prompt.contains("/home/user/api-docs: API reference docs"));
+        assert!(!prompt.contains("/home/user/scratch"));
+
+        let without = default_system_prompt(Path::new("/p"), None, &[]);
+        assert!(!without.contains("Reference directories"));
     }
 
     #[test]

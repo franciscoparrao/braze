@@ -254,6 +254,31 @@ impl BackendSpec {
         self.provider == Provider::Ollama
     }
 
+    /// The halves of this spec whose provider is NOT Ollama, labeled by
+    /// role (`"executor (anthropic)"`, `"lead (openrouter)"`, ...) —
+    /// empty for an all-Ollama spec. H-13
+    /// (docs/AUDITORIA-2026-07-v5.md): the Ollama-only sampling knobs
+    /// (`--top-p`/`--top-k`/`--repeat-penalty`) don't travel to the
+    /// Anthropic/OpenRouter builders, so a mixed sweep that sets them is
+    /// unbalanced in up to 3 unflagged dimensions; `main` uses this to
+    /// warn once per affected spec instead of staying silent.
+    pub fn non_ollama_halves(&self) -> Vec<String> {
+        let mut halves = Vec::new();
+        let mut push_if_not_ollama = |role: &str, spec: &BackendSpec| {
+            if spec.provider != Provider::Ollama {
+                halves.push(format!("{role} ({})", spec.provider_name()));
+            }
+        };
+        push_if_not_ollama("executor", self);
+        if let Some(planner) = &self.planner {
+            push_if_not_ollama("planner", planner);
+        }
+        if let Some(lead) = &self.lead {
+            push_if_not_ollama("lead", lead);
+        }
+        halves
+    }
+
     /// The executor's resolved model name (override, or `config`'s
     /// default for its provider) — no provider prefix, unlike
     /// `display_name`. Used to pick the model-family system-prompt hint
@@ -732,10 +757,12 @@ pub struct SamplingSpec {
     /// parameter.
     pub seed: Option<u64>,
     /// Ollama-only sampling knobs (ítem 7 del backlog 2026-07-06):
-    /// `None` defers to the model's Modelfile. Ignored (with no warning
-    /// — uniformity across a mixed sweep isn't achievable here) by the
+    /// `None` defers to the model's Modelfile. Ignored by the
     /// anthropic/openrouter builders, whose wire formats don't take
-    /// them through this crate yet.
+    /// them through this crate yet — uniformity across a mixed sweep
+    /// isn't achievable here, so `main` warns once per affected spec
+    /// (H-13, via [`BackendSpec::non_ollama_halves`]) instead of
+    /// letting the imbalance pass silently.
     pub top_p: Option<f32>,
     pub top_k: Option<u32>,
     pub repeat_penalty: Option<f32>,
@@ -757,6 +784,30 @@ mod tests {
             top_k: None,
             repeat_penalty: None,
         }
+    }
+
+    /// H-13 (docs/AUDITORIA-2026-07-v5.md): `main` warns per spec with
+    /// non-Ollama halves when the Ollama-only sampling knobs are set —
+    /// these pin which halves count as "ignoring" for that warning.
+    #[test]
+    fn non_ollama_halves_is_empty_for_an_all_ollama_composite() {
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b+lead:ollama:gemma4:e4b").unwrap();
+        assert!(spec.non_ollama_halves().is_empty());
+    }
+
+    #[test]
+    fn non_ollama_halves_labels_each_half_by_role() {
+        let spec = BackendSpec::parse(
+            "openrouter:deepseek/deepseek-v4-flash+plan:ollama:qwen2.5:3b+lead:anthropic:claude-sonnet-5",
+        )
+        .unwrap();
+        assert_eq!(
+            spec.non_ollama_halves(),
+            vec![
+                "executor (openrouter)".to_string(),
+                "lead (anthropic)".to_string()
+            ]
+        );
     }
 
     #[test]

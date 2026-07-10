@@ -69,6 +69,9 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     // Paquete 3 (docs/AUDITORIA-2026-07-v6.md) — pricing por
     // backend/modelo para estimated_cost_usd.
     "model_pricing",
+    // opencode-10 (docs/opencode-a-braze.md § 10) — directorios de
+    // referencia externos con descripción anunciada al modelo.
+    "references",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].
