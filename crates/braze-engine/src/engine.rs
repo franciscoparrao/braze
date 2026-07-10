@@ -1276,10 +1276,38 @@ impl Engine {
         // *persisted* text afterward.
         let mut text_buffer = String::new();
         let mut saw_done = false;
+        let mut usage: Option<RoundUsage> = None;
         while let Some(event) = stream.next().await {
             match event {
                 Ok(CompletionEvent::TextDelta(delta)) => {
                     text_buffer.push_str(&delta);
+                }
+                Ok(CompletionEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    stop_reason,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    escalation_trigger,
+                }) => {
+                    // H-4 (docs/AUDITORIA-2026-07-v5.md): this used to be
+                    // skipped as "not worth the same bookkeeping as a
+                    // normal round" — but the fallback re-sends the ENTIRE
+                    // conversation history as its prompt, making it one of
+                    // the most expensive single calls a turn can make, and
+                    // dropping its Usage made that cost invisible to the
+                    // bench (`TaskResult::input_tokens` under-reported
+                    // exactly on the degraded turns a cost analysis most
+                    // needs to see). H-3 counts that the fallback was
+                    // *attempted*; this records what it *cost*.
+                    usage = Some(RoundUsage {
+                        input_tokens,
+                        output_tokens,
+                        stop_reason,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        escalation_trigger,
+                    });
                 }
                 Ok(CompletionEvent::Done) => {
                     saw_done = true;
@@ -1287,9 +1315,7 @@ impl Engine {
                 }
                 // No tools were offered in this request, so a tool call
                 // here would itself be a violation of the request — ignore
-                // rather than act on it. `Usage` is fine to skip too: this
-                // degraded round isn't worth the same bookkeeping as a
-                // normal one.
+                // rather than act on it.
                 Ok(_) => {}
                 Err(err) => {
                     tracing::warn!(
@@ -1298,6 +1324,41 @@ impl Engine {
                     );
                     break;
                 }
+            }
+        }
+
+        // Persisted regardless of whether the fallback produced usable
+        // text below — the model call happened and was paid for either
+        // way, same reasoning as `SummaryFallbackAttempted` counting
+        // attempts rather than successes. One `Usage` per model round is
+        // the invariant `TaskResult::rounds` counts on; this round is a
+        // real model round.
+        if let Some(round_usage) = usage {
+            let escalation_trigger = round_usage.escalation_trigger;
+            self.append_and_notify(
+                session,
+                &AgentEvent::Usage {
+                    input_tokens: round_usage.input_tokens,
+                    output_tokens: round_usage.output_tokens,
+                    stop_reason: round_usage.stop_reason,
+                    cache_read_tokens: round_usage.cache_read_tokens,
+                    cache_write_tokens: round_usage.cache_write_tokens,
+                },
+                observer,
+            )
+            .await?;
+            // Same pairing `run_turn` maintains: if THIS call happened to
+            // be the one that triggered a reactive escalation (the
+            // fallback goes through the same `ModelBackend`, decorator
+            // included), the episode is persisted here too instead of
+            // silently dropped.
+            if let Some(trigger) = escalation_trigger {
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::EscalationToLead { trigger },
+                    observer,
+                )
+                .await?;
             }
         }
 
@@ -4021,9 +4082,18 @@ mod tests {
             // The round right after the tool call comes back with
             // nothing at all — no text, no further tool calls.
             vec![CompletionEvent::Done],
-            // The tools-free summary attempt.
+            // The tools-free summary attempt — reports Usage like any
+            // real model round would (H-4: it used to be dropped).
             vec![
                 CompletionEvent::TextDelta("listo, ya lo hice".to_string()),
+                CompletionEvent::Usage {
+                    input_tokens: 900,
+                    output_tokens: 15,
+                    stop_reason: Some("end_turn".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
                 CompletionEvent::Done,
             ],
         ]);
@@ -4071,6 +4141,27 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::SummaryFallbackAttempted)),
             "expected SummaryFallbackAttempted to be persisted, got: {events:?}"
+        );
+        // H-4 (docs/AUDITORIA-2026-07-v5.md): the fallback's own Usage is
+        // persisted too — it re-sends the whole history as its prompt, so
+        // dropping it under-reported cost exactly on degraded turns. The
+        // fallback round is the only scripted round that reports Usage in
+        // this test, so exactly one must land, with its numbers.
+        let usage_events: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    ..
+                } => Some((*input_tokens, *output_tokens)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            usage_events,
+            vec![(900, 15)],
+            "the summary fallback's Usage must be persisted, got: {events:?}"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

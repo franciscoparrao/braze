@@ -285,11 +285,33 @@ fn collapsed_observation_content(content: &str, full_observations: usize) -> Str
     /// enormous).
     const FIRST_LINE_MAX_CHARS: usize = 160;
 
+    /// `braze-tools-local::post_edit_check`'s feedback marker —
+    /// acoplamiento por convención, same as
+    /// `braze-model::escalation::POST_EDIT_CHECK_FAILURE_MARKER` (neither
+    /// crate depends on the other just to share one string). The marker
+    /// arrives on line 3+ of an edit's tool result ("\n\n[post-edit
+    /// check] ..."), so a first-line-only collapse silently dropped it —
+    /// and with it both the model's awareness that this old edit broke
+    /// the build AND `EscalatingBackend`'s F3 classification, exactly in
+    /// the long floundering turns where the collapse fires (I-3,
+    /// docs/AUDITORIA-2026-07-v6.md).
+    const POST_EDIT_CHECK_MARKER: &str = "[post-edit check]";
+
     let first_line = content.lines().next().unwrap_or("").trim_end();
     let excerpt: String = first_line.chars().take(FIRST_LINE_MAX_CHARS).collect();
+    let preserved_marker = if content.contains(POST_EDIT_CHECK_MARKER)
+        && !excerpt.contains(POST_EDIT_CHECK_MARKER)
+    {
+        // Kept compact: the classification only needs the marker's
+        // presence, and the model only needs to know the regression
+        // existed — the full compiler output stays omitted.
+        format!(" {POST_EDIT_CHECK_MARKER} (build regression in this old edit)")
+    } else {
+        String::new()
+    };
     let omitted = content.len().saturating_sub(excerpt.len());
     let collapsed = format!(
-        "{excerpt} [old observation collapsed: {omitted} chars omitted; the {full_observations} most recent tool results are shown in full]"
+        "{excerpt}{preserved_marker} [old observation collapsed: {omitted} chars omitted; the {full_observations} most recent tool results are shown in full]"
     );
     if collapsed.len() >= content.len() {
         return content.to_string();
@@ -1291,6 +1313,60 @@ mod tests {
             "build_messages_with_full_observations must produce an Anthropic-valid sequence \
              (first message role=User) regardless of which side of the \
              durable/tactical split the log's oldest event landed on",
+        );
+    }
+
+    // --- collapsed_observation_content marker preservation (I-3,
+    // docs/AUDITORIA-2026-07-v6.md) ---
+
+    /// The post-edit marker lives on line 3+ of an edit's result ("\n\n
+    /// [post-edit check] ...") — a first-line-only collapse used to drop
+    /// it, losing both the model's awareness of the old regression and
+    /// `EscalatingBackend`'s F3 classification, exactly in the long
+    /// floundering turns where the collapse fires.
+    #[test]
+    fn collapsing_preserves_the_post_edit_check_marker_from_later_lines() {
+        let content = format!(
+            "edited src/lib.rs (replaced 1 occurrence)\n\n[post-edit check] `cargo` (exit 101) \
+             in /tmp/x after this edit (the edit itself was applied). Fix these before moving \
+             on:\nerror[E0308]: mismatched types{}",
+            " and much more compiler output".repeat(20)
+        );
+        let collapsed = collapsed_observation_content(&content, 5);
+        assert!(collapsed.len() < content.len(), "must actually collapse");
+        assert!(
+            collapsed.contains("[post-edit check]"),
+            "the F3 classification marker must survive the collapse: {collapsed}"
+        );
+        assert!(
+            collapsed.contains("[old observation collapsed:"),
+            "still marked as collapsed: {collapsed}"
+        );
+    }
+
+    /// An observation without the marker gets no marker invented for it —
+    /// the preservation is conditional, not a blanket suffix.
+    #[test]
+    fn collapsing_adds_no_marker_when_the_content_never_had_one() {
+        let content = format!("line one of a big result\n{}", "more lines\n".repeat(100));
+        let collapsed = collapsed_observation_content(&content, 5);
+        assert!(collapsed.len() < content.len());
+        assert!(!collapsed.contains("[post-edit check]"));
+    }
+
+    /// A marker already on the first line isn't duplicated by the
+    /// preservation pass.
+    #[test]
+    fn a_marker_already_in_the_excerpt_is_not_duplicated() {
+        let content = format!(
+            "[post-edit check] regression right on line one\n{}",
+            "filler\n".repeat(100)
+        );
+        let collapsed = collapsed_observation_content(&content, 5);
+        assert_eq!(
+            collapsed.matches("[post-edit check]").count(),
+            1,
+            "got: {collapsed}"
         );
     }
 }

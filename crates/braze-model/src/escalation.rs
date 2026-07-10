@@ -354,6 +354,19 @@ fn observation_is_a_failure(block: &ContentBlock) -> bool {
     else {
         return false;
     };
+    // I-3 (docs/AUDITORIA-2026-07-v6.md): the durable-clearing render
+    // (`braze-engine::history::event_to_block_cleared` — acoplamiento por
+    // convención, same as the post-edit marker below) replaces an old
+    // result's content with this placeholder while PRESERVING `is_error`.
+    // The classification signals this function refines on (the
+    // environment-signal shapes, the post-edit marker) are gone with the
+    // content, so an old `exit_code`-style state fact would count as a
+    // model failure purely because its refinement got cleared. A cleared
+    // result is settled old history, not the current streak — never a
+    // failure.
+    if content.starts_with("[tool result cleared:") {
+        return false;
+    }
     if content.contains(POST_EDIT_CHECK_FAILURE_MARKER) {
         return true;
     }
@@ -715,6 +728,22 @@ mod tests {
             "both edits kept the build broken — must count as a failure streak \
              even though neither is_error"
         );
+    }
+
+    /// I-3 (docs/AUDITORIA-2026-07-v6.md): the durable-clearing render
+    /// replaces an old result's content with a placeholder while keeping
+    /// `is_error` — the classification refinements (environment signals,
+    /// post-edit marker) are gone with the content, so counting the bare
+    /// `is_error` would turn old state facts (a nonzero exit_code from
+    /// legitimate exploration) into spurious escalation fuel.
+    #[test]
+    fn a_cleared_placeholder_never_counts_as_a_failure_despite_is_error() {
+        let messages = vec![tool_result_message(
+            "[tool result cleared: 4813 chars removed to keep context small; the tool call \
+             above is preserved]",
+            true,
+        )];
+        assert_eq!(trailing_failed_observations(&messages), 0);
     }
 
     #[test]
