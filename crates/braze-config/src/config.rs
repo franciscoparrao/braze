@@ -22,7 +22,7 @@ pub struct McpServerConfigStub {
 /// into a declarative map of `extensions → command`, so any stack gets
 /// the same feedback loop — `ruff check`, `prettier --check`,
 /// `tsc --noEmit`, etc.). Each command runs from the edited file's
-/// parent directory (`cargo`はwalks ancestors looking for `Cargo.toml`;
+/// parent directory (`cargo` walks ancestors looking for `Cargo.toml`;
 /// `ruff`/`prettier`/`tsc` likewise walk up to their project roots), so
 /// no separate `cwd` strategy is required. Failure posture preserved:
 /// the guardrail only ever *adds* feedback — missing binary, timeout,
@@ -53,7 +53,14 @@ fn default_formatter_timeout_secs() -> u64 {
     60
 }
 
-fn default_formatters() -> Vec<FormatterConfig> {
+/// `pub` (not `pub(crate)`) so `braze-tools-local` — which already
+/// depends on this crate for `FormatterConfig` itself — can build its
+/// own `LocalToolsProvider`-level default from the same single
+/// definition instead of hardcoding a second copy of the `cargo check`
+/// command that could drift out of sync (found duplicated in the
+/// other-model commit `2923f63`, audited 2026-07-09). See
+/// `braze_tools_local::post_edit_check::default_rust_formatters`.
+pub fn default_formatters() -> Vec<FormatterConfig> {
     vec![FormatterConfig {
         command: vec![
             "cargo".to_string(),

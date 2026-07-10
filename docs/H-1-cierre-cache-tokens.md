@@ -60,7 +60,7 @@ Todos en `crates/braze-bench/src/metrics.rs` y `report.rs`:
 - Backend reporta caching, no hubo hits: Some(0).
 - Backend reporta caching, hubo N hits: Some(N).
 
-Con `u32`, "no sabe" y "zero hits" ambos 成为 `0`. El paper necesita distinguir — un A/B "con vs sin `enable_prompt_caching=true`" sobre `z-ai/glm-5.2` (que no soporta caching explícito) debe reportar `None` (no impactado) distinto de "glm con caching habilitado pero zero hits" que sería `Some(0)`. La semántica `None` vs `Some(0)` ya está baked en `AgentEvent::Usage` del WIP previo; esto sólo laextiende al bench.
+Con `u32`, "no sabe" y "zero hits" ambos se vuelven `0`. El paper necesita distinguir — un A/B "con vs sin `enable_prompt_caching=true`" sobre `z-ai/glm-5.2` (que no soporta caching explícito) debe reportar `None` (no impactado) distinto de "glm con caching habilitado pero zero hits" que sería `Some(0)`. La semántica `None` vs `Some(0)` ya está baked en `AgentEvent::Usage` del WIP previo; esto sólo la extiende al bench.
 
 Para análisis numérico del JSON, los consumers pueden hacer `.unwrap_or(0)` llegado el caso — pero el bench no debe colapsar antes.
 

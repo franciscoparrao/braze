@@ -50,7 +50,7 @@ expect_max_rounds = 6
 expect_max_tokens = 6000
 # Declarado pero aún no enforceado (ver TaskDef::expect_max_cost_usd):
 # cuando H-3 + E5 pongan pricing por backend, este valor se convierte
-# en un coterry real que la tarea también puede fallar.
+# en un criterio real que la tarea también puede fallar.
 expect_max_cost_usd = 0.02
 
 [tasks.setup_files]
@@ -137,9 +137,10 @@ expect_max_cost_usd = 0.05
 [tasks.setup_files]
 "backend_spec.rs" = '''
 //! Mini backend spec parser — analogue of crates/braze-bench/src/backend_spec.rs
-//! trimmed for the self-improvement bench. Supports a `+plan:<spec>` suffix
-//! that attaches a planner sub-spec to the executor; `+lead:` is NOT yet
-//! implemented — your job is to add it following exactly the same pattern.
+//! trimmed for the self-improvement bench. Supports a planner-suffix syntax
+//! that attaches a planner sub-spec to the executor; a lead-backend suffix
+//! is NOT yet implemented — your job is to add it following exactly the
+//! same pattern the planner suffix uses.
 //!
 //! The `"+plan:"`/`"+lead:"` tokens (rather than a bare separator char) are
 //! deliberate: model ids legitimately contain `:` (Ollama tags) and `/`
@@ -237,13 +238,29 @@ impl BackendSpec {
 '''
 
 # Three invariants on the same file: `+lead:` and `build_lead` prove the
-# new lead parser/method actually landed; `+plan:` is a regression guard
-# — the model must NOT delete the existing `+plan:` support while adding
-# `+lead:`, same acceptance criterion as the original SI-2
-# (docs/self-improvement-exercises.md § SI-2: "preserve the API while
-# extending it"). One substring per line would have been impossible
-# here (TOML forbids duplicate keys in a table), which is exactly why
-# `expect_file_contains` is a `Vec<String>` per file rather than a single
-# string — see `TaskDef::expect_file_contains`'s doc comment.
+# new lead parser/method actually landed; the third is a `+plan:`
+# regression guard — the model must NOT delete the existing `+plan:`
+# support while adding `+lead:`, same acceptance criterion as the
+# original SI-2 (docs/self-improvement-exercises.md § SI-2: "preserve
+# the API while extending it"). One substring per line would have been
+# impossible here (TOML forbids duplicate keys in a table), which is
+# exactly why `expect_file_contains` is a `Vec<String>` per file rather
+# than a single string — see `TaskDef::expect_file_contains`'s doc
+# comment.
+#
+# The `+plan:` guard is deliberately the full pre-existing error message
+# ("only one '+plan:' planner per entry"), not the bare token — audit of
+# the other-model commit `00b3ab1` (2026-07-09) found the bare token
+# guard was nearly useless: it also appears 5+ times in this fixture's
+# own doc comments (describing the syntax), so a model that silently
+# deleted the real `+plan:` duplicate-detection branch while leaving any
+# one comment untouched would still satisfy it. The full message string
+# only exists inside that branch's `format!` call — a model can't drop
+# the branch without also dropping this exact text. Comments in the
+# fixture above no longer spell out the bare `+plan:`/`+lead:` tokens
+# for the same reason (the bare `+lead:` token used to appear in the
+# fixture's own "not yet implemented" comment, so it was trivially
+# satisfied even by a no-op — `build_lead` was doing all the real work
+# of that pair).
 [tasks.expect_file_contains]
-"backend_spec.rs" = ["+lead:", "build_lead", "+plan:"]
+"backend_spec.rs" = ["+lead:", "build_lead", "only one '+plan:' planner per entry"]

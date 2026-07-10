@@ -324,7 +324,7 @@ References con `description` son advertised al agente en el system prompt. El di
 
 **Lo que suma para SLM-first**:
 
-- Un SLM no sabe dónde buscar. Decirle "这里有 docs del API en ../docs" en el system prompt es un steering barato y potente.
+- Un SLM no sabe dónde buscar. Decirle "Aquí hay docs del API en ../docs" en el system prompt es un steering barato y potente.
 - v3 D7 (system prompt y feedback en inglés while SLM habla español): las `description`s pueden ser específicas del ambiente local, e.g. "Aquí están los patrones GIS que usas para problemas de cuencas" — Steering proactivo en vez de esperar que el modelo recuerde.
 - Combina con skills loader (#7):`references` + `skills.paths` = ambiente "este proyecto tiene docs, tools, y skills — el modelo puede resolver su propia incertidumbre".
 
@@ -423,7 +423,7 @@ braze: v4 P0.3 pide checkpoint automático antes de cambios grandes. Un `Config:
 | 9 | Plugin / hook surface | Fase 2 `braze-hooks`, OTel, H-3 alt route | alto (trait + stable) | alto (estructural) |
 | 10 | `references` con descriptions | v3 D7 | bajo-medio | medio (steering proactivo SLM) |
 
-## Cómo lo lootearino (qué patrón imitar literalmente vs adaptar)
+## Cómo aprovecharlo (qué patrón imitar literalmente vs adaptar)
 
 **Copiar literalmente el shape**:
 
@@ -455,7 +455,7 @@ Esto se deja como hypothesis de investigación futura, no se incluye en el top-1
 
 ## Conclusión
 
-OpenCode y braze son **complementarios en prestaciones**: braze innovó en tolerancia a fallos (rescates textuales, escalación reactiva, compaction diferencial con invariants), OpenCode innovó en extensibilidad y ergonomía de configuración. De las 10 features listadas, 6 son "expresar en config algo que braze ya hardcodea", 3 son "añadir una capability nueva que執 OpenCode tiene y braze no", y 1 (chunkTimeout, N1) es "un gap nuevo que viendo el schema de OpenCode hace evidente".
+OpenCode y braze son **complementarios en prestaciones**: braze innovó en tolerancia a fallos (rescates textuales, escalación reactiva, compaction diferencial con invariants), OpenCode innovó en extensibilidad y ergonomía de configuración. De las 10 features listadas, 6 son "expresar en config algo que braze ya hardcodea", 3 son "añadir una capability nueva que OpenCode tiene y braze no", y 1 (chunkTimeout, N1) es "un gap nuevo que viendo el schema de OpenCode hace evidente".
 
 **Recomendación para siguiente tramo de trabajo**: el primer lote de "config exposure" (items 1, 2, 3 anteriores) se puede hacer en una sesión de código, cierra 3 ítems del backlog v5 + 2 de v4, y desbloquea ablationes que faltan para el paper (el propósito declarado del proyecto). Los items 5 (permission por-patrón) y 9 (hook surface) son estructuralmente más caros pero cada uno resuelve una clase entera de hallazgos — No postergarlos más allá del Paquete 2 del roadmap v5.
 

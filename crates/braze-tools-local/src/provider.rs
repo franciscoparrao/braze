@@ -371,41 +371,59 @@ pub(crate) const MAX_TOOL_OUTPUT_BYTES: usize = 8_000;
 /// model needs to be told *what to do differently*, per
 /// docs/AUDITORIA-2026-07.md's finding that terse errors get retried
 /// verbatim instead of corrected). If `max_lines` is `Some(N)`, also
-/// truncates at `N` lines when the byte cap hasn't already hit (v4
-/// P2.4 — useful for many-short-line outputs like a `grep -r` over a
-/// thousands-file repo where a byte-only cap can still show 100k+
-/// lines before triggering).
+/// truncates at `N` lines first (v4 P2.4 — useful for many-short-line
+/// outputs like a `grep -r` over a thousands-file repo where a
+/// byte-only cap can still show 100k+ lines before triggering).
+///
+/// The byte cap always applies **after** the line cap, unconditionally
+/// — a fix for a real bug (audit of the other-model commit `2923f63`,
+/// 2026-07-09): the line-truncation branch used to `return` immediately
+/// once it retained `max_lines` lines, without re-checking those
+/// retained lines against `budget`. A handful of very long lines (e.g.
+/// `max_lines: Some(5)` over 5 lines of 5KB each) could then blow past
+/// `budget` even though this doc comment already promised the byte cap
+/// applies second. Both truncations can now fire on the same call — the
+/// trailer says so explicitly instead of only reporting one.
 fn truncate_output(content: String, budget: usize, max_lines: Option<u32>) -> String {
     let max_lines = max_lines.unwrap_or(0) as usize;
-    if max_lines > 0 {
-        let mut lines: Vec<&str> = content.lines().collect();
-        if lines.len() > max_lines {
-            let omitted_lines = lines.len() - max_lines;
-            lines.truncate(max_lines);
-            let retained = lines.join("\n");
-            return format!(
-                "{}\n\n[output truncated: {omitted_lines} of {} lines omitted. Narrow your \
-                 query — a more specific path/pattern, or a smaller file — instead of retrying \
-                 this exact call.]",
-                retained,
-                content.lines().count(),
-            );
+    let total_lines = content.lines().count();
+
+    let (mut working, lines_omitted) = if max_lines > 0 && total_lines > max_lines {
+        let retained = content.lines().take(max_lines).collect::<Vec<_>>().join("\n");
+        (retained, total_lines - max_lines)
+    } else {
+        (content, 0)
+    };
+
+    let bytes_before_cap = working.len();
+    if working.len() > budget {
+        let mut cut = budget;
+        while !working.is_char_boundary(cut) {
+            cut -= 1;
         }
+        working.truncate(cut);
     }
-    if content.len() <= budget {
-        return content;
+    let bytes_omitted = bytes_before_cap - working.len();
+
+    match (lines_omitted, bytes_omitted) {
+        (0, 0) => working,
+        (lines, 0) => format!(
+            "{working}\n\n[output truncated: {lines} of {total_lines} lines omitted. Narrow \
+             your query — a more specific path/pattern, or a smaller file — instead of \
+             retrying this exact call.]"
+        ),
+        (0, bytes) => format!(
+            "{working}\n\n[output truncated: {bytes} of {bytes_before_cap} bytes omitted. \
+             Narrow your query — a more specific path/pattern, or a smaller file — instead of \
+             retrying this exact call.]"
+        ),
+        (lines, bytes) => format!(
+            "{working}\n\n[output truncated: {lines} of {total_lines} lines omitted, then \
+             {bytes} more of the retained {bytes_before_cap} bytes cut to fit the output \
+             budget. Narrow your query — a more specific path/pattern, or a smaller file — \
+             instead of retrying this exact call.]"
+        ),
     }
-    let mut cut = budget;
-    while !content.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    let omitted = content.len() - cut;
-    format!(
-        "{}\n\n[output truncated: {omitted} of {} bytes omitted. Narrow your query — a more \
-         specific path/pattern, or a smaller file — instead of retrying this exact call.]",
-        &content[..cut],
-        content.len(),
-    )
 }
 
 #[cfg(test)]
@@ -952,5 +970,32 @@ mod tests {
         assert!(content.len() < MAX_TOOL_OUTPUT_BYTES);
         let pass_through = truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None);
         assert_eq!(pass_through, content, "max_lines=None must not truncate");
+    }
+
+    /// Regression test for the truncation bug found auditing the
+    /// other-model commit `2923f63` (2026-07-09): a handful of very long
+    /// lines survives `max_lines` but must still be cut down to `budget`
+    /// bytes afterward — the line cap retaining `max_lines` lines is not
+    /// itself a guarantee those lines fit the byte budget.
+    #[test]
+    fn truncate_output_reapplies_the_byte_cap_after_a_few_very_long_lines_survive_max_lines() {
+        let long_line = "x".repeat(100);
+        // 5 lines of 100 bytes each = 500+ bytes retained, well over a
+        // 50-byte budget — the exact "few long lines" shape the old code
+        // never re-checked.
+        let content = (0..5).map(|_| long_line.clone()).collect::<Vec<_>>().join("\n");
+        let small_budget = 50usize;
+        let truncated = truncate_output(content, small_budget, Some(3));
+
+        let trailer_start = truncated.find("\n\n[output truncated").expect("must be truncated");
+        let retained = &truncated[..trailer_start];
+        assert!(
+            retained.len() <= small_budget,
+            "retained content must respect the byte budget even after max_lines kept a few \
+             oversized lines: {} bytes retained, budget was {small_budget}",
+            retained.len()
+        );
+        assert!(truncated.contains("lines omitted"), "must report the line truncation too: {truncated}");
+        assert!(truncated.contains("bytes"), "must report the byte truncation too: {truncated}");
     }
 }

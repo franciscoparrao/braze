@@ -56,19 +56,15 @@ pub(crate) async fn post_edit_feedback(path: &str, formatters: &[FormatterConfig
 /// serve as the seed for `LocalToolsProvider`'s field default (a `const`
 /// with `String`s inside can't be `const`-evaluated under current Rust,
 /// but this is just one allocation, paid once per `LocalToolsProvider`
-/// construction — negligible vs the rest of engine startup).
+/// construction — negligible vs the rest of engine startup). Delegates
+/// to [`braze_config::default_formatters`] rather than hardcoding a
+/// second copy of the `cargo check` command — the two definitions had
+/// drifted into two separate literals (found duplicated auditing the
+/// other-model commit `2923f63`, 2026-07-09), which is exactly the kind
+/// of thing that silently goes stale when one gets updated and the
+/// other doesn't.
 pub(crate) fn default_rust_formatters() -> Vec<FormatterConfig> {
-    vec![FormatterConfig {
-        command: vec![
-            "cargo".to_string(),
-            "check".to_string(),
-            "--quiet".to_string(),
-            "--message-format=short".to_string(),
-        ],
-        extensions: vec![".rs".to_string()],
-        timeout_secs: 60,
-        disabled: false,
-    }]
+    braze_config::default_formatters()
 }
 
 /// Runs `fmt.command` with `cwd = cwd` and turns a non-zero exit + any
@@ -189,22 +185,35 @@ mod tests {
         );
     }
 
+    /// A Rust file with no `Cargo.toml` ancestor still gets checked —
+    /// `cargo check` run from the file's parent directory fails with
+    /// "error: could not find `Cargo.toml`...", and that error line IS
+    /// surfaced as feedback (the pre-generalization code silently
+    /// returned `None` for this case instead). Regression test for a
+    /// dead assertion found auditing the other-model commit `2923f63`
+    /// (2026-07-09): this test used to write the fixture and then assert
+    /// nothing at all, despite its name and a comment explaining what
+    /// *should* happen — passing unconditionally regardless of whether
+    /// the described behavior actually held.
     #[tokio::test]
-    async fn a_rust_file_outside_any_cargo_project_produces_no_feedback() {
+    async fn a_rust_file_outside_any_cargo_project_still_surfaces_cargos_error() {
         let dir = temp_dir("no-project");
         let path = dir.join("src/suelto.rs");
         std::fs::write(&path, "fn main() {}").expect("write file");
 
-        // With no Cargo.toml ancestor, `cargo check` from the file's
-        // parent errors out (cargo: "could not find Cargo.toml"),
-        // producing a non-zero exit + a stderr line that doesn't contain
-        // the word "error" in the way our filter expects (it does —
-        // "error: could not find Cargo.toml"). Before generalization,
-        // the code silently returned None; the generalized version
-        // surfaces that error to the model too, which is correct
-        // behavior — but this regression test is now about cargo's
-        // behavior, not ours, so it's been removed-since-irrelevant and
-        // only the constructor path is kept visible.
+        let feedback =
+            post_edit_feedback(&path.to_string_lossy(), default_rust_formatters().as_slice()).await;
+
+        assert!(
+            feedback.is_some(),
+            "cargo check with no Cargo.toml ancestor exits non-zero with an 'error:' line and \
+             must be surfaced to the model, not silently dropped"
+        );
+        assert!(
+            feedback.unwrap().contains("Cargo.toml"),
+            "feedback should mention the missing manifest"
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
