@@ -187,6 +187,24 @@ pub enum AgentEvent {
         /// The note the model sees, verbatim.
         text: String,
     },
+    /// An audit-only engine hook (Paquete B′,
+    /// docs/harness-engineering-hooks-skills-2026-07-10.md § Parte II)
+    /// crossed its consecutive-failure threshold and was disabled for
+    /// the rest of the session. Persisted exactly once per disable (not
+    /// per failure — individual failures are `tracing::warn!` only) so
+    /// the rollout log records that observability was lost from this
+    /// point on, without a broken hook spamming the log. Audit-only,
+    /// never rendered to the model; hook dispatch itself skips this
+    /// variant so a failing hook can't feed back into hooks.
+    HookErrored {
+        /// The hook's stable id (`EngineHook::id`).
+        id: String,
+        /// Attach point that failed: `"on_event"` / `"before_model_request"`.
+        point: String,
+        /// The failure that crossed the threshold (an `Err` payload, or
+        /// a timeout description).
+        reason: String,
+    },
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only
@@ -432,6 +450,31 @@ mod tests {
                 assert_eq!(text, "over 80% of budget");
             }
             other => panic!("expected HarnessNote, got {other:?}"),
+        }
+    }
+
+    /// B′: `HookErrored` round-trips with its snake_case tag and all
+    /// three fields — the rollout log's record of lost observability.
+    #[test]
+    fn hook_errored_round_trips_through_json() {
+        let event = AgentEvent::HookErrored {
+            id: "prompt-budget-audit".to_string(),
+            point: "on_event".to_string(),
+            reason: "timed out after 250ms".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"hook_errored\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        match decoded {
+            AgentEvent::HookErrored { id, point, reason } => {
+                assert_eq!(id, "prompt-budget-audit");
+                assert_eq!(point, "on_event");
+                assert_eq!(reason, "timed out after 250ms");
+            }
+            other => panic!("expected HookErrored, got {other:?}"),
         }
     }
 

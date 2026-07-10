@@ -182,6 +182,13 @@ pub struct Engine {
     /// `true` by default; `with_harness_notes_enabled(false)` is the
     /// `no-harness-notes` ablation.
     harness_notes_enabled: bool,
+    /// Audit-only hooks (Paquete B′,
+    /// docs/harness-engineering-hooks-skills-2026-07-10.md § Parte II) —
+    /// dispatched after every persisted event and before every executor
+    /// request, in registration order, each call bounded by
+    /// `hooks::HOOK_TIMEOUT`. Empty by default; composition roots
+    /// register via [`Engine::with_hook`].
+    hooks: Vec<crate::hooks::RegisteredHook>,
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
     textual_rescue_enabled: bool,
@@ -319,6 +326,7 @@ impl Engine {
             turn_in_progress: std::sync::atomic::AtomicBool::new(false),
             consecutive_turns_without_tool_calls: std::sync::atomic::AtomicU32::new(0),
             harness_notes_enabled: true,
+            hooks: Vec::new(),
             textual_rescue_enabled: true,
             planner: None,
         }
@@ -449,6 +457,15 @@ impl Engine {
         self
     }
 
+    /// Registers an audit-only hook (Paquete B′,
+    /// docs/harness-engineering-hooks-skills-2026-07-10.md § Parte II) —
+    /// dispatched in registration order. Chainable, same shape as the
+    /// other builders.
+    pub fn with_hook(mut self, hook: std::sync::Arc<dyn crate::hooks::EngineHook>) -> Self {
+        self.hooks.push(crate::hooks::RegisteredHook::new(hook));
+        self
+    }
+
     /// Enables the planner/executor split (PLAN.md § "Split
     /// planificador/ejecutor"): `planner` — typically a stronger/cloud
     /// model — produces a one-shot plan at the start of every turn, which
@@ -474,7 +491,113 @@ impl Engine {
     ) -> Result<(), EngineError> {
         self.store.append(session, event).await?;
         observer.on_event(event);
+        // B′ (docs/harness-engineering-hooks-skills-2026-07-10.md):
+        // audit-only hooks see every persisted event — EXCEPT
+        // `HookErrored` itself, so a failing hook can't feed back into
+        // hook dispatch. A hook whose failure streak crosses the
+        // threshold gets its disable recorded as a persisted event
+        // (appended directly: the guard above makes re-dispatch moot,
+        // but appending without dispatching keeps this non-recursive by
+        // construction).
+        if !self.hooks.is_empty() && !matches!(event, AgentEvent::HookErrored { .. }) {
+            for (id, reason) in self.dispatch_hooks_on_event(event).await {
+                let hook_event = AgentEvent::HookErrored {
+                    id,
+                    point: crate::hooks::HookPoint::OnEvent.as_str().to_string(),
+                    reason,
+                };
+                self.store.append(session, &hook_event).await?;
+                observer.on_event(&hook_event);
+            }
+        }
         Ok(())
+    }
+
+    /// Runs every enabled hook's `on_event` under the per-call timeout,
+    /// warn-and-continue on failure. Returns the `(id, reason)` of each
+    /// hook whose failure streak crossed the disable threshold on THIS
+    /// call — the caller persists those as [`AgentEvent::HookErrored`].
+    async fn dispatch_hooks_on_event(&self, event: &AgentEvent) -> Vec<(String, String)> {
+        let mut disabled_now = Vec::new();
+        for registered in &self.hooks {
+            if registered.is_disabled() {
+                continue;
+            }
+            let outcome = tokio::time::timeout(
+                crate::hooks::HOOK_TIMEOUT,
+                registered.hook.on_event(event),
+            )
+            .await;
+            if let Some((id, reason)) =
+                Self::hook_failure(registered, crate::hooks::HookPoint::OnEvent, outcome)
+            {
+                disabled_now.push((id, reason));
+            }
+        }
+        disabled_now
+    }
+
+    /// `before_model_request` twin of [`Engine::dispatch_hooks_on_event`].
+    async fn dispatch_hooks_before_model_request(
+        &self,
+        request: &CompletionRequest,
+    ) -> Vec<(String, String)> {
+        let mut disabled_now = Vec::new();
+        for registered in &self.hooks {
+            if registered.is_disabled() {
+                continue;
+            }
+            let outcome = tokio::time::timeout(
+                crate::hooks::HOOK_TIMEOUT,
+                registered.hook.before_model_request(request),
+            )
+            .await;
+            if let Some((id, reason)) = Self::hook_failure(
+                registered,
+                crate::hooks::HookPoint::BeforeModelRequest,
+                outcome,
+            ) {
+                disabled_now.push((id, reason));
+            }
+        }
+        disabled_now
+    }
+
+    /// Shared failure bookkeeping for both dispatchers: logs the
+    /// warn-and-continue line, records the outcome on the hook's streak,
+    /// and returns `Some((id, reason))` only on the call that crossed
+    /// the disable threshold.
+    fn hook_failure(
+        registered: &crate::hooks::RegisteredHook,
+        point: crate::hooks::HookPoint,
+        outcome: Result<Result<(), String>, tokio::time::error::Elapsed>,
+    ) -> Option<(String, String)> {
+        let failure = match outcome {
+            Ok(Ok(())) => None,
+            Ok(Err(reason)) => Some(reason),
+            Err(_) => Some(format!(
+                "timed out after {}ms",
+                crate::hooks::HOOK_TIMEOUT.as_millis()
+            )),
+        };
+        if let Some(reason) = &failure {
+            tracing::warn!(
+                hook = registered.hook.id(),
+                point = point.as_str(),
+                reason = %reason,
+                "engine hook failed (warn_and_continue)"
+            );
+        }
+        let crossed = registered.record_outcome(point, failure.is_some());
+        if crossed {
+            tracing::warn!(
+                hook = registered.hook.id(),
+                point = point.as_str(),
+                "engine hook disabled after repeated failures"
+            );
+            return Some((registered.hook.id().to_string(), failure.unwrap_or_default()));
+        }
+        None
     }
 
     /// Makes one completion call and consumes its stream fully into a
@@ -1036,6 +1159,26 @@ impl Engine {
                 system_prompt: self.system_prompt.clone(),
                 max_tokens: self.max_tokens,
             };
+
+            // B′: audit-only hooks see the request about to be sent
+            // (`PromptBudgetAuditHook`'s attach point). Read-only by
+            // construction — the request is sent regardless.
+            if !self.hooks.is_empty() {
+                for (id, reason) in self.dispatch_hooks_before_model_request(&req).await {
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::HookErrored {
+                            id,
+                            point: crate::hooks::HookPoint::BeforeModelRequest
+                                .as_str()
+                                .to_string(),
+                            reason,
+                        },
+                        observer,
+                    )
+                    .await?;
+                }
+            }
 
             // técnica G10 (docs/AUDITORIA-2026-07.md): `best_of_n <= 1`
             // takes the exact single-call path that existed before G10 —
@@ -3145,6 +3288,7 @@ fn event_text_len(event: &AgentEvent) -> usize {
         | AgentEvent::TextualRescueApplied { .. }
         | AgentEvent::EscalationToLead { .. }
         | AgentEvent::SummaryFallbackAttempted
+        | AgentEvent::HookErrored { .. }
         | AgentEvent::Unknown => 0,
     }
 }
@@ -7177,6 +7321,198 @@ mod tests {
             }
             other => panic!("expected TurnBudgetExhausted, got {other:?}"),
         }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- Paquete B′: hooks audit-only
+    // (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte II) ---
+
+    /// A recording hook: appends `(hook_id, what_it_saw)` to a shared
+    /// vec — the ordering fixture for the stable-order test.
+    struct RecordingHook {
+        id: &'static str,
+        log: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::hooks::EngineHook for RecordingHook {
+        fn id(&self) -> &str {
+            self.id
+        }
+        async fn on_event(&self, event: &AgentEvent) -> Result<(), String> {
+            if matches!(event, AgentEvent::UserMessage { .. }) {
+                self.log.lock().unwrap().push(format!("{}:user", self.id));
+            }
+            Ok(())
+        }
+        async fn before_model_request(
+            &self,
+            _request: &braze_model::CompletionRequest,
+        ) -> Result<(), String> {
+            self.log.lock().unwrap().push(format!("{}:request", self.id));
+            Ok(())
+        }
+    }
+
+    /// A hook that always fails — the degradation fixture.
+    struct AlwaysFailingHook;
+
+    #[async_trait::async_trait]
+    impl crate::hooks::EngineHook for AlwaysFailingHook {
+        fn id(&self) -> &str {
+            "always-failing"
+        }
+        async fn on_event(&self, _event: &AgentEvent) -> Result<(), String> {
+            Err("boom".to_string())
+        }
+    }
+
+    /// Two hooks, registration order — both see the same points, in the
+    /// order they were registered (acceptance criterion "orden de hooks
+    /// estable y testeado"). Audit-only: the turn's outcome is untouched.
+    #[tokio::test]
+    async fn hooks_run_in_registration_order_and_see_events_and_requests() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola!".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_hook(Arc::new(RecordingHook {
+            id: "alpha",
+            log: Arc::clone(&log),
+        }))
+        .with_hook(Arc::new(RecordingHook {
+            id: "beta",
+            log: Arc::clone(&log),
+        }));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn must succeed with hooks attached");
+
+        let seen = log.lock().unwrap().clone();
+        // The user message lands first (persisted before the round), the
+        // request dispatch after — each point in registration order.
+        assert_eq!(
+            seen,
+            vec!["alpha:user", "beta:user", "alpha:request", "beta:request"],
+            "stable registration order at every point"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Acceptance criteria "hook que falla con warn_and_continue no mata
+    /// el turno y emite evento": the turn succeeds, and the failing hook
+    /// is disabled after its third consecutive failure with exactly one
+    /// persisted `HookErrored`.
+    #[tokio::test]
+    async fn a_persistently_failing_hook_is_disabled_with_one_event_and_the_turn_survives() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Three persisted events (UserMessage, Usage, AssistantText) —
+        // exactly enough on_event failures to cross the disable
+        // threshold of 3 within one turn.
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola!".to_string()),
+            CompletionEvent::Usage {
+                input_tokens: 10,
+                output_tokens: 5,
+                stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                escalation_trigger: None,
+            },
+            CompletionEvent::Done,
+        ]]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_hook(Arc::new(AlwaysFailingHook));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("a failing audit-only hook must never kill the turn");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let hook_errors: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::HookErrored { .. }))
+            .collect();
+        assert_eq!(
+            hook_errors.len(),
+            1,
+            "exactly one HookErrored — at the disable crossing, not per failure: {events:#?}"
+        );
+        match hook_errors[0] {
+            AgentEvent::HookErrored { id, reason, .. } => {
+                assert_eq!(id, "always-failing");
+                assert_eq!(reason, "boom");
+            }
+            other => panic!("expected HookErrored, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `PromptBudgetAuditHook` on a real turn: pure smoke — read-only by
+    /// construction, must never fail or alter the outcome.
+    #[tokio::test]
+    async fn the_prompt_budget_audit_hook_is_inert_on_a_normal_turn() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola!".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_hook(Arc::new(crate::hooks::PromptBudgetAuditHook));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("audit hook must be inert");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::HookErrored { .. })),
+            "the audit hook must never error"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

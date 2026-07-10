@@ -338,6 +338,7 @@ impl ContextCompactor for SimpleContextCompactor {
                 // about THIS turn) — stale ones surviving into the digest
                 // would mislead later turns.
                 | AgentEvent::HarnessNote { .. }
+                | AgentEvent::HookErrored { .. }
                 | AgentEvent::Unknown => {}
             }
         }

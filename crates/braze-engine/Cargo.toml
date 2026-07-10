@@ -21,9 +21,11 @@ tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
+# B′ (hooks audit-only): el trait EngineHook es async y dyn — mismo uso
+# que braze-model le da para ModelBackend. Antes solo dev-dependency
+# (mocks de tests).
+async-trait = { workspace = true }
 serde_json = { workspace = true }
 jsonschema = { workspace = true }
 uuid = { workspace = true }
 
-[dev-dependencies]
-async-trait = { workspace = true }

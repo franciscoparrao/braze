@@ -456,6 +456,7 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         | AgentEvent::TextualRescueApplied { .. }
         | AgentEvent::EscalationToLead { .. }
         | AgentEvent::SummaryFallbackAttempted
+        | AgentEvent::HookErrored { .. }
         | AgentEvent::Unknown => None,
     }
 }

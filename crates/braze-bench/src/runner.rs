@@ -214,6 +214,12 @@ pub async fn run_task(
     // the announced-deadline notes, ablatable so their effect on
     // TurnBudgetExhausted/iteration-cap aborts is measurable.
     .with_harness_notes_enabled(!ablation.disable_harness_notes)
+    // B′ (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte
+    // II): audit-only — logs the prompt-budget breakdown per request
+    // under `RUST_LOG=braze_engine=info`, the same channel the other
+    // lever activations already use. Zero effect on results by
+    // construction (read-only hook).
+    .with_hook(std::sync::Arc::new(braze_engine::PromptBudgetAuditHook))
     // C10: mirrors braze-cli's wiring. `max_turn_iterations`/
     // `planner_max_tokens` were a pre-existing mirror gap (wired in
     // production since opencode ítem 1 but never here — a bench run

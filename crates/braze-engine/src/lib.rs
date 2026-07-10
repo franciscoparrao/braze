@@ -8,10 +8,12 @@
 //! reconciles, per PLAN.md's dependency graph.
 
 mod engine;
+mod hooks;
 mod error;
 mod history;
 #[cfg(test)]
 mod protocol_check;
 
 pub use engine::{DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine, synthesize_orphan_repairs};
+pub use hooks::{EngineHook, PromptBudgetAuditHook};
 pub use error::EngineError;
