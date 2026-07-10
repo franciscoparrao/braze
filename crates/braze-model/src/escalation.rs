@@ -24,7 +24,7 @@ use std::pin::Pin;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 
 use braze_types::{ContentBlock, Message, Role};
 
@@ -181,18 +181,59 @@ impl ModelBackend for EscalatingBackend {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
         let decision = self.route(&req);
-        if decision == RouteDecision::LeadEscalating {
+        // H-3 (docs/AUDITORIA-2026-07-v5.md): only the round that *triggers*
+        // the escalation window gets a `trigger` — rounds already inside an
+        // active window (`LeadEscalated`) reuse it silently, same as they
+        // already reuse the routing decision itself (D4 above). This is
+        // what makes counting `AgentEvent::EscalationToLead` downstream
+        // count escalation *episodes*, not raw lead-model calls.
+        let trigger = if decision == RouteDecision::LeadEscalating {
+            let n = trailing_failed_observations(&req.messages);
             tracing::info!(
                 threshold = self.failure_threshold,
                 escalation_turns = self.escalation_turns,
                 "worker flounders (consecutive failed observations) — escalating to the lead model"
             );
-        }
-        if decision.is_lead() {
-            self.lead.complete(req).await
+            Some(format!(
+                "{n} consecutive failed observations (threshold {})",
+                self.failure_threshold
+            ))
         } else {
-            self.worker.complete(req).await
-        }
+            None
+        };
+
+        let stream = if decision.is_lead() {
+            self.lead.complete(req).await?
+        } else {
+            self.worker.complete(req).await?
+        };
+
+        // Only the triggering round pays for the wrapper — every other
+        // round (the overwhelming majority) returns the inner stream
+        // untouched.
+        let Some(trigger) = trigger else {
+            return Ok(stream);
+        };
+        Ok(Box::pin(stream.map(move |item| {
+            item.map(|event| match event {
+                CompletionEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    stop_reason,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    ..
+                } => CompletionEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    stop_reason,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    escalation_trigger: Some(trigger.clone()),
+                },
+                other => other,
+            })
+        })))
     }
 }
 
@@ -344,6 +385,41 @@ mod tests {
         .with_failure_threshold(threshold)
         .with_escalation_turns(escalation_turns);
         (backend, lead_calls, worker_calls)
+    }
+
+    /// Fake backend that actually emits a `Usage` event before `Done` —
+    /// `CountingBackend` above deliberately doesn't, so it can't exercise
+    /// the H-3 (docs/AUDITORIA-2026-07-v5.md) `escalation_trigger`
+    /// stamping, which only touches the `Usage` variant.
+    struct UsageEmittingBackend {
+        label: &'static str,
+    }
+
+    #[async_trait]
+    impl ModelBackend for UsageEmittingBackend {
+        fn name(&self) -> &str {
+            self.label
+        }
+
+        async fn complete(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
+            Ok(Box::pin(stream::iter(vec![
+                Ok(CompletionEvent::Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    stop_reason: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                }),
+                Ok(CompletionEvent::Done),
+            ])))
+        }
     }
 
     fn request(messages: Vec<Message>) -> CompletionRequest {
@@ -657,5 +733,54 @@ mod tests {
     fn the_decorator_name_names_both_backends() {
         let (backend, _, _) = harness(1, 1, 1);
         assert_eq!(backend.name(), "escalating(lead->worker)");
+    }
+
+    /// H-3 (docs/AUDITORIA-2026-07-v5.md): the round that *triggers* an
+    /// escalation must stamp `escalation_trigger` on its `Usage` event; a
+    /// normal worker round (clean history, no escalation) must not.
+    #[tokio::test]
+    async fn the_triggering_round_stamps_escalation_trigger_on_its_usage_event() {
+        let backend = EscalatingBackend::new(
+            Box::new(UsageEmittingBackend { label: "lead" }),
+            Box::new(UsageEmittingBackend { label: "worker" }),
+        )
+        .with_lead_turns(0) // purely reactive
+        .with_failure_threshold(2)
+        .with_escalation_turns(2);
+
+        async fn collect_triggers(
+            stream: Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+        ) -> Vec<Option<String>> {
+            stream
+                .filter_map(|event| async move {
+                    match event {
+                        Ok(CompletionEvent::Usage {
+                            escalation_trigger, ..
+                        }) => Some(escalation_trigger),
+                        _ => None,
+                    }
+                })
+                .collect()
+                .await
+        }
+
+        // Round 1: clean history -> worker, no trigger.
+        let stream = backend.complete(request(vec![])).await.unwrap();
+        assert_eq!(collect_triggers(stream).await, vec![None]);
+
+        // Round 2: 2 consecutive failed observations, at the threshold ->
+        // this round triggers the escalation.
+        let messages = vec![observation("1", true), observation("2", true)];
+        let stream = backend.complete(request(messages)).await.unwrap();
+        let triggers = collect_triggers(stream).await;
+        assert_eq!(triggers.len(), 1);
+        let trigger = triggers[0]
+            .as_ref()
+            .expect("the triggering round must stamp a trigger");
+        assert!(
+            trigger.contains("2 consecutive failed observations"),
+            "got: {trigger}"
+        );
+        assert!(trigger.contains("threshold 2"), "got: {trigger}");
     }
 }

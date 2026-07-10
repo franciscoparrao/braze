@@ -126,6 +126,47 @@ pub enum AgentEvent {
     PlanCreated {
         plan: String,
     },
+    /// A tool call the model emitted as plain text in a native
+    /// tool-template format (Qwen's `<tool_call>` tag, qwen3-coder's bare
+    /// `<function=...>` XML, Llama's pythonic `func(...)`, or a bare JSON
+    /// object) instead of a structured `tool_calls` entry, and
+    /// `Engine::complete_once_with`'s rescue ladder recovered it (H-3,
+    /// docs/AUDITORIA-2026-07-v5.md). Audit-only, same as
+    /// `CompactionOccurred`/`Usage` — never rendered back into model
+    /// history. Exists so `braze-bench` can count how often this
+    /// SLM-first harness technique actually fires per task/skill, instead
+    /// of the count only ever showing up as a `tracing::info!` line.
+    TextualRescueApplied {
+        /// Which rung of the rescue ladder succeeded — a short label like
+        /// `"<tool_call> tagged (Qwen/Hermes)"` or `"plain-text fallback"`,
+        /// matching the `format`/description already logged at the call
+        /// site in `engine.rs`.
+        parser: String,
+    },
+    /// `EscalatingBackend` (`braze-model::escalation`) routed this round to
+    /// its lead model reactively, because the worker had a trailing streak
+    /// of failed observations at or past its configured threshold (H-3,
+    /// docs/AUDITORIA-2026-07-v5.md). Emitted only on the round that
+    /// *triggers* the escalation window (`RouteDecision::LeadEscalating`),
+    /// not on every subsequent round already inside that window
+    /// (`RouteDecision::LeadEscalated`) — so counting these events counts
+    /// escalation *episodes*, not raw lead-model calls.
+    EscalationToLead {
+        /// Human-readable reason, e.g. `"3 consecutive failed observations
+        /// (threshold 2)"` — enough to eyeball in a rollout log without
+        /// cross-referencing `EscalatingBackend`'s internal counters.
+        trigger: String,
+    },
+    /// `Engine::attempt_tools_free_summary_round` was invoked — the turn's
+    /// last round came back with neither text nor a tool call after the
+    /// turn already made real progress, so the engine gave it one more
+    /// shot with tools disabled, asking it to summarize what it found so
+    /// far (H-3, docs/AUDITORIA-2026-07-v5.md). Emitted regardless of
+    /// whether that attempt actually produced usable text — this event
+    /// records that the fallback was *reached for*, not that it succeeded
+    /// (success is separately visible as the `AssistantText` it may or may
+    /// not append right after).
+    SummaryFallbackAttempted,
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only
@@ -295,5 +336,76 @@ mod tests {
         let json = r#"{"type":"some_future_event_kind","whatever":"fields","it":1}"#;
         let event: AgentEvent = serde_json::from_str(json).expect("must deserialize");
         assert!(matches!(event, AgentEvent::Unknown));
+    }
+
+    // --- H-3 (docs/AUDITORIA-2026-07-v5.md): SLM-lever events ---
+
+    #[test]
+    fn textual_rescue_applied_round_trips_through_json() {
+        let event = AgentEvent::TextualRescueApplied {
+            parser: "<tool_call> tagged (Qwen/Hermes)".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"textual_rescue_applied\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        match decoded {
+            AgentEvent::TextualRescueApplied { parser } => {
+                assert_eq!(parser, "<tool_call> tagged (Qwen/Hermes)");
+            }
+            other => panic!("expected TextualRescueApplied, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn escalation_to_lead_round_trips_through_json() {
+        let event = AgentEvent::EscalationToLead {
+            trigger: "3 consecutive failed observations (threshold 2)".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"escalation_to_lead\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        match decoded {
+            AgentEvent::EscalationToLead { trigger } => {
+                assert_eq!(trigger, "3 consecutive failed observations (threshold 2)");
+            }
+            other => panic!("expected EscalationToLead, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn summary_fallback_attempted_round_trips_through_json() {
+        let event = AgentEvent::SummaryFallbackAttempted;
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"summary_fallback_attempted\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        assert!(matches!(decoded, AgentEvent::SummaryFallbackAttempted));
+    }
+
+    /// A rollout log written by an older binary (before H-3) obviously
+    /// never contains these tags — but the inverse matters too: a binary
+    /// that *predates* H-3 reading a log written by a newer one must fall
+    /// back to `Unknown` for these tags rather than failing `load()` for
+    /// the whole session, same C9 contract as any other future variant.
+    /// Simulated here by feeding a tag this test build DOES know, through
+    /// the same code path `Unknown`'s own test uses — a real predates-H-3
+    /// binary can't be built in this test, so this just re-confirms the
+    /// mechanism (`#[serde(other)]`) generalizes to these new tags too by
+    /// construction, not by a tag-specific carve-out.
+    #[test]
+    fn h3_event_tags_are_ordinary_internally_tagged_variants_not_special_cased() {
+        for tag in ["textual_rescue_applied", "escalation_to_lead", "summary_fallback_attempted"] {
+            let json = format!(r#"{{"type":"{tag}_but_from_the_future","x":1}}"#);
+            let event: AgentEvent = serde_json::from_str(&json).expect("must deserialize");
+            assert!(matches!(event, AgentEvent::Unknown));
+        }
     }
 }

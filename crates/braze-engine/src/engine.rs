@@ -190,6 +190,11 @@ struct RoundUsage {
     stop_reason: Option<String>,
     cache_read_tokens: Option<u32>,
     cache_write_tokens: Option<u32>,
+    /// Set when `EscalatingBackend` stamped this round's `Usage` event as
+    /// the one that triggered a reactive escalation (H-3,
+    /// docs/AUDITORIA-2026-07-v5.md) — see
+    /// `CompletionEvent::Usage::escalation_trigger`'s doc comment.
+    escalation_trigger: Option<String>,
 }
 
 struct RoundOutcome {
@@ -203,6 +208,10 @@ struct RoundOutcome {
     /// mid-sentence (or mid-tool-call-JSON, which then fails to parse
     /// downstream with no other indication why).
     truncated: bool,
+    /// Which rung of the textual-rescue ladder recovered a tool call this
+    /// round, if any (H-3, docs/AUDITORIA-2026-07-v5.md) — see
+    /// `AgentEvent::TextualRescueApplied`'s doc comment.
+    rescue_applied: Option<String>,
 }
 
 /// Per-turn mutable state `dispatch_tool_calls` threads across every round
@@ -484,6 +493,7 @@ impl Engine {
                     stop_reason,
                     cache_read_tokens,
                     cache_write_tokens,
+                    escalation_trigger,
                 }) => {
                     tracing::debug!(
                         input_tokens,
@@ -516,6 +526,7 @@ impl Engine {
                         stop_reason,
                         cache_read_tokens,
                         cache_write_tokens,
+                        escalation_trigger,
                     });
                 }
                 Ok(CompletionEvent::Done) => {
@@ -566,6 +577,12 @@ impl Engine {
         // Llama, one of the most commonly installed local model
         // families), then (4) a bare JSON object that is the entire
         // response (optionally ```json-fenced).
+        // H-3 (docs/AUDITORIA-2026-07-v5.md): which rung (if any) actually
+        // rescued a tool call this round, threaded into `RoundOutcome` so
+        // `run_turn` can persist `AgentEvent::TextualRescueApplied` — the
+        // action already existed (the `tracing::info!` calls below), this
+        // just gives it a counted, bench-readable trail too.
+        let mut rescue_applied: Option<String> = None;
         if rescue_enabled && tool_calls.is_empty() {
             type TextualExtractor = fn(&str) -> (Vec<ToolCall>, String);
             const RESCUE_LADDER: &[(TextualExtractor, &str)] = &[
@@ -592,6 +609,7 @@ impl Engine {
                     tool_calls.extend(calls);
                     text_buffer = remaining_text;
                     rescued_from_ladder = true;
+                    rescue_applied = Some((*format).to_string());
                     break;
                 }
             }
@@ -604,6 +622,7 @@ impl Engine {
                 );
                 tool_calls.push(rescued);
                 text_buffer.clear();
+                rescue_applied = Some("plain-text fallback".to_string());
             }
         }
 
@@ -611,6 +630,7 @@ impl Engine {
             text_buffer,
             tool_calls,
             usage,
+            rescue_applied,
             truncated,
         })
     }
@@ -723,6 +743,16 @@ impl Engine {
             .usage
             .as_ref()
             .and_then(|u| u.stop_reason.clone());
+        // H-3 (docs/AUDITORIA-2026-07-v5.md): every candidate this round
+        // shares the same routing decision (D4's same-round dedup in
+        // `EscalatingBackend::route` keys on `req.messages.len()`, which
+        // every best-of-n attempt sends unchanged) — taking it from the
+        // winner specifically is just the least surprising of several
+        // equivalent choices, not a real distinction.
+        let winner_escalation_trigger = candidates[winner_index]
+            .usage
+            .as_ref()
+            .and_then(|u| u.escalation_trigger.clone());
 
         tracing::debug!(
             winner_index,
@@ -738,6 +768,7 @@ impl Engine {
             stop_reason: winner_stop_reason,
             cache_read_tokens: total_cache_read_tokens,
             cache_write_tokens: total_cache_write_tokens,
+            escalation_trigger: winner_escalation_trigger,
         });
 
         if !winner.text_buffer.is_empty() {
@@ -882,6 +913,7 @@ impl Engine {
                 tool_calls,
                 usage,
                 truncated,
+                rescue_applied,
             } = if self.best_of_n > 1 {
                 self.complete_with_best_of_n(&req, observer).await?
             } else {
@@ -898,6 +930,12 @@ impl Engine {
             // generated, not just the winner's — see
             // `complete_with_best_of_n`.
             if let Some(round_usage) = usage {
+                // H-3 (docs/AUDITORIA-2026-07-v5.md): `AgentEvent::Usage`
+                // itself gains no new field — the escalation fact gets its
+                // own persisted event below instead, captured here before
+                // `round_usage`'s other fields move into the `Usage`
+                // literal.
+                let escalation_trigger = round_usage.escalation_trigger;
                 self.append_and_notify(
                     session,
                     &AgentEvent::Usage {
@@ -907,6 +945,27 @@ impl Engine {
                         cache_read_tokens: round_usage.cache_read_tokens,
                         cache_write_tokens: round_usage.cache_write_tokens,
                     },
+                    observer,
+                )
+                .await?;
+                if let Some(trigger) = escalation_trigger {
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::EscalationToLead { trigger },
+                        observer,
+                    )
+                    .await?;
+                }
+            }
+
+            // H-3 (docs/AUDITORIA-2026-07-v5.md): the action already
+            // happened (inside `complete_once_with`'s rescue ladder,
+            // logged via `tracing::info!`) — this just gives it a
+            // persisted, bench-countable trail alongside the log line.
+            if let Some(parser) = rescue_applied {
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::TextualRescueApplied { parser },
                     observer,
                 )
                 .await?;
@@ -1169,6 +1228,13 @@ impl Engine {
         messages: &[Message],
         observer: &mut dyn TurnObserver,
     ) -> Result<bool, EngineError> {
+        // H-3 (docs/AUDITORIA-2026-07-v5.md): records that this fallback was
+        // *reached for*, regardless of whether it goes on to succeed —
+        // success is separately visible as the `AssistantText` this
+        // function may or may not append below.
+        self.append_and_notify(session, &AgentEvent::SummaryFallbackAttempted, observer)
+            .await?;
+
         let req = CompletionRequest {
             messages: messages.to_vec(),
             tool_stubs: Vec::new(),
@@ -2771,7 +2837,15 @@ fn event_text_len(event: &AgentEvent) -> usize {
         AgentEvent::CompactionOccurred { summary, .. } => summary.len(),
         AgentEvent::PermissionRequested { action, .. }
         | AgentEvent::PermissionDecided { action, .. } => action.len(),
-        AgentEvent::ToolCallStarted { .. } | AgentEvent::Usage { .. } | AgentEvent::Unknown => 0,
+        AgentEvent::ToolCallStarted { .. }
+        | AgentEvent::Usage { .. }
+        // H-3 (docs/AUDITORIA-2026-07-v5.md) lever events: audit-only,
+        // same as `Usage` above — never reached the model, nothing to
+        // count as dropped.
+        | AgentEvent::TextualRescueApplied { .. }
+        | AgentEvent::EscalationToLead { .. }
+        | AgentEvent::SummaryFallbackAttempted
+        | AgentEvent::Unknown => 0,
     }
 }
 
@@ -3823,6 +3897,7 @@ mod tests {
                 stop_reason: Some("max_tokens".to_string()),
                 cache_read_tokens: None,
                 cache_write_tokens: None,
+                escalation_trigger: None,
             },
             CompletionEvent::Done,
         ]]);
@@ -3951,6 +4026,15 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::ToolCallCompleted { .. }))
         );
+        // H-3 (docs/AUDITORIA-2026-07-v5.md): the fallback being *reached
+        // for* is now persisted, independent of whether it went on to
+        // produce usable text.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::SummaryFallbackAttempted)),
+            "expected SummaryFallbackAttempted to be persisted, got: {events:?}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -4056,6 +4140,7 @@ mod tests {
                 stop_reason: Some("end_turn".to_string()),
                 cache_read_tokens: Some(30),
                 cache_write_tokens: Some(5),
+                escalation_trigger: None,
             },
             CompletionEvent::Done,
         ]]);
@@ -4653,6 +4738,7 @@ mod tests {
                 stop_reason: Some("end_turn".to_string()),
                 cache_read_tokens: None,
                 cache_write_tokens: None,
+                escalation_trigger: None,
             },
             CompletionEvent::Done,
         ]]);
@@ -4786,6 +4872,7 @@ mod tests {
                 stop_reason: Some("max_tokens".to_string()),
                 cache_read_tokens: None,
                 cache_write_tokens: None,
+                escalation_trigger: None,
             },
             CompletionEvent::Done,
         ]]);
@@ -7317,6 +7404,16 @@ mod tests {
             )),
             "the tagged block must not be persisted as conversational text"
         );
+        // H-3 (docs/AUDITORIA-2026-07-v5.md): the rescue actually
+        // happening was already visible via `tracing::info!` before this
+        // — this pins that it's also persisted, bench-countable.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::TextualRescueApplied { parser } if parser.contains("Qwen/Hermes")
+            )),
+            "a rescued <tool_call> block must persist TextualRescueApplied naming that rung"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -7625,6 +7722,7 @@ mod tests {
                     // both-Some or both-None cases.
                     cache_read_tokens: Some(6),
                     cache_write_tokens: None,
+                    escalation_trigger: None,
                 },
                 CompletionEvent::Done,
             ],
@@ -7636,6 +7734,7 @@ mod tests {
                     stop_reason: Some("stop_sequence".to_string()),
                     cache_read_tokens: Some(4),
                     cache_write_tokens: Some(2),
+                    escalation_trigger: None,
                 },
                 CompletionEvent::Done,
             ],

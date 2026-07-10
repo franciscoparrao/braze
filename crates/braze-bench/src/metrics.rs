@@ -164,6 +164,33 @@ pub struct TaskResult {
     /// same reason. See that field's doc comment for the full rationale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_write_tokens: Option<u32>,
+    /// How many times `Engine::complete_once_with`'s textual-rescue ladder
+    /// recovered a tool call the model emitted as plain text instead of a
+    /// structured `tool_calls` entry — counted from
+    /// `AgentEvent::TextualRescueApplied` (H-3, docs/AUDITORIA-2026-07-v5.md).
+    /// Plain `u32`, not `Option<u32>`: unlike cache tokens, "0 rescues" and
+    /// "not applicable" are the same fact here — every backend always has
+    /// an opportunity to trigger this (or not), there's no "doesn't
+    /// report it" case to distinguish.
+    pub rescued_tool_calls: u32,
+    /// How many times `EscalatingBackend` reactively routed a round to its
+    /// lead model because the worker's trailing observations crossed the
+    /// failure threshold — counted from `AgentEvent::EscalationToLead`
+    /// (H-3). Counts escalation *episodes* (one per triggering round), not
+    /// every round spent inside an active escalation window — see that
+    /// event's doc comment.
+    pub leader_escalations: u32,
+    /// How many times tactical context compaction fired this task —
+    /// counted from `AgentEvent::CompactionOccurred`, which already
+    /// existed before H-3; this field is the part of the hallazgo that
+    /// was actually missing (nobody counted it).
+    pub compaction_count: u32,
+    /// How many times `Engine::attempt_tools_free_summary_round` was
+    /// invoked — counted from `AgentEvent::SummaryFallbackAttempted`
+    /// (H-3). Counts attempts, not successes; a turn can have this > 0
+    /// and still end in `EmptyModelResponse` if the fallback itself came
+    /// back empty too.
+    pub summary_fallbacks: u32,
     pub wall_time_ms: u128,
     pub passed: bool,
 }
@@ -210,6 +237,11 @@ pub fn harness_error_result(
         // comment calls out.
         cache_read_tokens: None,
         cache_write_tokens: None,
+        // Nothing ran, so none of these levers could have fired either.
+        rescued_tool_calls: 0,
+        leader_escalations: 0,
+        compaction_count: 0,
+        summary_fallbacks: 0,
         wall_time_ms: 0,
         passed: false,
     }
@@ -342,6 +374,28 @@ pub fn compute_metrics(
         .filter(|event| matches!(event, AgentEvent::Usage { .. }))
         .count() as u32;
 
+    // H-3 (docs/AUDITORIA-2026-07-v5.md): the four SLM-first levers this
+    // harness's whole thesis rests on, counted the same way `rounds` is —
+    // these actions already existed (visible via `tracing::info!`/`warn!`
+    // at their call sites in `engine.rs`), this is what makes them
+    // bench-readable instead of log-only.
+    let rescued_tool_calls = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::TextualRescueApplied { .. }))
+        .count() as u32;
+    let leader_escalations = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::EscalationToLead { .. }))
+        .count() as u32;
+    let compaction_count = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::CompactionOccurred { .. }))
+        .count() as u32;
+    let summary_fallbacks = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::SummaryFallbackAttempted))
+        .count() as u32;
+
     let planned = events
         .iter()
         .any(|event| matches!(event, AgentEvent::PlanCreated { .. }));
@@ -467,6 +521,10 @@ pub fn compute_metrics(
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
+        rescued_tool_calls,
+        leader_escalations,
+        compaction_count,
+        summary_fallbacks,
         wall_time_ms: wall_time.as_millis(),
         passed,
     }
@@ -1009,6 +1067,50 @@ mod tests {
         ];
         let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
         assert_eq!(result.rounds, 2);
+    }
+
+    /// H-3 (docs/AUDITORIA-2026-07-v5.md): the 4 SLM-first levers, each
+    /// counted independently from their own `AgentEvent` variant — this
+    /// is the whole point of the hallazgo, that the bench can finally
+    /// read these off the event log instead of only `tracing::info!`.
+    #[test]
+    fn compute_metrics_counts_each_slm_lever_independently() {
+        let events = vec![
+            AgentEvent::TextualRescueApplied {
+                parser: "<tool_call> tagged (Qwen/Hermes)".to_string(),
+            },
+            AgentEvent::TextualRescueApplied {
+                parser: "pythonic [func(...)] (Llama)".to_string(),
+            },
+            AgentEvent::EscalationToLead {
+                trigger: "2 consecutive failed observations (threshold 2)".to_string(),
+            },
+            AgentEvent::CompactionOccurred {
+                summary: "digest".to_string(),
+                dropped_tokens_estimate: 500,
+            },
+            AgentEvent::SummaryFallbackAttempted,
+        ];
+        let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
+        assert_eq!(result.rescued_tool_calls, 2);
+        assert_eq!(result.leader_escalations, 1);
+        assert_eq!(result.compaction_count, 1);
+        assert_eq!(result.summary_fallbacks, 1);
+    }
+
+    /// A run with none of the 4 levers firing reports all-zero counts, not
+    /// `None`/absent fields — same "0 means it didn't happen, always
+    /// meaningful" contract the field doc comments describe.
+    #[test]
+    fn compute_metrics_reports_zero_slm_levers_when_none_fired() {
+        let events = vec![AgentEvent::AssistantText {
+            text: "hola".to_string(),
+        }];
+        let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
+        assert_eq!(result.rescued_tool_calls, 0);
+        assert_eq!(result.leader_escalations, 0);
+        assert_eq!(result.compaction_count, 0);
+        assert_eq!(result.summary_fallbacks, 0);
     }
 
     #[test]

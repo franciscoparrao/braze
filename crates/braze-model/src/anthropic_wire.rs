@@ -330,6 +330,10 @@ impl AnthropicStreamState {
                         // this project actually gets used).
                         cache_read_tokens: None,
                         cache_write_tokens: None,
+                        // Only `EscalatingBackend` (braze-model::escalation)
+                        // ever sets this — a plain wire backend has no
+                        // notion of escalation (H-3, docs/AUDITORIA-2026-07-v5.md).
+                        escalation_trigger: None,
                     },
                     CompletionEvent::Done,
                 ]

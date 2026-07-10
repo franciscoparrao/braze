@@ -396,6 +396,8 @@ impl OllamaStreamState {
                 // Ollama has no per-token billing/caching concept.
                 cache_read_tokens: None,
                 cache_write_tokens: None,
+                // Only `EscalatingBackend` sets this (H-3, docs/AUDITORIA-2026-07-v5.md).
+                escalation_trigger: None,
             });
             events.push(CompletionEvent::Done);
             self.done = true;

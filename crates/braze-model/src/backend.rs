@@ -54,6 +54,17 @@ pub enum CompletionEvent {
         /// on the requests that read it back. Same `None`-means-"not
         /// reported" contract as `cache_read_tokens`.
         cache_write_tokens: Option<u32>,
+        /// Set by `EscalatingBackend::complete` (H-3,
+        /// docs/AUDITORIA-2026-07-v5.md) when this round is the one that
+        /// *triggers* a reactive escalation to the lead model — `None` for
+        /// every other round (normal worker rounds, rounds already inside
+        /// an active escalation window, and every backend that isn't
+        /// wrapped in `EscalatingBackend` at all). Plain `ModelBackend`
+        /// implementations never set this field themselves; it exists so
+        /// the decorator can signal the engine through the same `Usage`
+        /// event it already emits, without either side needing a second
+        /// side channel.
+        escalation_trigger: Option<String>,
     },
     Done,
 }

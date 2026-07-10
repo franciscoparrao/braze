@@ -723,6 +723,8 @@ impl OpenRouterStreamState {
             stop_reason: self.stop_reason.clone(),
             cache_read_tokens: self.cache_read_tokens,
             cache_write_tokens: self.cache_write_tokens,
+            // Only `EscalatingBackend` sets this (H-3, docs/AUDITORIA-2026-07-v5.md).
+            escalation_trigger: None,
         });
         events.push(CompletionEvent::Done);
         events

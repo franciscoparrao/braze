@@ -36,6 +36,18 @@ struct BackendSummary {
     schema_validation_failures: u32,
     tool_execution_failures: u32,
     permission_denials: u32,
+    /// Totals (not averages, same as the 3 fields above) of the 4
+    /// SLM-first levers (H-3, docs/AUDITORIA-2026-07-v5.md) — how many
+    /// tasks in this group needed rescue, escalation, compaction, or a
+    /// tools-free summary fallback to converge. The whole point of
+    /// counting these: two backends tied on `pass_rate` for a skill can
+    /// differ wildly in how many of these fired to get there, which is
+    /// exactly the SI-2 A/B question (`docs/sweep-si2-lead-ab-2026-07-09.md`)
+    /// that motivated this hallazgo in the first place.
+    rescued_tool_calls: u32,
+    leader_escalations: u32,
+    compaction_count: u32,
+    summary_fallbacks: u32,
     /// 95% Wilson score interval half-width around `passed/total`, in
     /// percentage points. With `--repetitions 1` (or few repetitions) a
     /// small local model's pass rate is mostly noise, not signal — this
@@ -126,6 +138,10 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
         schema_validation_failures: counted.iter().map(|r| r.schema_validation_failures).sum(),
         tool_execution_failures: counted.iter().map(|r| r.tool_execution_failures).sum(),
         permission_denials: counted.iter().map(|r| r.permission_denials).sum(),
+        rescued_tool_calls: counted.iter().map(|r| r.rescued_tool_calls).sum(),
+        leader_escalations: counted.iter().map(|r| r.leader_escalations).sum(),
+        compaction_count: counted.iter().map(|r| r.compaction_count).sum(),
+        summary_fallbacks: counted.iter().map(|r| r.summary_fallbacks).sum(),
         pass_rate_interval_pp: half_width * 100.0,
     }
 }
@@ -180,7 +196,7 @@ pub fn print_table(results: &[TaskResult]) {
     // failure isn't a model result at all (see
     // `BackendSummary::harness_errors`'s doc comment).
     println!(
-        "{:<24} {:>16} {:>8} {:>12} {:>10} {:>14} {:>16} {:>17} {:>14} {:>10} {:>12}",
+        "{:<24} {:>16} {:>8} {:>12} {:>10} {:>14} {:>16} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9}",
         "backend",
         "pass_rate(±95%)",
         "avg_rounds",
@@ -191,7 +207,11 @@ pub fn print_table(results: &[TaskResult]) {
         "schema_fail",
         "exec_fail",
         "denied",
-        "harness_err"
+        "harness_err",
+        "rescues",
+        "escalat",
+        "compact",
+        "sumfall"
     );
     for backend in backend_order {
         let rows: Vec<&TaskResult> = results.iter().filter(|r| r.backend == backend).collect();
@@ -201,7 +221,7 @@ pub fn print_table(results: &[TaskResult]) {
             summary.passed, summary.total, summary.pass_rate_interval_pp
         );
         println!(
-            "{:<24} {:>16} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12}",
+            "{:<24} {:>16} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9}",
             summary.backend,
             pass_rate_cell,
             summary.avg_rounds,
@@ -213,6 +233,10 @@ pub fn print_table(results: &[TaskResult]) {
             summary.tool_execution_failures,
             summary.permission_denials,
             summary.harness_errors,
+            summary.rescued_tool_calls,
+            summary.leader_escalations,
+            summary.compaction_count,
+            summary.summary_fallbacks,
         );
     }
 
@@ -236,8 +260,18 @@ pub fn print_table(results: &[TaskResult]) {
         // decides whether a lever is "worth it" for small models.
         println!("\n== Comparación por skill ==");
         println!(
-            "{:<24} {:<20} {:>9} {:>8} {:>10} {:>10} {:>11}",
-            "backend", "skill", "pass_rate", "avg_rounds", "avg_ms", "median_ms", "avg_tok_out"
+            "{:<24} {:<20} {:>9} {:>8} {:>10} {:>10} {:>11} {:>9} {:>9} {:>9} {:>9}",
+            "backend",
+            "skill",
+            "pass_rate",
+            "avg_rounds",
+            "avg_ms",
+            "median_ms",
+            "avg_tok_out",
+            "rescues",
+            "escalat",
+            "compact",
+            "sumfall"
         );
         for backend in {
             let mut order: Vec<&str> = Vec::new();
@@ -259,7 +293,7 @@ pub fn print_table(results: &[TaskResult]) {
                 let summary = summarize(backend, &rows);
                 let pass_rate_cell = format!("{}/{}", summary.passed, summary.total);
                 println!(
-                    "{:<24} {:<20} {:>9} {:>8.1} {:>10.0} {:>10.0} {:>11.0}",
+                    "{:<24} {:<20} {:>9} {:>8.1} {:>10.0} {:>10.0} {:>11.0} {:>9} {:>9} {:>9} {:>9}",
                     backend,
                     skill,
                     pass_rate_cell,
@@ -267,6 +301,10 @@ pub fn print_table(results: &[TaskResult]) {
                     summary.avg_wall_time_ms,
                     summary.median_wall_time_ms,
                     summary.avg_output_tokens,
+                    summary.rescued_tool_calls,
+                    summary.leader_escalations,
+                    summary.compaction_count,
+                    summary.summary_fallbacks,
                 );
             }
         }
@@ -387,9 +425,40 @@ mod tests {
             // same as `harness_error_result`.
             cache_read_tokens: None,
             cache_write_tokens: None,
+            rescued_tool_calls: 0,
+            leader_escalations: 0,
+            compaction_count: 0,
+            summary_fallbacks: 0,
             wall_time_ms,
             passed,
         }
+    }
+
+    /// H-3 (docs/AUDITORIA-2026-07-v5.md): the 4 SLM-lever fields sum
+    /// (not average) across rows, same as `schema_validation_failures`
+    /// already does — this is the aggregation `docs/sweep-si2-lead-ab-
+    /// 2026-07-09.md`'s follow-up question needs (how many rescues vs.
+    /// escalations per skill).
+    #[test]
+    fn summarize_sums_slm_levers_across_all_rows() {
+        let mut a = result(true, 100, 10, 2);
+        a.rescued_tool_calls = 2;
+        a.leader_escalations = 1;
+        a.compaction_count = 0;
+        a.summary_fallbacks = 1;
+        let mut b = result(true, 300, 20, 4);
+        b.rescued_tool_calls = 1;
+        b.leader_escalations = 0;
+        b.compaction_count = 3;
+        b.summary_fallbacks = 0;
+        let rows = vec![&a, &b];
+
+        let summary = summarize("ollama:x", &rows);
+
+        assert_eq!(summary.rescued_tool_calls, 3);
+        assert_eq!(summary.leader_escalations, 1);
+        assert_eq!(summary.compaction_count, 3);
+        assert_eq!(summary.summary_fallbacks, 1);
     }
 
     #[test]

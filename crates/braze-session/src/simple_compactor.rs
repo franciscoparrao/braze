@@ -327,6 +327,12 @@ impl ContextCompactor for SimpleContextCompactor {
                 | AgentEvent::PermissionRequested { .. }
                 | AgentEvent::PermissionDecided { .. }
                 | AgentEvent::Usage { .. }
+                // H-3 (docs/AUDITORIA-2026-07-v5.md) lever events: audit-only,
+                // same as `Usage`/`CompactionOccurred` above — nothing here
+                // is conversational content worth surviving into the digest.
+                | AgentEvent::TextualRescueApplied { .. }
+                | AgentEvent::EscalationToLead { .. }
+                | AgentEvent::SummaryFallbackAttempted
                 | AgentEvent::Unknown => {}
             }
         }

@@ -126,6 +126,13 @@ pub fn external_outcome_to_task_result(
             output_tokens: 0,
             cache_read_tokens: None,
             cache_write_tokens: None,
+            // Same "no AgentEvent log" reasoning as the fields above — a
+            // black-box external harness exposes none of the 4 SLM levers
+            // through this contract either (H-3, docs/AUDITORIA-2026-07-v5.md).
+            rescued_tool_calls: 0,
+            leader_escalations: 0,
+            compaction_count: 0,
+            summary_fallbacks: 0,
             wall_time_ms: outcome.wall_time.as_millis(),
             passed: false,
         };
@@ -184,6 +191,10 @@ pub fn external_outcome_to_task_result(
         // cache tokens. `None`, not `Some(0)`.
         cache_read_tokens: None,
         cache_write_tokens: None,
+        rescued_tool_calls: 0,
+        leader_escalations: 0,
+        compaction_count: 0,
+        summary_fallbacks: 0,
         wall_time_ms: outcome.wall_time.as_millis(),
         passed: assertions_passed,
     }
