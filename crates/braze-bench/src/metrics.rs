@@ -209,6 +209,13 @@ pub struct TaskResult {
     /// and still end in `EmptyModelResponse` if the fallback itself came
     /// back empty too.
     pub summary_fallbacks: u32,
+    /// How many mid-turn harness notes the engine injected (A′.2,
+    /// docs/harness-engineering-hooks-skills-2026-07-10.md § I.2) —
+    /// counted from `AgentEvent::HarnessNote`, any kind. Paired with the
+    /// `no-harness-notes` ablation, this is what attributes a pass-rate
+    /// delta to the announced deadline actually having been announced.
+    #[serde(default)]
+    pub harness_notes: u32,
     /// Estimated USD cost of this task run, from the resolved
     /// [`crate::backend_spec::PricingRates`] over the summed token
     /// counts (Paquete 3, docs/AUDITORIA-2026-07-v6.md). `None` when the
@@ -279,6 +286,7 @@ pub fn harness_error_result(
         leader_escalations: 0,
         compaction_count: 0,
         summary_fallbacks: 0,
+        harness_notes: 0,
         // Nothing ran — no tokens, no cost to estimate.
         estimated_cost_usd: None,
         wall_time_ms: 0,
@@ -434,6 +442,10 @@ pub fn compute_metrics(
     let summary_fallbacks = events
         .iter()
         .filter(|event| matches!(event, AgentEvent::SummaryFallbackAttempted))
+        .count() as u32;
+    let harness_notes = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::HarnessNote { .. }))
         .count() as u32;
 
     let planned = events
@@ -593,6 +605,7 @@ pub fn compute_metrics(
         leader_escalations,
         compaction_count,
         summary_fallbacks,
+        harness_notes,
         estimated_cost_usd,
         wall_time_ms: wall_time.as_millis(),
         passed,

@@ -134,6 +134,7 @@ pub fn external_outcome_to_task_result(
             leader_escalations: 0,
             compaction_count: 0,
             summary_fallbacks: 0,
+            harness_notes: 0,
             // No token counts → nothing to price.
             estimated_cost_usd: None,
             wall_time_ms: outcome.wall_time.as_millis(),
@@ -199,6 +200,7 @@ pub fn external_outcome_to_task_result(
         leader_escalations: 0,
         compaction_count: 0,
         summary_fallbacks: 0,
+        harness_notes: 0,
         estimated_cost_usd: None,
         wall_time_ms: outcome.wall_time.as_millis(),
         passed: assertions_passed,

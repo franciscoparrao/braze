@@ -14,7 +14,6 @@ use crate::anthropic_wire::{
 };
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
-use crate::http_error::http_error_to_model_error;
 
 /// Streams completions from the real Anthropic API.
 ///
@@ -31,6 +30,10 @@ pub struct AnthropicBackend {
     /// `None` (the default) leaves Anthropic's own provider default
     /// (~1.0) in effect. See [`AnthropicBackend::with_temperature`].
     temperature: Option<f32>,
+    /// H-19: retries for the initial request on transient 429/5xx/send
+    /// failures. Defaults to [`crate::retry::DEFAULT_MAX_RETRIES`]; see
+    /// [`AnthropicBackend::with_max_retries`].
+    max_retries: u32,
 }
 
 impl AnthropicBackend {
@@ -41,6 +44,7 @@ impl AnthropicBackend {
             client: crate::http_client::build_client(),
             base_url: ANTHROPIC_API_URL.to_string(),
             temperature: None,
+            max_retries: crate::retry::DEFAULT_MAX_RETRIES,
         }
     }
 
@@ -54,6 +58,7 @@ impl AnthropicBackend {
             client: crate::http_client::build_client(),
             base_url,
             temperature: None,
+            max_retries: crate::retry::DEFAULT_MAX_RETRIES,
         }
     }
 
@@ -65,6 +70,14 @@ impl AnthropicBackend {
     /// `OllamaBackend::with_temperature`.
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = Some(temperature);
+        self
+    }
+
+    /// Overrides the H-19 retry count for the initial request — `0`
+    /// restores the old single-attempt behavior (used by the HTTP
+    /// mapping tests, whose canned server scripts exactly one response).
+    pub fn with_max_retries(mut self, max_retries: u32) -> Self {
+        self.max_retries = max_retries;
         self
     }
 }
@@ -90,20 +103,22 @@ impl ModelBackend for AnthropicBackend {
             "starting anthropic completion turn"
         );
 
-        let response = self
-            .client
-            .post(&self.base_url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ModelError::Request(format!("anthropic request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            return Err(http_error_to_model_error(response, "anthropic").await);
-        }
+        // H-19: transient 429/5xx/send blips on the initial request are
+        // retried with backoff inside the wire — the engine never sees
+        // them unless they persist past the retries.
+        let response = crate::retry::send_with_retry(
+            "anthropic",
+            self.max_retries,
+            || {
+                self.client
+                    .post(&self.base_url)
+                    .header("x-api-key", &self.api_key)
+                    .header("anthropic-version", ANTHROPIC_VERSION)
+                    .header("content-type", "application/json")
+                    .json(&body)
+            },
+        )
+        .await?;
 
         // Convert to `Vec<u8>` at the boundary rather than naming
         // `bytes::Bytes` in a type signature — `bytes` is only a transitive
@@ -445,7 +460,10 @@ mod tests {
             "test-key".to_string(),
             "claude-opus-4-8".to_string(),
             format!("http://{addr}/v1/messages"),
-        );
+        )
+        // H-19: single attempt — this test asserts the ERROR MAPPING of a
+        // terminal status, not the retry behavior (covered in retry.rs).
+        .with_max_retries(0);
 
         let err = match backend.complete(sample_request()).await {
             Ok(_) => panic!("expected an error"),
@@ -467,7 +485,10 @@ mod tests {
             "test-key".to_string(),
             "claude-opus-4-8".to_string(),
             format!("http://{addr}/v1/messages"),
-        );
+        )
+        // H-19: single attempt — this test asserts the ERROR MAPPING of a
+        // terminal status, not the retry behavior (covered in retry.rs).
+        .with_max_retries(0);
 
         let err = match backend.complete(sample_request()).await {
             Ok(_) => panic!("expected an error"),

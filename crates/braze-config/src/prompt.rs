@@ -178,7 +178,9 @@ pub fn default_system_prompt(
          command, edit something), call the tool for it in the same turn. \
          Do not just describe or restate the plan — an action you only \
          narrate never actually happens.\n\
-         - Relative paths are resolved against the working directory above.{family_hint}{references_section}",
+         - Relative paths are resolved against the working directory above.\n\
+         - Old tool results may appear collapsed to one line to save space — \
+         re-run the tool if you need their full content.{family_hint}{references_section}",
         cwd.display()
     )
 }

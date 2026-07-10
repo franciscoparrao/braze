@@ -623,6 +623,11 @@ pub struct AblationOverrides {
     /// context — that's the point of the ablation: measuring what
     /// compaction is worth means letting its absence hurt.
     pub disable_compaction: bool,
+    /// `+ablate:no-harness-notes` — disables the A′.2 mid-turn harness
+    /// notes (`Engine::with_harness_notes_enabled(false)`): the ablation
+    /// that measures whether announcing the budget/iteration deadline
+    /// actually converts aborted turns into converged ones.
+    pub disable_harness_notes: bool,
 }
 
 impl AblationOverrides {
@@ -651,6 +656,7 @@ impl AblationOverrides {
                 "no-planner" => out.disable_planner = true,
                 "no-lead" => out.disable_lead = true,
                 "no-compaction" => out.disable_compaction = true,
+                "no-harness-notes" => out.disable_harness_notes = true,
                 "best-of-n" => out.best_of_n = Some(Self::parse_usize(key, value)?),
                 "tactical-window" => out.tactical_window = Some(Self::parse_usize(key, value)?),
                 "tactical-threshold" => {
@@ -717,6 +723,9 @@ impl AblationOverrides {
         }
         if self.disable_compaction {
             parts.push("no-compaction".to_string());
+        }
+        if self.disable_harness_notes {
+            parts.push("no-harness-notes".to_string());
         }
         if let Some(n) = self.best_of_n {
             parts.push(format!("best-of-n={n}"));
@@ -1193,14 +1202,14 @@ mod tests {
         );
     }
 
-    /// The five boolean levers of the ablation matrix (H-2 no-caching,
-    /// opencode-2 no-prune, E1 no-planner/no-lead/no-compaction) parse
-    /// and round-trip through the display name — the row identity a
-    /// results.json reader dedupes on.
+    /// The six boolean levers of the ablation matrix (H-2 no-caching,
+    /// opencode-2 no-prune, E1 no-planner/no-lead/no-compaction, A′.2
+    /// no-harness-notes) parse and round-trip through the display name —
+    /// the row identity a results.json reader dedupes on.
     #[test]
     fn parses_the_ablation_matrix_boolean_keys_and_displays_them_back() {
         let spec = BackendSpec::parse(
-            "ollama:qwen2.5:3b+ablate:no-caching;no-prune;no-planner;no-lead;no-compaction",
+            "ollama:qwen2.5:3b+ablate:no-caching;no-prune;no-planner;no-lead;no-compaction;no-harness-notes",
         )
         .unwrap();
         let ablation = spec.ablation();
@@ -1209,8 +1218,16 @@ mod tests {
         assert!(ablation.disable_planner);
         assert!(ablation.disable_lead);
         assert!(ablation.disable_compaction);
+        assert!(ablation.disable_harness_notes);
         let display = spec.display_name(&config());
-        for key in ["no-caching", "no-prune", "no-planner", "no-lead", "no-compaction"] {
+        for key in [
+            "no-caching",
+            "no-prune",
+            "no-planner",
+            "no-lead",
+            "no-compaction",
+            "no-harness-notes",
+        ] {
             assert!(display.contains(key), "missing {key} in: {display}");
         }
     }

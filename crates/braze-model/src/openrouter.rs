@@ -11,7 +11,6 @@ use futures::{Stream, StreamExt, stream};
 use crate::anthropic_wire::extract_next_sse_data;
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
-use crate::http_error::http_error_to_model_error;
 use crate::openrouter_wire::{OPENROUTER_DEFAULT_BASE_URL, OpenRouterStreamState, build_request};
 
 /// The literal sentinel OpenAI-compatible streaming APIs send as the final
@@ -42,6 +41,10 @@ pub struct OpenRouterBackend {
     /// (Anthropic/Qwen), so leaving it on doesn't change the request sent
     /// for any other provider.
     prompt_caching_enabled: bool,
+    /// H-19: retries for the initial request on transient 429/5xx/send
+    /// failures. Defaults to [`crate::retry::DEFAULT_MAX_RETRIES`]; see
+    /// [`OpenRouterBackend::with_max_retries`].
+    max_retries: u32,
 }
 
 impl OpenRouterBackend {
@@ -55,6 +58,7 @@ impl OpenRouterBackend {
             temperature: None,
             seed: None,
             prompt_caching_enabled: true,
+            max_retries: crate::retry::DEFAULT_MAX_RETRIES,
         }
     }
 
@@ -69,6 +73,7 @@ impl OpenRouterBackend {
             temperature: None,
             seed: None,
             prompt_caching_enabled: true,
+            max_retries: crate::retry::DEFAULT_MAX_RETRIES,
         }
     }
 
@@ -88,6 +93,14 @@ impl OpenRouterBackend {
     /// `OllamaBackend::with_seed`.
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.seed = Some(seed);
+        self
+    }
+
+    /// Overrides the H-19 retry count for the initial request — `0`
+    /// restores the old single-attempt behavior (used by the HTTP
+    /// mapping tests, whose canned server scripts exactly one response).
+    pub fn with_max_retries(mut self, max_retries: u32) -> Self {
+        self.max_retries = max_retries;
         self
     }
 
@@ -132,19 +145,21 @@ impl ModelBackend for OpenRouterBackend {
 
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
-        let response = self
-            .client
-            .post(url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ModelError::Request(format!("openrouter request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            return Err(http_error_to_model_error(response, "openrouter").await);
-        }
+        // H-19: transient 429/5xx/send blips on the initial request are
+        // retried with backoff inside the wire — the engine never sees
+        // them unless they persist past the retries.
+        let response = crate::retry::send_with_retry(
+            "openrouter",
+            self.max_retries,
+            || {
+                self.client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", self.api_key))
+                    .header("content-type", "application/json")
+                    .json(&body)
+            },
+        )
+        .await?;
 
         let byte_stream = response
             .bytes_stream()
@@ -508,7 +523,10 @@ mod tests {
             "test-key".to_string(),
             "openai/gpt-4o-mini".to_string(),
             format!("http://{addr}"),
-        );
+        )
+        // H-19: single attempt — this test asserts the ERROR MAPPING of a
+        // terminal status, not the retry behavior (covered in retry.rs).
+        .with_max_retries(0);
 
         let err = match backend.complete(sample_request()).await {
             Ok(_) => panic!("expected an error"),
@@ -530,7 +548,10 @@ mod tests {
             "test-key".to_string(),
             "openai/gpt-4o-mini".to_string(),
             format!("http://{addr}"),
-        );
+        )
+        // H-19: single attempt — this test asserts the ERROR MAPPING of a
+        // terminal status, not the retry behavior (covered in retry.rs).
+        .with_max_retries(0);
 
         let err = match backend.complete(sample_request()).await {
             Ok(_) => panic!("expected an error"),

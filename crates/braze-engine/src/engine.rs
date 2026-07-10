@@ -176,6 +176,12 @@ pub struct Engine {
     /// process restart) — never read back from the session log.
     consecutive_turns_without_tool_calls: std::sync::atomic::AtomicU32,
     /// Gates the textual tool-call rescue in [`Engine::complete_once`] —
+    /// A′.2 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.2):
+    /// whether the engine injects [`AgentEvent::HarnessNote`] warnings
+    /// (turn budget at 80%, final round coming) into the conversation.
+    /// `true` by default; `with_harness_notes_enabled(false)` is the
+    /// `no-harness-notes` ablation.
+    harness_notes_enabled: bool,
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
     textual_rescue_enabled: bool,
@@ -312,6 +318,7 @@ impl Engine {
             planner_max_tokens: PLANNER_MAX_TOKENS,
             turn_in_progress: std::sync::atomic::AtomicBool::new(false),
             consecutive_turns_without_tool_calls: std::sync::atomic::AtomicU32::new(0),
+            harness_notes_enabled: true,
             textual_rescue_enabled: true,
             planner: None,
         }
@@ -429,6 +436,16 @@ impl Engine {
     /// shape as [`Engine::with_context_budget`].
     pub fn with_textual_rescue_enabled(mut self, enabled: bool) -> Self {
         self.textual_rescue_enabled = enabled;
+        self
+    }
+
+    /// Gates the A′.2 harness notes (budget/iteration-cap warnings the
+    /// model sees mid-turn) — `true` by default; the `no-harness-notes`
+    /// ablation is how braze-bench measures whether announcing a
+    /// deadline actually converts aborted turns into converged ones.
+    /// Chainable, same shape as [`Engine::with_textual_rescue_enabled`].
+    pub fn with_harness_notes_enabled(mut self, enabled: bool) -> Self {
+        self.harness_notes_enabled = enabled;
         self
     }
 
@@ -969,6 +986,11 @@ impl Engine {
         // the quantity `max_turn_total_tokens` breaks on. Local to the
         // call, like `any_tool_calls_this_turn`.
         let mut turn_total_tokens: u64 = 0;
+        // A′.2: the budget warning fires at most ONCE per turn — a
+        // repeated "you're over 80%" every round is noise competing with
+        // the prompt budget it's trying to protect. (The iteration-cap
+        // note needs no flag: `round` hits its threshold exactly once.)
+        let mut budget_note_emitted = false;
 
         for round in 0..self.max_turn_iterations {
             // v4 P0.2 (docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3):
@@ -1185,6 +1207,51 @@ impl Engine {
             )
             .await?;
             any_tool_calls_this_turn = true;
+
+            // A′.2 (docs/harness-engineering-hooks-skills-2026-07-10.md
+            // § I.2): announce the deadline BEFORE the cut, not after —
+            // TurnBudget/the iteration cap abort turns the model never
+            // knew were budgeted; an announced deadline gives a small
+            // model the chance to converge on its own. Emitted here (after
+            // this round's dispatch, before the reload) so the note lands
+            // in the NEXT round's rendered history.
+            if self.harness_notes_enabled {
+                if let Some(budget) = self.max_turn_total_tokens
+                    && !budget_note_emitted
+                    && turn_total_tokens.saturating_mul(5) >= budget.saturating_mul(4)
+                {
+                    budget_note_emitted = true;
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::HarnessNote {
+                            kind: "turn_budget".to_string(),
+                            text: format!(
+                                "This turn has used {turn_total_tokens} of its {budget}-token \
+                                 budget (over 80%). Stop exploring and answer now with what you \
+                                 already have — the turn will be cut off at the budget."
+                            ),
+                        },
+                        observer,
+                    )
+                    .await?;
+                }
+                if self.max_turn_iterations >= 2 && round + 2 == self.max_turn_iterations {
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::HarnessNote {
+                            kind: "iteration_cap".to_string(),
+                            text: format!(
+                                "The next round is this turn's last (round {} of {}). Answer now \
+                                 with what you already have instead of calling more tools.",
+                                round + 2,
+                                self.max_turn_iterations
+                            ),
+                        },
+                        observer,
+                    )
+                    .await?;
+                }
+            }
 
             messages = self.load_messages(session, observer).await?;
         }
@@ -3033,6 +3100,8 @@ fn event_text_len(event: &AgentEvent) -> usize {
         AgentEvent::CompactionOccurred { summary, .. } => summary.len(),
         AgentEvent::PermissionRequested { action, .. }
         | AgentEvent::PermissionDecided { action, .. } => action.len(),
+        // A′.2: rendered into model history as `[harness] {text}`.
+        AgentEvent::HarnessNote { text, .. } => text.len(),
         AgentEvent::ToolCallStarted { .. }
         | AgentEvent::Usage { .. }
         // H-3 (docs/AUDITORIA-2026-07-v5.md) lever events: audit-only,
@@ -7002,6 +7071,201 @@ mod tests {
                 assert_eq!(spent_tokens, 90_500);
             }
             other => panic!("expected TurnBudgetExhausted, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A′.2 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.2):
+    /// crossing 80% of the turn budget injects ONE `HarnessNote` into the
+    /// conversation — the announced deadline a small model needs to
+    /// converge instead of exploring until the breaker kills the turn.
+    #[tokio::test]
+    async fn crossing_80_percent_of_the_token_budget_emits_one_harness_note() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            // Round 1: a tool call + usage at 85% of the budget.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                CompletionEvent::Usage {
+                    input_tokens: 80_000,
+                    output_tokens: 5_000,
+                    stop_reason: Some("tool_use".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            // Round 2: converges with text, still under the budget.
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_total_tokens(Some(100_000));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn must converge normally");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let notes: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::HarnessNote { .. }))
+            .collect();
+        assert_eq!(notes.len(), 1, "exactly one note, not one per round");
+        match notes[0] {
+            AgentEvent::HarnessNote { kind, text } => {
+                assert_eq!(kind, "turn_budget");
+                assert!(text.contains("85000"), "carries the real numbers: {text}");
+                assert!(text.contains("100000"), "carries the budget: {text}");
+            }
+            other => panic!("expected HarnessNote, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The `no-harness-notes` ablation: same turn shape, no note — the
+    /// A/B braze-bench runs to attribute any pass-rate delta to the
+    /// deadline having been announced.
+    #[tokio::test]
+    async fn the_harness_notes_ablation_silences_the_budget_note() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                CompletionEvent::Usage {
+                    input_tokens: 80_000,
+                    output_tokens: 5_000,
+                    stop_reason: Some("tool_use".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_total_tokens(Some(100_000))
+        .with_harness_notes_enabled(false);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn must converge normally");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::HarnessNote { .. })),
+            "ablated engine must emit no notes"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The iteration-cap note fires exactly once, right before the final
+    /// round — "round N of N is your last" — so a model that would blow
+    /// the cap gets one explicit chance to answer instead.
+    #[tokio::test]
+    async fn the_penultimate_round_emits_the_iteration_cap_note() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_iterations(2);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn must converge in round 2");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let notes: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::HarnessNote { .. }))
+            .collect();
+        assert_eq!(notes.len(), 1);
+        match notes[0] {
+            AgentEvent::HarnessNote { kind, text } => {
+                assert_eq!(kind, "iteration_cap");
+                assert!(text.contains("round 2 of 2"), "got: {text}");
+            }
+            other => panic!("expected HarnessNote, got {other:?}"),
         }
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

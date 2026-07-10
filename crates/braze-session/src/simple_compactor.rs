@@ -333,6 +333,11 @@ impl ContextCompactor for SimpleContextCompactor {
                 | AgentEvent::TextualRescueApplied { .. }
                 | AgentEvent::EscalationToLead { .. }
                 | AgentEvent::SummaryFallbackAttempted
+                // A′.2: harness notes are rendered to the model live, but
+                // they're tactical by nature ("budget nearly spent" is
+                // about THIS turn) — stale ones surviving into the digest
+                // would mislead later turns.
+                | AgentEvent::HarnessNote { .. }
                 | AgentEvent::Unknown => {}
             }
         }

@@ -310,8 +310,13 @@ fn collapsed_observation_content(content: &str, full_observations: usize) -> Str
         String::new()
     };
     let omitted = content.len().saturating_sub(excerpt.len());
+    // A′.1 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.1):
+    // the marker states what to DO, not just what happened — a frontier
+    // model infers "I can re-run the tool"; a 3B doesn't. The recovery
+    // recipe costs ~10 tokens per collapsed observation and is the whole
+    // point of announcing the collapse at all.
     let collapsed = format!(
-        "{excerpt}{preserved_marker} [old observation collapsed: {omitted} chars omitted; the {full_observations} most recent tool results are shown in full]"
+        "{excerpt}{preserved_marker} [old observation collapsed: {omitted} chars omitted; the {full_observations} most recent tool results are shown in full. Re-run the tool if you need the omitted content]"
     );
     if collapsed.len() >= content.len() {
         return content.to_string();
@@ -419,6 +424,16 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
                 tool_use_id: id.clone(),
                 content: result.content.clone(),
                 is_error: result.is_error,
+            },
+        )),
+        // A′.2: the one non-conversational event that IS rendered — an
+        // operational note the harness wants the model to act on (budget
+        // nearly spent, last round coming). User role, like tool results:
+        // it's the environment talking, not the assistant.
+        AgentEvent::HarnessNote { text, .. } => Some((
+            Role::User,
+            ContentBlock::Text {
+                text: format!("[harness] {text}"),
             },
         )),
         // Metadata / audit-only — never part of conversational content.
@@ -1341,6 +1356,12 @@ mod tests {
         assert!(
             collapsed.contains("[old observation collapsed:"),
             "still marked as collapsed: {collapsed}"
+        );
+        // A′.1: the marker carries the recovery recipe — a 3B doesn't
+        // infer "I can re-run the tool" from a bare "chars omitted".
+        assert!(
+            collapsed.contains("Re-run the tool"),
+            "the collapse marker must tell the model how to recover: {collapsed}"
         );
     }
 

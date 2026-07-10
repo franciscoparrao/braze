@@ -167,6 +167,26 @@ pub enum AgentEvent {
     /// (success is separately visible as the `AssistantText` it may or may
     /// not append right after).
     SummaryFallbackAttempted,
+    /// An operational note from the harness to the model, injected into
+    /// the conversation at the moment it's actionable (A′.2,
+    /// docs/harness-engineering-hooks-skills-2026-07-10.md § I.2): "80%
+    /// of the turn's token budget is spent, finish now", "the next round
+    /// is this turn's last". UNLIKE the audit-only H-3 lever events
+    /// above, this one IS rendered back into model history (as a
+    /// user-role text block — see `braze_engine::history::event_to_block`):
+    /// its whole purpose is that the model sees it. A frontier model
+    /// infers "I've used many rounds, I should wrap up"; a small model
+    /// doesn't — it explores until the harness kills the turn, and the
+    /// cut counts as a model failure when an announced deadline might
+    /// have converged.
+    HarnessNote {
+        /// Machine-readable kind — `"turn_budget"` / `"iteration_cap"` —
+        /// so `braze-bench` can count emissions per kind and the
+        /// `no-harness-notes` ablation A/B can attribute effects.
+        kind: String,
+        /// The note the model sees, verbatim.
+        text: String,
+    },
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only
@@ -388,6 +408,31 @@ mod tests {
         );
         let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
         assert!(matches!(decoded, AgentEvent::SummaryFallbackAttempted));
+    }
+
+    /// A′.2: `HarnessNote` round-trips with its snake_case tag and both
+    /// fields intact — it's the one operational event that gets rendered
+    /// back to the model, so losing `text` on reload would silently
+    /// change what a resumed session's model sees.
+    #[test]
+    fn harness_note_round_trips_through_json() {
+        let event = AgentEvent::HarnessNote {
+            kind: "turn_budget".to_string(),
+            text: "over 80% of budget".to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"harness_note\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        match decoded {
+            AgentEvent::HarnessNote { kind, text } => {
+                assert_eq!(kind, "turn_budget");
+                assert_eq!(text, "over 80% of budget");
+            }
+            other => panic!("expected HarnessNote, got {other:?}"),
+        }
     }
 
     /// A rollout log written by an older binary (before H-3) obviously

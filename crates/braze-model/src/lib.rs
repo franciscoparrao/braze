@@ -18,6 +18,7 @@ mod ollama;
 mod ollama_wire;
 mod openrouter;
 mod openrouter_wire;
+mod retry;
 mod synth_id;
 #[cfg(test)]
 mod test_support;

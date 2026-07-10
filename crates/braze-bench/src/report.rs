@@ -473,6 +473,7 @@ mod tests {
             leader_escalations: 0,
             compaction_count: 0,
             summary_fallbacks: 0,
+            harness_notes: 0,
             expected_cost_within_budget: None,
             estimated_cost_usd: None,
             wall_time_ms,

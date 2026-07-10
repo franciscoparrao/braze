@@ -210,6 +210,10 @@ pub async fn run_task(
     // tactical compaction (`+ablate:no-compaction`).
     .with_observation_collapse_enabled(!ablation.disable_observation_collapse)
     .with_compaction_enabled(!ablation.disable_compaction)
+    // A′.2 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.2):
+    // the announced-deadline notes, ablatable so their effect on
+    // TurnBudgetExhausted/iteration-cap aborts is measurable.
+    .with_harness_notes_enabled(!ablation.disable_harness_notes)
     // C10: mirrors braze-cli's wiring. `max_turn_iterations`/
     // `planner_max_tokens` were a pre-existing mirror gap (wired in
     // production since opencode ítem 1 but never here — a bench run
