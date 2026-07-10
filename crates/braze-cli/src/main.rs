@@ -269,7 +269,19 @@ async fn build_engine(
     // model change by phase vs reactive by observed failure).
     if let Some((backend, model_override)) = &lead_spec {
         let lead = build_model_backend(config, backend, model_override.as_deref())?;
-        model = Box::new(braze_model::EscalatingBackend::new(lead, model));
+        // I-1 (docs/AUDITORIA-2026-07-v6.md): the three escalation knobs
+        // from config/env (`lead_turns`/`lead_failure_threshold`/
+        // `lead_escalation_turns`, `None` = decorator default) — before
+        // this, `braze chat --lead` always ran the proactive 3-turn
+        // opening with no way to request the purely-reactive mode
+        // (`lead_turns = 0`).
+        model = Box::new(
+            braze_model::EscalatingBackend::new(lead, model).with_configured_knobs(
+                config.lead_turns,
+                config.lead_failure_threshold,
+                config.lead_escalation_turns,
+            ),
+        );
     }
 
     let planner = planner_spec

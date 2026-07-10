@@ -46,6 +46,12 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "planner_model",
     "lead_backend",
     "lead_model",
+    // I-1 (docs/AUDITORIA-2026-07-v6.md) — the three escalation knobs
+    // stop being unreachable EscalatingBackend builders. `lead_turns: 0`
+    // is the purely-reactive mode.
+    "lead_turns",
+    "lead_failure_threshold",
+    "lead_escalation_turns",
     // v4 P0.2 (mitad rondas) — `max_turn_iterations` and
     // `planner_max_tokens` stop being engine.rs hardcoded constants, now
     // configurable.

@@ -113,6 +113,53 @@ impl EscalatingBackend {
         self
     }
 
+    /// Applies the three escalation knobs from optional config values in
+    /// one call — `None` keeps the decorator's own default (the constants
+    /// at the top of this module). The single seam both composition roots
+    /// (`braze-cli::build_engine`, `braze-bench::BackendSpec::
+    /// build_agent_model`) share, so neither can silently forget one knob
+    /// — before this existed, NO caller applied any of them, and every
+    /// `+lead:` A/B ran with the proactive 3-turn opening instead of the
+    /// reactive escalation it claimed to measure (I-1,
+    /// docs/AUDITORIA-2026-07-v6.md, confirmed live: error_recovery
+    /// 0/3→3/3 with `leader_escalations = 0`).
+    pub fn with_configured_knobs(
+        mut self,
+        lead_turns: Option<usize>,
+        failure_threshold: Option<usize>,
+        escalation_turns: Option<usize>,
+    ) -> Self {
+        if let Some(n) = lead_turns {
+            self = self.with_lead_turns(n);
+        }
+        if let Some(n) = failure_threshold {
+            self = self.with_failure_threshold(n);
+        }
+        if let Some(n) = escalation_turns {
+            self = self.with_escalation_turns(n);
+        }
+        self
+    }
+
+    /// The configured opening-window size — observability for
+    /// composition-root wiring tests (I-1): the knobs are internal
+    /// routing state, and without getters neither `braze-cli` nor
+    /// `braze-bench` can assert their config plumbing actually reached
+    /// the decorator.
+    pub fn lead_turns(&self) -> usize {
+        self.lead_turns
+    }
+
+    /// The configured failure threshold — see [`Self::lead_turns`].
+    pub fn failure_threshold(&self) -> usize {
+        self.failure_threshold
+    }
+
+    /// The configured escalation-window size — see [`Self::lead_turns`].
+    pub fn escalation_turns(&self) -> usize {
+        self.escalation_turns
+    }
+
     /// Picks the backend for this call and updates the counters — split
     /// from `complete` so the routing decision is directly testable
     /// without streaming machinery.
@@ -733,6 +780,42 @@ mod tests {
     fn the_decorator_name_names_both_backends() {
         let (backend, _, _) = harness(1, 1, 1);
         assert_eq!(backend.name(), "escalating(lead->worker)");
+    }
+
+    /// I-1 (docs/AUDITORIA-2026-07-v6.md): `None` keeps each default,
+    /// `Some(n)` overrides just that knob — including `Some(0)` for
+    /// `lead_turns`, the purely-reactive mode the SI-2 A/B needed and
+    /// couldn't express.
+    #[test]
+    fn with_configured_knobs_applies_some_and_keeps_defaults_for_none() {
+        let fresh = || {
+            EscalatingBackend::new(
+                Box::new(CountingBackend {
+                    label: "lead",
+                    calls: Arc::new(AtomicUsize::new(0)),
+                }),
+                Box::new(CountingBackend {
+                    label: "worker",
+                    calls: Arc::new(AtomicUsize::new(0)),
+                }),
+            )
+        };
+
+        let untouched = fresh().with_configured_knobs(None, None, None);
+        assert_eq!(untouched.lead_turns(), DEFAULT_LEAD_TURNS);
+        assert_eq!(untouched.failure_threshold(), DEFAULT_FAILURE_THRESHOLD);
+        assert_eq!(untouched.escalation_turns(), DEFAULT_ESCALATION_TURNS);
+
+        let purely_reactive = fresh().with_configured_knobs(Some(0), Some(4), Some(2));
+        assert_eq!(purely_reactive.lead_turns(), 0, "lead_turns=0 must be expressible");
+        assert_eq!(purely_reactive.failure_threshold(), 4);
+        assert_eq!(purely_reactive.escalation_turns(), 2);
+
+        // Partial override: only the threshold, the other two keep defaults.
+        let partial = fresh().with_configured_knobs(None, Some(1), None);
+        assert_eq!(partial.lead_turns(), DEFAULT_LEAD_TURNS);
+        assert_eq!(partial.failure_threshold(), 1);
+        assert_eq!(partial.escalation_turns(), DEFAULT_ESCALATION_TURNS);
     }
 
     /// H-3 (docs/AUDITORIA-2026-07-v5.md): the round that *triggers* an

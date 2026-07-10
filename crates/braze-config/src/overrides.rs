@@ -79,6 +79,12 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub lead_model: Option<String>,
     #[serde(default)]
+    pub lead_turns: Option<usize>,
+    #[serde(default)]
+    pub lead_failure_threshold: Option<usize>,
+    #[serde(default)]
+    pub lead_escalation_turns: Option<usize>,
+    #[serde(default)]
     pub max_turn_iterations: Option<u32>,
     #[serde(default)]
     pub planner_max_tokens: Option<u32>,
@@ -252,6 +258,36 @@ impl ConfigOverrides {
                 "PLANNER_MODEL" => overrides.planner_model = Some(value.to_string()),
                 "LEAD_BACKEND" => overrides.lead_backend = Some(value.to_string()),
                 "LEAD_MODEL" => overrides.lead_model = Some(value.to_string()),
+                "LEAD_TURNS" => {
+                    let parsed = value
+                        .parse::<usize>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.lead_turns = Some(parsed);
+                }
+                "LEAD_FAILURE_THRESHOLD" => {
+                    let parsed = value
+                        .parse::<usize>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.lead_failure_threshold = Some(parsed);
+                }
+                "LEAD_ESCALATION_TURNS" => {
+                    let parsed = value
+                        .parse::<usize>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.lead_escalation_turns = Some(parsed);
+                }
                 "MAX_TURN_ITERATIONS" => {
                     let parsed = value
                         .parse::<u32>()
@@ -511,5 +547,28 @@ mod tests {
         let vars = [("BRAZE_SOME_FUTURE_FIELD", "value")];
         let overrides = ConfigOverrides::from_env(vars).unwrap();
         assert_eq!(overrides, ConfigOverrides::default());
+    }
+
+    /// I-1 (docs/AUDITORIA-2026-07-v6.md): the three escalation knobs
+    /// arrive via env — including `LEAD_TURNS=0`, the purely-reactive
+    /// mode that motivated exposing them.
+    #[test]
+    fn from_env_parses_lead_escalation_knobs() {
+        let vars = [
+            ("BRAZE_LEAD_TURNS", "0"),
+            ("BRAZE_LEAD_FAILURE_THRESHOLD", "3"),
+            ("BRAZE_LEAD_ESCALATION_TURNS", "4"),
+        ];
+        let overrides = ConfigOverrides::from_env(vars).unwrap();
+        assert_eq!(overrides.lead_turns, Some(0));
+        assert_eq!(overrides.lead_failure_threshold, Some(3));
+        assert_eq!(overrides.lead_escalation_turns, Some(4));
+    }
+
+    #[test]
+    fn from_env_rejects_invalid_lead_turns() {
+        let vars = [("BRAZE_LEAD_TURNS", "not-a-number")];
+        let err = ConfigOverrides::from_env(vars).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidEnvValue { .. }));
     }
 }

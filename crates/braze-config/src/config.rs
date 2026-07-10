@@ -258,6 +258,28 @@ pub struct Config {
     /// `planner_model`.
     #[serde(default)]
     pub lead_model: Option<String>,
+    /// How many opening calls of a session the lead handles proactively
+    /// before the worker takes over (`EscalatingBackend::with_lead_turns`,
+    /// Goose's `GOOSE_LEAD_TURNS`). `None` (the default) uses the
+    /// decorator's own default (3) — the value lives in
+    /// `braze-model::escalation`, not duplicated here. **`Some(0)` is the
+    /// purely-reactive mode**: the lead only ever enters when the worker
+    /// visibly flounders. Exposed per I-1 (docs/AUDITORIA-2026-07-v6.md):
+    /// with no way to set this, every `+lead:` A/B ran the proactive
+    /// 3-turn opening while claiming to measure reactive escalation.
+    #[serde(default)]
+    pub lead_turns: Option<usize>,
+    /// Consecutive failed observations that trigger a reactive escalation
+    /// to the lead (`with_failure_threshold`; the decorator clamps 0 up
+    /// to 1). `None` uses the decorator's default (2). Same I-1 rationale
+    /// as `lead_turns`.
+    #[serde(default)]
+    pub lead_failure_threshold: Option<usize>,
+    /// How many calls the lead handles per escalation episode before the
+    /// worker resumes (`with_escalation_turns`; clamped to at least 1).
+    /// `None` uses the decorator's default (3). Same I-1 rationale.
+    #[serde(default)]
+    pub lead_escalation_turns: Option<usize>,
     /// Tope de iteraciones agentic por turno antes de forzar una respuesta
     /// text-only (`Engine::run_turn`'s `MAX_TURN_ITERATIONS`). Default 20,
     /// el histórico valor hardcoded; acá expuesto (v4 P0.2/mitad rondas)
@@ -360,6 +382,9 @@ impl Default for Config {
             planner_model: None,
             lead_backend: None,
             lead_model: None,
+            lead_turns: None,
+            lead_failure_threshold: None,
+            lead_escalation_turns: None,
             max_turn_iterations: default_max_turn_iterations(),
             planner_max_tokens: default_planner_max_tokens(),
             tool_output_max_bytes: default_tool_output_max_bytes(),
@@ -559,6 +584,15 @@ impl Config {
         }
         if let Some(v) = overrides.lead_model {
             self.lead_model = Some(v);
+        }
+        if let Some(v) = overrides.lead_turns {
+            self.lead_turns = Some(v);
+        }
+        if let Some(v) = overrides.lead_failure_threshold {
+            self.lead_failure_threshold = Some(v);
+        }
+        if let Some(v) = overrides.lead_escalation_turns {
+            self.lead_escalation_turns = Some(v);
         }
         if let Some(v) = overrides.max_turn_iterations {
             self.max_turn_iterations = v;
@@ -826,6 +860,29 @@ mod tests {
         let env = vec![("BRAZE_OLLAMA_NUM_CTX".to_string(), "4096".to_string())];
         let config = Config::load_with(None, env).unwrap();
         assert_eq!(config.ollama_num_ctx, 4096);
+    }
+
+    /// I-1 (docs/AUDITORIA-2026-07-v6.md): the escalation knobs default
+    /// to `None` (decorator's own defaults apply) and flow end-to-end
+    /// from env through `apply_overrides` — `LEAD_TURNS=0` (purely
+    /// reactive) included, since `Some(0)` vs `None` is exactly the
+    /// distinction the Option encoding exists to preserve.
+    #[test]
+    fn lead_escalation_knobs_default_to_none_and_are_overridable_via_env() {
+        let defaults = Config::load_with(None, no_env()).unwrap();
+        assert_eq!(defaults.lead_turns, None);
+        assert_eq!(defaults.lead_failure_threshold, None);
+        assert_eq!(defaults.lead_escalation_turns, None);
+
+        let env = vec![
+            ("BRAZE_LEAD_TURNS".to_string(), "0".to_string()),
+            ("BRAZE_LEAD_FAILURE_THRESHOLD".to_string(), "3".to_string()),
+            ("BRAZE_LEAD_ESCALATION_TURNS".to_string(), "4".to_string()),
+        ];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(config.lead_turns, Some(0));
+        assert_eq!(config.lead_failure_threshold, Some(3));
+        assert_eq!(config.lead_escalation_turns, Some(4));
     }
 
     #[test]

@@ -306,11 +306,45 @@ impl BackendSpec {
         config: &Config,
         sampling: SamplingSpec,
     ) -> Result<Box<dyn ModelBackend>, BenchError> {
-        let worker = self.build(config, sampling)?;
-        match self.build_lead(config, sampling)? {
-            Some(lead) => Ok(Box::new(EscalatingBackend::new(lead, worker))),
-            None => Ok(worker),
+        match self.build_escalating(config, sampling)? {
+            Some(escalating) => Ok(Box::new(escalating)),
+            None => self.build(config, sampling),
         }
+    }
+
+    /// The concrete [`EscalatingBackend`] a `"+lead:"` spec composes, or
+    /// `None` for a plain spec — split from [`Self::build_agent_model`]
+    /// (which boxes it as `dyn ModelBackend`) so tests can assert the
+    /// knob wiring below actually reached the decorator (I-1,
+    /// docs/AUDITORIA-2026-07-v6.md: the previous composition applied NO
+    /// knobs, and being buried behind the trait object made that
+    /// unobservable — every `+lead:` A/B silently ran the proactive
+    /// 3-turn opening).
+    ///
+    /// Knob precedence, mirroring every other lever in `runner::run_task`:
+    /// an explicit `+ablate:lead-*` key wins; otherwise `Config`'s value;
+    /// otherwise (`None` both) the decorator's own default.
+    pub fn build_escalating(
+        &self,
+        config: &Config,
+        sampling: SamplingSpec,
+    ) -> Result<Option<EscalatingBackend>, BenchError> {
+        let Some(lead) = self.build_lead(config, sampling)? else {
+            return Ok(None);
+        };
+        let worker = self.build(config, sampling)?;
+        let ablation = self.ablation();
+        Ok(Some(
+            EscalatingBackend::new(lead, worker).with_configured_knobs(
+                ablation.lead_turns.or(config.lead_turns),
+                ablation
+                    .lead_failure_threshold
+                    .or(config.lead_failure_threshold),
+                ablation
+                    .lead_escalation_turns
+                    .or(config.lead_escalation_turns),
+            ),
+        ))
     }
 
     /// Builds the `ModelBackend` this spec names, with `sampling` applied
@@ -441,11 +475,27 @@ pub struct AblationOverrides {
     /// `Engine::with_tactical_full_observations` (see
     /// `braze_engine::history::TACTICAL_FULL_OBSERVATIONS`'s doc comment).
     pub tactical_full_observations: Option<usize>,
+    /// `+ablate:lead-turns=N` — overrides `Config::lead_turns` for this
+    /// spec's `EscalatingBackend` (I-1, docs/AUDITORIA-2026-07-v6.md).
+    /// `lead-turns=0` is the purely-reactive arm the SI-2 A/B needed and
+    /// couldn't express: without it every `+lead:` row ran the proactive
+    /// 3-turn opening while the analysis attributed the effect to
+    /// reactive escalation. Only meaningful on a spec that carries
+    /// `+lead:`; silently unused otherwise (same posture as `best-of-n`
+    /// on a config that doesn't vote).
+    pub lead_turns: Option<usize>,
+    /// `+ablate:lead-threshold=N` — overrides
+    /// `Config::lead_failure_threshold` (the decorator clamps 0 up to 1).
+    pub lead_failure_threshold: Option<usize>,
+    /// `+ablate:lead-window=N` — overrides `Config::lead_escalation_turns`
+    /// (clamped to at least 1).
+    pub lead_escalation_turns: Option<usize>,
 }
 
 impl AblationOverrides {
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
-         best-of-n=N, tactical-window=N, tactical-threshold=N, full-observations=N";
+         best-of-n=N, tactical-window=N, tactical-threshold=N, full-observations=N, \
+         lead-turns=N, lead-threshold=N, lead-window=N";
 
     fn parse(raw: &str) -> Result<Self, BenchError> {
         let mut out = Self::default();
@@ -469,6 +519,13 @@ impl AblationOverrides {
                 }
                 "full-observations" => {
                     out.tactical_full_observations = Some(Self::parse_usize(key, value)?)
+                }
+                "lead-turns" => out.lead_turns = Some(Self::parse_usize(key, value)?),
+                "lead-threshold" => {
+                    out.lead_failure_threshold = Some(Self::parse_usize(key, value)?)
+                }
+                "lead-window" => {
+                    out.lead_escalation_turns = Some(Self::parse_usize(key, value)?)
                 }
                 other => {
                     return Err(BenchError::Startup(format!(
@@ -518,6 +575,15 @@ impl AblationOverrides {
         }
         if let Some(n) = self.tactical_full_observations {
             parts.push(format!("full-observations={n}"));
+        }
+        if let Some(n) = self.lead_turns {
+            parts.push(format!("lead-turns={n}"));
+        }
+        if let Some(n) = self.lead_failure_threshold {
+            parts.push(format!("lead-threshold={n}"));
+        }
+        if let Some(n) = self.lead_escalation_turns {
+            parts.push(format!("lead-window={n}"));
         }
         if parts.is_empty() {
             String::new()
@@ -848,6 +914,76 @@ mod tests {
             .build_agent_model(&config(), sampling())
             .expect("ollama lead and worker must build");
         assert_eq!(model.name(), "escalating(ollama->ollama)");
+    }
+
+    // --- escalation knobs (I-1, docs/AUDITORIA-2026-07-v6.md) ---
+
+    /// The wiring gap I-1 exists to close: before `build_escalating`,
+    /// NO knob ever reached the decorator — every `+lead:` row ran the
+    /// proactive 3-turn opening regardless of config. These assert the
+    /// three-way precedence: ablation > config > decorator default.
+    #[test]
+    fn build_escalating_applies_config_knobs_when_no_ablation_overrides_them() {
+        let mut cfg = config();
+        cfg.lead_turns = Some(0); // purely reactive
+        cfg.lead_failure_threshold = Some(4);
+        cfg.lead_escalation_turns = Some(2);
+
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b+lead:ollama:qwen2.5:7b").unwrap();
+        let escalating = spec
+            .build_escalating(&cfg, sampling())
+            .expect("must build")
+            .expect("a +lead: spec composes an EscalatingBackend");
+        assert_eq!(escalating.lead_turns(), 0);
+        assert_eq!(escalating.failure_threshold(), 4);
+        assert_eq!(escalating.escalation_turns(), 2);
+    }
+
+    #[test]
+    fn an_ablate_lead_key_overrides_the_config_value() {
+        let mut cfg = config();
+        cfg.lead_turns = Some(5); // config says 5...
+
+        let spec = BackendSpec::parse(
+            "ollama:qwen2.5:3b+lead:ollama:qwen2.5:7b+ablate:lead-turns=0;lead-threshold=3",
+        )
+        .unwrap();
+        let escalating = spec
+            .build_escalating(&cfg, sampling())
+            .expect("must build")
+            .expect("a +lead: spec composes an EscalatingBackend");
+        // ...but the per-spec ablation wins: this row is the
+        // purely-reactive arm of the A/B.
+        assert_eq!(escalating.lead_turns(), 0);
+        assert_eq!(escalating.failure_threshold(), 3);
+    }
+
+    #[test]
+    fn build_escalating_is_none_for_a_spec_without_lead() {
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b").unwrap();
+        assert!(
+            spec.build_escalating(&config(), sampling())
+                .expect("plain spec must not error")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn parses_lead_knob_ablation_keys_and_displays_them_back() {
+        let spec = BackendSpec::parse(
+            "ollama:qwen2.5:3b+lead:ollama:qwen2.5:7b+ablate:lead-turns=0;lead-threshold=2;lead-window=4",
+        )
+        .unwrap();
+        let ablation = spec.ablation();
+        assert_eq!(ablation.lead_turns, Some(0));
+        assert_eq!(ablation.lead_failure_threshold, Some(2));
+        assert_eq!(ablation.lead_escalation_turns, Some(4));
+        // The display name round-trips the keys, so a results.json row is
+        // traceable back to the exact arm that produced it.
+        let display = spec.display_name(&config());
+        assert!(display.contains("lead-turns=0"), "got: {display}");
+        assert!(display.contains("lead-threshold=2"), "got: {display}");
+        assert!(display.contains("lead-window=4"), "got: {display}");
     }
 
     // --- ablation matrix (E1, docs/AUDITORIA-2026-07-v3.md) ---
