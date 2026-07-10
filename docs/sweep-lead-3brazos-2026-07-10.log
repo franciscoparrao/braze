@@ -1,0 +1,633 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.88s
+     Running `target/debug/braze-bench crates/braze-bench/suites/default.toml --backends 'ollama:qwen2.5:3b,ollama:qwen2.5:3b+lead:ollama:gemma4:e4b,ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0' --repetitions 5 --temperature 0.2 --no-ollama-stop --output docs/sweep-lead-3brazos-2026-07-10.json`
+Corriendo 5 repetición(es) por (tarea, backend) — timeout 180s por intento.
+-> ollama:qwen2.5:3b :: read_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: read_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: read_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: read_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: read_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: grep_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: glob_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: write_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: edit_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 1/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 2/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 3/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 4/5)
+-> ollama:qwen2.5:3b :: shell_exec_basic (rep 5/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 1/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 2/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 3/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 4/5)
+-> ollama:qwen2.5:3b :: no_tool_qa (rep 5/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 1/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 2/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 3/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 4/5)
+-> ollama:qwen2.5:3b :: multi_step_read_count_write (rep 5/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 4/5)
+[2m2026-07-10T04:45:41.206711Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0ma10f584a-1a74-4c80-9314-3093798b3e4c[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mread_file
+-> ollama:qwen2.5:3b :: error_recovery_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 1/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 2/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 3/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 4/5)
+-> ollama:qwen2.5:3b :: distractor_selection_among_files (rep 5/5)
+-> ollama:qwen2.5:3b :: edit_file_function_body (rep 1/5)
+[2m2026-07-10T04:46:28.526759Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0mc35255ac-851e-41fe-81b7-6a2cd14e162a[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0medit_file
+-> ollama:qwen2.5:3b :: edit_file_function_body (rep 2/5)
+-> ollama:qwen2.5:3b :: edit_file_function_body (rep 3/5)
+-> ollama:qwen2.5:3b :: edit_file_function_body (rep 4/5)
+-> ollama:qwen2.5:3b :: edit_file_function_body (rep 5/5)
+-> ollama:qwen2.5:3b :: no_tool_capital_question (rep 1/5)
+-> ollama:qwen2.5:3b :: no_tool_capital_question (rep 2/5)
+-> ollama:qwen2.5:3b :: no_tool_capital_question (rep 3/5)
+-> ollama:qwen2.5:3b :: no_tool_capital_question (rep 4/5)
+-> ollama:qwen2.5:3b :: no_tool_capital_question (rep 5/5)
+-> ollama:qwen2.5:3b :: no_tool_subtraction (rep 1/5)
+-> ollama:qwen2.5:3b :: no_tool_subtraction (rep 2/5)
+-> ollama:qwen2.5:3b :: no_tool_subtraction (rep 3/5)
+-> ollama:qwen2.5:3b :: no_tool_subtraction (rep 4/5)
+-> ollama:qwen2.5:3b :: no_tool_subtraction (rep 5/5)
+-> ollama:qwen2.5:3b :: multi_step_sum_two_files (rep 1/5)
+-> ollama:qwen2.5:3b :: multi_step_sum_two_files (rep 2/5)
+-> ollama:qwen2.5:3b :: multi_step_sum_two_files (rep 3/5)
+-> ollama:qwen2.5:3b :: multi_step_sum_two_files (rep 4/5)
+[2m2026-07-10T04:48:09.033560Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0mba0e69ee-7990-408f-a4dc-f35d62d6ffd7[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mgrep [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('command' was unexpected)
+-> ollama:qwen2.5:3b :: multi_step_sum_two_files (rep 5/5)
+[2m2026-07-10T04:48:20.458926Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0mfa2c283f-627f-4118-88b2-fce97d13be29[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mgrep [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('command' was unexpected)
+-> ollama:qwen2.5:3b :: multi_step_multiply_and_write (rep 1/5)
+[2m2026-07-10T04:48:31.787396Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m21b53961-1494-4dd3-bba1-9252cee420db[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0m3 is not of type "string"
+-> ollama:qwen2.5:3b :: multi_step_multiply_and_write (rep 2/5)
+[2m2026-07-10T04:48:39.037575Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m7e2df1bc-5dbe-41dc-9f65-6a5a37dce965[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('content' was unexpected)
+[2m2026-07-10T04:48:41.104539Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m7e2df1bc-5dbe-41dc-9f65-6a5a37dce965[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m2 [3merror[0m[2m=[0mAdditional properties are not allowed ('path' was unexpected)
+[2m2026-07-10T04:48:43.042841Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m7e2df1bc-5dbe-41dc-9f65-6a5a37dce965[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mshell_exec
+-> ollama:qwen2.5:3b :: multi_step_multiply_and_write (rep 3/5)
+[2m2026-07-10T04:48:53.116443Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m9257b748-78a9-4770-b033-b71611575883[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('content' was unexpected)
+[2m2026-07-10T04:48:55.199170Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m9257b748-78a9-4770-b033-b71611575883[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m2 [3merror[0m[2m=[0mAdditional properties are not allowed ('path' was unexpected)
+[2m2026-07-10T04:48:57.121124Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m9257b748-78a9-4770-b033-b71611575883[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mshell_exec
+[2m2026-07-10T04:48:58.286845Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m9257b748-78a9-4770-b033-b71611575883[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mread_file
+[2m2026-07-10T04:48:59.478160Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m9257b748-78a9-4770-b033-b71611575883[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mread_file
+-> ollama:qwen2.5:3b :: multi_step_multiply_and_write (rep 4/5)
+[2m2026-07-10T04:49:10.729443Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m197fae19-c630-4106-ba29-8ee1e90bb77b[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('content' was unexpected)
+[2m2026-07-10T04:49:12.784496Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m197fae19-c630-4106-ba29-8ee1e90bb77b[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m2 [3merror[0m[2m=[0mAdditional properties are not allowed ('path' was unexpected)
+[2m2026-07-10T04:49:14.730058Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m197fae19-c630-4106-ba29-8ee1e90bb77b[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mshell_exec
+[2m2026-07-10T04:49:15.941796Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m197fae19-c630-4106-ba29-8ee1e90bb77b[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mread_file
+[2m2026-07-10T04:49:19.812978Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m197fae19-c630-4106-ba29-8ee1e90bb77b[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mshell_exec
+-> ollama:qwen2.5:3b :: multi_step_multiply_and_write (rep 5/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_config_extension (rep 1/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_config_extension (rep 2/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_config_extension (rep 3/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_config_extension (rep 4/5)
+-> ollama:qwen2.5:3b :: error_recovery_wrong_config_extension (rep 5/5)
+-> ollama:qwen2.5:3b :: error_recovery_edit_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b :: error_recovery_edit_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b :: error_recovery_edit_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b :: error_recovery_edit_wrong_filename (rep 4/5)
+[2m2026-07-10T04:50:51.817302Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m78cd089d-731f-47e3-ae32-7ae705b9c278[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mgrep
+-> ollama:qwen2.5:3b :: error_recovery_edit_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b :: distractor_selection_log_with_error (rep 1/5)
+-> ollama:qwen2.5:3b :: distractor_selection_log_with_error (rep 2/5)
+-> ollama:qwen2.5:3b :: distractor_selection_log_with_error (rep 3/5)
+-> ollama:qwen2.5:3b :: distractor_selection_log_with_error (rep 4/5)
+-> ollama:qwen2.5:3b :: distractor_selection_log_with_error (rep 5/5)
+-> ollama:qwen2.5:3b :: distractor_selection_debug_config (rep 1/5)
+-> ollama:qwen2.5:3b :: distractor_selection_debug_config (rep 2/5)
+-> ollama:qwen2.5:3b :: distractor_selection_debug_config (rep 3/5)
+-> ollama:qwen2.5:3b :: distractor_selection_debug_config (rep 4/5)
+-> ollama:qwen2.5:3b :: distractor_selection_debug_config (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: read_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: read_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: read_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: read_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: read_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: grep_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: grep_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: grep_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: grep_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: grep_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: glob_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: glob_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: glob_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: glob_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: glob_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: write_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: write_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: write_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: write_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: write_file_basic (rep 5/5)
+[2m2026-07-10T04:57:38.413811Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m3b86ead1-8d17-45d2-8d55-a815d37dae2a[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m round produced neither text nor a tool call after this turn already dispatched at least one; attempting a tools-free summary round instead of discarding that progress [3mround[0m[2m=[0m1
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: shell_exec_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: shell_exec_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: shell_exec_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: shell_exec_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: shell_exec_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_qa (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_qa (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_qa (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_qa (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_qa (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_read_count_write (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_read_count_write (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_read_count_write (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_read_count_write (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_read_count_write (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_filename (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_among_files (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_among_files (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_among_files (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_among_files (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_among_files (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_function_body (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_function_body (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_function_body (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_function_body (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: edit_file_function_body (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_capital_question (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_capital_question (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_capital_question (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_capital_question (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_capital_question (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_subtraction (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_subtraction (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_subtraction (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_subtraction (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: no_tool_subtraction (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_sum_two_files (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_sum_two_files (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_sum_two_files (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_sum_two_files (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_sum_two_files (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_multiply_and_write (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_multiply_and_write (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_multiply_and_write (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_multiply_and_write (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: multi_step_multiply_and_write (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_config_extension (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_config_extension (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_config_extension (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_config_extension (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_wrong_config_extension (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_edit_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_edit_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_edit_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_edit_wrong_filename (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: error_recovery_edit_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_log_with_error (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_log_with_error (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_log_with_error (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_log_with_error (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_log_with_error (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_debug_config (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_debug_config (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_debug_config (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_debug_config (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b :: distractor_selection_debug_config (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: read_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: read_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: read_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: read_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: read_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: grep_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: grep_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: grep_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: grep_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: grep_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: glob_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: glob_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: glob_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: glob_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: glob_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: write_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: write_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: write_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: write_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: write_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: shell_exec_basic (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: shell_exec_basic (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: shell_exec_basic (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: shell_exec_basic (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: shell_exec_basic (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_qa (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_qa (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_qa (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_qa (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_qa (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_read_count_write (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_read_count_write (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_read_count_write (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_read_count_write (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_read_count_write (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_filename (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_among_files (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_among_files (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_among_files (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_among_files (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_among_files (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_function_body (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_function_body (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_function_body (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_function_body (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: edit_file_function_body (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_capital_question (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_capital_question (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_capital_question (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_capital_question (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_capital_question (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_subtraction (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_subtraction (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_subtraction (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_subtraction (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: no_tool_subtraction (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_sum_two_files (rep 1/5)
+[2m2026-07-10T05:48:14.450643Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0mb3c33a02-9d4d-4a0c-b118-d48c4bee19c6[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mgrep [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('command' was unexpected)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_sum_two_files (rep 2/5)
+[2m2026-07-10T05:49:36.173592Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m171968f2-3084-4781-aeae-01b90282a653[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mgrep [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('command' was unexpected)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_sum_two_files (rep 3/5)
+[2m2026-07-10T05:49:48.433707Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0mcd0b4902-a5fb-4cff-bfc3-ca47bd6bc378[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mgrep [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('content' was unexpected)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_sum_two_files (rep 4/5)
+[2m2026-07-10T05:50:02.163776Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m1264f870-d3bd-4029-a2c5-299a5224555c[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mread_file
+[2m2026-07-10T05:50:02.166337Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m1264f870-d3bd-4029-a2c5-299a5224555c[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m model repeated an identical tool call this turn; nudging instead of re-dispatching [3mtool[0m[2m=[0mread_file
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_sum_two_files (rep 5/5)
+[2m2026-07-10T05:50:45.219768Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m534f80af-182a-44cf-ae35-e6a72b760f92[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mgrep [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('command' was unexpected)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_multiply_and_write (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_multiply_and_write (rep 2/5)
+[2m2026-07-10T05:51:02.535229Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m8f6b7844-1459-41dc-9f01-6062ccafd9fa[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('content' was unexpected)
+[2m2026-07-10T05:51:04.492405Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m8f6b7844-1459-41dc-9f01-6062ccafd9fa[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m2 [3merror[0m[2m=[0mAdditional properties are not allowed ('path' was unexpected)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_multiply_and_write (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_multiply_and_write (rep 4/5)
+[2m2026-07-10T05:54:57.960416Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m369df125-18d7-4a61-b588-64d3ae4c85a4[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('content' was unexpected)
+[2m2026-07-10T05:55:00.023625Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0m369df125-18d7-4a61-b588-64d3ae4c85a4[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m2 [3merror[0m[2m=[0mAdditional properties are not allowed ('path' was unexpected)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: multi_step_multiply_and_write (rep 5/5)
+[2m2026-07-10T05:56:03.981418Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0mbcd2b8ac-7524-4ac6-9b4c-2989f170c281[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0mAdditional properties are not allowed ('content' was unexpected)
+[2m2026-07-10T05:56:06.037436Z[0m [33m WARN[0m [1mturn[0m[1m{[0m[3msession[0m[2m=[0mbcd2b8ac-7524-4ac6-9b4c-2989f170c281[1m}[0m[2m:[0m [2mbraze_engine::engine[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m2 [3merror[0m[2m=[0mAdditional properties are not allowed ('path' was unexpected)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_config_extension (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_config_extension (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_config_extension (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_config_extension (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_wrong_config_extension (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_edit_wrong_filename (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_edit_wrong_filename (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_edit_wrong_filename (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_edit_wrong_filename (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: error_recovery_edit_wrong_filename (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_log_with_error (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_log_with_error (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_log_with_error (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_log_with_error (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_log_with_error (rep 5/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_debug_config (rep 1/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_debug_config (rep 2/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_debug_config (rep 3/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_debug_config (rep 4/5)
+-> ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 :: distractor_selection_debug_config (rep 5/5)
+
+== Resultados por tarea ==
+[PASS] read_file_basic          ollama:qwen2.5:3b      7179ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2132 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b    (rep 2)   2797ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2132 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b    (rep 3)   2793ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2132 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b    (rep 4)   2772ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2132 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b    (rep 5)   2803ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2132 tokens_out=33
+[PASS] grep_basic               ollama:qwen2.5:3b      3841ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2158 tokens_out=54
+[PASS] grep_basic               ollama:qwen2.5:3b    (rep 2)   3963ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2158 tokens_out=57
+[PASS] grep_basic               ollama:qwen2.5:3b    (rep 3)   3965ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2133 tokens_out=57
+[PASS] grep_basic               ollama:qwen2.5:3b    (rep 4)   3974ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2158 tokens_out=57
+[PASS] grep_basic               ollama:qwen2.5:3b    (rep 5)   3970ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2158 tokens_out=57
+[PASS] glob_basic               ollama:qwen2.5:3b      3369ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2173 tokens_out=44
+[PASS] glob_basic               ollama:qwen2.5:3b    (rep 2)   3379ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2173 tokens_out=44
+[PASS] glob_basic               ollama:qwen2.5:3b    (rep 3)   3392ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2173 tokens_out=44
+[PASS] glob_basic               ollama:qwen2.5:3b    (rep 4)   3363ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2173 tokens_out=44
+[PASS] glob_basic               ollama:qwen2.5:3b    (rep 5)   3361ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2173 tokens_out=44
+[PASS] write_file_basic         ollama:qwen2.5:3b      3842ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2172 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b    (rep 2)   3830ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2172 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b    (rep 3)   3862ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2172 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b    (rep 4)   3829ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2172 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b    (rep 5)   3826ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2172 tokens_out=54
+[PASS] edit_file_basic          ollama:qwen2.5:3b      5652ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2198 tokens_out=92
+[PASS] edit_file_basic          ollama:qwen2.5:3b    (rep 2)   4584ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=70
+[PASS] edit_file_basic          ollama:qwen2.5:3b    (rep 3)   4620ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=70
+[PASS] edit_file_basic          ollama:qwen2.5:3b    (rep 4)   4170ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=61
+[PASS] edit_file_basic          ollama:qwen2.5:3b    (rep 5)   4585ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=70
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b      1812ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1028 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b    (rep 2)   1826ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1028 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b    (rep 3)   1822ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1028 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b    (rep 4)   1815ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1028 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b    (rep 5)   1796ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1028 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[PASS] no_tool_qa               ollama:qwen2.5:3b      1091ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1033 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b    (rep 2)   1080ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1033 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b    (rep 3)   1078ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1033 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b    (rep 4)   1085ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1033 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b    (rep 5)   1083ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1033 tokens_out=2
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b      6370ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3440 tokens_out=102
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b    (rep 2)   5966ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3440 tokens_out=93
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b    (rep 3)   6404ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3440 tokens_out=102
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b    (rep 4)   6046ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3440 tokens_out=93
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b    (rep 5)   6344ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3440 tokens_out=102
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b      5912ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2210 tokens_out=97 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 2)   5869ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2210 tokens_out=96 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 3)   4707ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2210 tokens_out=69 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 4)  13081ms  rounds=4 tool_calls=3  schema_fail=1  exec_fail=2  denied=0  tokens_in=4981 tokens_out=230 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b    (rep 5)   9030ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=2  denied=0  tokens_in=3504 tokens_out=157 [AssertionText]
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b      3855ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2175 tokens_out=54 [AssertionText]
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b    (rep 2)   3528ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2217 tokens_out=47
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b    (rep 3)   4088ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2171 tokens_out=59 [AssertionText]
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b    (rep 4)   3490ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2217 tokens_out=47
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b    (rep 5)   3546ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2217 tokens_out=47
+[FAIL] edit_file_function_body  ollama:qwen2.5:3b     18077ms  rounds=3 tool_calls=2  schema_fail=1  exec_fail=1  denied=0  tokens_in=3685 tokens_out=344 [AssertionFiles]
+[FAIL] edit_file_function_body  ollama:qwen2.5:3b    (rep 2)   7571ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2258 tokens_out=130 [AssertionFiles]
+[FAIL] edit_file_function_body  ollama:qwen2.5:3b    (rep 3)  16313ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=2  denied=0  tokens_in=3692 tokens_out=308 [AssertionFiles]
+[FAIL] edit_file_function_body  ollama:qwen2.5:3b    (rep 4)   7489ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2258 tokens_out=129 [AssertionFiles]
+[PASS] edit_file_function_body  ollama:qwen2.5:3b    (rep 5)  11765ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=0  tokens_in=3584 tokens_out=214
+[PASS] no_tool_capital_question ollama:qwen2.5:3b      1140ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1037 tokens_out=3
+[PASS] no_tool_capital_question ollama:qwen2.5:3b    (rep 2)   1134ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1037 tokens_out=3
+[PASS] no_tool_capital_question ollama:qwen2.5:3b    (rep 3)   1133ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1037 tokens_out=3
+[PASS] no_tool_capital_question ollama:qwen2.5:3b    (rep 4)   1143ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1037 tokens_out=3
+[PASS] no_tool_capital_question ollama:qwen2.5:3b    (rep 5)   1134ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1037 tokens_out=3
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b      1082ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1035 tokens_out=2
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b    (rep 2)   1085ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1035 tokens_out=2
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b    (rep 3)   1097ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1035 tokens_out=2
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b    (rep 4)   1098ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1035 tokens_out=2
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b    (rep 5)   1112ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1035 tokens_out=2
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b      6692ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=3593 tokens_out=105
+[FAIL] multi_step_sum_two_files ollama:qwen2.5:3b    (rep 2)  14384ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=6447 tokens_out=257 [AssertionFiles]
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b    (rep 3)  12362ms  rounds=3 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=4136 tokens_out=221
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b    (rep 4)  11293ms  rounds=3 tool_calls=4  schema_fail=1  exec_fail=0  denied=0  tokens_in=4017 tokens_out=199
+[FAIL] multi_step_sum_two_files ollama:qwen2.5:3b    (rep 5)  13534ms  rounds=3 tool_calls=5  schema_fail=1  exec_fail=1  denied=0  tokens_in=4277 tokens_out=244 [AssertionFiles]
+[FAIL] multi_step_multiply_and_write ollama:qwen2.5:3b      7148ms  rounds=2 tool_calls=3  schema_fail=1  exec_fail=0  denied=0  tokens_in=2477 tokens_out=117 [AssertionFiles]
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b    (rep 2)  14097ms  rounds=5 tool_calls=5  schema_fail=3  exec_fail=0  denied=0  tokens_in=7049 tokens_out=248
+[FAIL] multi_step_multiply_and_write ollama:qwen2.5:3b    (rep 3)  17638ms  rounds=7 tool_calls=7  schema_fail=5  exec_fail=0  denied=0  tokens_in=10693 tokens_out=303 [AssertionFiles]
+[FAIL] multi_step_multiply_and_write ollama:qwen2.5:3b    (rep 4)  16780ms  rounds=7 tool_calls=7  schema_fail=5  exec_fail=0  denied=0  tokens_in=10618 tokens_out=284 [AssertionFiles]
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b    (rep 5)   5505ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3438 tokens_out=83
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b      7816ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=2  denied=0  tokens_in=3522 tokens_out=132 [AssertionText]
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b    (rep 2)   5257ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2219 tokens_out=83 [AssertionText]
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b    (rep 3)   5503ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2219 tokens_out=89 [AssertionText]
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b    (rep 4)  11388ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=2  denied=0  tokens_in=3521 tokens_out=206 [AssertionText]
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b    (rep 5)   5237ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2219 tokens_out=83 [AssertionText]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b      9266ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=0  tokens_in=3469 tokens_out=160 [AssertionFiles]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b    (rep 2)   9565ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=0  tokens_in=3473 tokens_out=172 [AssertionFiles]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b    (rep 3)  24004ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=2  denied=0  tokens_in=6491 tokens_out=458 [AssertionFiles]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b    (rep 4)   9238ms  rounds=3 tool_calls=2  schema_fail=1  exec_fail=0  denied=0  tokens_in=3476 tokens_out=159 [AssertionFiles]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b    (rep 5)  10225ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3458 tokens_out=182 [AssertionFiles]
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b      3137ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2207 tokens_out=39
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b    (rep 2)   3093ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2207 tokens_out=39
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b    (rep 3)   3115ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2207 tokens_out=39
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b    (rep 4)   3137ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2207 tokens_out=39
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b    (rep 5)   3159ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2207 tokens_out=39
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b      3277ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2183 tokens_out=42
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b    (rep 2)   3272ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2183 tokens_out=42
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b    (rep 3)   4489ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2183 tokens_out=67
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b    (rep 4)   3266ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2183 tokens_out=42
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b    (rep 5)   3285ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2183 tokens_out=42
+[FAIL] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  33440ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=204 [AssertionToolCall]
+[FAIL] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  22047ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=267 [AssertionToolCall]
+[FAIL] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  17821ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=203 [AssertionToolCall]
+[FAIL] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  20571ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=243 [AssertionToolCall]
+[FAIL] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  18589ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=211 [AssertionToolCall]
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  31532ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2198 tokens_out=386
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  20075ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2198 tokens_out=234
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  19617ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2198 tokens_out=230
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  19552ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2198 tokens_out=224
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  24005ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2198 tokens_out=289
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  14106ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2234 tokens_out=151
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  24119ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2234 tokens_out=293
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  13558ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2234 tokens_out=145
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  14441ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2234 tokens_out=159
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  13880ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2234 tokens_out=149
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  14612ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2237 tokens_out=161
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)   9766ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2237 tokens_out=95
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)   9907ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2237 tokens_out=98
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)   9892ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2237 tokens_out=95
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  11104ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2659 tokens_out=96
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  12058ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2251 tokens_out=123
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  15402ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2251 tokens_out=170
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  11891ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2251 tokens_out=122
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  13748ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2251 tokens_out=157
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  11024ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2251 tokens_out=110
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  13786ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2209 tokens_out=147
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  13454ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2209 tokens_out=148
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  13973ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2209 tokens_out=150
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  13202ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2209 tokens_out=142
+[PASS] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  13801ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2209 tokens_out=150
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b   5898ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1064 tokens_out=50
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)   6987ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1064 tokens_out=67
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)   5893ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1064 tokens_out=50
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)   6307ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1064 tokens_out=58
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)   5892ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1064 tokens_out=50
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  84589ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=1  tokens_in=4871 tokens_out=997
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  48842ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3560 tokens_out=431
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  66341ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=1  tokens_in=4871 tokens_out=764
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  56310ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3560 tokens_out=542
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  80464ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=1  tokens_in=4871 tokens_out=968
+[PASS] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  49073ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3539 tokens_out=437
+[PASS] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  47274ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3539 tokens_out=591
+[PASS] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  36309ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3539 tokens_out=443
+[PASS] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  45597ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3539 tokens_out=568
+[PASS] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  47995ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4844 tokens_out=501
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  31114ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2275 tokens_out=198
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  96869ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=2  denied=0  tokens_in=5149 tokens_out=1157 [AssertionText]
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  61725ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=6592 tokens_out=527
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  30540ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2275 tokens_out=199
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5) 113604ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=6656 tokens_out=1379
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  30849ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2264 tokens_out=195
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  31181ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2264 tokens_out=380
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  61122ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=0  tokens_in=5051 tokens_out=681
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  66553ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=0  tokens_in=5051 tokens_out=595
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  30814ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2264 tokens_out=209
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b   6394ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1069 tokens_out=57
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)   5679ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1069 tokens_out=46
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)   6533ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1069 tokens_out=61
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)   7050ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1069 tokens_out=70
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  10286ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1069 tokens_out=115
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b   5687ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1067 tokens_out=48
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)   8745ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1067 tokens_out=90
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)   6997ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1067 tokens_out=64
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)   7555ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1067 tokens_out=73
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)   5875ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1067 tokens_out=50
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  76994ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=1  tokens_in=6311 tokens_out=917
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  51625ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3615 tokens_out=487
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3) 111253ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=2  denied=2  tokens_in=7913 tokens_out=1376
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  56463ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3615 tokens_out=557
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  45802ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4910 tokens_out=499
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  38025ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3537 tokens_out=313
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  39637ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3537 tokens_out=482
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  38758ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3537 tokens_out=473
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  46060ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3537 tokens_out=577
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  24498ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3537 tokens_out=288
+[PASS] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  32768ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3508 tokens_out=398
+[PASS] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  17969ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3507 tokens_out=197
+[PASS] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  28143ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3508 tokens_out=334
+[PASS] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  18159ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3507 tokens_out=196
+[PASS] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  33662ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3508 tokens_out=404
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  61909ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=2  denied=2  tokens_in=4822 tokens_out=772 [AssertionFiles]
+[PASS] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  40819ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3565 tokens_out=498
+[PASS] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  33150ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4910 tokens_out=318
+[PASS] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  45779ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3565 tokens_out=400
+[PASS] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  53714ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3655 tokens_out=671
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  17558ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2272 tokens_out=197
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  93433ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=0  tokens_in=5124 tokens_out=1122
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  29089ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2272 tokens_out=189
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4) 130411ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3715 tokens_out=1689
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  50013ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3709 tokens_out=637
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b  32829ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2245 tokens_out=406
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 2)  20690ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2245 tokens_out=236
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 3)  24820ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2245 tokens_out=294
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 4)  19182ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2245 tokens_out=223
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b (rep 5)  28017ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2251 tokens_out=336
+[PASS] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   8718ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2138 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   2820ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2138 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   2823ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2138 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   2806ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2138 tokens_out=33
+[PASS] read_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   2822ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2138 tokens_out=33
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   3931ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2166 tokens_out=56
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   3960ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2166 tokens_out=57
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   3961ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2166 tokens_out=57
+[FAIL] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   7951ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=0  tokens_in=3389 tokens_out=135 [AssertionToolCall]
+[PASS] grep_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   3905ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2166 tokens_out=55
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   3298ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2178 tokens_out=42
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   3393ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2178 tokens_out=44
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   5846ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2178 tokens_out=96
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   5845ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2178 tokens_out=96
+[PASS] glob_basic               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   5889ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2178 tokens_out=96
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   3847ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   3864ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   3832ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   3826ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=54
+[PASS] write_file_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   3839ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2176 tokens_out=54
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   4341ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2180 tokens_out=64
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   4607ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2180 tokens_out=70
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   4606ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2180 tokens_out=70
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   4601ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2180 tokens_out=70
+[PASS] edit_file_basic          ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   4624ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2180 tokens_out=70
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   1822ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1029 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   1808ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1029 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   1829ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1029 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   1818ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1029 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] shell_exec_basic         ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   1766ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1029 tokens_out=17 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   1067ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1034 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   1074ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1034 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   1091ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1034 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   1083ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1034 tokens_out=2
+[PASS] no_tool_qa               ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   1075ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1034 tokens_out=2
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   5414ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3444 tokens_out=81
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   6266ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3447 tokens_out=100
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   7982ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3447 tokens_out=136
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   5971ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3447 tokens_out=93
+[PASS] multi_step_read_count_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   5942ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3447 tokens_out=93
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   5646ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2214 tokens_out=93 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   4532ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2214 tokens_out=74 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   5827ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2214 tokens_out=94 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   6520ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2214 tokens_out=110 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   4471ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2214 tokens_out=65 [AssertionText]
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   4001ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2221 tokens_out=57
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   3501ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2221 tokens_out=47
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   3669ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2221 tokens_out=49
+[FAIL] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   3771ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2221 tokens_out=48 [AssertionText]
+[PASS] distractor_selection_among_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   3521ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2221 tokens_out=47
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0  12940ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=0  tokens_in=3630 tokens_out=238
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)  61751ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=2  denied=0  tokens_in=7273 tokens_out=666
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)  19944ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=0  tokens_in=3636 tokens_out=269
+[PASS] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)  14679ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=0  tokens_in=3634 tokens_out=274
+[FAIL] edit_file_function_body  ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   8518ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2263 tokens_out=151 [AssertionFiles]
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   1151ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1038 tokens_out=3
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   1128ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1038 tokens_out=3
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   1143ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1038 tokens_out=3
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   1130ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1038 tokens_out=3
+[PASS] no_tool_capital_question ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   1131ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1038 tokens_out=3
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   1084ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1036 tokens_out=2
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   1094ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1036 tokens_out=2
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   1091ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1036 tokens_out=2
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   1080ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1036 tokens_out=2
+[PASS] no_tool_subtraction      ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   1092ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1036 tokens_out=2
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0  84365ms  rounds=5 tool_calls=8  schema_fail=1  exec_fail=1  denied=1  tokens_in=8773 tokens_out=884
+[FAIL] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)  14118ms  rounds=2 tool_calls=4  schema_fail=1  exec_fail=0  denied=0  tokens_in=2602 tokens_out=261 [AssertionFiles]
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   9154ms  rounds=3 tool_calls=4  schema_fail=1  exec_fail=0  denied=0  tokens_in=4002 tokens_out=154
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)  41995ms  rounds=4 tool_calls=6  schema_fail=2  exec_fail=0  denied=0  tokens_in=6330 tokens_out=298
+[PASS] multi_step_sum_two_files ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)  16036ms  rounds=3 tool_calls=4  schema_fail=1  exec_fail=0  denied=0  tokens_in=4056 tokens_out=188
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   7188ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4759 tokens_out=114
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)  55196ms  rounds=4 tool_calls=4  schema_fail=2  exec_fail=0  denied=0  tokens_in=5438 tokens_out=571
+[FAIL] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3) 180001ms  rounds=2 tool_calls=4  schema_fail=0  exec_fail=1  denied=1  tokens_in=2396 tokens_out=195 [Timeout] (error: task exceeded its time budget)
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)  59899ms  rounds=4 tool_calls=4  schema_fail=2  exec_fail=0  denied=0  tokens_in=5442 tokens_out=631
+[PASS] multi_step_multiply_and_write ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)  68001ms  rounds=4 tool_calls=4  schema_fail=2  exec_fail=0  denied=0  tokens_in=5442 tokens_out=642
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0  15424ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=2  denied=0  tokens_in=3521 tokens_out=190 [AssertionText]
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   1970ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1051 tokens_out=20 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   4164ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2222 tokens_out=56 [AssertionText]
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   1962ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1051 tokens_out=20 [ModelBackendError] (error: model's response had no text and requested no tool calls)
+[FAIL] error_recovery_wrong_config_extension ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   5702ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=0  tokens_in=2222 tokens_out=93 [AssertionText]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   9421ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3439 tokens_out=166 [AssertionFiles]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)  26791ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=2  denied=0  tokens_in=6507 tokens_out=518 [AssertionFiles]
+[PASS] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   6826ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3529 tokens_out=111
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)  10951ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=0  tokens_in=3504 tokens_out=198 [AssertionFiles]
+[PASS] error_recovery_edit_wrong_filename ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)  59655ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=2  denied=1  tokens_in=10853 tokens_out=593
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   3174ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=39
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   3160ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=39
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   3148ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=39
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   3126ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=39
+[PASS] distractor_selection_log_with_error ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   3100ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2210 tokens_out=39
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0   3294ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2186 tokens_out=42
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 2)   4510ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2186 tokens_out=68
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 3)   4605ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2186 tokens_out=70
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 4)   3322ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2186 tokens_out=43
+[PASS] distractor_selection_debug_config ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 (rep 5)   4590ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2186 tokens_out=70
+
+== Comparación por backend ==
+backend                   pass_rate(±95%) avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall
+ollama:qwen2.5:3b            64/95 (±9pp)      2.2         5505       3862           2592               86                19             25          0            0         0         0         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b     88/95 (±5pp)      2.5        32159      24119           2885              353                 0             15          8            0         0         1         0         1
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0     72/95 (±9pp)      2.2        11002       3961           2580              114                12             23          3            0         0         7         0         0
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall
+ollama:qwen2.5:3b        single_tool              26/35      1.9       4800       3841          72         0         0         0         0
+ollama:qwen2.5:3b        no_tool                  15/15      1.0       1105       1097           2         0         0         0         0
+ollama:qwen2.5:3b        multi_step               10/15      3.7      10038       7148         170         0         0         0         0
+ollama:qwen2.5:3b        error_recovery            0/15      2.8       9073       9030         158         0         0         0         0
+ollama:qwen2.5:3b        distractor_selection     13/15      2.0       3449       3277          46         0         0         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b single_tool              30/35      2.1      20443      14612         212         0         0         0         1
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b no_tool                  15/15      1.0       6785       6394          63         0         0         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b multi_step               15/15      3.6      57711      51625         645         0         0         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b error_recovery           14/15      3.2      39488      40819         449         0         1         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b distractor_selection     14/15      2.8      51993      31114         586         0         0         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 single_tool              28/35      2.1       6767       3931          91         0         1         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 no_tool                  15/15      1.0       1101       1091           2         0         0         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 multi_step               13/15      3.3      37835      14118         296         0         5         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 error_recovery            2/15      2.7      11324       5827         160         0         1         0         0
+ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0 distractor_selection     14/15      2.0       3633       3501          49         0         0         0         0
+
+Resultados JSON escritos en docs/sweep-lead-3brazos-2026-07-10.json
