@@ -27,6 +27,23 @@ pub enum EngineError {
     #[error("turn exceeded the maximum of {0} model/tool-call round trips without converging")]
     TurnDidNotConverge(usize),
 
+    /// The turn's cumulative token consumption (input + output summed
+    /// across every round) blew past `Engine::max_turn_total_tokens` (v4
+    /// P0.2, docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3) and the
+    /// graceful tools-free summary attempt didn't produce usable text
+    /// either. The circuit breaker `max_turn_iterations` can't provide
+    /// this: a turn of few rounds can still accumulate hundreds of
+    /// thousands of input tokens re-sending a growing history (caso
+    /// real: 481K tokens de input en un turno de 40 rondas, sesión
+    /// ccd4621b — CLAUDE.md § "Próximos pasos").
+    #[error(
+        "turn spent {spent_tokens} tokens, past its budget of {budget_tokens}, without converging"
+    )]
+    TurnBudgetExhausted {
+        budget_tokens: u64,
+        spent_tokens: u64,
+    },
+
     /// A `ModelBackend`'s completion stream ended without ever yielding
     /// `CompletionEvent::Done` and without reporting an `Err` first — an
     /// invariant every implementation must uphold (see

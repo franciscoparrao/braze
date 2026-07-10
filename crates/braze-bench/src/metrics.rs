@@ -57,6 +57,16 @@ pub enum FailureCause {
     /// [`FailureCause::AssertionMaxRounds`]. Cache tokens are reported
     /// separately and aren't part of this budget.
     AssertionMaxTokens,
+    /// The turn converged, but its estimated cost exceeded
+    /// `expect_max_cost_usd` (Paquete 3, docs/AUDITORIA-2026-07-v6.md —
+    /// the enforcement `TaskDef::expect_max_cost_usd` was parsed-but-
+    /// waiting-for since v4 P0.4). Only evaluable when the backend row
+    /// resolved a pricing entry; see `TaskResult::estimated_cost_usd`.
+    AssertionMaxCost,
+    /// `Engine::run_turn` hit its cumulative per-turn token budget
+    /// (`max_turn_total_tokens`, v4 P0.2) and the graceful tools-free
+    /// summary attempt didn't produce usable text either.
+    TurnBudgetExhausted,
     /// Something failed *outside* the model/tool loop entirely — sandbox
     /// setup, reading back the session log, etc. Not attributable to the
     /// model at all; the task should generally be re-run rather than
@@ -127,6 +137,14 @@ pub struct TaskResult {
     /// contract as [`Self::expected_rounds_within_budget`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_tokens_within_budget: Option<bool>,
+    /// Whether the turn stayed within `expect_max_cost_usd` (Paquete 3,
+    /// docs/AUDITORIA-2026-07-v6.md). `None` when EITHER no cost budget
+    /// was declared on the `TaskDef` OR the backend row resolved no
+    /// pricing (`estimated_cost_usd: None`) — a declared budget with no
+    /// pricing reports "not evaluated" honestly instead of a free
+    /// `Some(true)`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_cost_within_budget: Option<bool>,
     pub input_tokens: u32,
     pub output_tokens: u32,
     /// Tokens of this task's prompts that hit an existing cache entry,
@@ -191,6 +209,24 @@ pub struct TaskResult {
     /// and still end in `EmptyModelResponse` if the fallback itself came
     /// back empty too.
     pub summary_fallbacks: u32,
+    /// Estimated USD cost of this task run, from the resolved
+    /// [`crate::backend_spec::PricingRates`] over the summed token
+    /// counts (Paquete 3, docs/AUDITORIA-2026-07-v6.md). `None` when the
+    /// spec resolved no pricing — an unlisted model, or a
+    /// `+plan:`/`+lead:` composite whose halves bill at different rates
+    /// (the event log can't attribute rounds to models). `Some(0.0)` is
+    /// a real answer (all-Ollama rows), distinct from `None` per the
+    /// same contract the cache-token fields pin.
+    ///
+    /// Formula, with OpenRouter's semantics (cache read/write tokens are
+    /// PART of `input_tokens`, re-billed at their own rate):
+    /// `uncached = input - cache_read - cache_write` (saturating), cost =
+    /// `uncached*in + cache_read*(read_rate or in) + cache_write*(write_rate
+    /// or in) + output*out`, all per-Mtok. When the backend reports no
+    /// cache tokens (`None`), those terms are zero and it reduces to
+    /// `input*in + output*out`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_usd: Option<f64>,
     pub wall_time_ms: u128,
     pub passed: bool,
 }
@@ -229,6 +265,7 @@ pub fn harness_error_result(
         // Same "not reported" semantics as the cache fields below.
         expected_rounds_within_budget: None,
         expected_tokens_within_budget: None,
+        expected_cost_within_budget: None,
         input_tokens: 0,
         output_tokens: 0,
         // Nothing ran, so no provider reported cache tokens at all —
@@ -242,6 +279,8 @@ pub fn harness_error_result(
         leader_escalations: 0,
         compaction_count: 0,
         summary_fallbacks: 0,
+        // Nothing ran — no tokens, no cost to estimate.
+        estimated_cost_usd: None,
         wall_time_ms: 0,
         passed: false,
     }
@@ -293,6 +332,7 @@ pub fn compute_metrics(
     wall_time: Duration,
     run_outcome: RunOutcome,
     expected_files_found: Option<bool>,
+    pricing: Option<crate::backend_spec::PricingRates>,
 ) -> TaskResult {
     let started_ids: HashSet<&str> = events
         .iter()
@@ -421,6 +461,9 @@ pub fn compute_metrics(
                 braze_engine::EngineError::TurnDidNotConverge(_) => {
                     FailureCause::MaxIterationsExhausted
                 }
+                braze_engine::EngineError::TurnBudgetExhausted { .. } => {
+                    FailureCause::TurnBudgetExhausted
+                }
                 braze_engine::EngineError::IncompleteStream => FailureCause::IncompleteStream,
                 braze_engine::EngineError::Model(_) => FailureCause::ModelBackendError,
                 braze_engine::EngineError::Session(_) => FailureCause::SessionError,
@@ -466,12 +509,34 @@ pub fn compute_metrics(
         .expect_max_tokens
         .map(|max| total_tokens <= max);
 
+    // Paquete 3 (docs/AUDITORIA-2026-07-v6.md): see
+    // `TaskResult::estimated_cost_usd`'s doc comment for the formula and
+    // its OpenRouter assumptions.
+    let estimated_cost_usd = pricing.map(|rates| {
+        let cache_read = cache_read_tokens.unwrap_or(0) as f64;
+        let cache_write = cache_write_tokens.unwrap_or(0) as f64;
+        let uncached = (input_tokens as f64 - cache_read - cache_write).max(0.0);
+        let input_cost = uncached * rates.input_usd_per_mtok
+            + cache_read * rates.cache_read_usd_per_mtok.unwrap_or(rates.input_usd_per_mtok)
+            + cache_write
+                * rates.cache_write_usd_per_mtok.unwrap_or(rates.input_usd_per_mtok);
+        (input_cost + output_tokens as f64 * rates.output_usd_per_mtok) / 1_000_000.0
+    });
+    // `None` when either half is missing: a declared budget with no
+    // pricing is "not evaluated", never a free pass (see the field's doc
+    // comment).
+    let expected_cost_within_budget = match (task.expect_max_cost_usd, estimated_cost_usd) {
+        (Some(max), Some(cost)) => Some(cost <= max),
+        _ => None,
+    };
+
     let assertions_passed = expected_tool_called.unwrap_or(true)
         && (!task.expect_no_tool_call || tool_call_names.is_empty())
         && expected_text_found.unwrap_or(true)
         && expected_files_found.unwrap_or(true)
         && expected_rounds_within_budget.unwrap_or(true)
-        && expected_tokens_within_budget.unwrap_or(true);
+        && expected_tokens_within_budget.unwrap_or(true)
+        && expected_cost_within_budget.unwrap_or(true);
 
     let passed = converged && assertions_passed;
 
@@ -493,6 +558,8 @@ pub fn compute_metrics(
             Some(FailureCause::AssertionMaxRounds)
         } else if expected_tokens_within_budget == Some(false) {
             Some(FailureCause::AssertionMaxTokens)
+        } else if expected_cost_within_budget == Some(false) {
+            Some(FailureCause::AssertionMaxCost)
         } else {
             None
         }
@@ -517,6 +584,7 @@ pub fn compute_metrics(
         expected_files_found,
         expected_rounds_within_budget,
         expected_tokens_within_budget,
+        expected_cost_within_budget,
         input_tokens,
         output_tokens,
         cache_read_tokens,
@@ -525,6 +593,7 @@ pub fn compute_metrics(
         leader_escalations,
         compaction_count,
         summary_fallbacks,
+        estimated_cost_usd,
         wall_time_ms: wall_time.as_millis(),
         passed,
     }
@@ -584,7 +653,7 @@ mod tests {
     /// here doesn't vary (repetition 0, no file assertions) so each test
     /// body only names what it's actually exercising.
     fn metrics(task: &TaskDef, events: &[AgentEvent], run_outcome: RunOutcome) -> TaskResult {
-        compute_metrics("ollama:x", task, 0, events, zero(), run_outcome, None)
+        compute_metrics("ollama:x", task, 0, events, zero(), run_outcome, None, None)
     }
 
     #[test]
@@ -1126,6 +1195,7 @@ mod tests {
             zero(),
             RunOutcome::Converged,
             Some(false),
+            None,
         );
         assert!(!result.passed);
         assert_eq!(result.expected_files_found, Some(false));
@@ -1145,6 +1215,7 @@ mod tests {
             zero(),
             RunOutcome::Converged,
             Some(true),
+            None,
         );
         assert!(result.passed);
         assert_eq!(result.expected_files_found, Some(true));
@@ -1264,6 +1335,109 @@ mod tests {
         assert!(!result.passed);
         assert_eq!(result.expected_tokens_within_budget, Some(false));
         assert_eq!(result.failure_cause, Some(FailureCause::AssertionMaxTokens));
+    }
+
+    // --- estimated_cost_usd + expect_max_cost_usd enforcement
+    // (Paquete 3, docs/AUDITORIA-2026-07-v6.md) ---
+
+    fn rates(input: f64, output: f64) -> crate::backend_spec::PricingRates {
+        crate::backend_spec::PricingRates {
+            input_usd_per_mtok: input,
+            output_usd_per_mtok: output,
+            cache_read_usd_per_mtok: None,
+            cache_write_usd_per_mtok: None,
+        }
+    }
+
+    fn metrics_priced(
+        task: &TaskDef,
+        events: &[AgentEvent],
+        pricing: Option<crate::backend_spec::PricingRates>,
+    ) -> TaskResult {
+        compute_metrics(
+            "openrouter:x",
+            task,
+            0,
+            events,
+            zero(),
+            RunOutcome::Converged,
+            None,
+            pricing,
+        )
+    }
+
+    /// The plain formula with no cache reporting: input*in + output*out.
+    /// 1M input at $0.09 + 1M output at $0.18 = $0.27 exactly.
+    #[test]
+    fn estimated_cost_is_input_plus_output_when_no_cache_is_reported() {
+        let events = vec![usage_round(1_000_000, 1_000_000)];
+        let result = metrics_priced(&task(None, false, None), &events, Some(rates(0.09, 0.18)));
+        let cost = result.estimated_cost_usd.expect("priced row must estimate");
+        assert!((cost - 0.27).abs() < 1e-9, "got {cost}");
+    }
+
+    /// Cache-read tokens bill at their own rate when provided; the
+    /// uncached remainder bills at the input rate.
+    #[test]
+    fn estimated_cost_bills_cache_reads_at_their_own_rate() {
+        let events = vec![AgentEvent::Usage {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            stop_reason: Some("end_turn".to_string()),
+            cache_read_tokens: Some(500_000),
+            cache_write_tokens: None,
+        }];
+        let mut priced = rates(1.0, 0.0);
+        priced.cache_read_usd_per_mtok = Some(0.1);
+        let result = metrics_priced(&task(None, false, None), &events, Some(priced));
+        // 500k uncached at $1/M + 500k cached at $0.1/M = 0.5 + 0.05.
+        let cost = result.estimated_cost_usd.unwrap();
+        assert!((cost - 0.55).abs() < 1e-9, "got {cost}");
+    }
+
+    /// `Some(0.0)` (all-zero rates: Ollama) is a real answer, distinct
+    /// from `None` (no pricing resolved) — mirror of the cache-token
+    /// contract.
+    #[test]
+    fn a_zero_rate_row_estimates_zero_not_none() {
+        let events = vec![usage_round(10_000, 500)];
+        let priced = metrics_priced(&task(None, false, None), &events, Some(rates(0.0, 0.0)));
+        assert_eq!(priced.estimated_cost_usd, Some(0.0));
+        let unpriced = metrics_priced(&task(None, false, None), &events, None);
+        assert_eq!(unpriced.estimated_cost_usd, None);
+    }
+
+    #[test]
+    fn expect_max_cost_fails_the_task_when_the_estimate_exceeds_it() {
+        let events = vec![usage_round(1_000_000, 1_000_000)]; // $0.27 at these rates
+        let mut t = task(None, false, None);
+        t.expect_max_cost_usd = Some(0.10);
+        let result = metrics_priced(&t, &events, Some(rates(0.09, 0.18)));
+        assert!(!result.passed);
+        assert_eq!(result.expected_cost_within_budget, Some(false));
+        assert_eq!(result.failure_cause, Some(FailureCause::AssertionMaxCost));
+    }
+
+    #[test]
+    fn expect_max_cost_passes_when_the_estimate_fits() {
+        let events = vec![usage_round(100_000, 10_000)];
+        let mut t = task(None, false, None);
+        t.expect_max_cost_usd = Some(0.05);
+        let result = metrics_priced(&t, &events, Some(rates(0.09, 0.18)));
+        assert!(result.passed);
+        assert_eq!(result.expected_cost_within_budget, Some(true));
+    }
+
+    /// A declared budget on an UNPRICED row is "not evaluated" (`None`),
+    /// never a free pass or a guessed failure.
+    #[test]
+    fn a_cost_budget_without_pricing_is_not_evaluated() {
+        let events = vec![usage_round(1_000_000, 1_000_000)];
+        let mut t = task(None, false, None);
+        t.expect_max_cost_usd = Some(0.000001); // absurdly tight...
+        let result = metrics_priced(&t, &events, None); // ...but unpriced
+        assert!(result.passed, "must not fail on a price it doesn't know");
+        assert_eq!(result.expected_cost_within_budget, None);
     }
 
     /// The priority order in `compute_metrics`'s failure-cause chain:

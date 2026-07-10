@@ -122,6 +122,7 @@ pub fn external_outcome_to_task_result(
             // same "not reported" contract as the cache fields below.
             expected_rounds_within_budget: None,
             expected_tokens_within_budget: None,
+            expected_cost_within_budget: None,
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: None,
@@ -133,6 +134,8 @@ pub fn external_outcome_to_task_result(
             leader_escalations: 0,
             compaction_count: 0,
             summary_fallbacks: 0,
+            // No token counts → nothing to price.
+            estimated_cost_usd: None,
             wall_time_ms: outcome.wall_time.as_millis(),
             passed: false,
         };
@@ -184,6 +187,7 @@ pub fn external_outcome_to_task_result(
         // `TaskResult::expected_rounds_within_budget` documents.
         expected_rounds_within_budget: None,
         expected_tokens_within_budget: None,
+        expected_cost_within_budget: None,
         input_tokens: 0,
         output_tokens: 0,
         // Same as the early-return arm above: a black-box external
@@ -195,6 +199,7 @@ pub fn external_outcome_to_task_result(
         leader_escalations: 0,
         compaction_count: 0,
         summary_fallbacks: 0,
+        estimated_cost_usd: None,
         wall_time_ms: outcome.wall_time.as_millis(),
         passed: assertions_passed,
     }

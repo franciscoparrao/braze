@@ -205,7 +205,15 @@ pub async fn run_task(
     // turn off before — the ACI collapse (`+ablate:no-prune`) and
     // tactical compaction (`+ablate:no-compaction`).
     .with_observation_collapse_enabled(!ablation.disable_observation_collapse)
-    .with_compaction_enabled(!ablation.disable_compaction);
+    .with_compaction_enabled(!ablation.disable_compaction)
+    // C10: mirrors braze-cli's wiring. `max_turn_iterations`/
+    // `planner_max_tokens` were a pre-existing mirror gap (wired in
+    // production since opencode ítem 1 but never here — a bench run
+    // measured the hardcoded defaults regardless of config);
+    // `max_turn_total_tokens` is the v4 P0.2 breaker, new in Paquete 3.
+    .with_max_turn_iterations(config.max_turn_iterations as usize)
+    .with_planner_max_tokens(config.planner_max_tokens)
+    .with_max_turn_total_tokens(config.max_turn_total_tokens);
 
     if let Some(full_observations) = ablation.tactical_full_observations {
         engine = engine.with_tactical_full_observations(full_observations);
@@ -288,6 +296,10 @@ pub async fn run_task(
         wall_time,
         run_outcome,
         expected_files_found,
+        // Paquete 3: `None` when the spec's models aren't priced (or a
+        // composite bills at mixed rates) — the row reports no cost
+        // estimate rather than a guessed one.
+        spec.resolve_pricing(config),
     ))
 }
 

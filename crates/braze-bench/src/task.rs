@@ -89,20 +89,14 @@ pub struct TaskDef {
     #[serde(default)]
     pub expect_max_tokens: Option<u32>,
     /// If set, the task only passes if the turn's estimated cost in USD
-    /// stayed at or below this number. **Currently parsed and stored but
-    /// NOT enforced** — per-backend/model pricing is the H-3 + E5
-    /// deliverable (docs/AUDITORIA-2026-07-v5.md § "Tradeoff
-    /// costo/calidad por skill"), and enforcing against a price that
-    /// isn't wired yet would be cargo-cult. Once pricing lands in
-    /// `metrics`, flip this to an actual assertion the same way
-    /// `expect_max_rounds`/`expect_max_tokens` already are. Carrying the
-    /// field now lets a self-improvement suite declare its cost budget
-    /// up front (and lets us audit how often a real run would have
-    /// blown it) without lying about enforcement that doesn't exist.
+    /// (`TaskResult::estimated_cost_usd`, from `Config::model_pricing` —
+    /// Paquete 3, docs/AUDITORIA-2026-07-v6.md) stayed at or below this
+    /// number. Enforced ONLY when the backend row resolved a pricing
+    /// entry: a declared budget on an unpriced model reports
+    /// `expected_cost_within_budget: None` ("not evaluated") rather than
+    /// passing or failing on a guessed price. Same budget-assertion
+    /// rationale as `expect_max_rounds`/`expect_max_tokens`.
     #[serde(default)]
-    // Parsed and stored; enforcement waits on H-3 + E5 per-backend
-    // pricing (see this field's doc comment).
-    #[allow(dead_code)]
     pub expect_max_cost_usd: Option<f64>,
 }
 

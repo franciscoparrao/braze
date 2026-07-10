@@ -269,6 +269,44 @@ impl BackendSpec {
             })
     }
 
+    /// The provider's config-facing name — the same string
+    /// `Config::pricing_for` keys on.
+    fn provider_name(&self) -> &'static str {
+        match self.provider {
+            Provider::Anthropic => "anthropic",
+            Provider::Ollama => "ollama",
+            Provider::OpenRouter => "openrouter",
+        }
+    }
+
+    /// The flat per-Mtok rates used to estimate this spec's task cost —
+    /// `None` means "cost unknown, report no estimate" (Paquete 3,
+    /// docs/AUDITORIA-2026-07-v6.md § roadmap).
+    ///
+    /// Composite-spec rule: `AgentEvent::Usage` does NOT record which
+    /// model produced each round, so a `+plan:`/`+lead:` spec whose
+    /// halves bill at different rates can't be costed from the event log
+    /// — this resolves `Some` only when EVERY model in the spec
+    /// (executor + planner + lead) resolves to *identical* rates. That
+    /// covers the common cases (simple specs; all-Ollama composites,
+    /// where everything is $0) honestly, and refuses to guess for the
+    /// rest. Per-round model attribution in `Usage` would lift the
+    /// limitation; out of scope here.
+    pub fn resolve_pricing(&self, config: &Config) -> Option<PricingRates> {
+        let executor = PricingRates::from_entry(
+            config.pricing_for(self.provider_name(), &self.executor_model_name(config))?,
+        );
+        for half in [&self.planner, &self.lead].into_iter().flatten() {
+            let half_rates = PricingRates::from_entry(
+                config.pricing_for(half.provider_name(), &half.executor_model_name(config))?,
+            );
+            if half_rates != executor {
+                return None;
+            }
+        }
+        Some(executor)
+    }
+
     /// Builds the planner backend, if this spec carries one — same
     /// `sampling` as the executor (N-34: one sampling regime per sweep,
     /// planner included).
@@ -456,6 +494,32 @@ impl BackendSpec {
                 }
                 Ok(Box::new(backend))
             }
+        }
+    }
+}
+
+/// Flat per-Mtok USD rates resolved from [`Config::pricing_for`] for one
+/// backend row — the value-type `compute_metrics` consumes (Copy, no
+/// borrow of `Config`). See [`BackendSpec::resolve_pricing`] for the
+/// composite-spec resolution rule.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PricingRates {
+    pub input_usd_per_mtok: f64,
+    pub output_usd_per_mtok: f64,
+    /// `None` = the provider doesn't price cache reads separately (those
+    /// tokens bill as normal input in the estimate).
+    pub cache_read_usd_per_mtok: Option<f64>,
+    /// Same contract as `cache_read_usd_per_mtok`.
+    pub cache_write_usd_per_mtok: Option<f64>,
+}
+
+impl PricingRates {
+    fn from_entry(entry: &braze_config::ModelPricing) -> Self {
+        Self {
+            input_usd_per_mtok: entry.input_usd_per_mtok,
+            output_usd_per_mtok: entry.output_usd_per_mtok,
+            cache_read_usd_per_mtok: entry.cache_read_usd_per_mtok,
+            cache_write_usd_per_mtok: entry.cache_write_usd_per_mtok,
         }
     }
 }
@@ -982,6 +1046,51 @@ mod tests {
     }
 
     // --- escalation knobs (I-1, docs/AUDITORIA-2026-07-v6.md) ---
+
+    // --- resolve_pricing (Paquete 3, docs/AUDITORIA-2026-07-v6.md) ---
+
+    /// Simple Ollama spec → the catch-all $0 entry resolves.
+    #[test]
+    fn resolve_pricing_resolves_a_simple_ollama_spec_to_zero() {
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b").unwrap();
+        let pricing = spec.resolve_pricing(&config()).expect("ollama is priced");
+        assert_eq!(pricing.input_usd_per_mtok, 0.0);
+        assert_eq!(pricing.output_usd_per_mtok, 0.0);
+    }
+
+    /// All-Ollama composite: every half resolves to the same $0 rates →
+    /// costable.
+    #[test]
+    fn resolve_pricing_resolves_an_all_ollama_composite() {
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b+lead:ollama:gemma4:e4b").unwrap();
+        assert!(spec.resolve_pricing(&config()).is_some());
+    }
+
+    /// A composite whose halves bill at DIFFERENT rates can't be costed
+    /// from the event log (Usage doesn't attribute rounds to models) —
+    /// `None`, never a guess.
+    #[test]
+    fn resolve_pricing_refuses_a_mixed_rate_composite() {
+        let mut cfg = config();
+        cfg.openrouter_api_key = Some(braze_config::ApiKey::new("k"));
+        cfg.model_pricing.push(braze_config::ModelPricing {
+            backend: "openrouter".to_string(),
+            model_prefix: "caro/modelo".to_string(),
+            input_usd_per_mtok: 5.0,
+            output_usd_per_mtok: 15.0,
+            cache_read_usd_per_mtok: None,
+            cache_write_usd_per_mtok: None,
+        });
+        let spec = BackendSpec::parse("ollama:qwen2.5:3b+lead:openrouter:caro/modelo").unwrap();
+        assert!(spec.resolve_pricing(&cfg).is_none());
+    }
+
+    /// An unlisted model anywhere in the spec → `None`.
+    #[test]
+    fn resolve_pricing_is_none_for_an_unlisted_model() {
+        let spec = BackendSpec::parse("openrouter:z-ai/glm-5.2").unwrap();
+        assert!(spec.resolve_pricing(&config()).is_none());
+    }
 
     /// The wiring gap I-1 exists to close: before `build_escalating`,
     /// NO knob ever reached the decorator — every `+lead:` row ran the

@@ -53,6 +53,73 @@ fn default_formatter_timeout_secs() -> u64 {
     60
 }
 
+/// Precio de API para un (backend, familia de modelos) — la pieza que
+/// faltaba para computar `estimated_cost_usd` en braze-bench (E5/v4
+/// "métricas nuevas", docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3)
+/// y para enforcear `expect_max_cost_usd` (v4 P0.4, parseado sin
+/// enforcement hasta ahora).
+///
+/// El matching es por backend exacto + prefijo de modelo (ver
+/// [`Config::pricing_for`]): `model_prefix: ""` es el catch-all de un
+/// backend (útil para Ollama, donde TODO modelo local factura $0 en
+/// términos de API), y una entrada más específica
+/// (`"deepseek/deepseek-v4-flash"`) le gana al catch-all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelPricing {
+    /// `"ollama"`, `"anthropic"` o `"openrouter"` — debe coincidir exacto
+    /// con el nombre de backend del spec.
+    pub backend: String,
+    /// Prefijo del nombre de modelo que esta entrada cubre. `""` matchea
+    /// todos los modelos del backend; entre varias entradas que
+    /// matchean, gana la de prefijo más largo.
+    #[serde(default)]
+    pub model_prefix: String,
+    /// USD por millón de tokens de input (sin cachear).
+    pub input_usd_per_mtok: f64,
+    /// USD por millón de tokens de output.
+    pub output_usd_per_mtok: f64,
+    /// USD por millón de tokens de input servidos desde cache — `None`
+    /// cuando el proveedor no reporta caching o el precio no se conoce
+    /// (esos tokens se facturan como input normal en la estimación).
+    #[serde(default)]
+    pub cache_read_usd_per_mtok: Option<f64>,
+    /// USD por millón de tokens escritos a cache (premium sobre input).
+    /// Mismo contrato `None` que `cache_read_usd_per_mtok`.
+    #[serde(default)]
+    pub cache_write_usd_per_mtok: Option<f64>,
+}
+
+/// Tabla default, fechada **2026-07-09** — los precios de API envejecen;
+/// al agregar un modelo nuevo a los sweeps, agregar su entrada acá (o en
+/// el config file) con el precio vigente. Un modelo sin entrada produce
+/// `estimated_cost_usd: None` (sin estimación), nunca un precio
+/// inventado.
+fn default_model_pricing() -> Vec<ModelPricing> {
+    vec![
+        // Inferencia local: $0 de API por definición (el costo real es
+        // hardware/energía, fuera del alcance de esta métrica).
+        ModelPricing {
+            backend: "ollama".to_string(),
+            model_prefix: String::new(),
+            input_usd_per_mtok: 0.0,
+            output_usd_per_mtok: 0.0,
+            cache_read_usd_per_mtok: None,
+            cache_write_usd_per_mtok: None,
+        },
+        // Verificado contra openrouter.ai/deepseek/deepseek-v4-flash el
+        // 2026-07-09 — el modelo OpenRouter recomendado del proyecto
+        // (CLAUDE.md § "Modelo recomendado vía OpenRouter").
+        ModelPricing {
+            backend: "openrouter".to_string(),
+            model_prefix: "deepseek/deepseek-v4-flash".to_string(),
+            input_usd_per_mtok: 0.09,
+            output_usd_per_mtok: 0.18,
+            cache_read_usd_per_mtok: None,
+            cache_write_usd_per_mtok: None,
+        },
+    ]
+}
+
 /// `pub` (not `pub(crate)`) so `braze-tools-local` — which already
 /// depends on this crate for `FormatterConfig` itself — can build its
 /// own `LocalToolsProvider`-level default from the same single
@@ -297,6 +364,17 @@ pub struct Config {
     /// `max_turn_iterations`.
     #[serde(default = "default_planner_max_tokens")]
     pub planner_max_tokens: u32,
+    /// Circuit breaker por consumo acumulado por turno (v4 P0.2,
+    /// docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3): tope de tokens
+    /// totales (input + output sumados entre rondas) que un solo turno
+    /// puede gastar antes de que el engine corte con un resumen graceful
+    /// (`Engine::with_max_turn_total_tokens`). `None` (el default) =
+    /// deshabilitado. `max_turn_iterations` corta por RONDAS; esto corta
+    /// por TOKENS — un turno de pocas rondas puede acumular cientos de
+    /// miles de tokens de input re-enviando una historia creciente (caso
+    /// real: 481K en 40 rondas, sesión ccd4621b).
+    #[serde(default)]
+    pub max_turn_total_tokens: Option<u64>,
     /// Per-tool-result byte budget before `LocalToolsProvider::wrap`
     /// truncates and appends an actionable "narrow your query" trailer
     /// (v4 P2.4). Default 8000 — the historical `MAX_TOOL_OUTPUT_BYTES`
@@ -322,6 +400,11 @@ pub struct Config {
     /// (still honored) blanket-skips every entry when true.
     #[serde(default = "default_formatters")]
     pub formatters: Vec<FormatterConfig>,
+    /// Precios de API por (backend, prefijo de modelo) — ver
+    /// [`ModelPricing`] y [`Config::pricing_for`]. Defaults en
+    /// [`default_model_pricing`] (fechados; los precios envejecen).
+    #[serde(default = "default_model_pricing")]
+    pub model_pricing: Vec<ModelPricing>,
 }
 
 /// Default helper for `Config::tool_output_max_bytes` — matches the
@@ -387,9 +470,11 @@ impl Default for Config {
             lead_escalation_turns: None,
             max_turn_iterations: default_max_turn_iterations(),
             planner_max_tokens: default_planner_max_tokens(),
+            max_turn_total_tokens: None,
             tool_output_max_bytes: default_tool_output_max_bytes(),
             tool_output_max_lines: None,
             formatters: default_formatters(),
+            model_pricing: default_model_pricing(),
         }
     }
 }
@@ -600,6 +685,9 @@ impl Config {
         if let Some(v) = overrides.planner_max_tokens {
             self.planner_max_tokens = v;
         }
+        if let Some(v) = overrides.max_turn_total_tokens {
+            self.max_turn_total_tokens = Some(v);
+        }
         if let Some(v) = overrides.tool_output_max_bytes {
             self.tool_output_max_bytes = v;
         }
@@ -613,6 +701,23 @@ impl Config {
         if let Some(v) = overrides.formatters {
             self.formatters = v;
         }
+        // Same full-replacement contract as `formatters`.
+        if let Some(v) = overrides.model_pricing {
+            self.model_pricing = v;
+        }
+    }
+
+    /// Resuelve la entrada de pricing para `(backend, model)`: el backend
+    /// debe coincidir exacto; entre las entradas cuyo `model_prefix`
+    /// prefija a `model`, gana la de prefijo más largo (`""` es el
+    /// catch-all del backend). `None` cuando ninguna entrada matchea —
+    /// "precio desconocido", que los consumers deben propagar como
+    /// "sin estimación", nunca tratar como $0.
+    pub fn pricing_for(&self, backend: &str, model: &str) -> Option<&ModelPricing> {
+        self.model_pricing
+            .iter()
+            .filter(|entry| entry.backend == backend && model.starts_with(&entry.model_prefix))
+            .max_by_key(|entry| entry.model_prefix.len())
     }
 }
 
@@ -860,6 +965,59 @@ mod tests {
         let env = vec![("BRAZE_OLLAMA_NUM_CTX".to_string(), "4096".to_string())];
         let config = Config::load_with(None, env).unwrap();
         assert_eq!(config.ollama_num_ctx, 4096);
+    }
+
+    // --- pricing_for (Paquete 3, docs/AUDITORIA-2026-07-v6.md) ---
+
+    /// The default table ships with the two entries the project's sweeps
+    /// actually exercise: the Ollama catch-all at $0 and
+    /// deepseek-v4-flash's live-verified rates.
+    #[test]
+    fn default_pricing_covers_ollama_and_the_recommended_openrouter_model() {
+        let config = Config::load_with(None, no_env()).unwrap();
+
+        let ollama = config
+            .pricing_for("ollama", "qwen2.5:3b")
+            .expect("ollama catch-all must match any local model");
+        assert_eq!(ollama.input_usd_per_mtok, 0.0);
+        assert_eq!(ollama.output_usd_per_mtok, 0.0);
+
+        let deepseek = config
+            .pricing_for("openrouter", "deepseek/deepseek-v4-flash")
+            .expect("the recommended OpenRouter model must be priced");
+        assert_eq!(deepseek.input_usd_per_mtok, 0.09);
+        assert_eq!(deepseek.output_usd_per_mtok, 0.18);
+    }
+
+    /// Unknown model on a backend WITHOUT a catch-all entry → `None`
+    /// ("price unknown"), never $0 — the consumer must be able to tell
+    /// "free" apart from "no idea".
+    #[test]
+    fn pricing_for_an_unlisted_model_is_none_not_zero() {
+        let config = Config::load_with(None, no_env()).unwrap();
+        assert!(config.pricing_for("openrouter", "z-ai/glm-5.2").is_none());
+        // Backend must match exactly — an ollama model name asked under
+        // the wrong backend doesn't leak the catch-all.
+        assert!(config.pricing_for("anthropic", "qwen2.5:3b").is_none());
+    }
+
+    /// The longest matching prefix wins over the catch-all.
+    #[test]
+    fn pricing_for_prefers_the_most_specific_prefix() {
+        let mut config = Config::load_with(None, no_env()).unwrap();
+        config.model_pricing.push(ModelPricing {
+            backend: "ollama".to_string(),
+            model_prefix: "qwen3.5".to_string(),
+            input_usd_per_mtok: 1.0, // synthetic, to tell the entries apart
+            output_usd_per_mtok: 2.0,
+            cache_read_usd_per_mtok: None,
+            cache_write_usd_per_mtok: None,
+        });
+
+        let specific = config.pricing_for("ollama", "qwen3.5-coder").unwrap();
+        assert_eq!(specific.input_usd_per_mtok, 1.0, "specific prefix beats catch-all");
+        let fallback = config.pricing_for("ollama", "gemma4:e4b").unwrap();
+        assert_eq!(fallback.input_usd_per_mtok, 0.0, "catch-all still covers the rest");
     }
 
     /// I-1 (docs/AUDITORIA-2026-07-v6.md): the escalation knobs default

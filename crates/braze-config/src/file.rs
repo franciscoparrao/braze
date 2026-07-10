@@ -57,6 +57,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     // configurable.
     "max_turn_iterations",
     "planner_max_tokens",
+    // v4 P0.2 (Paquete 3) — circuit breaker por tokens acumulados por turno.
+    "max_turn_total_tokens",
     // v4 P2.4 — `tool_output_max_bytes`/`tool_output_max_lines` configurable
     // truncation limits (previously `MAX_TOOL_OUTPUT_BYTES` hardcoded).
     "tool_output_max_bytes",
@@ -64,6 +66,9 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     // v4 P1.6 — per-extension formatter map (generalizes the Rust-only
     // cargo check guardrail).
     "formatters",
+    // Paquete 3 (docs/AUDITORIA-2026-07-v6.md) — pricing por
+    // backend/modelo para estimated_cost_usd.
+    "model_pricing",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

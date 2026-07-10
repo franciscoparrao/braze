@@ -108,6 +108,12 @@ pub struct Engine {
     /// token-budget triggers) — see
     /// [`Engine::with_compaction_enabled`] (`+ablate:no-compaction`).
     compaction_enabled: bool,
+    /// Cumulative per-turn token circuit breaker (v4 P0.2): once a
+    /// turn's summed `input + output` across rounds exceeds this, the
+    /// loop stops gracefully instead of re-sending an ever-growing
+    /// history. `None` (the default) = disabled. See
+    /// [`Engine::with_max_turn_total_tokens`].
+    max_turn_total_tokens: Option<u64>,
     /// Approximate token budget for the durable+tactical portion of the
     /// prompt (i.e. excluding `system_prompt`/tool schemas, which the
     /// caller should already have reserved headroom for when computing
@@ -298,6 +304,7 @@ impl Engine {
             tactical_full_observations: crate::history::TACTICAL_FULL_OBSERVATIONS,
             observation_collapse_enabled: true,
             compaction_enabled: true,
+            max_turn_total_tokens: None,
             context_budget_tokens: None,
             best_of_n: 1,
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
@@ -357,6 +364,20 @@ impl Engine {
     /// `true` (the default) keeps the existing behavior. Chainable.
     pub fn with_compaction_enabled(mut self, enabled: bool) -> Self {
         self.compaction_enabled = enabled;
+        self
+    }
+
+    /// Cumulative per-turn token budget (v4 P0.2,
+    /// docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3): once the turn's
+    /// summed `input + output` tokens exceed `budget`, the next iteration
+    /// stops the loop gracefully — same tools-free summary attempt the
+    /// iteration cap gets — instead of re-sending an ever-growing history
+    /// until `max_turn_iterations`. `None` (the default) disables the
+    /// breaker. Token-based, not USD-based, on purpose: this crate has no
+    /// pricing knowledge (that lives in config/bench), and a caller that
+    /// thinks in dollars can convert with its own rates. Chainable.
+    pub fn with_max_turn_total_tokens(mut self, budget: Option<u64>) -> Self {
+        self.max_turn_total_tokens = budget;
         self
     }
 
@@ -922,8 +943,44 @@ impl Engine {
         // later round must NOT count as "narration only" just because its
         // *last* round happened to have no tool calls.
         let mut any_tool_calls_this_turn = false;
+        // v4 P0.2: cumulative input+output across this turn's rounds —
+        // the quantity `max_turn_total_tokens` breaks on. Local to the
+        // call, like `any_tool_calls_this_turn`.
+        let mut turn_total_tokens: u64 = 0;
 
         for round in 0..self.max_turn_iterations {
+            // v4 P0.2 (docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3):
+            // checked at the top of the NEXT iteration, not right after a
+            // round — a round that converges to a final answer within
+            // budget+ε must return normally, and one more model call
+            // against an over-budget history is exactly what this breaker
+            // exists to prevent. Same graceful degradation the iteration
+            // cap gets below: summarize what was found instead of failing
+            // outright.
+            if let Some(budget) = self.max_turn_total_tokens
+                && turn_total_tokens > budget
+            {
+                tracing::warn!(
+                    round,
+                    budget_tokens = budget,
+                    spent_tokens = turn_total_tokens,
+                    "turn blew its cumulative token budget; attempting a final tools-free summary \
+                     round instead of continuing to re-send a growing history"
+                );
+                self.consecutive_turns_without_tool_calls
+                    .store(0, std::sync::atomic::Ordering::SeqCst);
+                if self
+                    .attempt_tools_free_summary_round(session, &messages, observer)
+                    .await?
+                {
+                    return Ok(());
+                }
+                return Err(EngineError::TurnBudgetExhausted {
+                    budget_tokens: budget,
+                    spent_tokens: turn_total_tokens,
+                });
+            }
+
             // N-16 (docs/AUDITORIA-2026-07-v2.md): the lossy variant
             // degrades a provider that fails to list its stubs (e.g. an
             // MCP server that died mid-session) instead of aborting every
@@ -962,6 +1019,10 @@ impl Engine {
             // generated, not just the winner's — see
             // `complete_with_best_of_n`.
             if let Some(round_usage) = usage {
+                // v4 P0.2: feed the turn's cumulative-token breaker (the
+                // check at the top of the next iteration).
+                turn_total_tokens +=
+                    u64::from(round_usage.input_tokens) + u64::from(round_usage.output_tokens);
                 // H-3 (docs/AUDITORIA-2026-07-v5.md): `AgentEvent::Usage`
                 // itself gains no new field — the escalation fact gets its
                 // own persisted event below instead, captured here before
@@ -6787,6 +6848,175 @@ mod tests {
                 .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
             "no budget configured: a single large event below the count threshold must not compact"
         );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// v4 P0.2 (docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3): a turn
+    /// whose cumulative tokens blow the budget stops at the top of the
+    /// next iteration — gracefully when the tools-free summary produces
+    /// text, as here.
+    #[tokio::test]
+    async fn a_turn_over_its_token_budget_stops_gracefully_via_the_summary_round() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let expensive_usage = || CompletionEvent::Usage {
+            input_tokens: 90_000,
+            output_tokens: 500,
+            stop_reason: Some("tool_use".to_string()),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            escalation_trigger: None,
+        };
+        let model = ScriptedModel::new(vec![
+            // Round 1: a tool call whose usage alone blows the 50k budget.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                expensive_usage(),
+                CompletionEvent::Done,
+            ],
+            // The tools-free summary attempt (round 2 never runs as a
+            // normal round — the breaker fires first).
+            vec![
+                CompletionEvent::TextDelta("resumen de lo hecho".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_total_tokens(Some(50_000));
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            result.is_ok(),
+            "expected graceful summary recovery, got {result:?}"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text == "resumen de lo hecho"
+            )),
+            "the summary text must be persisted, got: {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::SummaryFallbackAttempted)),
+            "the breaker goes through the same instrumented fallback path"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Same breaker, but the summary attempt comes back empty — the turn
+    /// surfaces `TurnBudgetExhausted` with the real numbers instead of
+    /// pretending it converged.
+    #[tokio::test]
+    async fn a_turn_over_its_token_budget_with_an_empty_summary_errors_with_the_spent_count() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                CompletionEvent::Usage {
+                    input_tokens: 90_000,
+                    output_tokens: 500,
+                    stop_reason: Some("tool_use".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            // Empty summary attempt.
+            vec![CompletionEvent::Done],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_total_tokens(Some(50_000));
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        match result {
+            Err(EngineError::TurnBudgetExhausted {
+                budget_tokens,
+                spent_tokens,
+            }) => {
+                assert_eq!(budget_tokens, 50_000);
+                assert_eq!(spent_tokens, 90_500);
+            }
+            other => panic!("expected TurnBudgetExhausted, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `None` (the default) never trips, no matter how much a turn spends
+    /// — zero behavior change for existing callers.
+    #[tokio::test]
+    async fn without_a_token_budget_an_expensive_turn_completes_normally() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("respuesta".to_string()),
+            CompletionEvent::Usage {
+                input_tokens: 5_000_000,
+                output_tokens: 100,
+                stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                escalation_trigger: None,
+            },
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(result.is_ok(), "got {result:?}");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

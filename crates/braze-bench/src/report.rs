@@ -48,6 +48,12 @@ struct BackendSummary {
     leader_escalations: u32,
     compaction_count: u32,
     summary_fallbacks: u32,
+    /// Sum of every row's `estimated_cost_usd` — `None` only when NO row
+    /// reported a cost (unpriced models throughout), `Some(sum)` once at
+    /// least one did (same aggregation contract as the cache-token
+    /// fields; E5's cost/quality tradeoff needs the group total, not an
+    /// average that dilutes across unpriced rows).
+    total_cost_usd: Option<f64>,
     /// 95% Wilson score interval half-width around `passed/total`, in
     /// percentage points. With `--repetitions 1` (or few repetitions) a
     /// small local model's pass rate is mostly noise, not signal — this
@@ -142,7 +148,31 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
         leader_escalations: counted.iter().map(|r| r.leader_escalations).sum(),
         compaction_count: counted.iter().map(|r| r.compaction_count).sum(),
         summary_fallbacks: counted.iter().map(|r| r.summary_fallbacks).sum(),
+        total_cost_usd: sum_optional_f64(counted.iter().map(|r| r.estimated_cost_usd)),
         pass_rate_interval_pp: half_width * 100.0,
+    }
+}
+
+/// Sums optional per-row USD costs into an optional total — `None` only
+/// when every row was `None` (no pricing anywhere: stay silent rather
+/// than claim "$0"); `Some(sum)` once at least one row reported.
+/// f64 mirror of `metrics::sum_optional_u32`, same reasoning.
+fn sum_optional_f64(values: impl Iterator<Item = Option<f64>>) -> Option<f64> {
+    let mut sum = 0.0f64;
+    let mut any_reported = false;
+    for v in values.flatten() {
+        sum += v;
+        any_reported = true;
+    }
+    any_reported.then_some(sum)
+}
+
+/// `"$0.0123"` when priced, `"-"` when no row in the group had pricing —
+/// visibly different from a genuine $0.0000 (all-Ollama rows).
+fn format_cost_cell(total: Option<f64>) -> String {
+    match total {
+        Some(usd) => format!("${usd:.4}"),
+        None => "-".to_string(),
     }
 }
 
@@ -196,7 +226,7 @@ pub fn print_table(results: &[TaskResult]) {
     // failure isn't a model result at all (see
     // `BackendSummary::harness_errors`'s doc comment).
     println!(
-        "{:<24} {:>16} {:>8} {:>12} {:>10} {:>14} {:>16} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9}",
+        "{:<24} {:>16} {:>8} {:>12} {:>10} {:>14} {:>16} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",
         "backend",
         "pass_rate(±95%)",
         "avg_rounds",
@@ -211,7 +241,8 @@ pub fn print_table(results: &[TaskResult]) {
         "rescues",
         "escalat",
         "compact",
-        "sumfall"
+        "sumfall",
+        "cost_usd"
     );
     for backend in backend_order {
         let rows: Vec<&TaskResult> = results.iter().filter(|r| r.backend == backend).collect();
@@ -221,7 +252,7 @@ pub fn print_table(results: &[TaskResult]) {
             summary.passed, summary.total, summary.pass_rate_interval_pp
         );
         println!(
-            "{:<24} {:>16} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9}",
+            "{:<24} {:>16} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",
             summary.backend,
             pass_rate_cell,
             summary.avg_rounds,
@@ -237,6 +268,7 @@ pub fn print_table(results: &[TaskResult]) {
             summary.leader_escalations,
             summary.compaction_count,
             summary.summary_fallbacks,
+            format_cost_cell(summary.total_cost_usd),
         );
     }
 
@@ -260,7 +292,7 @@ pub fn print_table(results: &[TaskResult]) {
         // decides whether a lever is "worth it" for small models.
         println!("\n== Comparación por skill ==");
         println!(
-            "{:<24} {:<20} {:>9} {:>8} {:>10} {:>10} {:>11} {:>9} {:>9} {:>9} {:>9}",
+            "{:<24} {:<20} {:>9} {:>8} {:>10} {:>10} {:>11} {:>9} {:>9} {:>9} {:>9} {:>10}",
             "backend",
             "skill",
             "pass_rate",
@@ -271,7 +303,8 @@ pub fn print_table(results: &[TaskResult]) {
             "rescues",
             "escalat",
             "compact",
-            "sumfall"
+            "sumfall",
+            "cost_usd"
         );
         for backend in {
             let mut order: Vec<&str> = Vec::new();
@@ -293,7 +326,7 @@ pub fn print_table(results: &[TaskResult]) {
                 let summary = summarize(backend, &rows);
                 let pass_rate_cell = format!("{}/{}", summary.passed, summary.total);
                 println!(
-                    "{:<24} {:<20} {:>9} {:>8.1} {:>10.0} {:>10.0} {:>11.0} {:>9} {:>9} {:>9} {:>9}",
+                    "{:<24} {:<20} {:>9} {:>8.1} {:>10.0} {:>10.0} {:>11.0} {:>9} {:>9} {:>9} {:>9} {:>10}",
                     backend,
                     skill,
                     pass_rate_cell,
@@ -305,6 +338,7 @@ pub fn print_table(results: &[TaskResult]) {
                     summary.leader_escalations,
                     summary.compaction_count,
                     summary.summary_fallbacks,
+                    format_cost_cell(summary.total_cost_usd),
                 );
             }
         }
@@ -439,6 +473,8 @@ mod tests {
             leader_escalations: 0,
             compaction_count: 0,
             summary_fallbacks: 0,
+            expected_cost_within_budget: None,
+            estimated_cost_usd: None,
             wall_time_ms,
             passed,
         }

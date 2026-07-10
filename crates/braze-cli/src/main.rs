@@ -470,7 +470,10 @@ async fn build_engine(
     .with_best_of_n(config.best_of_n)
     .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue)
     .with_max_turn_iterations(config.max_turn_iterations as usize)
-    .with_planner_max_tokens(config.planner_max_tokens);
+    .with_planner_max_tokens(config.planner_max_tokens)
+    // v4 P0.2: circuit breaker por tokens acumulados por turno — None
+    // (default) lo deshabilita.
+    .with_max_turn_total_tokens(config.max_turn_total_tokens);
 
     if let Some(budget) = ollama_budget {
         engine = engine.with_context_budget(budget);
