@@ -2849,14 +2849,51 @@ fn event_text_len(event: &AgentEvent) -> usize {
     }
 }
 
-/// How generous a flat, literature/local-model-tuned default (either
-/// [`crate::history::MAX_FULL_OBSERVATIONS_TOTAL_CHARS`] or
-/// [`DEFAULT_TACTICAL_COMPACTION_THRESHOLD`]) gets scaled up when the
-/// caller *hasn't* configured a small, fixed context budget — see
-/// [`full_observations_byte_budget`] and
-/// [`effective_tactical_compaction_threshold`]'s doc comments for the two
-/// concrete failure modes this addresses.
+/// Ceiling for how far the three tactical caps scale above their
+/// literature/local-model-tuned defaults: applied outright when the
+/// caller *hasn't* configured a context budget (cloud backends — see
+/// [`full_observations_byte_budget`]'s doc comment for the failure mode),
+/// and as the upper clamp of [`tactical_cap_scale`]'s budget-proportional
+/// scaling when one IS configured — a 128K-context local model shouldn't
+/// get a wider tactical window than cloud backends do.
 const NO_CONTEXT_BUDGET_SCALE_MULTIPLIER: usize = 10;
+
+/// The single multiplier the three tactical caps
+/// ([`full_observations_byte_budget`],
+/// [`effective_tactical_compaction_threshold`],
+/// [`effective_tactical_full_observations`]) share, derived from the
+/// session's actual context budget instead of its mere presence (I-2,
+/// docs/AUDITORIA-2026-07-v6.md).
+///
+/// The v5-era logic was binary: `Some(_)` → defaults, `None` → ×10. That
+/// fixed the U-17/U-18/U-19 re-read loops for cloud backends but left
+/// them fully alive for large local models — a qwen3.5-coder with
+/// `num_ctx=32768` on a LAN node got the same minimal caps (8KB of full
+/// observations ≈ ONE `read_file` page under braze-tools-local's ~8KB
+/// per-call cap) as a 3B model on an 8K window, for exactly the
+/// population this project's thesis targets.
+///
+/// Anchoring: the historical 8 000-char default was tuned for
+/// `num_ctx=8192`, whose budget (~6 000 tokens ≈ 24 000 chars at ~4
+/// chars/token) makes it one *third* of the budget in chars. Keeping
+/// that ratio: `scale = (budget_tokens×4/3) / MAX_FULL_OBSERVATIONS_TOTAL_CHARS`,
+/// floored at 1 (never below the tuned defaults — they're the protective
+/// minimum, not a starting point to shrink) and capped at
+/// [`NO_CONTEXT_BUDGET_SCALE_MULTIPLIER`] (never above what cloud gets).
+/// At the 8K reference this yields exactly 1 — byte-identical behavior
+/// for the small local models the defaults were tuned on; at
+/// `num_ctx=32768` it yields ×5; `None` (cloud) keeps the flat ×10.
+fn tactical_cap_scale(context_budget_tokens: Option<u32>) -> usize {
+    match context_budget_tokens {
+        None => NO_CONTEXT_BUDGET_SCALE_MULTIPLIER,
+        Some(budget_tokens) => {
+            // ~4 chars/token, same heuristic as `estimate_message_tokens`.
+            let budget_chars = budget_tokens as usize * 4;
+            (budget_chars / 3 / MAX_FULL_OBSERVATIONS_TOTAL_CHARS)
+                .clamp(1, NO_CONTEXT_BUDGET_SCALE_MULTIPLIER)
+        }
+    }
+}
 
 /// The aggregate byte cap [`crate::history::render_tactical_events`]
 /// enforces across the observations it keeps full, sized to whether this
@@ -2880,13 +2917,13 @@ const NO_CONTEXT_BUDGET_SCALE_MULTIPLIER: usize = 10;
 /// (hallazgo U-6 and its repeats) before this was diagnosed.
 ///
 /// A backend with a real small-context concern keeps the original,
-/// literature-adjacent 8 000-char default unchanged — this only widens
-/// the budget when there's no configured reason to keep it tight.
+/// literature-adjacent 8 000-char default unchanged — the budget only
+/// widens in proportion to how much context the session actually has
+/// (I-2, docs/AUDITORIA-2026-07-v6.md — the v5-era version widened it
+/// only when NO budget was configured at all, leaving the U-17 collapse
+/// fully alive for large local models; see [`tactical_cap_scale`]).
 fn full_observations_byte_budget(context_budget_tokens: Option<u32>) -> usize {
-    match context_budget_tokens {
-        Some(_) => MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
-        None => MAX_FULL_OBSERVATIONS_TOTAL_CHARS * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER,
-    }
+    MAX_FULL_OBSERVATIONS_TOTAL_CHARS * tactical_cap_scale(context_budget_tokens)
 }
 
 /// The event-count threshold past which [`Engine::load_messages`] folds
@@ -2928,10 +2965,10 @@ fn effective_tactical_compaction_threshold(
     configured: usize,
     context_budget_tokens: Option<u32>,
 ) -> usize {
-    if context_budget_tokens.is_some() || configured != DEFAULT_TACTICAL_COMPACTION_THRESHOLD {
+    if configured != DEFAULT_TACTICAL_COMPACTION_THRESHOLD {
         return configured;
     }
-    configured * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+    configured * tactical_cap_scale(context_budget_tokens)
 }
 
 /// Same reasoning and the same corruption risk as
@@ -2958,10 +2995,10 @@ fn effective_tactical_full_observations(
     configured: usize,
     context_budget_tokens: Option<u32>,
 ) -> usize {
-    if context_budget_tokens.is_some() || configured != TACTICAL_FULL_OBSERVATIONS {
+    if configured != TACTICAL_FULL_OBSERVATIONS {
         return configured;
     }
-    configured * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+    configured * tactical_cap_scale(context_budget_tokens)
 }
 
 /// Rough token estimate for the *entire* durable+tactical portion of the
@@ -6477,6 +6514,69 @@ mod tests {
     #[test]
     fn an_explicit_non_default_compaction_threshold_is_never_scaled() {
         assert_eq!(effective_tactical_compaction_threshold(8, None), 8);
+    }
+
+    // --- tactical_cap_scale (I-2, docs/AUDITORIA-2026-07-v6.md): the
+    // caps scale with the budget's VALUE, not its mere presence ---
+
+    /// The anchor the whole formula hangs on: at the historical 8K-ctx
+    /// reference budget the scale is exactly 1 — byte-identical behavior
+    /// for the small local models the defaults were tuned on.
+    #[test]
+    fn the_reference_budget_scales_by_exactly_one() {
+        assert_eq!(tactical_cap_scale(Some(6_000)), 1);
+        assert_eq!(tactical_cap_scale(Some(8_192)), 1);
+    }
+
+    /// A 32K-ctx local model (budget ≈ 30K tokens) gets proportionally
+    /// wider caps — the exact population (qwen3.5-coder on Nitro) for
+    /// which the U-17 re-read collapse was still alive under the binary
+    /// Some/None logic.
+    #[test]
+    fn a_large_local_budget_scales_all_three_caps_proportionally() {
+        let budget = Some(30_000);
+        assert_eq!(tactical_cap_scale(budget), 5);
+        assert_eq!(
+            full_observations_byte_budget(budget),
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS * 5
+        );
+        assert_eq!(
+            effective_tactical_compaction_threshold(DEFAULT_TACTICAL_COMPACTION_THRESHOLD, budget),
+            DEFAULT_TACTICAL_COMPACTION_THRESHOLD * 5
+        );
+        assert_eq!(
+            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, budget),
+            TACTICAL_FULL_OBSERVATIONS * 5
+        );
+    }
+
+    /// A tiny budget never shrinks the caps below the tuned defaults —
+    /// they're the protective minimum, not a starting point to scale down.
+    #[test]
+    fn a_tiny_budget_floors_at_the_tuned_defaults() {
+        assert_eq!(tactical_cap_scale(Some(1_000)), 1);
+        assert_eq!(
+            full_observations_byte_budget(Some(1_000)),
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS
+        );
+    }
+
+    /// A huge local budget caps at the same ×10 cloud backends get — a
+    /// 128K-context local model shouldn't out-scale cloud.
+    #[test]
+    fn a_huge_local_budget_caps_at_the_cloud_multiplier() {
+        assert_eq!(
+            tactical_cap_scale(Some(500_000)),
+            NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+        );
+    }
+
+    /// The ablation guard survives the I-2 change: an explicit override
+    /// is never scaled no matter how large the budget is.
+    #[test]
+    fn an_explicit_override_is_never_scaled_even_with_a_large_budget() {
+        assert_eq!(effective_tactical_compaction_threshold(8, Some(30_000)), 8);
+        assert_eq!(effective_tactical_full_observations(2, Some(30_000)), 2);
     }
 
     #[test]
