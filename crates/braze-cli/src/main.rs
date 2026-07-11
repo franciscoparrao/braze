@@ -501,6 +501,8 @@ async fn build_engine(
     // C′.1: providers con más stubs que este umbral quedan detrás del
     // meta-tool search_tools (el caso objetivo: gateways MCP grandes).
     .with_tool_search_threshold(config.tool_search_threshold)
+    // C′.2: task list tipada — off salvo config explícita.
+    .with_task_list_enabled(config.enable_task_list)
     // v4 P0.2: circuit breaker por tokens acumulados por turno — None
     // (default) lo deshabilita.
     .with_max_turn_total_tokens(config.max_turn_total_tokens);

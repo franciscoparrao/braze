@@ -114,6 +114,9 @@ pub struct ConfigOverrides {
     /// (`BRAZE_TOOL_SEARCH_THRESHOLD`).
     #[serde(default)]
     pub tool_search_threshold: Option<usize>,
+    /// C′.2 — lista de tareas tipada (`BRAZE_ENABLE_TASK_LIST`).
+    #[serde(default)]
+    pub enable_task_list: Option<bool>,
 }
 
 impl ConfigOverrides {
@@ -302,6 +305,16 @@ impl ConfigOverrides {
                             reason: e.to_string(),
                         })?;
                     overrides.lead_escalation_turns = Some(parsed);
+                }
+                "ENABLE_TASK_LIST" => {
+                    let parsed = value
+                        .parse::<bool>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.enable_task_list = Some(parsed);
                 }
                 "TOOL_SEARCH_THRESHOLD" => {
                     let parsed = value

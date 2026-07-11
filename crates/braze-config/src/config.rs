@@ -446,6 +446,14 @@ pub struct Config {
     /// se difieren con el default.
     #[serde(default = "default_tool_search_threshold")]
     pub tool_search_threshold: usize,
+    /// C′.2 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.4):
+    /// expone las tools `task_add`/`task_update` y re-inyecta el resumen
+    /// compacto de la lista por ronda; con planner activo, el plan
+    /// siembra la lista en vez de persistirse como prosa. OFF por
+    /// default — dos tools extra son distractores potenciales para un
+    /// SLM; se promueve solo si su A/B lo valida.
+    #[serde(default)]
+    pub enable_task_list: bool,
 }
 
 /// Espejo de `braze_engine::tool_search::DEFAULT_TOOL_SEARCH_THRESHOLD`
@@ -525,6 +533,7 @@ impl Default for Config {
             model_pricing: default_model_pricing(),
             references: Vec::new(),
             tool_search_threshold: default_tool_search_threshold(),
+            enable_task_list: false,
         }
     }
 }
@@ -760,6 +769,9 @@ impl Config {
         }
         if let Some(v) = overrides.tool_search_threshold {
             self.tool_search_threshold = v;
+        }
+        if let Some(v) = overrides.enable_task_list {
+            self.enable_task_list = v;
         }
     }
 

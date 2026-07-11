@@ -9,6 +9,7 @@
 
 mod engine;
 mod hooks;
+mod task_list;
 mod tool_search;
 mod error;
 mod history;

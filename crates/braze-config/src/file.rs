@@ -74,6 +74,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "references",
     // C′.1 — umbral de deferral de tools por provider (search_tools).
     "tool_search_threshold",
+    // C′.2 — lista de tareas tipada (task_add/task_update).
+    "enable_task_list",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

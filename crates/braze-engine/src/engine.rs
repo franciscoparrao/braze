@@ -12,7 +12,7 @@ use braze_events::{AgentEvent, BackgroundTask, TaskHandle, TaskNotifier, TurnObs
 use braze_model::{CompletionEvent, CompletionRequest, ModelBackend};
 use braze_session::{ContextCompactor, DurableState, SessionError, SessionStore};
 use braze_tools_core::ToolRegistry;
-use braze_types::{ContentBlock, Message, SessionId, ToolCall, ToolResult, ToolStub};
+use braze_types::{ContentBlock, Message, Role, SessionId, ToolCall, ToolResult, ToolStub};
 
 use crate::error::EngineError;
 use crate::history::{
@@ -198,6 +198,14 @@ pub struct Engine {
     /// re-listan el resto de la sesión. `std::sync::Mutex` (no tokio):
     /// nunca se sostiene a través de un await.
     activated_deferred_tools: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// C′.2 (crate::task_list): expone `task_add`/`task_update` y
+    /// re-inyecta el resumen compacto por ronda. OFF por default — dos
+    /// tools extra son distractores potenciales para un SLM; entra al
+    /// bench por su propia fila (`+ablate:task-list`).
+    task_list_enabled: bool,
+    /// El estado de la lista (por sesión, en memoria — ver el module doc
+    /// de `crate::task_list` sobre `--resume`).
+    task_list: std::sync::Mutex<crate::task_list::TaskList>,
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
     textual_rescue_enabled: bool,
@@ -338,6 +346,8 @@ impl Engine {
             hooks: Vec::new(),
             tool_search_threshold: crate::tool_search::DEFAULT_TOOL_SEARCH_THRESHOLD,
             activated_deferred_tools: std::sync::Mutex::new(std::collections::HashSet::new()),
+            task_list_enabled: false,
+            task_list: std::sync::Mutex::new(crate::task_list::TaskList::default()),
             textual_rescue_enabled: true,
             planner: None,
         }
@@ -483,6 +493,15 @@ impl Engine {
     /// Chainable.
     pub fn with_tool_search_threshold(mut self, threshold: usize) -> Self {
         self.tool_search_threshold = threshold;
+        self
+    }
+
+    /// Enables the C′.2 typed task list (`crate::task_list`) — the two
+    /// harness-owned tools plus the per-round compact summary
+    /// reinjection. Off by default; `Config::enable_task_list` /
+    /// `+ablate:task-list`. Chainable.
+    pub fn with_task_list_enabled(mut self, enabled: bool) -> Self {
+        self.task_list_enabled = enabled;
         self
     }
 
@@ -1182,10 +1201,28 @@ impl Engine {
                 self.tool_search_threshold,
                 &self.activated_deferred_tools.lock().unwrap().clone(),
             );
-            let tool_stubs = inventory.visible;
+            let mut tool_stubs = inventory.visible;
             let hidden_stubs = inventory.hidden;
+            // C′.2: the task tools join the inventory only when the
+            // lever is on, and the compact summary rides as an ephemeral
+            // trailing user message — request-scoped like the inventory
+            // itself, never persisted (persisting it every round would
+            // be the prose-plan noise this lever exists to replace).
+            let mut request_messages = messages.clone();
+            if self.task_list_enabled {
+                tool_stubs.extend(crate::task_list::task_tool_stubs());
+                let task_list = self.task_list.lock().unwrap();
+                if task_list.has_open_tasks() {
+                    request_messages.push(Message {
+                        role: Role::User,
+                        content: vec![ContentBlock::Text {
+                            text: task_list.summary_line(),
+                        }],
+                    });
+                }
+            }
             let req = CompletionRequest {
-                messages: messages.clone(),
+                messages: request_messages,
                 tool_stubs: tool_stubs.clone(),
                 system_prompt: self.system_prompt.clone(),
                 max_tokens: self.max_tokens,
@@ -1477,6 +1514,50 @@ impl Engine {
     ///
     /// Only `Err` for session-store failures (persisting `Usage`/
     /// `PlanCreated`) — those are real turn failures, not planner ones.
+    /// C′.2: applies one `task_add`/`task_update` call to the in-memory
+    /// list and renders the tool result the model sees — `(content,
+    /// is_error)`. Malformed arguments come back as recoverable tool
+    /// errors with the actionable detail (never a hard failure: the
+    /// model can retry with fixed arguments).
+    fn handle_task_tool_call(&self, call: &ToolCall) -> (String, bool) {
+        let mut task_list = self.task_list.lock().unwrap();
+        if call.name == crate::task_list::TASK_ADD_TOOL {
+            let Some(description) = call
+                .arguments
+                .get("description")
+                .and_then(|v| v.as_str())
+                .filter(|d| !d.trim().is_empty())
+            else {
+                return (
+                    "task_add needs a non-empty 'description' string".to_string(),
+                    true,
+                );
+            };
+            let id = task_list.add(description);
+            return (
+                format!("added task {id}. {}", task_list.summary_line()),
+                false,
+            );
+        }
+        let id = call.arguments.get("id").and_then(|v| v.as_u64());
+        let status = call
+            .arguments
+            .get("status")
+            .and_then(|v| v.as_str())
+            .and_then(crate::task_list::TaskStatus::parse);
+        match (id, status) {
+            (Some(id), Some(status)) => match task_list.update(id as usize, status) {
+                Ok(()) => (task_list.summary_line(), false),
+                Err(reason) => (reason, true),
+            },
+            _ => (
+                "task_update needs an integer 'id' and a 'status' of pending/in_progress/done"
+                    .to_string(),
+                true,
+            ),
+        }
+    }
+
     async fn attempt_planning_round(
         &self,
         session: &SessionId,
@@ -1574,6 +1655,24 @@ impl Engine {
             tracing::info!(
                 "planner produced a single-step (or unstructured) plan; discarding it — \
                  the executor's first round covers it without the plan-in-prompt cost"
+            );
+            return Ok(false);
+        }
+        // C′.2 (crate::task_list): with the task list on, the plan
+        // becomes TYPED STATE instead of prose — its numbered steps seed
+        // the list (re-injected compactly every round) and no
+        // `PlanCreated` prose enters the history at all. This is the
+        // "planner→tasks" arm of the pre-registered A/B (PLAN.md § split
+        // planificador/ejecutor): same planner call, different delivery.
+        if self.task_list_enabled {
+            let seeded = self
+                .task_list
+                .lock()
+                .unwrap()
+                .seed_from_numbered_plan(plan);
+            tracing::info!(
+                seeded,
+                "plan delivered as typed tasks instead of prose (task list enabled)"
             );
             return Ok(false);
         }
@@ -1924,6 +2023,32 @@ impl Engine {
                             tool_call_id: call.id.clone(),
                             content,
                             is_error: false,
+                        },
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
+            }
+
+            // C′.2 (crate::task_list): the two task tools are
+            // harness-owned state mutations — same inline treatment as
+            // `search_tools` (no registry schema, no permission guard:
+            // in-memory bookkeeping). Only intercepted while the lever
+            // is on, so the names pass through untouched otherwise.
+            if self.task_list_enabled
+                && (call.name == crate::task_list::TASK_ADD_TOOL
+                    || call.name == crate::task_list::TASK_UPDATE_TOOL)
+            {
+                let (content, is_error) = self.handle_task_tool_call(&call);
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result: ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content,
+                            is_error,
                         },
                     },
                     observer,
@@ -7420,6 +7545,244 @@ mod tests {
             }
             other => panic!("expected TurnBudgetExhausted, got {other:?}"),
         }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- C′.2: task list tipada
+    // (docs/harness-engineering-hooks-skills-2026-07-10.md § I.4) ---
+
+    /// With the lever ON: the two task tools join the inventory, an add
+    /// + update round-trips through the harness-owned handler, and the
+    /// compact summary rides the NEXT round's request as an ephemeral
+    /// user message (never persisted).
+    #[tokio::test]
+    async fn task_tools_round_trip_and_the_summary_rides_the_next_request() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "task_add".to_string(),
+                        arguments: serde_json::json!({ "description": "leer notas.txt" }),
+                    },
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-2".to_string(),
+                        name: "task_add".to_string(),
+                        arguments: serde_json::json!({ "description": "responder" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-3".to_string(),
+                        name: "task_update".to_string(),
+                        arguments: serde_json::json!({ "id": 1, "status": "done" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::clone(&requests),
+        };
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "haz dos cosas", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let requests = requests.lock().unwrap().clone();
+        // Round 1: tools listed, no summary yet (empty list).
+        let round1_names: Vec<&str> = requests[0]
+            .tool_stubs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(round1_names.contains(&"task_add"));
+        assert!(round1_names.contains(&"task_update"));
+        let round1_text: String = requests[0]
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !round1_text.contains("Task list:"),
+            "no summary before any task exists"
+        );
+
+        // Round 2: the summary reflects the adds.
+        let round2_text: String = requests[1]
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            round2_text.contains("1 [pending] leer notas.txt"),
+            "got: {round2_text}"
+        );
+        assert!(round2_text.contains("2 [pending] responder"));
+
+        // Round 3: the update shows.
+        let round3_text: String = requests[2]
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            round3_text.contains("1 [done] leer notas.txt"),
+            "got: {round3_text}"
+        );
+
+        // The ephemeral summary must NOT be persisted as events.
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::UserMessage { text } if text.contains("Task list:")
+            )),
+            "the summary is request-scoped, never persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// With the lever OFF (the default): no task tools in the inventory
+    /// — existing measurements see zero change.
+    #[tokio::test]
+    async fn the_task_list_is_absent_by_default() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![vec![
+                CompletionEvent::TextDelta("hola".to_string()),
+                CompletionEvent::Done,
+            ]]),
+            requests: Arc::clone(&requests),
+        };
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let requests = requests.lock().unwrap().clone();
+        assert!(
+            !requests[0]
+                .tool_stubs
+                .iter()
+                .any(|s| s.name == "task_add" || s.name == "task_update"),
+            "off by default"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The planner bridge (the pre-registered A/B's planner→tasks arm):
+    /// with the task list on, an accepted plan seeds tasks instead of
+    /// persisting `PlanCreated` prose, and the summary rides the
+    /// executor's first request.
+    #[tokio::test]
+    async fn an_accepted_plan_seeds_the_task_list_instead_of_prose() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("1. leer notas.txt\n2. responder".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let executor = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ]]),
+            requests: Arc::clone(&requests),
+        };
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner))
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "haz dos cosas", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. })),
+            "planner→tasks: no prose plan in the history"
+        );
+
+        let requests = requests.lock().unwrap().clone();
+        let round1_text: String = requests[0]
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            round1_text.contains("1 [pending] leer notas.txt"),
+            "the seeded list rides the first executor request: {round1_text}"
+        );
+        assert!(round1_text.contains("2 [pending] responder"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

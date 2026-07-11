@@ -633,6 +633,13 @@ pub struct AblationOverrides {
     /// deferral con un umbral bajo (o desactivarla con uno enorme) para
     /// el A/B con un provider sintético de ruido.
     pub tool_search_threshold: Option<usize>,
+    /// `+ablate:task-list` — ENABLES the C′.2 typed task list for this
+    /// row. The one enabling key in a matrix of disablers, documented
+    /// exception: every other lever defaults ON (so its ablation
+    /// disables), this one defaults OFF (two extra tools are potential
+    /// SLM distractors) — the suffix still means what every suffix
+    /// means: "this row diverges from the config default".
+    pub enable_task_list: bool,
 }
 
 impl AblationOverrides {
@@ -674,6 +681,7 @@ impl AblationOverrides {
                 "lead-threshold" => {
                     out.lead_failure_threshold = Some(Self::parse_usize(key, value)?)
                 }
+                "task-list" => out.enable_task_list = true,
                 "tool-search-threshold" => {
                     out.tool_search_threshold = Some(Self::parse_usize(key, value)?)
                 }
@@ -746,6 +754,9 @@ impl AblationOverrides {
         }
         if let Some(n) = self.tactical_full_observations {
             parts.push(format!("full-observations={n}"));
+        }
+        if self.enable_task_list {
+            parts.push("task-list".to_string());
         }
         if let Some(n) = self.tool_search_threshold {
             parts.push(format!("tool-search-threshold={n}"));

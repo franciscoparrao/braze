@@ -220,6 +220,9 @@ pub async fn run_task(
             .tool_search_threshold
             .unwrap_or(config.tool_search_threshold),
     )
+    // C′.2: la fila puede prender la task list aunque config la tenga
+    // off (default) — el brazo planner→tasks del A/B pre-registrado.
+    .with_task_list_enabled(config.enable_task_list || ablation.enable_task_list)
     // B′ (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte
     // II): audit-only — logs the prompt-budget breakdown per request
     // under `RUST_LOG=braze_engine=info`, the same channel the other
