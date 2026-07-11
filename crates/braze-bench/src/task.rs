@@ -98,6 +98,17 @@ pub struct TaskDef {
     /// rationale as `expect_max_rounds`/`expect_max_tokens`.
     #[serde(default)]
     pub expect_max_cost_usd: Option<f64>,
+    /// C′.1 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.3):
+    /// número de herramientas SINTÉTICAS de ruido que el runner agrega al
+    /// registry para esta tarea (un `NoiseToolsProvider` propio, separado
+    /// del provider local) — el fixture del A/B de `search_tools`: con
+    /// ruido sobre el umbral de deferral, el brazo default esconde el
+    /// catálogo detrás del meta-tool; el brazo
+    /// `+ablate:tool-search-threshold=1000000` lo lista entero. `0` (el
+    /// default) no agrega nada — las suites existentes no cambian ni de
+    /// comportamiento ni de fingerprint.
+    #[serde(default)]
+    pub noise_tools: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -241,6 +252,34 @@ mod tests {
         assert!(result.is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// C′.1: the shipped `tool-search.toml` must parse, every task must
+    /// carry enough noise to cross the default deferral threshold (40),
+    /// and — the invariant the whole A/B rides on — no task may expect a
+    /// NOISE tool: the correct answer always lives in the local tools,
+    /// with the noise there purely to distract.
+    #[test]
+    fn tool_search_suite_parses_and_noise_crosses_the_default_threshold() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites/tool-search.toml");
+        let tasks = load_suite(&path).expect("tool-search.toml must parse");
+
+        assert!(tasks.len() >= 5, "got {}", tasks.len());
+        for task in &tasks {
+            assert!(
+                task.noise_tools > 40,
+                "task {} must cross the default deferral threshold",
+                task.id
+            );
+            if let Some(expected) = &task.expect_tool_call {
+                assert!(
+                    !expected.starts_with("noise_"),
+                    "task {} expects a noise tool — the A/B's premise is that noise is never the answer",
+                    task.id
+                );
+            }
+        }
     }
 
     /// Regression test for F8: the shipped `default.toml` must actually

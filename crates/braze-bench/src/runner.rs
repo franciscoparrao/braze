@@ -145,7 +145,17 @@ pub async fn run_task(
     let tools_provider = braze_tools_local::LocalToolsProvider::with_workdir(guard, sandbox.path())
         .with_post_edit_check(post_edit_check_enabled)
         .with_edit_strict_mode(ablation.edit_strict_mode);
-    let tools = braze_tools_core::ToolRegistry::new(vec![Box::new(tools_provider)]);
+    // C′.1: el fixture del A/B de search_tools — un catálogo sintético
+    // de ruido junto a las tools locales reales, solo cuando la tarea lo
+    // pide (`noise_tools > 0`); las suites existentes no cambian.
+    let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
+        vec![Box::new(tools_provider)];
+    if task.noise_tools > 0 {
+        providers.push(Box::new(crate::noise::NoiseToolsProvider::new(
+            task.noise_tools,
+        )));
+    }
+    let tools = braze_tools_core::ToolRegistry::new(providers);
 
     let model = spec.build_agent_model(config, sampling)?;
     // N-36 (docs/AUDITORIA-2026-07-v2.md): the exact same anti-loop system

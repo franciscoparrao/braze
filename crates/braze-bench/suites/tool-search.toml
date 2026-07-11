@@ -1,0 +1,86 @@
+# Suite del A/B de search_tools (C′.1,
+# docs/harness-engineering-hooks-skills-2026-07-10.md § I.3): las mismas
+# formas de tarea del suite default, pero con un catálogo sintético de
+# 200 herramientas de ruido (`noise_tools`, ver braze-bench::noise) que
+# simula un gateway MCP grande. Ninguna tarea necesita una tool de ruido
+# — miden si el modelo encuentra la tool LOCAL correcta cuando el
+# inventario está saturado.
+#
+# Brazos del A/B (el umbral default de deferral es 40, así que 200 tools
+# de ruido lo cruzan):
+#
+#   ollama:qwen2.5:3b                                     → deferral ON (default):
+#                                                           el modelo ve 6 tools locales + search_tools
+#   ollama:qwen2.5:3b+ablate:tool-search-threshold=1000000 → deferral OFF:
+#                                                           las 206 tools listadas completas
+#
+# La hipótesis (el argumento del colapso ACI aplicado al inventario): el
+# brazo sin deferral pierde pass rate por distracción y/o satura el
+# num_ctx local; el brazo con deferral queda cerca del rendimiento del
+# suite default sin ruido.
+
+[[tasks]]
+id = "noisy_read_file"
+prompt = "Lee el archivo notas.txt del directorio actual y dime cuántas líneas tiene."
+expect_tool_call = "read_file"
+expect_text_contains = "3"
+skill = "single_tool"
+noise_tools = 200
+
+[tasks.setup_files]
+"notas.txt" = "linea uno\nlinea dos\nlinea tres\n"
+
+[[tasks]]
+id = "noisy_grep"
+prompt = "Busca la palabra ERROR en el archivo datos.txt y dime en qué línea aparece."
+expect_tool_call = "grep"
+skill = "single_tool"
+noise_tools = 200
+
+[tasks.setup_files]
+"datos.txt" = "inicio del programa\nERROR: fallo de conexion\nfin del programa\n"
+
+[[tasks]]
+id = "noisy_write_file"
+prompt = "Crea un archivo llamado resumen.txt que contenga exactamente el texto: listo"
+expect_tool_call = "write_file"
+skill = "single_tool"
+noise_tools = 200
+
+[tasks.expect_file_contains]
+"resumen.txt" = ["listo"]
+
+[[tasks]]
+id = "noisy_no_tool"
+prompt = "¿Cuánto es 7 por 8? Responde solo el número."
+expect_no_tool_call = true
+expect_text_contains = "56"
+skill = "no_tool"
+noise_tools = 200
+
+[[tasks]]
+id = "noisy_multi_step"
+prompt = "Lee el archivo a.txt, lee el archivo b.txt, y escribe en suma.txt la suma de los dos números que contienen."
+expect_text_contains = "30"
+skill = "multi_step"
+noise_tools = 200
+
+[tasks.setup_files]
+"a.txt" = "10"
+"b.txt" = "20"
+
+[tasks.expect_file_contains]
+"suma.txt" = ["30"]
+
+[[tasks]]
+id = "noisy_distractor"
+prompt = "Necesito saber cuántas líneas tiene informe.txt. En el directorio también hay otros archivos, ignóralos."
+expect_tool_call = "read_file"
+expect_text_contains = "2"
+skill = "distractor_selection"
+noise_tools = 200
+
+[tasks.setup_files]
+"informe.txt" = "primera linea\nsegunda linea\n"
+"borrador.txt" = "no leas esto\n"
+"viejo.txt" = "tampoco esto\n"

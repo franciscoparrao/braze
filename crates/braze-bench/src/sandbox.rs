@@ -95,6 +95,7 @@ mod tests {
             expect_max_rounds: None,
             expect_max_tokens: None,
             expect_max_cost_usd: None,
+            noise_tools: 0,
         }
     }
 

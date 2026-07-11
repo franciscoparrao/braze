@@ -8,6 +8,7 @@ mod error;
 mod external;
 mod metadata;
 mod metrics;
+mod noise;
 mod report;
 mod runner;
 mod sandbox;
