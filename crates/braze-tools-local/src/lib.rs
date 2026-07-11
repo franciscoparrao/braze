@@ -15,6 +15,7 @@
 //! requires confirmation for writes/deletes/irreversible commands, not
 //! reads.
 
+mod ask_user;
 mod edit_file;
 mod glob;
 mod grep;
@@ -28,4 +29,5 @@ mod write_file;
 #[cfg(test)]
 mod test_support;
 
+pub use ask_user::AskUserProvider;
 pub use provider::LocalToolsProvider;

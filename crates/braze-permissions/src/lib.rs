@@ -41,6 +41,7 @@ mod classifier;
 mod confirm;
 mod error;
 mod guard;
+mod question;
 
 pub use action::ActionDescriptor;
 pub use allowlist::WorkdirAllowlist;
@@ -50,3 +51,4 @@ pub use classifier::{
 pub use confirm::ConfirmationPrompt;
 pub use error::PermissionError;
 pub use guard::{PermissionGuard, derive_permission_key};
+pub use question::QuestionPrompt;

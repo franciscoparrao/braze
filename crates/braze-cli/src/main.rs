@@ -10,11 +10,11 @@ mod cli_args;
 mod error;
 mod permissions_report;
 mod terminal_prompt;
+mod terminal_question;
 
 use std::process::ExitCode;
 
 use clap::Parser;
-use tokio::io::AsyncBufReadExt;
 
 use braze_events::{ChannelTaskNotifier, TextDeltaObserver};
 use braze_types::SessionId;
@@ -351,6 +351,9 @@ async fn build_engine(
     tui_mode: bool,
     supervised: bool,
     cwd: &std::path::Path,
+    // E′ I.5: when `Some`, the `ask_user` tool is exposed (interactive
+    // plain chat only) — `run`/the bench pass `None` (no human to ask).
+    ask_user_prompt: Option<std::sync::Arc<dyn braze_permissions::QuestionPrompt>>,
 ) -> Result<(braze_engine::Engine, String), CliError> {
     let mut model = build_model_backend(config, &config.default_backend, None)?;
 
@@ -434,6 +437,13 @@ async fn build_engine(
         .with_formatters(config.formatters.clone());
     let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
         vec![Box::new(local_provider)];
+
+    // E′ I.5: the `ask_user` tool is its own provider, added only when an
+    // interactive prompt was supplied — so it never shows up in the tool
+    // inventory of `run` or the bench, where there's no one to answer.
+    if let Some(prompt) = ask_user_prompt {
+        providers.push(Box::new(braze_tools_local::AskUserProvider::new(prompt)));
+    }
 
     // D5 (auditoría 2026-07): two `mcp_servers` entries sharing a `name`
     // would produce identical `mcp__<name>__<tool>` advertised names,
@@ -816,6 +826,24 @@ async fn run() -> Result<(), CliError> {
     // instead of the session this process started with.
     let live_session = std::sync::Arc::new(std::sync::Mutex::new(session));
 
+    // E′ I.5: `ask_user` is exposed only in the interactive PLAIN chat
+    // loop — not in `run` (one-shot, no human at the keyboard), and not
+    // in `--tui` yet (v1: the overlay wiring is deferred; the trait lives
+    // in braze-permissions so the TUI can add a channel impl later). The
+    // prompt shares the chat loop's single stdin reader (see
+    // `terminal_question`) so a piped answer isn't swallowed by the
+    // loop's read-ahead buffer.
+    let plain_chat = matches!(cli.command, Command::Chat { .. }) && !tui_mode;
+    let stdin_lines = terminal_question::shared_stdin();
+    let ask_user_prompt: Option<std::sync::Arc<dyn braze_permissions::QuestionPrompt>> =
+        if plain_chat {
+            Some(std::sync::Arc::new(
+                terminal_question::TerminalQuestionPrompt::new(std::sync::Arc::clone(&stdin_lines)),
+            ))
+        } else {
+            None
+        };
+
     let (engine, status_line) = build_engine(
         &config,
         planner_spec.clone(),
@@ -826,6 +854,7 @@ async fn run() -> Result<(), CliError> {
         tui_mode,
         supervised,
         &cwd,
+        ask_user_prompt,
     )
     .await?;
 
@@ -921,6 +950,8 @@ async fn run() -> Result<(), CliError> {
                         true,
                         supervised,
                         &cwd,
+                        // TUI: `ask_user` deferred to a channel impl (v1).
+                        None,
                     )
                     .await
                     .map_err(|err| err.to_string())
@@ -942,14 +973,16 @@ async fn run() -> Result<(), CliError> {
         Command::Chat { .. } => {
             println!("session: {session} (usa --resume {session} para continuarla luego)");
 
-            let stdin = tokio::io::stdin();
-            let mut lines = tokio::io::BufReader::new(stdin).lines();
-
+            // The SAME reader `TerminalQuestionPrompt` reads through (E′
+            // I.5) — one buffer over stdin, so an `ask_user` answer and
+            // the next chat message can't be swallowed by each other's
+            // read-ahead.
             loop {
                 print!("> ");
                 std::io::Write::flush(&mut std::io::stdout()).ok();
 
-                let Some(line) = lines.next_line().await? else {
+                let next = { stdin_lines.lock().await.next_line().await? };
+                let Some(line) = next else {
                     break; // EOF (Ctrl-D)
                 };
                 let trimmed = line.trim();

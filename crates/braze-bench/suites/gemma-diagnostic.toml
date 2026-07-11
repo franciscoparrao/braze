@@ -1,0 +1,154 @@
+# Suite diagnóstica para adaptar braze a la familia Gemma.
+#
+# Objetivo: medir roles y fallos de Gemma como executor/lead/planner sin
+# depender de prompts largos ni de configuración local externa. Cada tarea
+# apunta a una clase de comportamiento observada en los sweeps recientes:
+# no-tool, tool básico, distractores, multi-step, error recovery, disciplina
+# de schema, respuesta vacía post-tool, plan-prosa, task-list, tool-search,
+# español técnico y permisos.
+
+[[tasks]]
+id = "gemma_no_tool_arithmetic"
+prompt = "Responde solo el número: ¿cuánto es 7 por 8? No uses herramientas."
+expect_no_tool_call = true
+expect_text_contains = "56"
+skill = "no_tool"
+expect_max_rounds = 2
+expect_max_tokens = 1200
+
+[[tasks]]
+id = "gemma_simple_read_lines"
+prompt = "Lee el archivo notas.txt del directorio actual y dime cuántas líneas tiene. Responde solo el número."
+expect_tool_call = "read_file"
+expect_text_contains = "3"
+skill = "single_tool"
+expect_max_rounds = 5
+expect_max_tokens = 4000
+
+[tasks.setup_files]
+"notas.txt" = "uno\ndos\ntres\n"
+
+[[tasks]]
+id = "gemma_distractor_exact_file"
+prompt = "Necesito saber cuántas líneas tiene informe_final.txt. En el directorio hay borradores y backups; ignóralos. Responde solo el número."
+expect_tool_call = "read_file"
+expect_text_contains = "2"
+skill = "distractor_selection"
+expect_max_rounds = 6
+expect_max_tokens = 5000
+
+[tasks.setup_files]
+"informe_final.txt" = "primera linea\nsegunda linea\n"
+"informe_borrador.txt" = "uno\ndos\ntres\ncuatro\n"
+"informe_backup.txt" = "no usar\n"
+
+[[tasks]]
+id = "gemma_multi_step_sum_write"
+prompt = "Lee a.txt y b.txt. Cada archivo contiene un número entero. Escribe en total.txt la suma de ambos números y luego responde listo."
+expect_tool_call = "write_file"
+expect_text_contains = "listo"
+skill = "multi_step"
+expect_max_rounds = 8
+expect_max_tokens = 8000
+
+[tasks.setup_files]
+"a.txt" = "17\n"
+"b.txt" = "25\n"
+
+[tasks.expect_file_contains]
+"total.txt" = ["42"]
+
+[[tasks]]
+id = "gemma_error_recovery_near_filename"
+prompt = "Lee informe.txt. Si ese archivo no existe, busca el archivo con nombre más parecido y usa ese. Responde con la palabra clave que contiene."
+expect_text_contains = "alpaca"
+skill = "error_recovery"
+expect_max_rounds = 10
+expect_max_tokens = 10000
+
+[tasks.setup_files]
+"informe_final.txt" = "La palabra clave es alpaca.\n"
+"notas.txt" = "La palabra clave incorrecta es bruma.\n"
+
+[[tasks]]
+id = "gemma_schema_discipline_read"
+prompt = "Usa la herramienta adecuada para leer exactamente src/main.rs. No inventes campos ni rutas alternativas. Luego responde cuántas veces aparece la palabra main."
+expect_tool_call = "read_file"
+expect_text_contains = "2"
+skill = "schema_discipline"
+expect_max_rounds = 6
+expect_max_tokens = 6000
+
+[tasks.setup_files]
+"src/main.rs" = "fn main() {\n    println!(\"main\");\n}\n"
+
+[[tasks]]
+id = "gemma_empty_response_after_tool"
+prompt = "Lee estado.txt. Después de leerlo, no llames más herramientas: responde una frase breve que contenga exactamente la palabra terminado."
+expect_tool_call = "read_file"
+expect_text_contains = "terminado"
+skill = "post_tool_closure"
+expect_max_rounds = 6
+expect_max_tokens = 5000
+
+[tasks.setup_files]
+"estado.txt" = "El proceso ya finalizó correctamente.\n"
+
+[[tasks]]
+id = "gemma_plan_prose_stress"
+prompt = "Primero escribe un plan breve de una línea y luego ejecútalo: lee x.txt y responde su primera palabra."
+expect_tool_call = "read_file"
+expect_text_contains = "delta"
+skill = "planner_stress"
+expect_max_rounds = 8
+expect_max_tokens = 8000
+
+[tasks.setup_files]
+"x.txt" = "delta epsilon zeta\n"
+
+[[tasks]]
+id = "gemma_task_list_candidate"
+prompt = "Necesito que completes una tarea de tres pasos: lee primero.txt, lee segundo.txt, y escribe combinado.txt con ambas palabras separadas por un espacio. Al final responde listo."
+expect_tool_call = "write_file"
+expect_text_contains = "listo"
+skill = "task_list_candidate"
+expect_max_rounds = 9
+expect_max_tokens = 9000
+
+[tasks.setup_files]
+"primero.txt" = "norte\n"
+"segundo.txt" = "sur\n"
+
+[tasks.expect_file_contains]
+"combinado.txt" = ["norte", "sur"]
+
+[[tasks]]
+id = "gemma_tool_search_noise_read"
+prompt = "Hay muchas herramientas disponibles. Encuentra la herramienta correcta para leer archivos, lee objetivo.txt y responde la palabra clave."
+expect_tool_call = "read_file"
+expect_text_contains = "granito"
+skill = "tool_search"
+noise_tools = 200
+expect_max_rounds = 8
+expect_max_tokens = 9000
+
+[tasks.setup_files]
+"objetivo.txt" = "La palabra clave es granito.\n"
+
+[[tasks]]
+id = "gemma_spanish_instruction_following"
+prompt = "Responde en español técnico, sin herramientas, con exactamente una frase que incluya la palabra arnés."
+expect_no_tool_call = true
+expect_text_contains = "arnés"
+skill = "spanish_instruction"
+expect_max_rounds = 2
+expect_max_tokens = 1200
+
+[[tasks]]
+id = "gemma_permission_boundary"
+prompt = "Intenta escribir el texto peligro en /tmp/braze_gemma_permiso.txt. Si no tienes permiso, responde denegado."
+expect_tool_call = "write_file"
+expect_text_contains = "denegado"
+skill = "permission_boundary"
+expect_max_rounds = 6
+expect_max_tokens = 6000
