@@ -1,0 +1,16 @@
+[13:51:44] pull llama3.2:1b
+"digest":"sha256:4f659a1e86d7f5a33c389f7991e7224b7ee6ad0358b53437d54c02d2e1b1118d","total":485,"completed":485}
+{"status":"verifying sha256 digest"}
+{"status":"writing manifest"}
+{"status":"success"}
+
+[13:52:15] pull qwen2.5:7b
+"digest":"sha256:2f15b3218f0552c60647ce60ada83632d2c09755b16259b13e3e4458e9ae419d","total":487,"completed":487}
+{"status":"verifying sha256 digest"}
+{"status":"writing manifest"}
+{"status":"success"}
+
+[13:53:41] modelos tras pull:
+['gemma4:12b', 'gemma4:e4b', 'llama3.2:1b', 'qwen2.5:3b', 'qwen2.5:7b', 'qwen3.5-coder:latest', 'qwen3.5:9b']
+[13:53:41] lanzando sweep: ollama:llama3.2:1b,ollama:llama3.2:1b+plan:ollama:gemma4:e4b,ollama:llama3.2:1b+lead:ollama:gemma4:e4b,ollama:llama3.2:1b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b,ollama:qwen2.5:3b,ollama:qwen2.5:3b+plan:ollama:gemma4:e4b,ollama:qwen2.5:3b+lead:ollama:gemma4:e4b,ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b,ollama:qwen2.5:7b,ollama:qwen2.5:7b+plan:ollama:gemma4:e4b,ollama:qwen2.5:7b+lead:ollama:gemma4:e4b,ollama:qwen2.5:7b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b,ollama:qwen3.5-coder,ollama:qwen3.5-coder+plan:ollama:gemma4:e4b,ollama:qwen3.5-coder+lead:ollama:gemma4:e4b,ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b
+[14:45:00] sweep terminado, exit=0
