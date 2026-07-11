@@ -1818,11 +1818,23 @@ El criterio pre-registrado ("si no mueve `multi_step`/`error_recovery` →
 remoción") se cumple: mueve `error_recovery` en las 4 celdas con planner.
 Sigue **opt-in** (no default), pero deja de ser apuesta fallida — es una
 palanca de ganancia scale-dependent. Punto débil: `multi_step` regresa en
-3b (anotado, no bloqueante). Siguiente eslabón opcional: `+planner+lead`
-con el planner arreglado. (Nota metodológica: el brazo 3b+task-list se
+3b (anotado, no bloqueante). (Nota metodológica: el brazo 3b+task-list se
 re-corrió — su corrida original tuvo 58 fallos transitorios de red de
 Nitro en la ronda 0 que lo hundían a un 35% artefacto; el dato limpio es
 79%.)
+
+**Eslabón final `+planner+lead` CERRADO (2026-07-11,
+`docs/sweep-planlead-2026-07-11.md`)**: la composición prosa+lead en 3b
+es el mejor brazo del proyecto para ese modelo (95%, con multi_step +
+error_recovery + distractor_selection perfectas por primera vez) pero
++3pp sobre el lead solo queda dentro del ruido; en el techo nada
+compone (94/93/93). Hallazgo clave: la entrega óptima del plan SE
+INVIERTE con lead presente — el task-list (mejor entrega sin lead)
+RESTA combinado con lead (86%, multi_step 9/15): doble andamiaje de
+estado se interfiere. `3b+lead` replica por 4ª vez (banda 92-92.6%).
+Recomendación: lead solo como sweet spot; prosa+lead si +3pp > +50%
+latencia; task-list nunca junto a lead. La historia del split queda
+completa — sin sweeps pendientes.
 
 ## Grupo O — la superficie de archivo usable (docs/AUDITORIA-2026-07-v3.md, 2026-07-06)
 
