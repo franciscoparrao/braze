@@ -1,0 +1,14 @@
+% Caption sugerido:
+\caption{Two-level tool deferral: same correctness, $5.6\times$ fewer
+prompt tokens. On a suite whose tasks require only the six local tools
+but whose registry carries 200 synthetic noise tools (an MCP-gateway
+stand-in), hiding the noise catalog behind a single \texttt{search\_tools}
+meta-tool (blue) versus listing all 206 tools (grey).
+\textbf{(a)}~Input tokens per run (points: individual runs, $n{=}30$
+per arm; black bar: median). \textbf{(b)}~Pass rate (95\% Wilson CIs).
+Correctness is unchanged (7B) or within noise (3B) — the models are
+not measurably distracted by 200 irrelevant tools — while prompt cost
+collapses $5.6\times$ and wall-clock roughly halves (not shown). At
+the scale of real tool gateways (1{,}500+ tools) the full-inventory
+arm would exceed the local context window outright: deferral is
+enabling, not merely cheaper.}
