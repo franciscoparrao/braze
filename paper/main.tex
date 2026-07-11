@@ -1,0 +1,309 @@
+% main.tex — esqueleto del manuscrito (ángulo A: la curva harness-vs-escala).
+%
+% Venue aún por decidir (candidatos: TMLR, EMSE — ver discusión 2026-07-10);
+% article genérico portable: migrar al template del venue al decidir.
+% Compilar: make  (o pdflatex main && bibtex main && pdflatex ×2)
+%
+% Estado: ESQUELETO con contenido real — números, figuras y claims salen de
+% los docs de análisis commiteados (citados en % comentarios por sección).
+% Los TODO marcan prosa por escribir o datos por verificar.
+
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage[colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue]{hyperref}
+\usepackage[round]{natbib}
+\usepackage{xcolor}
+
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\braze}{\textsc{braze}}
+
+\title{The Harness Compensates the Model: A Pre-Registered Study of
+Agentic Scaffolding Across Small-Model Scales%
+\thanks{\todo{título candidato 1; alternativas: ``Not All Scaffolding
+Helps: ...'' (enfatiza el resultado negativo), ``A 1B Agent That Beats
+Its 7B Baseline: ...'' (enfatiza el dato estrella)}}}
+
+\author{Francisco Parra\\
+\todo{afiliación} \\
+\texttt{\todo{email}}}
+
+\date{}
+
+\begin{document}
+\maketitle
+
+% =====================================================================
+\begin{abstract}
+% Fuente: docs/sweep-curva-multiescala-2026-07-10.md,
+% docs/sweep-planner-ab-2026-07-11.md, docs/sweep-lead-3brazos-2026-07-10.md
+Agentic coding harnesses are designed for frontier models; whether --- and
+which --- scaffolding transfers to small, local models (1--8B) is largely
+unmeasured. We present \braze{}, an open-source agentic harness built to
+make that question measurable: every reliability lever is independently
+switchable per benchmark row, every run is reproducible from a commit
+hash and suite fingerprint, and design decisions were pre-registered
+before their evaluations ran. Across 1{,}520 runs spanning four executor
+scales and four harness configurations we find that a single capability
+lever --- a small lead model that proactively opens each turn --- yields
++70\,pp pass rate at 1B, decaying monotonically to zero at the scale
+ceiling; a 1B executor with this lever (89\%) outperforms 3B (68\%) and
+7B (80\%) baselines. In contrast, a context lever (a prose plan injected
+into the prompt) \emph{harms} at both extremes of the scale through a
+single degeneration mode (empty responses). A pre-registered iteration
+localizes the failure to the plan's \emph{delivery} --- rendered as the
+assistant's own text --- and repairs it: re-rendered as user context it
+gains +10\,pp on the strongest executor, and delivered as a typed task
+list it gains +12\,pp on the smallest. We further isolate the lead's
+mechanism experimentally (proactive opening, not reactive escalation)
+and show that two-level tool deferral cuts prompt tokens $5.6\times$ at
+no correctness cost. \todo{cerrar con 1 frase de takeaway para
+practitioners.}
+\end{abstract}
+
+% =====================================================================
+\section{Introduction}\label{sec:intro}
+% Fuente: CLAUDE.md (tesis), PLAN.md, docs/SOTA-2026-07.md
+
+\todo{párrafo 1 — el contexto: coding agents (Claude Code, Codex,
+OpenCode, Goose) construidos alrededor de modelos frontier; el costo/
+privacidad/latencia empujan hacia modelos locales chicos; la pregunta
+abierta: ¿cuánto del harness transfiere?}
+
+\todo{párrafo 2 — la tesis: el harness como variable que compensa la
+escala del modelo. Antecedente directo: SWE-agent/ACI
+\citep{yang2024sweagent} mostró que la interfaz agente-computadora mueve
+el resultado tanto como el modelo; nosotros lo sistematizamos a través
+de ESCALAS y con palancas conmutables una a una.}
+
+\todo{párrafo 3 — por qué esto requiere infraestructura y no solo un
+benchmark: ablations por fila, atribución causal, pre-registro.}
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item \textbf{The harness-vs-scale curve} (Fig.~\ref{fig:curva}):
+    4 harness configurations $\times$ 4 executor scales, $n{=}95$ per
+    cell, one binary. The capability lever decays monotonically
+    (+70\,pp at 1B $\to$ $-4$\,pp at the ceiling); the context lever
+    harms at both extremes via one degeneration mode.
+  \item \textbf{Causal isolation of the dominant lever}: a three-arm
+    experiment separating proactive opening from reactive escalation
+    shows the entire gain comes from the former; the reactive trigger
+    is structurally blind to the semantic failures that dominate
+    (\S\ref{sec:mechanism}).
+  \item \textbf{A negative result diagnosed and repaired under
+    pre-registration} (Fig.~\ref{fig:rescate}): the planner's collapse
+    (both extremes at 49\%) was a delivery bug, not a property of
+    planning; the pre-registered iteration turns it into a
+    scale-dependent gain (+10 to +12\,pp).
+  \item \textbf{Cost-side levers quantified}: two-level tool deferral
+    ($5.6\times$ fewer prompt tokens, no correctness cost,
+    Fig.~\ref{fig:searchtools}); \todo{¿incluir colapso ACI/ablations
+    acá o dejarlo en resultados secundarios?}
+  \item \textbf{\braze{} itself}: an open-source Rust harness where
+    every lever is a per-row benchmark ablation
+    (\texttt{+ablate:\{no-rescue, no-prune, no-lead, task-list, ...\}}),
+    releasable artifact with full sweep data. \todo{DOI Zenodo al
+    empaquetar (/zenodo).}
+\end{enumerate}
+
+% =====================================================================
+\section{Related Work}\label{sec:related}
+% Fuente: docs/SOTA-2026-07.md; docs/opencode-a-braze.md;
+% docs/harness-engineering-hooks-skills-2026-07-10.md
+
+\paragraph{Agent-computer interfaces.} \todo{SWE-agent/ACI
+\citep{yang2024sweagent}: la evidencia de que la interfaz importa; su
+colapso de observaciones (+3pp SWE-bench Lite) es el antecedente del
+colapso táctico de \braze{}. Nosotros: la dimensión escala.}
+
+\paragraph{Small language models as agents.} \todo{Qwen3-Coder TR
+\citep{qwen3coder}: overfitting al tool-template nativo — motiva los
+hints proactivos por familia y el rescate textual. Survey de SLMs
+\citep{todoSLMsurvey}: ICL débil y no-monotónico en modelos chicos —
+motiva prompts cortos. arXiv 2604.02155 \citep{todoReasoningDegrades}:
+razonamiento largo degrada tool-calling en modelos chicos.}
+
+\paragraph{Multi-model orchestration.} \todo{Goose (lead/worker
+reactivo) — nuestro A/B de 3 brazos muestra que la variante PROACTIVA
+es la que paga; Aider architect/editor (+3-4pp) — calibra la ganancia
+esperable del split planner/executor; best-of-n para tool-calling
+\citep{corradini2025}.}
+
+\paragraph{Agentic harnesses.} \todo{Claude Code / Codex / OpenCode /
+Gemini CLI: principios de diseño (carga diferida, compactación
+diferencial, permisos en capas) — no publicados como resultados
+medibles; nuestra contribución es hacerlos conmutables y medirlos.}
+
+% =====================================================================
+\section{The \braze{} Harness}\label{sec:harness}
+% Fuente: PLAN.md (arquitectura), CLAUDE.md (palancas)
+
+\todo{descripción compacta: workspace Rust de 14 crates, tres traits
+congelados (ToolProvider / ModelBackend / SessionStore+Compactor);
+énfasis en que TODO lo demás es palanca conmutable.}
+
+\begin{table}[t]
+\centering\small
+\caption{Reliability levers and their per-row benchmark ablations.
+\todo{completar columna de default y sección de resultados donde se
+mide cada una.}}
+\label{tab:levers}
+\begin{tabular}{llll}
+\toprule
+Lever & Mechanism & Ablation key & Measured in \\
+\midrule
+Lead model & proactive turn opening & \texttt{no-lead}, \texttt{lead-turns=N} & \S\ref{sec:curve},~\S\ref{sec:mechanism} \\
+Planner & plan pre-round (3 deliveries) & \texttt{no-planner}, \texttt{task-list} & \S\ref{sec:planner} \\
+Tool deferral & \texttt{search\_tools} meta-tool & \texttt{tool-search-threshold=N} & \S\ref{sec:searchtools} \\
+Observation collapse & old tool outputs $\to$ 1 line & \texttt{no-prune}, \texttt{full-observations=N} & \todo{ablation sweep} \\
+Textual rescue & per-family tool-call parsers & \texttt{no-rescue} & \todo{GLM vía OpenRouter} \\
+Post-edit check & compiler feedback in-result & \texttt{no-post-edit-check} & \todo{ablation sweep} \\
+Best-of-$n$ & vote among candidates & \texttt{best-of-n=N} & \todo{g10 sweep} \\
+Harness notes & budget/deadline warnings & \texttt{no-harness-notes} & \todo{pendiente} \\
+Typed task list & plan as state, compact re-injection & \texttt{task-list} & \S\ref{sec:planner} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Experimental Setup}\label{sec:setup}
+% Fuente: braze-bench (diseño), docs de sweeps (metadata)
+
+\todo{suite (19 tareas, 5 skills: single\_tool / no\_tool / multi\_step /
+error\_recovery / distractor\_selection), sandbox por corrida, timeout,
+5 repeticiones, temp 0.2; modelos (llama3.2:1b, qwen2.5:3b/7b,
+qwen3.5-coder; gemma4:e4b como lead/planner fijo); nodo de inferencia
+dedicado (regla un-sweep-a-la-vez tras medir contaminación).}
+
+\paragraph{Reproducibility.} Every sweep JSON embeds the harness git
+commit, a suite fingerprint, and per-model digests; confidence
+intervals are 95\% Wilson ($n{=}95$ per cell unless noted); deltas
+across sweeps are never compared as levels, only within-sweep
+(Newcombe/MOVER intervals for differences). \todo{párrafo sobre
+pre-registro: criterios del planner y del explorador escritos antes de
+sus sweeps, citables por commit.}
+
+% =====================================================================
+\section{Results}\label{sec:results}
+
+\subsection{The harness-vs-scale curve}\label{sec:curve}
+% Fuente: docs/sweep-curva-multiescala-2026-07-10.md
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figs/fig1_curva.pdf}
+  \input{figs/fig1_curva_caption.tex}
+  \label{fig:curva}
+\end{figure}
+
+\todo{prosa de los 6 hallazgos del doc de la curva: (1) decaimiento
+monótono del lead +70/+24/+15/-4pp y el dato estrella 1B+lead 89\% >
+7B baseline 80\%; (2) el planner-prosa colapsa ambos extremos por
+respuestas vacías (37 y 35 de las fallas); (3) la composición hereda el
+gradiente; (4) la excepción informativa del 7B; (5) en el techo +lead
+es MÁS RÁPIDO que baseline (19.8 vs 23.7s); (6) replicaciones del 3b en
+la banda 67-72\% a través de 4 sweeps.}
+
+\subsection{Isolating the mechanism: proactive opening, not reactive
+escalation}\label{sec:mechanism}
+% Fuente: docs/sweep-lead-3brazos-2026-07-10.md
+
+\todo{el A/B de 3 brazos: proactivo 92.6\% [85.6,96.4] vs reactivo puro
+75.8\% [66.3,83.3] vs baseline 67.4\%; las 13 fallas de error\_recovery
+del brazo reactivo con CERO escalaciones — el trigger (tool failures
+consecutivas) es estructuralmente ciego a ``ejecutar con éxito la
+acción equivocada''; cuando dispara, 7/7 pasan. Lección: mecanismo
+válido, cobertura estrecha.}
+
+\subsection{A negative result, diagnosed and repaired}\label{sec:planner}
+% Fuente: docs/sweep-planner-ab-2026-07-11.md; docs/sweep-matriz-4brazos-2026-07-10.md
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.6\linewidth]{figs/fig2_rescate.pdf}
+  \input{figs/fig2_rescate_caption.tex}
+  \label{fig:rescate}
+\end{figure}
+
+\todo{la secuencia completa como narrativa de método: (1) A/B original
+negativo $\to$ queda opt-in con iteración pre-registrada; (2) la matriz
+lo vuelve decisivo (-22pp, degeneración diagnosticada); (3) la curva
+muestra el mismo modo en ambos extremos; (4) la iteración (render
+user-role + descarte single-step + entrega como task list) rescata:
+prosa-user +10pp en coder, task-list +12pp en 3b; (5) el criterio
+pre-registrado impidió tanto el falso rechazo como el rescate ad-hoc.
+Nota del brazo contaminado y su re-run (transparencia).}
+
+\subsection{Tool deferral: cost, not correctness}\label{sec:searchtools}
+% Fuente: docs/sweep-search-tools-ab-2026-07-11.md
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.6\linewidth]{figs/fig3_search_tools.pdf}
+  \input{figs/fig3_search_tools_caption.tex}
+  \label{fig:searchtools}
+\end{figure}
+
+\todo{honestidad primero: la hipótesis de distracción NO se confirmó a
+200 tools de ruido — la cantidad no distrae, la plausibilidad sí
+(contraste con distractor\_selection). La ganancia es costo: 5.6× tokens,
+2.4× wall; a escala gateway (1500+) es habilitación.}
+
+\subsection{Secondary levers and ablations}\label{sec:ablations}
+\todo{qué entra acá: rescued\_tool\_calls=0 en 665 corridas con Qwen
+(el rescate no dispara donde no hay leak — honestidad sobre una palanca
+estrella que no se activó en este régimen; SÍ se activa con GLM vía
+OpenRouter, citar evidencia U-15/U-16); ¿correr ablation sweep de
+no-prune/post-edit-check para esta sección o declararlo future work?}
+
+% =====================================================================
+\section{Discussion}\label{sec:discussion}
+
+\todo{(1) Not all scaffolding helps: palancas de CAPACIDAD en rounds
+tempranos suman; palancas de CONTEXTO restan salvo entrega correcta —
+y la entrega correcta depende de la escala (prosa para capaces, estado
+tipado para chicos). (2) El harness le debe avisos al modelo chico
+(deadline anunciado vs corte silencioso). (3) Pre-registro como
+disciplina de ingeniería, no solo de ciencia: dos veces evitó
+decisiones equivocadas. (4) Implicación práctica: un 1B con lead barato
+como configuración edge viable.}
+
+\section{Threats to Validity}\label{sec:threats}
+\todo{(1) suite propia de 19 tareas — mitigación pendiente: anclar con
+benchmark externo (BFCL subset) o suite ampliada; (2) un solo
+lead/planner (gemma4:e4b); (3) n=15 por celda de skill (solo extremos
+concluyentes); (4) modelos de una familia dominante (Qwen) + 1
+Llama; (5) fallos transitorios de infraestructura documentados y
+excluidos/re-corridos con transparencia (listar los 3 casos).}
+
+\section{Conclusion}\label{sec:conclusion}
+\todo{1 párrafo: la curva existe, tiene mecanismo, y sus excepciones
+tienen diagnóstico. El harness compensa escala — pero solo el andamiaje
+correcto, entregado en el formato correcto para la escala.}
+
+% =====================================================================
+\paragraph{Artifact availability.} \todo{repo + DOI Zenodo del código y
+los 8 sweep JSONs (~4.400 corridas totales citadas); instrucciones de
+reproducción por sweep están en cada docs/sweep-*.md.}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\section{Sweep inventory}\label{app:sweeps}
+\todo{tabla: cada sweep citado, su commit, n, fecha, archivo JSON — la
+fuente es el encabezado de cada docs/sweep-*.md.}
+
+\section{Pre-registration texts}\label{app:prereg}
+\todo{transcribir los dos pre-registros con su commit: el criterio del
+planner (PLAN.md, previo al A/B) y el diseño del explorador
+(docs/explorador-aislado-ab-design.md) como ejemplo de la disciplina
+aplicada a futuro.}
+
+\end{document}

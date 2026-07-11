@@ -1,0 +1,8 @@
+# Artefactos de compilación LaTeX — el fuente es main.tex; el PDF se
+# regenera con `make pdf`.
+main.pdf
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
