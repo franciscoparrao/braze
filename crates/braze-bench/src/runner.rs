@@ -172,8 +172,11 @@ pub async fn run_task(
     // No references (opencode-10): the bench sandbox is hermetic by
     // design — a user's reference dirs leaking into the measured system
     // prompt would make pass rates depend on local config.
+    // Sin environment block (E′ I.6): el sandbox no es un repo git y el
+    // bench mide el prompt default de producción (environment_block es
+    // off por default — si algún día se promueve, N-36 exige seguirlo).
     let system_prompt =
-        braze_config::default_system_prompt(sandbox.path(), model_hint.as_deref(), &[]);
+        braze_config::default_system_prompt(sandbox.path(), model_hint.as_deref(), &[], None);
 
     // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget
     // — without it, a bench pass rate for an Ollama backend measured a

@@ -454,6 +454,15 @@ pub struct Config {
     /// SLM; se promueve solo si su A/B lo valida.
     #[serde(default)]
     pub enable_task_list: bool,
+    /// E′ I.6 (docs/harness-engineering-hooks-skills-2026-07-10.md):
+    /// anexa al system prompt un snapshot del entorno (branch + git
+    /// status recortado + fecha + OS) generado por el composition root —
+    /// el modelo no gasta rondas de shell_exec en orientarse. OFF por
+    /// default: el contexto es presupuesto (con num_ctx chico cada línea
+    /// compite), y el bench lo deja siempre off (sandbox sin git; N-36
+    /// exige que el bench siga al default de producción).
+    #[serde(default)]
+    pub environment_block: bool,
 }
 
 /// Espejo de `braze_engine::tool_search::DEFAULT_TOOL_SEARCH_THRESHOLD`
@@ -534,6 +543,7 @@ impl Default for Config {
             references: Vec::new(),
             tool_search_threshold: default_tool_search_threshold(),
             enable_task_list: false,
+            environment_block: false,
         }
     }
 }
@@ -772,6 +782,9 @@ impl Config {
         }
         if let Some(v) = overrides.enable_task_list {
             self.enable_task_list = v;
+        }
+        if let Some(v) = overrides.environment_block {
+            self.environment_block = v;
         }
     }
 

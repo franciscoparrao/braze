@@ -121,6 +121,84 @@ fn build_permission_guard(
     guard
 }
 
+/// E′ I.6: snapshot recortado del entorno para el system prompt —
+/// fecha, OS, y (si `cwd` es un repo git) branch + `git status --short`
+/// capado a 10 líneas. Todo best-effort: un `git` ausente o un
+/// directorio sin repo simplemente omite esas líneas, nunca falla el
+/// arranque. El cap existe porque el contexto es presupuesto: un
+/// worktree con 300 archivos sucios no debe comerse el `num_ctx`.
+fn build_environment_snapshot(cwd: &std::path::Path) -> String {
+    const MAX_STATUS_LINES: usize = 10;
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "- date: {}",
+        chrono_free_date_string()
+    ));
+    lines.push(format!("- os: {}", std::env::consts::OS));
+
+    let git = |args: &[&str]| -> Option<String> {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+    };
+
+    if let Some(branch) = git(&["rev-parse", "--abbrev-ref", "HEAD"]) {
+        lines.push(format!("- git branch: {branch}"));
+        if let Some(status) = git(&["status", "--short"]) {
+            if status.is_empty() {
+                lines.push("- git status: clean".to_string());
+            } else {
+                let total = status.lines().count();
+                let shown: Vec<&str> = status.lines().take(MAX_STATUS_LINES).collect();
+                let mut rendered = format!("- git status ({total} changed):");
+                for line in shown {
+                    rendered.push_str(&format!("\n  {line}"));
+                }
+                if total > MAX_STATUS_LINES {
+                    rendered.push_str(&format!(
+                        "\n  ... and {} more",
+                        total - MAX_STATUS_LINES
+                    ));
+                }
+                lines.push(rendered);
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Local date without a chrono dependency: `date +%F` via the shell is
+/// overkill and non-portable; `SystemTime` gives an epoch — days since
+/// epoch to a civil date is a small pure computation (Howard Hinnant's
+/// algorithm), enough for a "what day is it" grounding line.
+fn chrono_free_date_string() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = (secs / 86_400) as i64;
+    // Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 /// Builds one `ModelBackend` by name from the already-resolved config —
 /// the primary (executor) backend and, when the planner/executor split is
 /// enabled, the planner too (PLAN.md § "Split planificador/ejecutor") go
@@ -425,11 +503,22 @@ async fn build_engine(
         "anthropic" => config.anthropic_model.clone(),
         _ => None,
     };
+    // E′ I.6 (docs/harness-engineering-hooks-skills-2026-07-10.md): el
+    // snapshot lo arma este composition root — la lib de config solo
+    // formatea. Se computa una vez al construir el Engine (no por
+    // turno): un snapshot al inicio de sesión, igual que el harness que
+    // inspiró el diseño.
+    let environment_snapshot = if config.environment_block {
+        Some(build_environment_snapshot(cwd))
+    } else {
+        None
+    };
     let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
         braze_config::default_system_prompt(
             cwd,
             model_hint_for_prompt.as_deref(),
             &config.references,
+            environment_snapshot.as_deref(),
         )
     });
 
@@ -831,4 +920,42 @@ async fn run() -> Result<(), CliError> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// E′ I.6: outside a git repo the snapshot degrades to date + OS —
+    /// best-effort by design, never a startup failure.
+    #[test]
+    fn the_environment_snapshot_degrades_gracefully_without_git() {
+        let dir = std::env::temp_dir().join(format!(
+            "braze-cli-env-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let snapshot = build_environment_snapshot(&dir);
+        assert!(snapshot.contains("- date: "), "got: {snapshot}");
+        assert!(snapshot.contains(&format!("- os: {}", std::env::consts::OS)));
+        assert!(
+            !snapshot.contains("git branch"),
+            "no repo → no git lines: {snapshot}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The civil-date computation produces a plausible ISO date (the
+    /// alternative was a chrono dependency for one grounding line).
+    #[test]
+    fn the_date_string_is_iso_shaped() {
+        let date = chrono_free_date_string();
+        assert_eq!(date.len(), 10, "got: {date}");
+        assert_eq!(&date[4..5], "-");
+        assert_eq!(&date[7..8], "-");
+        let year: u32 = date[..4].parse().unwrap();
+        assert!((2026..2100).contains(&year), "got: {date}");
+    }
 }

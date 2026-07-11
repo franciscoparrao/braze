@@ -76,6 +76,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "tool_search_threshold",
     // C′.2 — lista de tareas tipada (task_add/task_update).
     "enable_task_list",
+    // E′ I.6 — snapshot de entorno en el system prompt.
+    "environment_block",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].
