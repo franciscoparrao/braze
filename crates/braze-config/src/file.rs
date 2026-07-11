@@ -72,6 +72,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     // opencode-10 (docs/opencode-a-braze.md § 10) — directorios de
     // referencia externos con descripción anunciada al modelo.
     "references",
+    // C′.1 — umbral de deferral de tools por provider (search_tools).
+    "tool_search_threshold",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

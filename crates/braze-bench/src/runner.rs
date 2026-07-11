@@ -214,6 +214,12 @@ pub async fn run_task(
     // the announced-deadline notes, ablatable so their effect on
     // TurnBudgetExhausted/iteration-cap aborts is measurable.
     .with_harness_notes_enabled(!ablation.disable_harness_notes)
+    // C′.1: umbral de deferral de tools — ablation > config.
+    .with_tool_search_threshold(
+        ablation
+            .tool_search_threshold
+            .unwrap_or(config.tool_search_threshold),
+    )
     // B′ (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte
     // II): audit-only — logs the prompt-budget breakdown per request
     // under `RUST_LOG=braze_engine=info`, the same channel the other

@@ -9,6 +9,7 @@
 
 mod engine;
 mod hooks;
+mod tool_search;
 mod error;
 mod history;
 #[cfg(test)]

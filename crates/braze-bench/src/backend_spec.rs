@@ -628,6 +628,11 @@ pub struct AblationOverrides {
     /// that measures whether announcing the budget/iteration deadline
     /// actually converts aborted turns into converged ones.
     pub disable_harness_notes: bool,
+    /// `+ablate:tool-search-threshold=N` — overrides
+    /// `Config::tool_search_threshold` (C′.1): la fila puede forzar la
+    /// deferral con un umbral bajo (o desactivarla con uno enorme) para
+    /// el A/B con un provider sintético de ruido.
+    pub tool_search_threshold: Option<usize>,
 }
 
 impl AblationOverrides {
@@ -668,6 +673,9 @@ impl AblationOverrides {
                 "lead-turns" => out.lead_turns = Some(Self::parse_usize(key, value)?),
                 "lead-threshold" => {
                     out.lead_failure_threshold = Some(Self::parse_usize(key, value)?)
+                }
+                "tool-search-threshold" => {
+                    out.tool_search_threshold = Some(Self::parse_usize(key, value)?)
                 }
                 "lead-window" => {
                     out.lead_escalation_turns = Some(Self::parse_usize(key, value)?)
@@ -738,6 +746,9 @@ impl AblationOverrides {
         }
         if let Some(n) = self.tactical_full_observations {
             parts.push(format!("full-observations={n}"));
+        }
+        if let Some(n) = self.tool_search_threshold {
+            parts.push(format!("tool-search-threshold={n}"));
         }
         if let Some(n) = self.lead_turns {
             parts.push(format!("lead-turns={n}"));

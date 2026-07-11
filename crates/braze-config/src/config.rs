@@ -438,6 +438,21 @@ pub struct Config {
     /// que un SLM no puede inferir solo. Ver [`ReferenceConfig`].
     #[serde(default)]
     pub references: Vec<ReferenceConfig>,
+    /// C′.1 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.3):
+    /// stubs por provider sobre los cuales sus tools no se listan al
+    /// modelo y quedan detrás del meta-tool `search_tools` del engine.
+    /// El caso objetivo son gateways MCP grandes (cientos-miles de
+    /// tools) contra un `num_ctx` local chico; las 6 tools locales nunca
+    /// se difieren con el default.
+    #[serde(default = "default_tool_search_threshold")]
+    pub tool_search_threshold: usize,
+}
+
+/// Espejo de `braze_engine::tool_search::DEFAULT_TOOL_SEARCH_THRESHOLD`
+/// (braze-config no depende de braze-engine — misma convención que los
+/// demás defaults espejados).
+fn default_tool_search_threshold() -> usize {
+    40
 }
 
 /// Default helper for `Config::tool_output_max_bytes` — matches the
@@ -509,6 +524,7 @@ impl Default for Config {
             formatters: default_formatters(),
             model_pricing: default_model_pricing(),
             references: Vec::new(),
+            tool_search_threshold: default_tool_search_threshold(),
         }
     }
 }
@@ -741,6 +757,9 @@ impl Config {
         }
         if let Some(v) = overrides.references {
             self.references = v;
+        }
+        if let Some(v) = overrides.tool_search_threshold {
+            self.tool_search_threshold = v;
         }
     }
 

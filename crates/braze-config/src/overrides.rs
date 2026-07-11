@@ -110,6 +110,10 @@ pub struct ConfigOverrides {
     /// posture as `formatters`/`model_pricing`, and for the same reason.
     #[serde(default)]
     pub references: Option<Vec<crate::config::ReferenceConfig>>,
+    /// C′.1 — umbral de deferral de tools por provider
+    /// (`BRAZE_TOOL_SEARCH_THRESHOLD`).
+    #[serde(default)]
+    pub tool_search_threshold: Option<usize>,
 }
 
 impl ConfigOverrides {
@@ -298,6 +302,16 @@ impl ConfigOverrides {
                             reason: e.to_string(),
                         })?;
                     overrides.lead_escalation_turns = Some(parsed);
+                }
+                "TOOL_SEARCH_THRESHOLD" => {
+                    let parsed = value
+                        .parse::<usize>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.tool_search_threshold = Some(parsed);
                 }
                 "MAX_TURN_ITERATIONS" => {
                     let parsed = value

@@ -498,6 +498,9 @@ async fn build_engine(
     .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue)
     .with_max_turn_iterations(config.max_turn_iterations as usize)
     .with_planner_max_tokens(config.planner_max_tokens)
+    // C′.1: providers con más stubs que este umbral quedan detrás del
+    // meta-tool search_tools (el caso objetivo: gateways MCP grandes).
+    .with_tool_search_threshold(config.tool_search_threshold)
     // v4 P0.2: circuit breaker por tokens acumulados por turno — None
     // (default) lo deshabilita.
     .with_max_turn_total_tokens(config.max_turn_total_tokens);

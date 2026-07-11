@@ -189,6 +189,15 @@ pub struct Engine {
     /// `hooks::HOOK_TIMEOUT`. Empty by default; composition roots
     /// register via [`Engine::with_hook`].
     hooks: Vec<crate::hooks::RegisteredHook>,
+    /// C′.1 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.3):
+    /// stubs por provider sobre los cuales sus tools no se listan y
+    /// quedan detrás del meta-tool `search_tools`. Ver
+    /// `crate::tool_search`.
+    tool_search_threshold: usize,
+    /// Tools de providers diferidos que una búsqueda ya "activó" — se
+    /// re-listan el resto de la sesión. `std::sync::Mutex` (no tokio):
+    /// nunca se sostiene a través de un await.
+    activated_deferred_tools: std::sync::Mutex<std::collections::HashSet<String>>,
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
     textual_rescue_enabled: bool,
@@ -327,6 +336,8 @@ impl Engine {
             consecutive_turns_without_tool_calls: std::sync::atomic::AtomicU32::new(0),
             harness_notes_enabled: true,
             hooks: Vec::new(),
+            tool_search_threshold: crate::tool_search::DEFAULT_TOOL_SEARCH_THRESHOLD,
+            activated_deferred_tools: std::sync::Mutex::new(std::collections::HashSet::new()),
             textual_rescue_enabled: true,
             planner: None,
         }
@@ -463,6 +474,15 @@ impl Engine {
     /// other builders.
     pub fn with_hook(mut self, hook: std::sync::Arc<dyn crate::hooks::EngineHook>) -> Self {
         self.hooks.push(crate::hooks::RegisteredHook::new(hook));
+        self
+    }
+
+    /// Overrides the per-provider stub count over which a provider's
+    /// tools hide behind `search_tools` (C′.1, `crate::tool_search`) —
+    /// `Config::tool_search_threshold` / `+ablate:tool-search-threshold=N`.
+    /// Chainable.
+    pub fn with_tool_search_threshold(mut self, threshold: usize) -> Self {
+        self.tool_search_threshold = threshold;
         self
     }
 
@@ -1152,7 +1172,18 @@ impl Engine {
             // degrades a provider that fails to list its stubs (e.g. an
             // MCP server that died mid-session) instead of aborting every
             // subsequent turn, including ones that only need local tools.
-            let tool_stubs = self.tools.all_stubs_lossy().await;
+            let all_stubs = self.tools.all_stubs_lossy().await;
+            // C′.1 (crate::tool_search): providers over the threshold
+            // hide behind the `search_tools` meta-tool; activated hits
+            // resurface. Recomputed per round so a search in round N
+            // changes round N+1's inventory.
+            let inventory = crate::tool_search::apply_deferral(
+                all_stubs,
+                self.tool_search_threshold,
+                &self.activated_deferred_tools.lock().unwrap().clone(),
+            );
+            let tool_stubs = inventory.visible;
+            let hidden_stubs = inventory.hidden;
             let req = CompletionRequest {
                 messages: messages.clone(),
                 tool_stubs: tool_stubs.clone(),
@@ -1345,6 +1376,7 @@ impl Engine {
                 session,
                 &tool_calls,
                 &tool_stubs,
+                &hidden_stubs,
                 &mut dispatch_state,
                 observer,
             )
@@ -1455,7 +1487,15 @@ impl Engine {
             return Ok(false);
         };
 
-        let tool_stubs = self.tools.all_stubs_lossy().await;
+        // C′.1: the planner's prompt lists the tool inventory — the same
+        // deferral applies (1.500 nombres en el prompt del planner es el
+        // mismo problema que en el del executor).
+        let tool_stubs = crate::tool_search::apply_deferral(
+            self.tools.all_stubs_lossy().await,
+            self.tool_search_threshold,
+            &self.activated_deferred_tools.lock().unwrap().clone(),
+        )
+        .visible;
         let req = CompletionRequest {
             messages: messages.to_vec(),
             tool_stubs: Vec::new(),
@@ -1748,6 +1788,7 @@ impl Engine {
         session: &SessionId,
         tool_calls: &[ToolCall],
         available_tools: &[ToolStub],
+        hidden_stubs: &[ToolStub],
         state: &mut TurnDispatchState,
         observer: &mut dyn TurnObserver,
     ) -> Result<(), EngineError> {
@@ -1825,6 +1866,64 @@ impl Engine {
                                 call.name
                             ),
                             is_error: true,
+                        },
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
+            }
+
+            // C′.1 (crate::tool_search): the `search_tools` meta-tool is
+            // harness-owned — handled inline, before schema resolution
+            // (the registry has no schema for it) and outside the
+            // permission guard (read-only over an in-memory catalog).
+            // Only intercepted while something is actually hidden, so a
+            // real provider that happens to advertise this name isn't
+            // shadowed when deferral is inactive.
+            if call.name == crate::tool_search::SEARCH_TOOL_NAME && !hidden_stubs.is_empty() {
+                let query = call
+                    .arguments
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let hits = crate::tool_search::search_stubs(
+                    hidden_stubs,
+                    query,
+                    crate::tool_search::SEARCH_RESULTS_LIMIT,
+                );
+                let content = if hits.is_empty() {
+                    format!(
+                        "No tools matched '{query}'. Try different keywords — the catalog \
+                         covers {} tools.",
+                        hidden_stubs.len()
+                    )
+                } else {
+                    let mut listing = String::from("Matching tools, now available to call:\n");
+                    for hit in &hits {
+                        listing.push_str(&format!("- {}: {}\n", hit.name, hit.summary));
+                    }
+                    listing
+                };
+                {
+                    let mut activated = self.activated_deferred_tools.lock().unwrap();
+                    for hit in &hits {
+                        activated.insert(hit.name.clone());
+                    }
+                }
+                tracing::info!(
+                    query,
+                    hits = hits.len(),
+                    "search_tools activated deferred tools"
+                );
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result: ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content,
+                            is_error: false,
                         },
                     },
                     observer,
@@ -7321,6 +7420,174 @@ mod tests {
             }
             other => panic!("expected TurnBudgetExhausted, got {other:?}"),
         }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- C′.1: search_tools — herramientas diferidas en dos niveles
+    // (docs/harness-engineering-hooks-skills-2026-07-10.md § I.3) ---
+
+    /// A provider with many stubs — the "gateway grande" fixture. Every
+    /// tool resolves a permissive schema and invokes successfully.
+    struct NoisyToolsProvider {
+        count: usize,
+        invocations: Arc<AtomicU32>,
+    }
+
+    #[async_trait]
+    impl ToolProvider for NoisyToolsProvider {
+        fn provider_id(&self) -> &str {
+            "test:noisy"
+        }
+
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            let mut stubs: Vec<ToolStub> = (0..self.count)
+                .map(|i| ToolStub {
+                    name: format!("noise_tool_{i}"),
+                    summary: "an unrelated operation".to_string(),
+                    source: "test:noisy".to_string(),
+                    input_schema: None,
+                })
+                .collect();
+            stubs.push(ToolStub {
+                name: "frobnicate_target".to_string(),
+                summary: "frobnicates the target dataset".to_string(),
+                source: "test:noisy".to_string(),
+                input_schema: None,
+            });
+            Ok(stubs)
+        }
+
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            if name.starts_with("noise_tool_") || name == "frobnicate_target" {
+                Ok(Some(ToolSchema {
+                    name: name.to_string(),
+                    description: "test tool".to_string(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            self.invocations.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: "frobnicated".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    /// The full two-level loop: a big provider hides behind
+    /// `search_tools`; the model searches, the hit activates, the next
+    /// round's inventory lists it, and the call dispatches to the real
+    /// provider. The small provider stays visible throughout.
+    #[tokio::test]
+    async fn search_tools_hides_a_big_provider_and_activation_makes_the_hit_invocable() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let invocations = Arc::new(AtomicU32::new(0));
+        let echo_invocations = Arc::new(AtomicU32::new(0));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                // Round 1: the model searches the hidden catalog.
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "search_tools".to_string(),
+                        arguments: serde_json::json!({ "query": "frobnicate dataset" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                // Round 2: calls the tool the search surfaced.
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-2".to_string(),
+                        name: "frobnicate_target".to_string(),
+                        arguments: serde_json::json!({}),
+                    },
+                    CompletionEvent::Done,
+                ],
+                // Round 3: converges.
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::clone(&requests),
+        };
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![
+                Box::new(EchoToolProvider::new(Arc::clone(&echo_invocations))),
+                Box::new(NoisyToolsProvider {
+                    count: 50,
+                    invocations: Arc::clone(&invocations),
+                }),
+            ]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tool_search_threshold(40);
+
+        engine
+            .run_turn(&session, "frobnica el dataset", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        // Cloned out so no MutexGuard lives across the await below.
+        let requests = requests.lock().unwrap().clone();
+        // Round 1's inventory: echo (small provider, visible), NO noise
+        // tools, and the search meta-tool.
+        let round1_names: Vec<&str> = requests[0]
+            .tool_stubs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(round1_names.contains(&"echo"));
+        assert!(round1_names.contains(&"search_tools"));
+        assert!(
+            !round1_names.iter().any(|n| n.starts_with("noise_tool_")),
+            "the big provider's tools must be hidden: {round1_names:?}"
+        );
+        assert!(
+            !round1_names.contains(&"frobnicate_target"),
+            "the target starts hidden too"
+        );
+
+        // Round 2's inventory: the search hit is now listed.
+        let round2_names: Vec<&str> = requests[1]
+            .tool_stubs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(
+            round2_names.contains(&"frobnicate_target"),
+            "the activated hit must resurface: {round2_names:?}"
+        );
+
+        // And the real provider was actually invoked.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        // The search result itself reached the model as a tool result.
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::ToolCallCompleted { result, .. }
+                    if result.content.contains("frobnicate_target") && !result.is_error
+            )),
+            "the search must answer with the matching tools"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
