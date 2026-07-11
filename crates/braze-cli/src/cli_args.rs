@@ -11,7 +11,7 @@
 //! crate never reimplements config loading, it only adds the final,
 //! highest-priority layer.
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -111,6 +111,32 @@ pub enum Command {
         #[arg(long)]
         supervised: bool,
     },
+    /// Inspect and reason about permission decisions across past sessions
+    /// (E′ I.8, docs/harness-engineering-hooks-skills-2026-07-10.md).
+    Permissions {
+        #[command(subcommand)]
+        action: PermissionsAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PermissionsAction {
+    /// Mine the session logs and rank the actions you've approved (and
+    /// denied) most often — the ones re-confirmed every new session
+    /// because approval replay is session-scoped. Read-only: nothing is
+    /// applied, this is the evidence for a future allowlist.
+    Suggest(SuggestArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct SuggestArgs {
+    /// How many actions to show per section.
+    #[arg(long, default_value_t = 15)]
+    pub top: usize,
+    /// Hide actions with fewer than this many approvals/denials — filters
+    /// one-off confirmations that aren't allowlist material.
+    #[arg(long, default_value_t = 2)]
+    pub min_count: usize,
 }
 
 impl Command {
@@ -118,6 +144,7 @@ impl Command {
     pub fn backend_override(&self) -> Option<&str> {
         match self {
             Command::Chat { backend, .. } | Command::Run { backend, .. } => backend.as_deref(),
+            Command::Permissions { .. } => None,
         }
     }
 
@@ -125,6 +152,7 @@ impl Command {
     pub fn model_override(&self) -> Option<&str> {
         match self {
             Command::Chat { model, .. } | Command::Run { model, .. } => model.as_deref(),
+            Command::Permissions { .. } => None,
         }
     }
 
@@ -134,6 +162,7 @@ impl Command {
             Command::Chat { ollama_url, .. } | Command::Run { ollama_url, .. } => {
                 ollama_url.as_deref()
             }
+            Command::Permissions { .. } => None,
         }
     }
 
@@ -142,7 +171,7 @@ impl Command {
     pub fn theme_override(&self) -> Option<&str> {
         match self {
             Command::Chat { theme, .. } => theme.as_deref(),
-            Command::Run { .. } => None,
+            Command::Run { .. } | Command::Permissions { .. } => None,
         }
     }
 
@@ -154,6 +183,7 @@ impl Command {
     pub fn planner_override(&self) -> Option<(&str, Option<&str>)> {
         let raw = match self {
             Command::Chat { planner, .. } | Command::Run { planner, .. } => planner.as_deref()?,
+            Command::Permissions { .. } => return None,
         };
         Some(match raw.split_once(':') {
             Some((backend, model)) => (backend, Some(model)),
@@ -166,6 +196,7 @@ impl Command {
     pub fn lead_override(&self) -> Option<(&str, Option<&str>)> {
         let raw = match self {
             Command::Chat { lead, .. } | Command::Run { lead, .. } => lead.as_deref()?,
+            Command::Permissions { .. } => return None,
         };
         Some(match raw.split_once(':') {
             Some((backend, model)) => (backend, Some(model)),
@@ -177,6 +208,7 @@ impl Command {
     pub fn supervised(&self) -> bool {
         match self {
             Command::Chat { supervised, .. } | Command::Run { supervised, .. } => *supervised,
+            Command::Permissions { .. } => false,
         }
     }
 }

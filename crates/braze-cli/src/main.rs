@@ -8,6 +8,7 @@
 
 mod cli_args;
 mod error;
+mod permissions_report;
 mod terminal_prompt;
 
 use std::process::ExitCode;
@@ -17,7 +18,7 @@ use tokio::io::AsyncBufReadExt;
 
 use braze_events::{ChannelTaskNotifier, TextDeltaObserver};
 use braze_types::SessionId;
-use cli_args::{Cli, Command};
+use cli_args::{Cli, Command, PermissionsAction};
 use error::CliError;
 use terminal_prompt::TerminalConfirmationPrompt;
 
@@ -620,10 +621,60 @@ async fn build_engine(
     Ok((engine, status_line))
 }
 
+/// E′ I.8: `braze permissions suggest` — reads every session log under
+/// `config.session_dir`, aggregates the permission decisions, and prints
+/// the ranking. Read-only; no engine, no model.
+async fn run_permissions(
+    action: &PermissionsAction,
+    config: &braze_config::Config,
+) -> Result<(), CliError> {
+    use braze_session::SessionStore;
+
+    let PermissionsAction::Suggest(args) = action;
+
+    let store = braze_session::FileSessionStore::new(config.session_dir.clone());
+    let session_ids = store
+        .list_sessions()
+        .await
+        .map_err(|err| CliError::Startup(format!("no se pudieron listar las sesiones: {err}")))?;
+
+    let mut sessions = Vec::with_capacity(session_ids.len());
+    for id in &session_ids {
+        // A single unreadable/corrupt session log shouldn't sink the whole
+        // report — skip it with a warning, same posture as the rest of the
+        // binary's best-effort diagnostics.
+        match store.load(id).await {
+            Ok(events) => sessions.push(events),
+            Err(err) => {
+                tracing::warn!(session = %id, error = %err, "skipping unreadable session log")
+            }
+        }
+    }
+
+    let stats = permissions_report::aggregate(&sessions);
+    print!(
+        "{}",
+        permissions_report::render_report(&stats, args.top, args.min_count)
+    );
+    println!(
+        "\n({} sesiones leídas de {})",
+        sessions.len(),
+        config.session_dir.display()
+    );
+    Ok(())
+}
+
 async fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
     let mut config = braze_config::Config::load()?;
+
+    // E′ I.8: `permissions suggest` needs neither a model nor an engine —
+    // it only reads the on-disk session logs. Dispatched here, before any
+    // backend/guard/tool construction, and returns.
+    if let Command::Permissions { action } = &cli.command {
+        return run_permissions(action, &config).await;
+    }
 
     // Resolved early, before the model backend/guards/tools are built, so
     // both `build_permission_guard` (for `--resume` replay) and
@@ -638,6 +689,8 @@ async fn run() -> Result<(), CliError> {
             .parse::<SessionId>()
             .map_err(|err| CliError::Startup(format!("invalid session id '{id_str}': {err}")))?,
         Command::Chat { resume: None, .. } => SessionId::new(),
+        // `Permissions` is dispatched and returned above, before this.
+        Command::Permissions { .. } => unreachable!("handled by run_permissions"),
     };
 
     // `--backend` is applied first so that a bare `--model` (with no
@@ -930,6 +983,8 @@ async fn run() -> Result<(), CliError> {
                 println!();
             }
         }
+        // Dispatched and returned at the top of `run()`.
+        Command::Permissions { .. } => unreachable!("handled by run_permissions"),
     }
 
     Ok(())
