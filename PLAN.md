@@ -1797,9 +1797,32 @@ degeneración); (2) `PlanCreated` se renderiza con **rol user** como
 contexto ("Plan for this request... you have NOT executed any of it
 yet") en vez de texto del assistant — el render viejo hacía que el
 modelo chico tratara "su propio" plan como si ya hubiera respondido.
-Falta el A/B (baseline / +plan nuevo, mismo diseño de la matriz);
-criterio intacto: si no mueve `multi_step`/`error_recovery`, remoción
-completa.
+
+**A/B CERRADO (2026-07-11): el planner se RESCATA, no se remueve.**
+`docs/sweep-planner-ab-2026-07-11.md` — 3 brazos × {qwen2.5:3b,
+qwen3.5-coder}. La degeneración era un bug de RENDER, no del planner: con
+el render user-role, las respuestas vacías desaparecen (coder: 35 → 1) y
+los dos catastróficos 49% de la curva suben a 63% (3b prosa) y 96%
+(coder prosa). El planner iterado AYUDA en ambas escalas, con distinta
+entrega:
+
+- **coder: la prosa user-role gana** — 96% vs 86% baseline (+10pp),
+  `error_recovery` 13→15/15, `single_tool` 28→35/35.
+- **3b: el planner→tasks gana** — 79% vs 67% baseline (+12pp, el brazo
+  `+ablate:task-list` que siembra la lista tipada de C′.2),
+  `error_recovery` 3→10/15. La prosa en 3b queda apenas bajo baseline
+  (63%). El plan como ESTADO estructurado guía mejor a un 3B que la
+  prosa a interpretar.
+
+El criterio pre-registrado ("si no mueve `multi_step`/`error_recovery` →
+remoción") se cumple: mueve `error_recovery` en las 4 celdas con planner.
+Sigue **opt-in** (no default), pero deja de ser apuesta fallida — es una
+palanca de ganancia scale-dependent. Punto débil: `multi_step` regresa en
+3b (anotado, no bloqueante). Siguiente eslabón opcional: `+planner+lead`
+con el planner arreglado. (Nota metodológica: el brazo 3b+task-list se
+re-corrió — su corrida original tuvo 58 fallos transitorios de red de
+Nitro en la ronda 0 que lo hundían a un 35% artefacto; el dato limpio es
+79%.)
 
 ## Grupo O — la superficie de archivo usable (docs/AUDITORIA-2026-07-v3.md, 2026-07-06)
 
