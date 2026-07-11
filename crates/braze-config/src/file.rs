@@ -78,6 +78,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "enable_task_list",
     // E′ I.6 — snapshot de entorno en el system prompt.
     "environment_block",
+    // D′ — skills locales explicit-only (paths + caps).
+    "skills",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

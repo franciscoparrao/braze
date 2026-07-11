@@ -263,6 +263,7 @@ dependencies = [
  "braze-model",
  "braze-permissions",
  "braze-session",
+ "braze-skills",
  "braze-tools-core",
  "braze-tools-local",
  "braze-tui",
@@ -295,6 +296,7 @@ dependencies = [
  "braze-model",
  "braze-permissions",
  "braze-session",
+ "braze-skills",
  "braze-tools-core",
  "braze-tools-local",
  "braze-types",
@@ -371,6 +373,14 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "braze-skills"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
  "tracing",
 ]
 

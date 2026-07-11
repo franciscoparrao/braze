@@ -1,0 +1,12 @@
+[package]
+name = "braze-skills"
+description = "Local skill discovery and loading: SKILL.md files as procedural memory with progressive disclosure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }

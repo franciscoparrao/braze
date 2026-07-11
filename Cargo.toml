@@ -10,6 +10,7 @@ members = [
     "crates/braze-model",
     "crates/braze-tools-local",
     "crates/braze-mcp-client",
+    "crates/braze-skills",
     "crates/braze-engine",
     "crates/braze-tui",
     "crates/braze-cli",
@@ -29,6 +30,7 @@ braze-events = { path = "crates/braze-events" }
 braze-config = { path = "crates/braze-config" }
 braze-permissions = { path = "crates/braze-permissions" }
 braze-session = { path = "crates/braze-session" }
+braze-skills = { path = "crates/braze-skills" }
 braze-tools-core = { path = "crates/braze-tools-core" }
 braze-model = { path = "crates/braze-model" }
 braze-tools-local = { path = "crates/braze-tools-local" }

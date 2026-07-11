@@ -205,6 +205,31 @@ pub enum AgentEvent {
         /// a timeout description).
         reason: String,
     },
+    /// A skill's body was loaded into the turn's system prompt (D′,
+    /// docs/harness-engineering-hooks-skills-2026-07-10.md § Parte III).
+    /// Audit-only — the body itself is request-scoped (rebuilt from the
+    /// registry, never persisted as conversation), so this event is the
+    /// rollout log's only trace of WHAT guidance the model was given and
+    /// what it cost; braze-bench counts these for the skills A/B.
+    SkillLoaded {
+        /// Normalized skill name.
+        name: String,
+        /// How it got selected — `"explicit_mention"` is the only v1
+        /// trigger; the study's router (`"router_match"`) arrives with
+        /// its own A/B or not at all.
+        trigger: String,
+        /// ~4 chars/token over the (possibly capped) injected body.
+        estimated_tokens: u32,
+        /// Whether the body hit `max_body_tokens` and was cut.
+        truncated: bool,
+    },
+    /// A skill selection was recognized but NOT loaded — over the
+    /// per-turn cap, or the file became unreadable after discovery.
+    /// Same audit-only posture as [`AgentEvent::SkillLoaded`].
+    SkillLoadSkipped {
+        name: String,
+        reason: String,
+    },
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only
@@ -476,6 +501,30 @@ mod tests {
             }
             other => panic!("expected HookErrored, got {other:?}"),
         }
+    }
+
+    /// D′: the two skill events round-trip with their snake_case tags.
+    #[test]
+    fn skill_events_round_trip_through_json() {
+        let loaded = AgentEvent::SkillLoaded {
+            name: "testing".to_string(),
+            trigger: "explicit_mention".to_string(),
+            estimated_tokens: 300,
+            truncated: false,
+        };
+        let json = serde_json::to_string(&loaded).expect("serialize");
+        assert!(json.contains("\"skill_loaded\""), "got: {json}");
+        assert!(matches!(
+            serde_json::from_str::<AgentEvent>(&json).expect("deserialize"),
+            AgentEvent::SkillLoaded { ref name, .. } if name == "testing"
+        ));
+
+        let skipped = AgentEvent::SkillLoadSkipped {
+            name: "review".to_string(),
+            reason: "per-turn cap (2) reached".to_string(),
+        };
+        let json = serde_json::to_string(&skipped).expect("serialize");
+        assert!(json.contains("\"skill_load_skipped\""), "got: {json}");
     }
 
     /// A rollout log written by an older binary (before H-3) obviously

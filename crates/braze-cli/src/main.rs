@@ -595,6 +595,19 @@ async fn build_engine(
     // v4 P0.2: circuit breaker por tokens acumulados por turno — None
     // (default) lo deshabilita.
     .with_max_turn_total_tokens(config.max_turn_total_tokens);
+    // D′: skills locales — discovery al arranque, solo si config lista
+    // paths (allowlist vacía = apagado; el bench nunca los pasa).
+    if !config.skills.paths.is_empty() {
+        let registry =
+            std::sync::Arc::new(braze_skills::SkillRegistry::discover(&config.skills.paths));
+        if !registry.is_empty() {
+            engine = engine.with_skills(
+                registry,
+                config.skills.max_body_tokens,
+                config.skills.max_loaded_per_turn,
+            );
+        }
+    }
 
     if let Some(budget) = ollama_budget {
         engine = engine.with_context_budget(budget);

@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 braze-engine = { workspace = true }
+braze-skills = { workspace = true }
 braze-tui = { workspace = true }
 braze-config = { workspace = true }
 braze-session = { workspace = true }

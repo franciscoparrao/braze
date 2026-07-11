@@ -206,6 +206,19 @@ pub struct Engine {
     /// El estado de la lista (por sesión, en memoria — ver el module doc
     /// de `crate::task_list` sobre `--resume`).
     task_list: std::sync::Mutex<crate::task_list::TaskList>,
+    /// D′ (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte
+    /// III): registry de skills descubiertas al arranque. `None` (el
+    /// default y el bench siempre) = feature apagada.
+    skill_registry: Option<std::sync::Arc<braze_skills::SkillRegistry>>,
+    /// Skills ya cargadas esta sesión — sus addenda se re-anexan al
+    /// system prompt de cada request (reconstruidos del registry, nunca
+    /// persistidos como conversación).
+    loaded_skills: std::sync::Mutex<Vec<braze_skills::LoadedSkill>>,
+    /// Cap de tokens por body inyectado (config `skills.max_body_tokens`).
+    skills_max_body_tokens: usize,
+    /// Cuántas skills puede cargar la mención de UN turno (config
+    /// `skills.max_loaded_per_turn`).
+    skills_max_loaded_per_turn: usize,
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
     textual_rescue_enabled: bool,
@@ -348,6 +361,10 @@ impl Engine {
             activated_deferred_tools: std::sync::Mutex::new(std::collections::HashSet::new()),
             task_list_enabled: false,
             task_list: std::sync::Mutex::new(crate::task_list::TaskList::default()),
+            skill_registry: None,
+            loaded_skills: std::sync::Mutex::new(Vec::new()),
+            skills_max_body_tokens: 1200,
+            skills_max_loaded_per_turn: 2,
             textual_rescue_enabled: true,
             planner: None,
         }
@@ -502,6 +519,22 @@ impl Engine {
     /// `+ablate:task-list`. Chainable.
     pub fn with_task_list_enabled(mut self, enabled: bool) -> Self {
         self.task_list_enabled = enabled;
+        self
+    }
+
+    /// Attaches a skill registry (D′, `braze-skills`) with its two caps —
+    /// `$name` mentions in a turn's user input load bodies as system
+    /// prompt addenda. `None` registry (the default; braze-bench always)
+    /// keeps the feature fully off. Chainable.
+    pub fn with_skills(
+        mut self,
+        registry: std::sync::Arc<braze_skills::SkillRegistry>,
+        max_body_tokens: usize,
+        max_loaded_per_turn: usize,
+    ) -> Self {
+        self.skill_registry = Some(registry);
+        self.skills_max_body_tokens = max_body_tokens;
+        self.skills_max_loaded_per_turn = max_loaded_per_turn.max(1);
         self
     }
 
@@ -1074,6 +1107,12 @@ impl Engine {
         // itself would be the thing making the session unresumable).
         let existing_events = self.load_and_repair(session, observer).await?;
 
+        // D′: `$skill` mentions resolve before anything else this turn —
+        // the study's point is loading the guidance BEFORE the executor's
+        // first mistake, not after.
+        self.load_mentioned_skills(session, user_input, observer)
+            .await?;
+
         self.append_and_notify(
             session,
             &AgentEvent::UserMessage {
@@ -1224,7 +1263,7 @@ impl Engine {
             let req = CompletionRequest {
                 messages: request_messages,
                 tool_stubs: tool_stubs.clone(),
-                system_prompt: self.system_prompt.clone(),
+                system_prompt: self.system_prompt_with_skills(),
                 max_tokens: self.max_tokens,
             };
 
@@ -1514,6 +1553,101 @@ impl Engine {
     ///
     /// Only `Err` for session-store failures (persisting `Usage`/
     /// `PlanCreated`) — those are real turn failures, not planner ones.
+    /// D′: the base system prompt plus every loaded skill's addendum —
+    /// rebuilt per request from in-memory state (the study's rule: never
+    /// persist a body as conversation; the rollout log's trace is the
+    /// `SkillLoaded` event).
+    fn system_prompt_with_skills(&self) -> String {
+        let loaded = self.loaded_skills.lock().unwrap();
+        if loaded.is_empty() {
+            return self.system_prompt.clone();
+        }
+        let mut prompt = self.system_prompt.clone();
+        for skill in loaded.iter() {
+            prompt.push_str(&skill.prompt_addendum());
+        }
+        prompt
+    }
+
+    /// D′: resolves this turn's explicit `$skill` mentions against the
+    /// registry, loading up to `skills_max_loaded_per_turn` bodies (cap
+    /// crossings and unreadable files persist as `SkillLoadSkipped`).
+    /// Already-loaded skills are skipped silently — re-mentioning is a
+    /// no-op, not an error.
+    async fn load_mentioned_skills(
+        &self,
+        session: &SessionId,
+        user_input: &str,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<(), EngineError> {
+        let Some(registry) = &self.skill_registry else {
+            return Ok(());
+        };
+        let mentions = registry.explicit_mentions(user_input);
+        let mut loaded_this_turn = 0usize;
+        for name in mentions {
+            if self
+                .loaded_skills
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|s| s.name == name)
+            {
+                continue;
+            }
+            if loaded_this_turn >= self.skills_max_loaded_per_turn {
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::SkillLoadSkipped {
+                        name,
+                        reason: format!(
+                            "per-turn cap ({}) reached",
+                            self.skills_max_loaded_per_turn
+                        ),
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
+            }
+            match registry.load_body(&name, self.skills_max_body_tokens) {
+                Some(loaded) => {
+                    tracing::info!(
+                        skill = %loaded.name,
+                        estimated_tokens = loaded.estimated_tokens,
+                        truncated = loaded.truncated,
+                        "skill loaded from explicit mention"
+                    );
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::SkillLoaded {
+                            name: loaded.name.clone(),
+                            trigger: "explicit_mention".to_string(),
+                            estimated_tokens: loaded.estimated_tokens,
+                            truncated: loaded.truncated,
+                        },
+                        observer,
+                    )
+                    .await?;
+                    self.loaded_skills.lock().unwrap().push(loaded);
+                    loaded_this_turn += 1;
+                }
+                None => {
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::SkillLoadSkipped {
+                            name,
+                            reason: "body unreadable at load time".to_string(),
+                        },
+                        observer,
+                    )
+                    .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// C′.2: applies one `task_add`/`task_update` call to the in-memory
     /// list and renders the tool result the model sees — `(content,
     /// is_error)`. Malformed arguments come back as recoverable tool
@@ -3513,6 +3647,8 @@ fn event_text_len(event: &AgentEvent) -> usize {
         | AgentEvent::EscalationToLead { .. }
         | AgentEvent::SummaryFallbackAttempted
         | AgentEvent::HookErrored { .. }
+        | AgentEvent::SkillLoaded { .. }
+        | AgentEvent::SkillLoadSkipped { .. }
         | AgentEvent::Unknown => 0,
     }
 }
@@ -7546,6 +7682,161 @@ mod tests {
             other => panic!("expected TurnBudgetExhausted, got {other:?}"),
         }
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- D′: skills locales explicit-only
+    // (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte III) ---
+
+    fn temp_skills_dir(label: &str, skills: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "braze-engine-skills-{}-{label}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (name, body) in skills {
+            let skill_dir = dir.join(name);
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            std::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: guidance for {name}\n---\n\n{body}"),
+            )
+            .unwrap();
+        }
+        dir
+    }
+
+    /// The explicit-mention path end to end: `$testing` in the user's
+    /// input loads that skill's body into the request's system prompt,
+    /// persists `SkillLoaded`, and leaves unmentioned skills out.
+    #[tokio::test]
+    async fn a_skill_mention_loads_its_body_into_the_system_prompt() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let skills_dir = temp_skills_dir(
+            "mention",
+            &[
+                ("testing", "Always run cargo test before claiming success."),
+                ("review", "Check invariants first."),
+            ],
+        );
+        let registry =
+            std::sync::Arc::new(braze_skills::SkillRegistry::discover(std::slice::from_ref(&skills_dir)));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ]]),
+            requests: Arc::clone(&requests),
+        };
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(registry, 1200, 2);
+
+        engine
+            .run_turn(&session, "usa $testing para esto", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let requests = requests.lock().unwrap().clone();
+        assert!(
+            requests[0].system_prompt.contains("Loaded skill: testing"),
+            "got: {}",
+            requests[0].system_prompt
+        );
+        assert!(
+            requests[0]
+                .system_prompt
+                .contains("Always run cargo test before claiming success."),
+            "the body itself must be injected"
+        );
+        assert!(
+            !requests[0].system_prompt.contains("Loaded skill: review"),
+            "unmentioned skills stay out"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::SkillLoaded { name, trigger, .. }
+                    if name == "testing" && trigger == "explicit_mention"
+            )),
+            "the load must persist as the rollout log's trace"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::UserMessage { text } if text.contains("Always run cargo test")
+            )),
+            "the body is request-scoped, never persisted as conversation"
+        );
+
+        let _ = std::fs::remove_dir_all(&skills_dir);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The per-turn cap: mentioning three skills with a cap of 2 loads
+    /// two and persists a `SkillLoadSkipped` for the third — bounded
+    /// context growth, visible in the log.
+    #[tokio::test]
+    async fn the_per_turn_cap_skips_the_excess_mention_with_an_event() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let skills_dir = temp_skills_dir(
+            "cap",
+            &[("uno", "body uno"), ("dos", "body dos"), ("tres", "body tres")],
+        );
+        let registry =
+            std::sync::Arc::new(braze_skills::SkillRegistry::discover(std::slice::from_ref(&skills_dir)));
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("listo".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(registry, 1200, 2);
+
+        engine
+            .run_turn(&session, "usa $uno $dos $tres", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let loaded: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::SkillLoaded { .. }))
+            .collect();
+        assert_eq!(loaded.len(), 2, "cap of 2: {events:#?}");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::SkillLoadSkipped { name, reason }
+                    if name == "tres" && reason.contains("per-turn cap")
+            )),
+            "the third mention must be visibly skipped"
+        );
+
+        let _ = std::fs::remove_dir_all(&skills_dir);
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 

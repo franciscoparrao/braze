@@ -17,6 +17,7 @@ braze-tools-core = { workspace = true }
 braze-tools-local = { workspace = true }
 braze-mcp-client = { workspace = true }
 braze-model = { workspace = true }
+braze-skills = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

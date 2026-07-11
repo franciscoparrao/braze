@@ -457,6 +457,8 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         | AgentEvent::EscalationToLead { .. }
         | AgentEvent::SummaryFallbackAttempted
         | AgentEvent::HookErrored { .. }
+        | AgentEvent::SkillLoaded { .. }
+        | AgentEvent::SkillLoadSkipped { .. }
         | AgentEvent::Unknown => None,
     }
 }

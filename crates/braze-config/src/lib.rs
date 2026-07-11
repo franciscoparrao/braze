@@ -32,7 +32,7 @@ mod prompt;
 
 pub use api_key::ApiKey;
 pub use config::{
-    Config, FormatterConfig, McpServerConfigStub, ModelPricing, ReferenceConfig,
+    Config, FormatterConfig, McpServerConfigStub, ModelPricing, ReferenceConfig, SkillsConfig,
     default_formatters,
 };
 pub use error::ConfigError;

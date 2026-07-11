@@ -339,6 +339,8 @@ impl ContextCompactor for SimpleContextCompactor {
                 // would mislead later turns.
                 | AgentEvent::HarnessNote { .. }
                 | AgentEvent::HookErrored { .. }
+                | AgentEvent::SkillLoaded { .. }
+                | AgentEvent::SkillLoadSkipped { .. }
                 | AgentEvent::Unknown => {}
             }
         }

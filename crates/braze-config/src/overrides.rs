@@ -121,6 +121,10 @@ pub struct ConfigOverrides {
     /// (`BRAZE_ENVIRONMENT_BLOCK`).
     #[serde(default)]
     pub environment_block: Option<bool>,
+    /// D′ — skills locales; reemplazo completo, file-only (estructurado,
+    /// misma postura que `references`).
+    #[serde(default)]
+    pub skills: Option<crate::config::SkillsConfig>,
 }
 
 impl ConfigOverrides {

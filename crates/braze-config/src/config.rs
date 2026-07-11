@@ -114,6 +114,45 @@ pub struct ReferenceConfig {
     pub description: Option<String>,
 }
 
+/// Configuración de skills locales (D′,
+/// docs/harness-engineering-hooks-skills-2026-07-10.md § Parte III):
+/// `paths` es una ALLOWLIST deliberada de directorios con `SKILL.md` —
+/// vacía (el default) la feature queda apagada; NO se apuntan acá los
+/// directorios de skills de un entorno frontier tal cual (en un 3B son
+/// distractores — el estudio pide cuerpos SLM-native). Los caps existen
+/// porque el contexto es presupuesto: `max_body_tokens` corta cada body
+/// inyectado, `max_loaded_per_turn` acota cuántas skills puede cargar la
+/// mención de un solo turno.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillsConfig {
+    #[serde(default)]
+    pub paths: Vec<PathBuf>,
+    #[serde(default = "default_skills_max_body_tokens")]
+    pub max_body_tokens: usize,
+    #[serde(default = "default_skills_max_loaded_per_turn")]
+    pub max_loaded_per_turn: usize,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            paths: Vec::new(),
+            max_body_tokens: default_skills_max_body_tokens(),
+            max_loaded_per_turn: default_skills_max_loaded_per_turn(),
+        }
+    }
+}
+
+/// El cap del estudio (§ config propuesta): ~1200 tokens por body —
+/// una skill más larga está escrita para un frontier, no para un SLM.
+fn default_skills_max_body_tokens() -> usize {
+    1200
+}
+
+fn default_skills_max_loaded_per_turn() -> usize {
+    2
+}
+
 /// Tabla default, fechada **2026-07-09** — los precios de API envejecen;
 /// al agregar un modelo nuevo a los sweeps, agregar su entrada acá (o en
 /// el config file) con el precio vigente. Un modelo sin entrada produce
@@ -463,6 +502,10 @@ pub struct Config {
     /// exige que el bench siga al default de producción).
     #[serde(default)]
     pub environment_block: bool,
+    /// D′ — skills locales explicit-only; ver [`SkillsConfig`]. Solo
+    /// desde el config file (estructurado, como `references`).
+    #[serde(default)]
+    pub skills: SkillsConfig,
 }
 
 /// Espejo de `braze_engine::tool_search::DEFAULT_TOOL_SEARCH_THRESHOLD`
@@ -544,6 +587,7 @@ impl Default for Config {
             tool_search_threshold: default_tool_search_threshold(),
             enable_task_list: false,
             environment_block: false,
+            skills: SkillsConfig::default(),
         }
     }
 }
@@ -785,6 +829,9 @@ impl Config {
         }
         if let Some(v) = overrides.environment_block {
             self.environment_block = v;
+        }
+        if let Some(v) = overrides.skills {
+            self.skills = v;
         }
     }
 

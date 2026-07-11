@@ -71,8 +71,9 @@ sin index — los wires nunca dropean una call en silencio); y
 
 ## Arquitectura
 
-Workspace de 13 crates (`crates/braze-*`, incluye `braze-tui` y
-`braze-bench`), grafo de
+Workspace de 14 crates (`crates/braze-*`, incluye `braze-tui`,
+`braze-bench` y `braze-skills` — este último agregado 2026-07-11, D′ del
+estudio consolidado: skills locales explicit-only), grafo de
 dependencias en niveles — ver `PLAN.md` para el diagrama y las firmas de
 los tres traits que actúan de contrato congelado: `ToolProvider`
 (`braze-tools-core`), `ModelBackend` (`braze-model`),
@@ -92,7 +93,7 @@ Todo lo demás sigue la convención habitual: `thiserror` v2, `clap` v4,
 
 ## Estado del código (2026-07-06)
 
-Los 13 crates tienen lógica real y verificada. `cargo build/test/clippy
+Los 14 crates tienen lógica real y verificada. `cargo build/test/clippy
 --workspace` verdes: **612 tests**, clippy `-D warnings` limpio. La
 convención de verificación del proyecto: cada incremento se prueba
 también **en vivo** (pty scripteado contra el binario real para la TUI,
