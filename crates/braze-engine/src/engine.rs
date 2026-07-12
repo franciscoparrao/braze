@@ -2129,6 +2129,52 @@ impl Engine {
             )
             .await?;
 
+            // J-9 (docs/AUDITORIA-2026-07-v7.md): a deferred tool is NOT
+            // invocable until a search activates it — deferral is
+            // invocability, not just prompt space. Before this gate, a
+            // model that named a hidden tool exactly (remembered from
+            // pre-compaction history, or guessed from the count the
+            // search_tools stub announces) dispatched it directly,
+            // silently bypassing the mechanism the search_tools A/B
+            // claims to measure ("the model can only use what's listed
+            // or searched for"). The error is recoverable and actionable
+            // — one extra round through `search_tools` when it happens
+            // (rare), in exchange for the mechanism meaning what it says.
+            // Deliberately NOT auto-activate-and-dispatch: that would be
+            // the same bypass with bookkeeping.
+            //
+            // Checked BEFORE the repeated-call nudge, and a blocked call
+            // is deliberately NOT recorded in `seen_calls`: it never
+            // produced a result, so the legitimate retry after the model
+            // activates the tool via `search_tools` must dispatch — the
+            // nudge's "the result has not changed" claim would be false
+            // exactly there.
+            if hidden_stubs.iter().any(|stub| stub.name == call.name) {
+                tracing::info!(
+                    tool = %call.name,
+                    "blocked a direct call to a deferred tool that was never activated"
+                );
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result: ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: format!(
+                                "Tool '{}' exists but is not loaded. Call search_tools with \
+                                 keywords describing what you need (e.g. \"{}\") — matching \
+                                 tools become available to call afterwards.",
+                                call.name, call.name
+                            ),
+                            is_error: true,
+                        },
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
+            }
+
             // Exact repeat of a (name, arguments) pair already dispatched
             // earlier in this same turn — the dominant non-convergence
             // pattern for small/local models (they re-issue an identical
@@ -8431,6 +8477,108 @@ mod tests {
             )),
             "the search must answer with the matching tools"
         );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// J-9 (docs/AUDITORIA-2026-07-v7.md): naming a hidden tool directly
+    /// — without activating it via `search_tools` — must NOT dispatch it.
+    /// The model gets a recoverable, actionable error instead; after a
+    /// real search activates the tool, the same direct call works. This
+    /// is what makes "the model can only use what's listed or searched
+    /// for" literally true for the search_tools A/B.
+    #[tokio::test]
+    async fn a_deferred_tool_called_without_activation_is_rejected_not_dispatched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let invocations = Arc::new(AtomicU32::new(0));
+        let echo_invocations = Arc::new(AtomicU32::new(0));
+
+        let model = ScriptedModel::new(vec![
+            // Round 1: guesses the hidden tool's name directly.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "frobnicate_target".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            // Round 2: does what the error told it to do.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "search_tools".to_string(),
+                    arguments: serde_json::json!({ "query": "frobnicate" }),
+                },
+                CompletionEvent::Done,
+            ],
+            // Round 3: the activated tool now dispatches for real.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-3".to_string(),
+                    name: "frobnicate_target".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            // Round 4: converges.
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![
+                Box::new(EchoToolProvider::new(Arc::clone(&echo_invocations))),
+                Box::new(NoisyToolsProvider {
+                    count: 50,
+                    invocations: Arc::clone(&invocations),
+                }),
+            ]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tool_search_threshold(40);
+
+        engine
+            .run_turn(&session, "frobnica el dataset", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        // The provider ran exactly once — for round 3, never for the
+        // unactivated round-1 call.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let round1_result = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { id, result } if id == "call-1" => Some(result),
+                _ => None,
+            })
+            .expect("the blocked call must still complete its event pair");
+        assert!(round1_result.is_error);
+        assert!(
+            round1_result.content.contains("search_tools"),
+            "the error must tell the model the way in: {}",
+            round1_result.content
+        );
+        let round3_result = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { id, result } if id == "call-3" => Some(result),
+                _ => None,
+            })
+            .expect("the post-activation call must complete");
+        assert!(!round3_result.is_error);
+        assert_eq!(round3_result.content, "frobnicated");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

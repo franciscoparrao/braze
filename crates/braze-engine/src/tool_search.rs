@@ -22,6 +22,14 @@
 //! La activación vive en el `Engine` (por sesión) — un hit de búsqueda
 //! queda invocable el resto de la sesión, igual que en el harness que
 //! inspiró el diseño.
+//!
+//! **La deferral es INVOCABILIDAD, no solo espacio de prompt** (J-9,
+//! docs/AUDITORIA-2026-07-v7.md): una tool oculta nombrada directamente
+//! — sin pasar por `search_tools` — se rechaza con un tool error
+//! accionable en vez de despacharse. Sin ese gate, un modelo que
+//! recordaba el nombre de la historia pre-compactación (o lo adivinaba
+//! del conteo que el propio stub del meta-tool anuncia) bypasseaba en
+//! silencio el mecanismo que el A/B de search_tools dice medir.
 
 use std::collections::{HashMap, HashSet};
 
