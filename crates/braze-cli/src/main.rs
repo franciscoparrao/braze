@@ -441,6 +441,7 @@ async fn build_engine(
     // E′ I.5: the `ask_user` tool is its own provider, added only when an
     // interactive prompt was supplied — so it never shows up in the tool
     // inventory of `run` or the bench, where there's no one to answer.
+    let ask_user_enabled = ask_user_prompt.is_some();
     if let Some(prompt) = ask_user_prompt {
         providers.push(Box::new(braze_tools_local::AskUserProvider::new(prompt)));
     }
@@ -606,6 +607,14 @@ async fn build_engine(
     // v4 P0.2: circuit breaker por tokens acumulados por turno — None
     // (default) lo deshabilita.
     .with_max_turn_total_tokens(config.max_turn_total_tokens);
+    // J-13 (docs/AUDITORIA-2026-07-v7.md): ask_user espera a un HUMANO —
+    // dispatch inline, exento del timeout de 120s de los background
+    // tools (bajo ese reloj, una respuesta lenta se cancelaba y la línea
+    // que el humano tecleaba después la consumía el chat loop como un
+    // prompt nuevo).
+    if ask_user_enabled {
+        engine = engine.with_untimed_tool(braze_tools_local::ASK_USER_TOOL);
+    }
     // D′: skills locales — discovery al arranque, solo si config lista
     // paths (allowlist vacía = apagado; el bench nunca los pasa).
     if !config.skills.paths.is_empty() {

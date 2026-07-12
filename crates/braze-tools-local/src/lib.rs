@@ -29,5 +29,5 @@ mod write_file;
 #[cfg(test)]
 mod test_support;
 
-pub use ask_user::AskUserProvider;
+pub use ask_user::{ASK_USER_TOOL, AskUserProvider};
 pub use provider::LocalToolsProvider;

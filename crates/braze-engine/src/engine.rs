@@ -137,6 +137,16 @@ pub struct Engine {
     /// the timeout-then-abort path in `dispatch_tool_calls` without
     /// actually waiting 120 real seconds.
     tool_completion_timeout: Duration,
+    /// Tools dispatched inline, with NO completion timeout — J-13
+    /// (docs/AUDITORIA-2026-07-v7.md): a tool that blocks on a HUMAN
+    /// answer (`ask_user`) must not race the background-tool timeout.
+    /// Under the 120s clock, a slow human answer was cancelled (the model
+    /// got a timeout error and guessed anyway) and the answer the human
+    /// then typed was consumed by the chat loop as a brand-new prompt — a
+    /// garbage turn. The composition root that registers an interactive
+    /// provider names it here (`braze-cli` adds `ask_user`); empty by
+    /// default and in every non-interactive root (bench, `braze run`).
+    untimed_tools: std::collections::HashSet<String>,
     /// Safety cap on model/tool-call round trips within a single
     /// [`Engine::run_turn`] call. Defaults to [`MAX_TURN_ITERATIONS`];
     /// overridden via [`Engine::with_max_turn_iterations`] from
@@ -363,6 +373,7 @@ impl Engine {
             context_budget_tokens: None,
             best_of_n: 1,
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
+            untimed_tools: std::collections::HashSet::new(),
             max_turn_iterations: MAX_TURN_ITERATIONS,
             planner_max_tokens: PLANNER_MAX_TOKENS,
             turn_in_progress: std::sync::atomic::AtomicBool::new(false),
@@ -462,6 +473,14 @@ impl Engine {
     /// Chainable, same shape as [`Engine::with_context_budget`].
     pub fn with_tool_completion_timeout(mut self, timeout: Duration) -> Self {
         self.tool_completion_timeout = timeout;
+        self
+    }
+
+    /// Marks a tool as interactive: dispatched inline and exempt from
+    /// [`Engine::with_tool_completion_timeout`] — see the
+    /// `untimed_tools` field doc (J-13). Chainable, once per tool.
+    pub fn with_untimed_tool(mut self, name: impl Into<String>) -> Self {
+        self.untimed_tools.insert(name.into());
         self
     }
 
@@ -2356,6 +2375,52 @@ impl Engine {
                         "failed to resolve tool schema before dispatch (MVP does not validate strictly)"
                     );
                 }
+            }
+
+            // J-13 (docs/AUDITORIA-2026-07-v7.md): interactive tools wait
+            // on a HUMAN, so they dispatch inline with no completion
+            // timeout — under the background 120s clock, a slow human
+            // answer to `ask_user` was cancelled (the model got a timeout
+            // error and guessed anyway, defeating the tool's purpose) and
+            // the line the human then typed was consumed by the chat loop
+            // as a brand-new prompt. Blocking indefinitely is the correct
+            // semantics here, exactly like the approval prompts.
+            if self.untimed_tools.contains(&call.name) {
+                tracing::debug!(tool = %call.name, id = %call.id, "dispatching interactive tool call inline (no timeout)");
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallStarted {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        background: false,
+                    },
+                    observer,
+                )
+                .await?;
+                let result = match self.tools.dispatch(&call).await {
+                    Ok(result) => result,
+                    Err(err) => ToolResult {
+                        tool_call_id: call.id.clone(),
+                        content: err.to_string(),
+                        is_error: true,
+                    },
+                };
+                // Mirrors the background completion path's F6 handling —
+                // an interactive tool is not expected to mutate, but the
+                // invariant shouldn't depend on that expectation.
+                if !result.is_error && MUTATING_TOOL_NAMES.contains(&call.name.as_str()) {
+                    seen_calls.clear();
+                }
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result,
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
             }
 
             // A9 (docs/AUDITORIA-2026-07.md): per-tool-call visibility for
@@ -4647,6 +4712,74 @@ mod tests {
             "the tool call kept running in the background after the engine \
              timed out waiting for it"
         );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// J-13 (docs/AUDITORIA-2026-07-v7.md): a tool marked untimed
+    /// (interactive — `ask_user` in production) dispatches inline and is
+    /// exempt from `tool_completion_timeout`: the same slow tool that the
+    /// N-33 test above proves gets CANCELLED under the 20ms clock must
+    /// here run to completion and deliver its real result — a human
+    /// answering slowly is not a hung tool.
+    #[tokio::test]
+    async fn an_untimed_tool_outlives_the_completion_timeout_and_delivers_its_result() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let completed = Arc::new(AtomicBool::new(false));
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "slow".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(SlowToolProvider::new(
+                Duration::from_millis(300),
+                Arc::clone(&completed),
+            ))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tool_completion_timeout(Duration::from_millis(20))
+        .with_untimed_tool("slow");
+
+        engine
+            .run_turn(&session, "please run the slow tool", &mut NoopObserver)
+            .await
+            .expect("turn must converge with the tool's real result");
+
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "the untimed tool must have actually run to completion"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let result = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { result, .. } => Some(result),
+                _ => None,
+            })
+            .expect("the tool completion must be persisted");
+        assert!(!result.is_error, "got: {}", result.content);
+        assert_eq!(result.content, "done");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
