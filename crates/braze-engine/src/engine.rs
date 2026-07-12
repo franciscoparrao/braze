@@ -203,9 +203,21 @@ pub struct Engine {
     /// tools extra son distractores potenciales para un SLM; entra al
     /// bench por su propia fila (`+ablate:task-list`).
     task_list_enabled: bool,
-    /// El estado de la lista (por sesión, en memoria — ver el module doc
-    /// de `crate::task_list` sobre `--resume`).
+    /// El estado de la lista (por turno, en memoria — se resetea al
+    /// inicio de cada `run_turn`, J-4 docs/AUDITORIA-2026-07-v7.md: sin
+    /// el reset, los planes de turnos/temas distintos se mezclaban y un
+    /// pendiente abandonado re-inyectaba el resumen para siempre. Ver el
+    /// module doc de `crate::task_list` sobre `--resume`).
     task_list: std::sync::Mutex<crate::task_list::TaskList>,
+    /// J-3 (docs/AUDITORIA-2026-07-v7.md): los `HarnessNote` del turno EN
+    /// CURSO, re-anexados como mensaje user efímero al final de cada
+    /// request — el mismo patrón request-scoped del resumen de la task
+    /// list. El evento se persiste igual (auditoría/bench), pero NUNCA se
+    /// renderiza desde la historia: antes, un "[harness] answer now" del
+    /// turno 1 seguía siendo instrucción vigente en los turnos 2..N (el
+    /// bench single-turn jamás vio este modo de falla). Se limpia al
+    /// inicio de cada `run_turn`.
+    turn_harness_notes: std::sync::Mutex<Vec<String>>,
     /// D′ (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte
     /// III): registry de skills descubiertas al arranque. `None` (el
     /// default y el bench siempre) = feature apagada.
@@ -361,6 +373,7 @@ impl Engine {
             activated_deferred_tools: std::sync::Mutex::new(std::collections::HashSet::new()),
             task_list_enabled: false,
             task_list: std::sync::Mutex::new(crate::task_list::TaskList::default()),
+            turn_harness_notes: std::sync::Mutex::new(Vec::new()),
             skill_registry: None,
             loaded_skills: std::sync::Mutex::new(Vec::new()),
             skills_max_body_tokens: 1200,
@@ -1097,6 +1110,15 @@ impl Engine {
         // touching each one individually.
         let _turn_guard = TurnGuard::acquire(&self.turn_in_progress)?;
 
+        // J-3/J-4 (docs/AUDITORIA-2026-07-v7.md): both pieces of
+        // turn-scoped harness state start fresh — last turn's task list
+        // (a new request is a new plan; stale pending entries re-injected
+        // the summary forever and mixed unrelated plans) and last turn's
+        // harness notes (a "answer now, stop calling tools" from turn 1
+        // must not remain a live instruction in turn 2).
+        self.task_list.lock().unwrap().clear();
+        self.turn_harness_notes.lock().unwrap().clear();
+
         // N-4 (docs/AUDITORIA-2026-07-v2.md): repair any tool_use orphaned
         // by a crash/kill/power-loss in a *previous* run *before* this
         // turn's `UserMessage` is appended — `load_messages` also repairs
@@ -1259,6 +1281,18 @@ impl Engine {
                         }],
                     });
                 }
+            }
+            // J-3: this turn's harness notes ride every later request of
+            // the turn as ephemeral trailing user messages — same
+            // request-scoped pattern as the task-list summary above; the
+            // persisted events are audit-only (see the emission site).
+            for note in self.turn_harness_notes.lock().unwrap().iter() {
+                request_messages.push(Message {
+                    role: Role::User,
+                    content: vec![ContentBlock::Text {
+                        text: format!("[harness] {note}"),
+                    }],
+                });
             }
             let req = CompletionRequest {
                 messages: request_messages,
@@ -1463,44 +1497,52 @@ impl Engine {
             // § I.2): announce the deadline BEFORE the cut, not after —
             // TurnBudget/the iteration cap abort turns the model never
             // knew were budgeted; an announced deadline gives a small
-            // model the chance to converge on its own. Emitted here (after
-            // this round's dispatch, before the reload) so the note lands
-            // in the NEXT round's rendered history.
+            // model the chance to converge on its own. The event is
+            // persisted for audit/bench counting, but what the model sees
+            // is the ephemeral copy in `turn_harness_notes`, re-appended
+            // to every later request of THIS turn only (J-3,
+            // docs/AUDITORIA-2026-07-v7.md: rendering notes from history
+            // kept "answer now, stop calling tools" alive as an
+            // instruction in every subsequent turn of the session).
             if self.harness_notes_enabled {
                 if let Some(budget) = self.max_turn_total_tokens
                     && !budget_note_emitted
                     && turn_total_tokens.saturating_mul(5) >= budget.saturating_mul(4)
                 {
                     budget_note_emitted = true;
+                    let text = format!(
+                        "This turn has used {turn_total_tokens} of its {budget}-token \
+                         budget (over 80%). Stop exploring and answer now with what you \
+                         already have — the turn will be cut off at the budget."
+                    );
                     self.append_and_notify(
                         session,
                         &AgentEvent::HarnessNote {
                             kind: "turn_budget".to_string(),
-                            text: format!(
-                                "This turn has used {turn_total_tokens} of its {budget}-token \
-                                 budget (over 80%). Stop exploring and answer now with what you \
-                                 already have — the turn will be cut off at the budget."
-                            ),
+                            text: text.clone(),
                         },
                         observer,
                     )
                     .await?;
+                    self.turn_harness_notes.lock().unwrap().push(text);
                 }
                 if self.max_turn_iterations >= 2 && round + 2 == self.max_turn_iterations {
+                    let text = format!(
+                        "The next round is this turn's last (round {} of {}). Answer now \
+                         with what you already have instead of calling more tools.",
+                        round + 2,
+                        self.max_turn_iterations
+                    );
                     self.append_and_notify(
                         session,
                         &AgentEvent::HarnessNote {
                             kind: "iteration_cap".to_string(),
-                            text: format!(
-                                "The next round is this turn's last (round {} of {}). Answer now \
-                                 with what you already have instead of calling more tools.",
-                                round + 2,
-                                self.max_turn_iterations
-                            ),
+                            text: text.clone(),
                         },
                         observer,
                     )
                     .await?;
+                    self.turn_harness_notes.lock().unwrap().push(text);
                 }
             }
 
@@ -3636,8 +3678,10 @@ fn event_text_len(event: &AgentEvent) -> usize {
         AgentEvent::CompactionOccurred { summary, .. } => summary.len(),
         AgentEvent::PermissionRequested { action, .. }
         | AgentEvent::PermissionDecided { action, .. } => action.len(),
-        // A′.2: rendered into model history as `[harness] {text}`.
-        AgentEvent::HarnessNote { text, .. } => text.len(),
+        // A′.2 + J-3: what reaches the model is the ephemeral
+        // request-scoped copy, not this persisted event — audit-only
+        // here, like the lever events below.
+        AgentEvent::HarnessNote { .. } => 0,
         AgentEvent::ToolCallStarted { .. }
         | AgentEvent::Usage { .. }
         // H-3 (docs/AUDITORIA-2026-07-v5.md) lever events: audit-only,
@@ -8628,6 +8672,176 @@ mod tests {
                 assert!(text.contains("round 2 of 2"), "got: {text}");
             }
             other => panic!("expected HarnessNote, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `true` when any message in `req` carries a Text block containing
+    /// `needle` — for the J-3/J-4 request-scoping assertions below.
+    fn any_message_text_contains(req: &CompletionRequest, needle: &str) -> bool {
+        req.messages.iter().any(|message| {
+            message.content.iter().any(
+                |block| matches!(block, ContentBlock::Text { text } if text.contains(needle)),
+            )
+        })
+    }
+
+    /// J-3 (docs/AUDITORIA-2026-07-v7.md): a harness note reaches the
+    /// remaining rounds of ITS OWN turn (as an ephemeral trailing user
+    /// message) but is gone from the next turn's requests — before this,
+    /// the persisted event rendered from history and a stale "answer now,
+    /// stop calling tools" from turn 1 stayed a live instruction for the
+    /// whole session (the single-turn bench never saw the failure mode).
+    #[tokio::test]
+    async fn a_harness_note_is_scoped_to_its_own_turn() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                // Turn 1, round 1: a tool call + usage at 85% of budget →
+                // the budget note fires.
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({ "text": "hola" }),
+                    },
+                    CompletionEvent::Usage {
+                        input_tokens: 80_000,
+                        output_tokens: 5_000,
+                        stop_reason: Some("tool_use".to_string()),
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        escalation_trigger: None,
+                    },
+                    CompletionEvent::Done,
+                ],
+                // Turn 1, round 2: converges.
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+                // Turn 2, round 1: converges immediately.
+                vec![
+                    CompletionEvent::TextDelta("listo de nuevo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::clone(&requests),
+        };
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_total_tokens(Some(100_000));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn 1 must converge");
+        engine
+            .run_turn(&session, "otra cosa", &mut NoopObserver)
+            .await
+            .expect("turn 2 must converge");
+
+        {
+            let requests = requests.lock().unwrap();
+            assert_eq!(requests.len(), 3, "2 rounds in turn 1 + 1 in turn 2");
+            assert!(
+                any_message_text_contains(&requests[1], "[harness]"),
+                "turn 1's round 2 must still see its own note (the A\u{2032}.2 mechanism)"
+            );
+            assert!(
+                !any_message_text_contains(&requests[2], "[harness]"),
+                "turn 2 must NOT see turn 1's stale note (J-3)"
+            );
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// J-4 (docs/AUDITORIA-2026-07-v7.md): the task list is turn state —
+    /// an entry left `pending` when its turn ends must not re-inject the
+    /// summary into the next turn's requests (before this, plans of
+    /// unrelated turns mixed and per-round cost grew monotonically with
+    /// the session).
+    #[tokio::test]
+    async fn a_pending_task_does_not_leak_into_the_next_turn() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                // Turn 1, round 1: adds a task (stays pending forever).
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "task_add".to_string(),
+                        arguments: serde_json::json!({ "description": "leer el archivo" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                // Turn 1, round 2: converges without finishing the task.
+                vec![
+                    CompletionEvent::TextDelta("me rindo".to_string()),
+                    CompletionEvent::Done,
+                ],
+                // Turn 2, round 1: converges immediately.
+                vec![
+                    CompletionEvent::TextDelta("tema nuevo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::clone(&requests),
+        };
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn 1 must converge");
+        engine
+            .run_turn(&session, "otra cosa", &mut NoopObserver)
+            .await
+            .expect("turn 2 must converge");
+
+        {
+            let requests = requests.lock().unwrap();
+            assert_eq!(requests.len(), 3, "2 rounds in turn 1 + 1 in turn 2");
+            assert!(
+                any_message_text_contains(&requests[1], "Task list:"),
+                "turn 1's round 2 must see its own open task"
+            );
+            assert!(
+                !any_message_text_contains(&requests[2], "Task list:"),
+                "turn 2 must NOT inherit turn 1's abandoned pending task (J-4)"
+            );
         }
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

@@ -432,21 +432,19 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
                 is_error: result.is_error,
             },
         )),
-        // A′.2: the one non-conversational event that IS rendered — an
-        // operational note the harness wants the model to act on (budget
-        // nearly spent, last round coming). User role, like tool results:
-        // it's the environment talking, not the assistant.
-        AgentEvent::HarnessNote { text, .. } => Some((
-            Role::User,
-            ContentBlock::Text {
-                text: format!("[harness] {text}"),
-            },
-        )),
         // Metadata / audit-only — never part of conversational content.
         // `Unknown` (C9's forward-compat catch-all) belongs here too:
         // this binary has no definition for it, so there is nothing
         // meaningful to render into a `Message`.
-        AgentEvent::ToolCallStarted { .. }
+        //
+        // `HarnessNote` (A′.2) lives here since J-3
+        // (docs/AUDITORIA-2026-07-v7.md): what the model sees is the
+        // ephemeral request-scoped copy `Engine::run_turn` appends for
+        // the emitting turn only — rendering the persisted event from
+        // history kept stale "answer now, stop calling tools"
+        // instructions alive in every later turn of the session.
+        AgentEvent::HarnessNote { .. }
+        | AgentEvent::ToolCallStarted { .. }
         | AgentEvent::CompactionOccurred { .. }
         | AgentEvent::PermissionRequested { .. }
         | AgentEvent::PermissionDecided { .. }

@@ -67,6 +67,17 @@ pub(crate) struct TaskList {
 }
 
 impl TaskList {
+    /// Vacía la lista — J-4 (docs/AUDITORIA-2026-07-v7.md): el estado es
+    /// del TURNO, no de la sesión. `Engine::run_turn` la resetea al
+    /// entrar; sin esto, los planes de turnos distintos se mezclaban en
+    /// el resumen y un pendiente abandonado lo re-inyectaba para
+    /// siempre (con costo por ronda monótonamente creciente). Los ids
+    /// vuelven a partir de 1 en el turno siguiente — coherente con que
+    /// el resumen re-inyectado es el único lugar donde el modelo los ve.
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+    }
+
     pub(crate) fn add(&mut self, description: &str) -> usize {
         let id = self.entries.len() + 1;
         self.entries.push(TaskEntry {
