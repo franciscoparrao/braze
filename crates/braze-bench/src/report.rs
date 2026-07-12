@@ -262,7 +262,10 @@ pub fn print_table(results: &[TaskResult]) {
         let summary = summarize(backend, &rows);
         let pass_rate_cell = format!(
             "{}/{} [{:.0},{:.0}]%",
-            summary.passed, summary.total, summary.pass_rate_ci_low_pct, summary.pass_rate_ci_high_pct
+            summary.passed,
+            summary.total,
+            summary.pass_rate_ci_low_pct,
+            summary.pass_rate_ci_high_pct
         );
         println!(
             "{:<24} {:>16} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",
@@ -461,6 +464,7 @@ mod tests {
             run_error: None,
             failure_cause: None,
             tool_calls_total: 0,
+            tool_call_names: Vec::new(),
             planned: false,
             schema_validation_failures: 0,
             tool_execution_failures: 0,
@@ -677,7 +681,28 @@ mod tests {
         some_row.cache_read_tokens = Some(10_100);
         some_row.cache_write_tokens = Some(9_500);
         let json = serde_json::to_value(&some_row).expect("serialize");
-        assert_eq!(json.get("cache_read_tokens"), Some(&serde_json::json!(10_100)));
-        assert_eq!(json.get("cache_write_tokens"), Some(&serde_json::json!(9_500)));
+        assert_eq!(
+            json.get("cache_read_tokens"),
+            Some(&serde_json::json!(10_100))
+        );
+        assert_eq!(
+            json.get("cache_write_tokens"),
+            Some(&serde_json::json!(9_500))
+        );
+    }
+
+    #[test]
+    fn task_result_serializes_tool_call_names_even_when_empty() {
+        let mut row = result(true, 100, 0, 0);
+        let json = serde_json::to_value(&row).expect("serialize empty tool names");
+        assert_eq!(json.get("tool_call_names"), Some(&serde_json::json!([])));
+
+        row.tool_call_names = vec!["read_file".to_string(), "write_file".to_string()];
+        row.tool_calls_total = row.tool_call_names.len() as u32;
+        let json = serde_json::to_value(&row).expect("serialize tool names");
+        assert_eq!(
+            json.get("tool_call_names"),
+            Some(&serde_json::json!(["read_file", "write_file"]))
+        );
     }
 }

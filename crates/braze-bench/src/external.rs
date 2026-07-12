@@ -107,6 +107,7 @@ pub fn external_outcome_to_task_result(
             run_error: Some(run_error),
             failure_cause: Some(FailureCause::ModelBackendError),
             tool_calls_total: 0,
+            tool_call_names: Vec::new(),
             schema_validation_failures: 0,
             tool_execution_failures: 0,
             permission_denials: 0,
@@ -174,6 +175,7 @@ pub fn external_outcome_to_task_result(
             Some(FailureCause::AssertionText)
         },
         tool_calls_total: 0,
+        tool_call_names: Vec::new(),
         schema_validation_failures: 0,
         tool_execution_failures: 0,
         permission_denials: 0,

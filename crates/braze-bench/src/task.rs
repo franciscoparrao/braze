@@ -261,8 +261,7 @@ mod tests {
     /// with the noise there purely to distract.
     #[test]
     fn tool_search_suite_parses_and_noise_crosses_the_default_threshold() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites/tool-search.toml");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites/tool-search.toml");
         let tasks = load_suite(&path).expect("tool-search.toml must parse");
 
         assert!(tasks.len() >= 5, "got {}", tasks.len());
@@ -280,6 +279,84 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The Gemma diagnostic suite is a small-model fixture, not an ad-hoc
+    /// local scratch file: it must keep parsing after unrelated task-suite
+    /// changes and must preserve the probes that make its sweep
+    /// interpretable (budgets, tool-search noise, no-tool controls, and
+    /// real filesystem assertions for writes).
+    #[test]
+    fn gemma_diagnostic_suite_parses_and_preserves_probe_contracts() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites/gemma-diagnostic.toml");
+        let tasks = load_suite(&path).expect("gemma-diagnostic.toml must parse");
+
+        assert_eq!(
+            tasks.len(),
+            12,
+            "gemma-diagnostic.toml should stay a compact 12-task diagnostic suite"
+        );
+
+        let ids = tasks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                "gemma_no_tool_arithmetic",
+                "gemma_simple_read_lines",
+                "gemma_distractor_exact_file",
+                "gemma_multi_step_sum_write",
+                "gemma_error_recovery_near_filename",
+                "gemma_schema_discipline_read",
+                "gemma_empty_response_after_tool",
+                "gemma_plan_prose_stress",
+                "gemma_task_list_candidate",
+                "gemma_tool_search_noise_read",
+                "gemma_spanish_instruction_following",
+                "gemma_permission_boundary",
+            ]
+        );
+
+        for task in &tasks {
+            assert!(
+                task.expect_max_rounds.is_some(),
+                "task '{}' must declare expect_max_rounds",
+                task.id
+            );
+            assert!(
+                task.expect_max_tokens.is_some(),
+                "task '{}' must declare expect_max_tokens",
+                task.id
+            );
+            assert!(
+                task.skill.is_some(),
+                "task '{}' must declare a skill label",
+                task.id
+            );
+        }
+
+        assert!(
+            tasks.iter().any(|t| t.expect_no_tool_call),
+            "suite needs at least one no-tool control"
+        );
+        assert!(
+            tasks.iter().any(|t| !t.expect_file_contains.is_empty()),
+            "suite needs real filesystem assertions for write tasks"
+        );
+
+        let tool_search = tasks
+            .iter()
+            .find(|t| t.id == "gemma_tool_search_noise_read")
+            .expect("suite must include the tool-search noise probe");
+        assert!(
+            tool_search.noise_tools > 40,
+            "tool-search probe must cross the default deferral threshold"
+        );
+        assert_eq!(
+            tool_search.expect_tool_call.as_deref(),
+            Some("read_file"),
+            "tool-search probe should still expect the real local read tool"
+        );
     }
 
     /// Regression test for F8: the shipped `default.toml` must actually
@@ -420,7 +497,9 @@ mod tests {
              (asserts: {backend_spec_asserts:?})"
         );
         assert!(
-            backend_spec_asserts.iter().any(|s| s.contains("build_lead")),
+            backend_spec_asserts
+                .iter()
+                .any(|s| s.contains("build_lead")),
             "si_2_lead_suffix must verify build_lead was added to backend_spec.rs \
              (asserts: {backend_spec_asserts:?})"
         );

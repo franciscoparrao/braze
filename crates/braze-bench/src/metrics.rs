@@ -99,6 +99,15 @@ pub struct TaskResult {
     pub run_error: Option<String>,
     pub failure_cause: Option<FailureCause>,
     pub tool_calls_total: u32,
+    /// Exact tool names emitted by the assistant, in event-log order.
+    ///
+    /// This is deliberately serialized alongside `tool_calls_total` so
+    /// post-hoc sweep analysis can explain `AssertionToolCall` rows
+    /// without re-running the model: a row can now distinguish "called
+    /// no tool", "called the wrong tool", and "called the expected tool
+    /// but failed later". Repetitions are preserved because repeated
+    /// calls are diagnostically meaningful for small-model loops.
+    pub tool_call_names: Vec<String>,
     pub schema_validation_failures: u32,
     pub tool_execution_failures: u32,
     pub permission_denials: u32,
@@ -273,6 +282,7 @@ pub fn harness_error_result(
         run_error: Some(error.to_string()),
         failure_cause: Some(FailureCause::HarnessError),
         tool_calls_total: 0,
+        tool_call_names: Vec::new(),
         schema_validation_failures: 0,
         tool_execution_failures: 0,
         permission_denials: 0,
@@ -364,10 +374,10 @@ pub fn compute_metrics(
         })
         .collect();
 
-    let tool_call_names: Vec<&str> = events
+    let tool_call_names: Vec<String> = events
         .iter()
         .filter_map(|event| match event {
-            AgentEvent::AssistantToolCall { name, .. } => Some(name.as_str()),
+            AgentEvent::AssistantToolCall { name, .. } => Some(name.clone()),
             _ => None,
         })
         .collect();
@@ -415,18 +425,18 @@ pub fn compute_metrics(
     // `Engine::complete_with_best_of_n`'s `sum_optional_u32`, so a
     // best-of-n turn where only one candidate reports cache tokens
     // still surfaces here rather than being zeroed by its siblings.
-    let cache_read_tokens = sum_optional_u32(
-        events.iter().map(|event| match event {
-            AgentEvent::Usage { cache_read_tokens, .. } => *cache_read_tokens,
-            _ => None,
-        }),
-    );
-    let cache_write_tokens = sum_optional_u32(
-        events.iter().map(|event| match event {
-            AgentEvent::Usage { cache_write_tokens, .. } => *cache_write_tokens,
-            _ => None,
-        }),
-    );
+    let cache_read_tokens = sum_optional_u32(events.iter().map(|event| match event {
+        AgentEvent::Usage {
+            cache_read_tokens, ..
+        } => *cache_read_tokens,
+        _ => None,
+    }));
+    let cache_write_tokens = sum_optional_u32(events.iter().map(|event| match event {
+        AgentEvent::Usage {
+            cache_write_tokens, ..
+        } => *cache_write_tokens,
+        _ => None,
+    }));
 
     // One `Usage` event is persisted per model completion round (see
     // `Engine::run_turn`) — a direct proxy for how many rounds this turn
@@ -524,7 +534,7 @@ pub fn compute_metrics(
     let expected_tool_called = task
         .expect_tool_call
         .as_deref()
-        .map(|expected| tool_call_names.contains(&expected));
+        .map(|expected| tool_call_names.iter().any(|name| name == expected));
 
     let expected_text_found = task.expect_text_contains.as_deref().map(|expected| {
         contains_as_a_bounded_token(&final_text.to_lowercase(), &expected.to_lowercase())
@@ -545,13 +555,9 @@ pub fn compute_metrics(
     // — within budget — trivially), mirroring the other `Option<bool>`
     // assertion results so a report can distinguish "no budget was
     // declared" from "budget declared and blown".
-    let expected_rounds_within_budget = task
-        .expect_max_rounds
-        .map(|max| rounds <= max);
+    let expected_rounds_within_budget = task.expect_max_rounds.map(|max| rounds <= max);
     let total_tokens = input_tokens + output_tokens;
-    let expected_tokens_within_budget = task
-        .expect_max_tokens
-        .map(|max| total_tokens <= max);
+    let expected_tokens_within_budget = task.expect_max_tokens.map(|max| total_tokens <= max);
 
     // Paquete 3 (docs/AUDITORIA-2026-07-v6.md): see
     // `TaskResult::estimated_cost_usd`'s doc comment for the formula and
@@ -561,9 +567,14 @@ pub fn compute_metrics(
         let cache_write = cache_write_tokens.unwrap_or(0) as f64;
         let uncached = (input_tokens as f64 - cache_read - cache_write).max(0.0);
         let input_cost = uncached * rates.input_usd_per_mtok
-            + cache_read * rates.cache_read_usd_per_mtok.unwrap_or(rates.input_usd_per_mtok)
+            + cache_read
+                * rates
+                    .cache_read_usd_per_mtok
+                    .unwrap_or(rates.input_usd_per_mtok)
             + cache_write
-                * rates.cache_write_usd_per_mtok.unwrap_or(rates.input_usd_per_mtok);
+                * rates
+                    .cache_write_usd_per_mtok
+                    .unwrap_or(rates.input_usd_per_mtok);
         (input_cost + output_tokens as f64 * rates.output_usd_per_mtok) / 1_000_000.0
     });
     // `None` when either half is missing: a declared budget with no
@@ -618,6 +629,7 @@ pub fn compute_metrics(
         run_error,
         failure_cause,
         tool_calls_total: tool_call_names.len() as u32,
+        tool_call_names,
         schema_validation_failures,
         tool_execution_failures,
         permission_denials,
@@ -752,8 +764,36 @@ mod tests {
         assert!(result.passed);
         assert_eq!(result.expected_tool_called, Some(true));
         assert_eq!(result.tool_calls_total, 1);
+        assert_eq!(result.tool_call_names, vec!["read_file"]);
         assert_eq!(result.schema_validation_failures, 0);
         assert_eq!(result.tool_execution_failures, 0);
+    }
+
+    #[test]
+    fn tool_call_names_preserve_order_and_repetitions() {
+        let events = vec![
+            AgentEvent::AssistantToolCall {
+                id: "1".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            AgentEvent::AssistantToolCall {
+                id: "2".to_string(),
+                name: "write_file".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            AgentEvent::AssistantToolCall {
+                id: "3".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({}),
+            },
+        ];
+        let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
+        assert_eq!(result.tool_calls_total, 3);
+        assert_eq!(
+            result.tool_call_names,
+            vec!["read_file", "write_file", "read_file"]
+        );
     }
 
     #[test]
@@ -898,7 +938,11 @@ mod tests {
                 text: "El archivo tiene 5 líneas".to_string(),
             },
         ];
-        let result = metrics(&task(None, false, Some("2")), &events, RunOutcome::Converged);
+        let result = metrics(
+            &task(None, false, Some("2")),
+            &events,
+            RunOutcome::Converged,
+        );
         assert_eq!(result.expected_text_found, Some(false));
         assert!(!result.passed);
     }
@@ -928,7 +972,11 @@ mod tests {
                 text: "El archivo tiene 2 líneas".to_string(),
             },
         ];
-        let result = metrics(&task(None, false, Some("2")), &events, RunOutcome::Converged);
+        let result = metrics(
+            &task(None, false, Some("2")),
+            &events,
+            RunOutcome::Converged,
+        );
         assert_eq!(result.expected_text_found, Some(true));
         assert!(result.passed);
     }
