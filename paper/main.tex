@@ -61,9 +61,11 @@ assistant's own text --- and repairs it: re-rendered as user context it
 gains +10\,pp on the strongest executor, and delivered as a typed task
 list it gains +12\,pp on the smallest. We further isolate the lead's
 mechanism experimentally (proactive opening, not reactive escalation)
-and show that two-level tool deferral cuts prompt tokens $5.6\times$ at
-no correctness cost. \todo{cerrar con 1 frase de takeaway para
-practitioners.}
+and show that two-level tool deferral cuts prompt tokens $5$--$6\times$
+at a real, scale-dependent correctness cost whose mechanism ---
+diagnosed via transcript probes --- is compositional brittleness of the
+small model, not tool findability. \todo{cerrar con 1 frase de takeaway
+para practitioners.}
 \end{abstract}
 
 % =====================================================================
@@ -101,8 +103,10 @@ benchmark: ablations por fila, atribución causal, pre-registro.}
     (both extremes at 49\%) was a delivery bug, not a property of
     planning; the pre-registered iteration turns it into a
     scale-dependent gain (+10 to +12\,pp).
-  \item \textbf{Cost-side levers quantified}: two-level tool deferral
-    ($5.6\times$ fewer prompt tokens, no correctness cost,
+  \item \textbf{Cost-side levers quantified, honestly}: two-level tool
+    deferral ($5$--$6\times$ fewer prompt tokens at a $-13$/$-24$\,pp
+    correctness cost, whose diagnosed mechanism is compositional
+    brittleness rather than findability or distraction,
     Fig.~\ref{fig:searchtools}); \todo{¿incluir colapso ACI/ablations
     acá o dejarlo en resultados secundarios?}
   \item \textbf{\braze{} itself}: an open-source Rust harness where
@@ -240,8 +244,11 @@ prosa-user +10pp en coder, task-list +12pp en 3b; (5) el criterio
 pre-registrado impidió tanto el falso rechazo como el rescate ad-hoc.
 Nota del brazo contaminado y su re-run (transparencia).}
 
-\subsection{Tool deferral: cost, not correctness}\label{sec:searchtools}
-% Fuente: docs/sweep-search-tools-ab-2026-07-11.md
+\subsection{Tool deferral: cheaper, not free}\label{sec:searchtools}
+% Fuente: docs/sweep-search-tools-ab-n15-2026-07-12.md (n=90/brazo,
+% binario endurecido post-v7; los dos sweeps n=30 previos quedan como
+% análisis de sensibilidad — el "no correctness cost" original era
+% artefacto de n=30 + assert laxo pre-J-7)
 
 \begin{figure}[t]
   \centering
@@ -250,10 +257,22 @@ Nota del brazo contaminado y su re-run (transparencia).}
   \label{fig:searchtools}
 \end{figure}
 
-\todo{honestidad primero: la hipótesis de distracción NO se confirmó a
-200 tools de ruido — la cantidad no distrae, la plausibilidad sí
-(contraste con distractor\_selection). La ganancia es costo: 5.6× tokens,
-2.4× wall; a escala gateway (1500+) es habilitación.}
+\todo{la narrativa de esta sección (fuente:
+docs/sweep-search-tools-ab-n15-2026-07-12.md): (1) el ahorro es sólido y
+replicado 3×: 5-6× tokens, ~2× wall; a escala gateway (1500+, ~30K
+tokens de inventario) es habilitación, no optimización. (2) el costo de
+correctness es real a n=90 (-24pp 3b / -13pp 7b, ICs disjuntos) — y su
+mecanismo NO es findability (gate de llamadas directas: 0 disparos en
+360 corridas) ni distracción (distractor 15/15 en TODOS los brazos — la
+plausibilidad distrae, la cantidad no), sino FRAGILIDAD COMPOSICIONAL:
+las sondas con transcripts muestran al mismo modelo, mismos seeds,
+computando 10+20 bien con 206 stubs inertes de relleno y escribiendo
+los sumandos sin sumar sin ellos; y 7×8 pasando 5/15 con el stub de
+search, 11/15 a pelo, 15/15 con el relleno. (3) implicación de config:
+deferral por default solo cuando el inventario no cabe; para ≤7B con
+inventario que cabe, no. (4) conexión con la tesis: los efectos del
+harness sobre modelos chicos son no-monótonos — se miden, no se
+asumen.}
 
 \subsection{Secondary levers and ablations}\label{sec:ablations}
 \todo{qué entra acá: rescued\_tool\_calls=0 en 665 corridas con Qwen

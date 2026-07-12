@@ -1,10 +1,17 @@
 # fig3_search_tools.R — Deferral de herramientas en dos niveles
-# (search_tools): mismo pass rate, 5.6× menos tokens de prompt.
+# (search_tools): 5-6× menos tokens de prompt, con costo de correctness
+# real a esta escala de modelo (-24pp en 3b, -13pp en 7b, ICs disjuntos).
 #
-# Datos: docs/sweep-search-tools-ab-2026-07-11.json (120 corridas — 2
-# brazos × {3b, 7b} × 6 tareas × 5 reps sobre tool-search.toml: 200
-# tools de ruido sintético). Análisis:
-# docs/sweep-search-tools-ab-2026-07-11.md.
+# Datos: docs/sweep-search-tools-ab-n15-2026-07-12.json (360 corridas —
+# 2 brazos × {3b, 7b} × 6 tareas × 15 reps sobre tool-search.toml: 200
+# tools de ruido sintético; binario 57db13f con el harness endurecido de
+# la auditoría v7: gate J-9, assert estricto J-7, budget justo J-17).
+# Análisis y diagnóstico de fragilidad composicional (las sondas de
+# noisy_no_tool / noisy_multi_step):
+# docs/sweep-search-tools-ab-n15-2026-07-12.md. Las dos corridas previas
+# (n=30: docs/sweep-search-tools-ab-2026-07-11.md y el re-run postgate)
+# quedan como análisis de sensibilidad — el "mismo pass rate" original
+# era artefacto de n=30 + assert laxo pre-J-7.
 #
 # Panel (a): tokens de input POR CORRIDA (puntos crudos + mediana) — se
 # muestran los datos, no solo medias (regla anti-dynamite). Panel (b):
@@ -23,7 +30,7 @@ fontfam <- setup_paper_theme(journal = "elsevier")
 
 # ---- Datos ----------------------------------------------------------------
 
-res <- fromJSON("docs/sweep-search-tools-ab-2026-07-11.json")$results |>
+res <- fromJSON("docs/sweep-search-tools-ab-n15-2026-07-12.json")$results |>
   as_tibble() |>
   transmute(
     executor = factor(
@@ -39,7 +46,7 @@ res <- fromJSON("docs/sweep-search-tools-ab-2026-07-11.json")$results |>
     input_tokens,
     passed
   )
-stopifnot(nrow(res) == 120)
+stopifnot(nrow(res) == 360)
 
 wilson <- function(x, n, z = 1.96) {
   p <- x / n

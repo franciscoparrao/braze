@@ -1,14 +1,22 @@
 % Caption sugerido:
-\caption{Two-level tool deferral: same correctness, $5.6\times$ fewer
-prompt tokens. On a suite whose tasks require only the six local tools
-but whose registry carries 200 synthetic noise tools (an MCP-gateway
-stand-in), hiding the noise catalog behind a single \texttt{search\_tools}
-meta-tool (blue) versus listing all 206 tools (grey).
-\textbf{(a)}~Input tokens per run (points: individual runs, $n{=}30$
-per arm; black bar: median). \textbf{(b)}~Pass rate (95\% Wilson CIs).
-Correctness is unchanged (7B) or within noise (3B) — the models are
-not measurably distracted by 200 irrelevant tools — while prompt cost
-collapses $5.6\times$ and wall-clock roughly halves (not shown). At
-the scale of real tool gateways (1{,}500+ tools) the full-inventory
-arm would exceed the local context window outright: deferral is
-enabling, not merely cheaper.}
+\caption{Two-level tool deferral: prompt cost collapses $5$--$6\times$;
+correctness pays a real, scale-dependent price. On a suite whose tasks
+require only the six local tools but whose registry carries 200
+synthetic noise tools (an MCP-gateway stand-in), hiding the noise
+catalog behind a single \texttt{search\_tools} meta-tool (blue) versus
+listing all 206 tools (grey). \textbf{(a)}~Input tokens per run
+(points: individual runs, $n{=}90$ per arm; black bar: median).
+\textbf{(b)}~Pass rate (95\% Wilson CIs): the deferred arm loses
+24\,pp (3B) and 13\,pp (7B), CIs disjoint. The mechanism is not tool
+findability — the deferred arm never needed nor attempted a hidden
+tool (the direct-call gate fired zero times in 360 runs) — but
+\emph{compositional brittleness}: transcript probes show the same
+model, at the same seeds, computing $10{+}20$ correctly with 206 inert
+stubs padding the prompt and writing the unsummed inputs without them
+(§ ablations). Distraction, by contrast, does not materialize: the
+distractor-selection task passes 15/15 in every arm — plausibility,
+not volume, is what distracts. At the scale of real tool gateways
+(1{,}500+ tools, $\sim$30K tokens of inventory) the full-inventory arm
+exceeds the local context window outright: deferral remains enabling
+there, while these results argue against enabling it by default for
+$\leq$7B models when the inventory fits.}
