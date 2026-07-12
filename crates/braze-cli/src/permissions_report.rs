@@ -119,7 +119,7 @@ pub fn render_report(stats: &[PermissionStat], top: usize, min_count: usize) -> 
         return format!(
             "No hay decisiones de permiso registradas que superen el umbral \
              (--min-count {min_count}).\nCorre algunas sesiones con acciones que pidan \
-             confirmación y volvé a intentar.\n"
+             confirmación y vuelve a intentar.\n"
         );
     }
 

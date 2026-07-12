@@ -643,9 +643,17 @@ pub struct AblationOverrides {
 }
 
 impl AblationOverrides {
+    /// Every key `parse` accepts, verbatim, for the unknown-key error
+    /// message. J-22 (docs/AUDITORIA-2026-07-v7.md): this list drifted
+    /// from the parser (it was missing `no-harness-notes`, `task-list`
+    /// and `tool-search-threshold`), so a typo on one of the missing
+    /// keys got "help" that implied the lever didn't exist —
+    /// `recognized_keys_lists_every_parseable_key` now pins the two in
+    /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
-         no-caching, no-prune, no-planner, no-lead, no-compaction, \
-         best-of-n=N, tactical-window=N, tactical-threshold=N, full-observations=N, \
+         no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
+         task-list, best-of-n=N, tactical-window=N, tactical-threshold=N, \
+         full-observations=N, tool-search-threshold=N, \
          lead-turns=N, lead-threshold=N, lead-window=N";
 
     fn parse(raw: &str) -> Result<Self, BenchError> {
@@ -1348,6 +1356,32 @@ mod tests {
     fn an_unknown_ablate_key_is_a_startup_error() {
         let result = BackendSpec::parse("ollama:qwen2.5:3b+ablate:not-a-real-key");
         assert!(matches!(result, Err(BenchError::Startup(_))));
+    }
+
+    /// J-22 (docs/AUDITORIA-2026-07-v7.md): `RECOGNIZED_KEYS` drifted
+    /// from the parser — the unknown-key error listed keys as "the valid
+    /// ones" while omitting three that parse fine, so a typo on an
+    /// omitted key got help implying the lever didn't exist. This pins
+    /// the advertised list to the parser: every advertised key must
+    /// actually parse. (The reverse direction — a new match arm without
+    /// a `RECOGNIZED_KEYS` entry — is what the const's doc comment
+    /// instructs; there's no way to enumerate match arms at runtime.)
+    #[test]
+    fn recognized_keys_lists_every_parseable_key() {
+        for entry in AblationOverrides::RECOGNIZED_KEYS.split(',') {
+            let entry = entry.trim();
+            // "best-of-n=N" advertises a numeric key: exercise it with a
+            // real value; bare keys parse as-is.
+            let pair = match entry.strip_suffix("=N") {
+                Some(key) => format!("{key}=3"),
+                None => entry.to_string(),
+            };
+            let spec = format!("ollama:qwen2.5:3b+ablate:{pair}");
+            assert!(
+                BackendSpec::parse(&spec).is_ok(),
+                "advertised '+ablate:' key '{entry}' does not actually parse"
+            );
+        }
     }
 
     #[test]

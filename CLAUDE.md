@@ -1,12 +1,18 @@
 # braze — motor agéntico genérico en Rust (experimento)
 
-> **Estado (2026-07-06):** MVP completo y en reorientación **"maestro en
+> **Estado (2026-07-11):** MVP completo, reorientado a **"maestro en
 > modelos pequeños"** — el harness como variable que compensa la escala
 > del modelo (respaldo: SWE-agent/ACI y el TR de Qwen3-Coder-Next, ver
-> `docs/SOTA-2026-07.md`). Fases 1-5 + TUI (2 fases) + auditorías v1/v2
-> cerradas; split planificador/ejecutor implementado con **veredicto A/B
-> negativo** (queda opt-in, ver PLAN.md); backlog rankeado
-> post-revisiones OSS (ítems 1-7) **completo**. Creado 2026-07-03.
+> `docs/SOTA-2026-07.md`). Fases 1-5 + TUI (2 fases) + auditorías
+> **v1-v7** (roadmap v6 Paquetes 1-4 y v7 Paquete 1 ejecutados; abiertos
+> vigentes en `docs/AUDITORIA-2026-07-v7.md`); split planificador/
+> ejecutor: el veredicto A/B negativo inicial era **un bug de render —
+> el planner se rescató** bajo pre-registro (+10/+12pp en el 3b según
+> entrega; con lead presente la entrega óptima se invierte y task-list
+> +lead resta, ver `docs/sweep-planlead-2026-07-11.md`); estudio
+> consolidado de 3 harnesses (A′-E′ + I.7) ejecutado; evidencia
+> experimental del paper completa y manuscrito en `paper/` (esqueleto
+> compila, 3 figuras reproducibles con `make`). Creado 2026-07-03.
 > Ver `PLAN.md` para la arquitectura, el grafo de dependencias, y una
 > sección por cada incremento con su verificación.
 
@@ -91,10 +97,13 @@ del autor** (datacube-rs, geostat-rs, swarm-abm son 100% sync + rayon):
 Todo lo demás sigue la convención habitual: `thiserror` v2, `clap` v4,
 `serde`+`serde_json`, licencia dual `MIT OR Apache-2.0`, archivo-por-módulo.
 
-## Estado del código (2026-07-06)
+## Estado del código (2026-07-11)
 
 Los 14 crates tienen lógica real y verificada. `cargo build/test/clippy
---workspace` verdes: **612 tests**, clippy `-D warnings` limpio. La
+--workspace` verdes: **~900 tests**, clippy `-D warnings` limpio.
+Deuda estructural conocida: `engine.rs` llegó a ~10.100 líneas (P1.1 de
+las auditorías — cada paquete de cierres lo agranda; el split va ANTES
+de la próxima ronda de features/Fase 2). La
 convención de verificación del proyecto: cada incremento se prueba
 también **en vivo** (pty scripteado contra el binario real para la TUI,
 sweeps de braze-bench contra modelos reales, smoke contra APIs reales) —
@@ -117,24 +126,28 @@ compactación) — braze-bench instala subscriber de tracing.
 
 ## Próximos pasos al retomar
 
-- Iteración pre-registrada del planner (opcional, PLAN.md): descartar
-  planes de un solo paso y/o render con rol user; si no mueve
-  multi_step/error_recovery, remoción completa.
-- A/B del `EscalatingBackend` en braze-bench (falta sintaxis de spec con
-  lead, anotado en `docs/SOTA-2026-07.md`).
-- Paper ángulo A (EMS/ESIN): la curva harness-vs-escala por skill, con
-  qwen3.5-coder 6/6 vs qwen2.5:3b 0-2/6 en las skills débiles como
-  contraste central; suite ampliada de tareas de edición pendiente.
-- Infra Nitro: IP fija en el router, `OLLAMA_KEEP_ALIVE`.
-- Circuit breaker por costo acumulado por turno (idea de
-  `@openrouter/agent`'s `maxCost(amount)` stop condition,
-  docs/usability-log-2026-07-07-si2.md): `MAX_TURN_ITERATIONS` corta por
-  cantidad de rondas pero no por gasto — un turno de investigación puede
-  acumular cientos de miles de tokens sin que nada lo frene antes (caso
-  real: 481K tokens de entrada en un turno de 40 rondas, sesión
-  `ccd4621b`). Con `cache_read_tokens`/`cache_write_tokens` ya fluyendo
-  por `AgentEvent::Usage` (prompt-caching, cerrado hoy), agregar un tope
-  de costo acumulado sería una extensión barata. No diseñado todavía.
+(Actualizado 2026-07-11 tras la auditoría v7 — los ítems históricos de
+esta sección ya se ejecutaron: la iteración del planner CERRÓ con
+rescate, la sintaxis `+lead:` existe y su A/B de 3 brazos está medido, y
+el breaker por turno existe como `max_turn_total_tokens` desde el
+Paquete 3 de v6.)
+
+- **Manuscrito** (`paper/`): escribir la prosa de los TODOs de
+  `main.tex` (mapeados a `docs/sweep-*.md`); `/verify-refs` sobre
+  `refs.bib`; decidir venue (TMLR vs EMSE) y migrar template; `/zenodo`
+  para el DOI del artefacto. Los caveats de la auditoría v7 ya están
+  anotados en § Threats to Validity.
+- **Roadmap v7** (`docs/AUDITORIA-2026-07-v7.md`): Paquetes 2-4 —
+  multi-turno (J-3 harness notes turn-scoped, J-4 task list reset, J-13
+  ask_user sin timeout de 120s), seguridad (J-18 `ls`/`wc` path-checked,
+  J-19 sanitizar ANSI en approval prompts, ratificar J-20 symlink), y el
+  resto por conveniencia.
+- **P0.2 restante**: el breaker de TOKENS por turno existe
+  (`max_turn_total_tokens`, default off); faltan las variantes de costo
+  USD en runtime y walltime por turno.
+- **P1.1**: split de `engine.rs` (~10.100 líneas) — antes de Fase 2.
+- Infra Nitro: IP fija en el router, `OLLAMA_KEEP_ALIVE`, retry opt-in
+  de Ollama para sweeps largos.
 
 ## Modelos locales recomendados (Ollama)
 
