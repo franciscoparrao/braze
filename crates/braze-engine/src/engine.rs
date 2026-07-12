@@ -3270,6 +3270,18 @@ fn extract_pythonic_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
             break; // unclosed '[': stop scanning, leave the rest visible
         };
         let block_end = start + close_offset + 1; // include the ']'
+        // J-8 (docs/AUDITORIA-2026-07-v7.md): same fence check the tagged
+        // and `<function=` rungs apply (F1) — a `[get_weather(...)]`
+        // QUOTED inside a markdown code fence is the model showing an
+        // example ("así emite Llama sus tool calls"), not making a call.
+        // This rung was the only one missing it, so a fenced example got
+        // extracted and dispatched for real.
+        let absolute_start = text.len() - rest.len() + start;
+        if is_inside_code_fence(text, absolute_start) {
+            remaining.push_str(&rest[..block_end]);
+            rest = &rest[block_end..];
+            continue;
+        }
         let inner = &rest[start + 1..block_end - 1];
         match parse_pythonic_calls(inner) {
             Some(parsed) => {
@@ -9223,6 +9235,29 @@ mod tests {
         let (calls, remaining) = extract_function_xml_tool_calls(text);
         assert!(calls.is_empty(), "a fenced example must not be dispatched");
         assert_eq!(remaining, text);
+    }
+
+    /// J-8 (docs/AUDITORIA-2026-07-v7.md): the pythonic rung was the only
+    /// one missing the F1 fence check — a fenced `[func(...)]` example
+    /// ("así emite Llama sus tool calls") got extracted and dispatched
+    /// for real.
+    #[test]
+    fn a_pythonic_call_inside_a_markdown_fence_is_not_executed() {
+        let text = "Así emite Llama sus tool calls:\n```\n[get_weather(city=\"SF\")]\n```\n";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty(), "a fenced example must not be dispatched");
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_unfenced_pythonic_call_after_fenced_prose_is_still_rescued() {
+        let text = "Ejemplo:\n```\nsolo texto\n```\n[echo(text=\"hi\")]";
+        let (calls, _) = extract_pythonic_tool_calls(text);
+        assert_eq!(
+            calls.len(),
+            1,
+            "the real call after the fence must still rescue"
+        );
     }
 
     #[test]
