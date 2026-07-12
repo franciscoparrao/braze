@@ -60,21 +60,34 @@ struct EscalationState {
     calls: usize,
     /// Remaining calls of an active escalation (0 = not escalated).
     escalated_remaining: usize,
-    /// `req.messages.len()` the last time `route` advanced the counters
-    /// above — D4 (docs/AUDITORIA-2026-07-v3.md): best-of-n
+    /// Fingerprint of `req.messages` the last time `route` advanced the
+    /// counters above — D4 (docs/AUDITORIA-2026-07-v3.md): best-of-n
     /// (`Engine::complete_with_best_of_n`) calls `complete` N times per
     /// round with an *identical* request (all N candidates answer the
     /// same turn). Without this, each candidate consumed its own
     /// `lead_turns`/`escalated_remaining` slot — "the lead opens the
     /// session" could exhaust itself inside a single round of voting, and
     /// the vote ended up comparing candidates from different models as
-    /// if they were interchangeable. History only grows within a turn, so
-    /// two genuinely different rounds never share the same message
-    /// count; two calls that do share it are the same round's candidates.
-    last_round_message_count: Option<usize>,
+    /// if they were interchangeable.
+    ///
+    /// A content fingerprint, NOT `messages.len()` (J-1,
+    /// docs/AUDITORIA-2026-07-v7.md): under budget-driven compaction the
+    /// rendered history no longer grows monotonically within a turn — it
+    /// folds to `[summary] + tail`, and two consecutive rounds with the
+    /// same event shape (one tool call per round) render to the SAME
+    /// message count. With a bare count, `route` replayed the previous
+    /// round's decision forever: a stale `Worker` decision meant the
+    /// failure streak was never re-evaluated (escalation could never
+    /// fire exactly in the floundering turns it exists for), and a stale
+    /// `LeadEscalating` re-stamped its trigger every round (inflating
+    /// `leader_escalations` and never consuming the escalation window).
+    /// Hashing the message *contents* keeps the best-of-n dedup (the N
+    /// candidate requests are byte-identical) while telling genuinely
+    /// different rounds apart regardless of shape.
+    last_round_fingerprint: Option<u64>,
     /// The decision made the last time `route` actually advanced the
     /// counters — replayed for every later call in the same round
-    /// (detected via `last_round_message_count`) instead of routing them
+    /// (detected via `last_round_fingerprint`) instead of routing them
     /// independently.
     last_decision: Option<RouteDecision>,
 }
@@ -171,14 +184,15 @@ impl EscalatingBackend {
 
         // D4: another best-of-n candidate for the round just routed —
         // reuse that round's decision instead of advancing the counters
-        // again for it.
-        let this_round_message_count = req.messages.len();
-        if state.last_round_message_count == Some(this_round_message_count)
+        // again for it. Detected by content fingerprint, not message
+        // count (J-1): see `last_round_fingerprint`'s doc comment.
+        let this_round_fingerprint = request_fingerprint(&req.messages);
+        if state.last_round_fingerprint == Some(this_round_fingerprint)
             && let Some(decision) = state.last_decision
         {
             return decision;
         }
-        state.last_round_message_count = Some(this_round_message_count);
+        state.last_round_fingerprint = Some(this_round_fingerprint);
 
         state.calls += 1;
 
@@ -284,14 +298,84 @@ impl ModelBackend for EscalatingBackend {
     }
 }
 
+/// Order-insensitive-to-nothing content hash of a request's messages —
+/// the round-identity signal `route`'s D4 dedup keys on (see
+/// `EscalationState::last_round_fingerprint`). Hashes every block's
+/// discriminant and payload, so any appended message, any compaction
+/// fold, and any cleared/collapsed observation produces a different
+/// fingerprint, while best-of-n's byte-identical candidate requests
+/// collide exactly as intended.
+fn request_fingerprint(messages: &[Message]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    messages.len().hash(&mut hasher);
+    for message in messages {
+        std::mem::discriminant(&message.role).hash(&mut hasher);
+        for block in &message.content {
+            match block {
+                ContentBlock::Text { text } => {
+                    0u8.hash(&mut hasher);
+                    text.hash(&mut hasher);
+                }
+                ContentBlock::ToolUse { id, name, input } => {
+                    1u8.hash(&mut hasher);
+                    id.hash(&mut hasher);
+                    name.hash(&mut hasher);
+                    input.to_string().hash(&mut hasher);
+                }
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } => {
+                    2u8.hash(&mut hasher);
+                    tool_use_id.hash(&mut hasher);
+                    content.hash(&mut hasher);
+                    is_error.hash(&mut hasher);
+                }
+            }
+        }
+    }
+    hasher.finish()
+}
+
+/// User-role Text messages the harness itself injects into the rendered
+/// history — NOT the human speaking. J-2 (docs/AUDITORIA-2026-07-v7.md):
+/// `trailing_failed_observations` must skip these rather than treat them
+/// as episode boundaries, because they arrive exactly when the streak
+/// matters — the task-list summary rides as a trailing user message on
+/// EVERY round while tasks are open, and harness notes fire when the
+/// turn is degrading (budget/iteration caps). Breaking on them zeroed
+/// the streak permanently: in a `+lead:`+task-list arm the reactive
+/// escalation was dead by construction. Acoplamiento por convención
+/// (same as `[tool result cleared:` above and the post-edit marker):
+/// these prefixes are owned by `braze-engine`'s render layer.
+fn is_harness_injected_user_text(message: &Message) -> bool {
+    const HARNESS_TEXT_PREFIXES: &[&str] = &[
+        // `history.rs` render of `AgentEvent::HarnessNote`.
+        "[harness] ",
+        // The ephemeral task-list summary (`task_list.rs::summary_line`).
+        "Task list: ",
+        // `history.rs` render of `AgentEvent::PlanCreated` (user role).
+        "Plan for this request",
+        // The durable-summary placeholder prepended after compaction.
+        "[Resumen de contexto previo]",
+    ];
+    message.content.iter().any(|block| {
+        matches!(block, ContentBlock::Text { text }
+            if HARNESS_TEXT_PREFIXES.iter().any(|prefix| text.starts_with(prefix)))
+    })
+}
+
 /// Counts the *trailing* run of failed observations in `messages`: how
 /// many of the most recent tool-result messages (User messages carrying
 /// `ToolResult` blocks) contain at least one observation
 /// [`observation_is_a_failure`] treats as a failure, walking backwards.
 /// The scan skips Assistant messages (the tool_use/plan/text between
-/// observations) and stops at the first clean observation or at a real
-/// user Text message — either one means the worker isn't in a failure
-/// streak *right now*.
+/// observations) and harness-injected user text (J-2, see
+/// [`is_harness_injected_user_text`]), and stops at the first clean
+/// observation or at a real user Text message — either one means the
+/// worker isn't in a failure streak *right now*.
 fn trailing_failed_observations(messages: &[Message]) -> usize {
     let mut failures = 0;
     for message in messages.iter().rev() {
@@ -303,8 +387,13 @@ fn trailing_failed_observations(messages: &[Message]) -> usize {
             .iter()
             .any(|block| matches!(block, ContentBlock::ToolResult { .. }));
         if !has_tool_results {
-            // A real user message (or summary placeholder): whatever
-            // failed before it is a previous episode, not this streak.
+            if is_harness_injected_user_text(message) {
+                // The harness talking to the model, not the human: the
+                // streak continues through it (J-2).
+                continue;
+            }
+            // A real user message: whatever failed before it is a
+            // previous episode, not this streak.
             break;
         }
         let any_failure = message.content.iter().any(observation_is_a_failure);
@@ -504,14 +593,14 @@ mod tests {
 
     /// `n` plain User text messages — never `ToolResult` blocks, so they
     /// read as "clean" to `trailing_failed_observations` regardless of
-    /// `n`. Used purely to vary `req.messages.len()` between calls that
+    /// `n`. Used purely to vary the request contents between calls that
     /// are meant to represent distinct rounds: D4's same-round dedup
-    /// (docs/AUDITORIA-2026-07-v3.md) is keyed on message count, and real
-    /// engine usage never sends the exact same, unchanged history to two
-    /// genuinely different rounds (the log only grows within a turn) —
-    /// these tests honor that invariant instead of the unrealistic
-    /// "identical empty history, 5 different rounds" shape a raw `vec![]`
-    /// repeated would exercise.
+    /// (docs/AUDITORIA-2026-07-v3.md) is keyed on a content fingerprint
+    /// (J-1, docs/AUDITORIA-2026-07-v7.md), and real engine usage never
+    /// sends the exact same, unchanged history to two genuinely different
+    /// rounds — these tests honor that invariant instead of the
+    /// unrealistic "identical empty history, 5 different rounds" shape a
+    /// raw `vec![]` repeated would exercise.
     fn filler(n: usize) -> Vec<Message> {
         (0..n).map(|_| Message::text(Role::User, "...")).collect()
     }
@@ -627,6 +716,78 @@ mod tests {
             (4, 1),
             "the window is now exhausted — back to the worker"
         );
+    }
+
+    // --- J-1 (docs/AUDITORIA-2026-07-v7.md): under compaction the
+    // rendered history stops growing monotonically — two genuinely
+    // different rounds can share a message count. The dedup must key on
+    // content, not on count. ---
+
+    #[tokio::test]
+    async fn two_rounds_with_the_same_message_count_but_different_content_route_independently() {
+        // Simulates the budget-compaction regime: every round renders as
+        // `[summary] + tail` with a constant shape. Round 1 and round 2
+        // both have exactly 1 message, but different contents.
+        let (backend, lead, worker) = harness(1, 1, 1);
+
+        let round_1 = vec![Message::text(Role::User, "[Resumen] ronda uno")];
+        let round_2 = vec![Message::text(Role::User, "[Resumen] ronda dos")];
+
+        let _ = backend.complete(request(round_1)).await.unwrap();
+        let _ = backend.complete(request(round_2)).await.unwrap();
+
+        assert_eq!(
+            (lead.load(Ordering::SeqCst), worker.load(Ordering::SeqCst)),
+            (1, 1),
+            "round 2 must advance the counters (lead opening consumed, worker takes over) — \
+             a count-keyed dedup would have replayed round 1's LeadOpening decision"
+        );
+    }
+
+    // --- J-2 (docs/AUDITORIA-2026-07-v7.md): harness-injected user text
+    // (task-list summary, harness notes, plan render, compaction
+    // placeholder) must not zero the failure streak. ---
+
+    #[test]
+    fn harness_injected_user_text_does_not_break_the_failure_streak() {
+        // The exact shape of a `+lead:`+task-list round: two failed
+        // observations, then the ephemeral task-list summary trailing the
+        // request. Before J-2 the summary zeroed the streak on EVERY
+        // round (it rides while any task is open), killing reactive
+        // escalation by construction.
+        let messages = vec![
+            observation("a", true),
+            observation("b", true),
+            Message::text(
+                Role::User,
+                "Task list: 1 [pending] leer archivo. Mark progress with task_update(id, status).",
+            ),
+        ];
+        assert_eq!(trailing_failed_observations(&messages), 2);
+
+        // Same for a harness note — it fires exactly when the turn is
+        // degrading, which is when the streak matters most.
+        let messages = vec![
+            observation("a", true),
+            observation("b", true),
+            Message::text(
+                Role::User,
+                "[harness] The next round is this turn's last (round 8 of 8).",
+            ),
+        ];
+        assert_eq!(trailing_failed_observations(&messages), 2);
+    }
+
+    #[test]
+    fn a_real_user_message_still_ends_the_streak() {
+        // The J-2 skip is prefix-scoped: genuine human text remains an
+        // episode boundary.
+        let messages = vec![
+            observation("a", true),
+            observation("b", true),
+            Message::text(Role::User, "mejor intenta con el otro archivo"),
+        ];
+        assert_eq!(trailing_failed_observations(&messages), 0);
     }
 
     #[tokio::test]

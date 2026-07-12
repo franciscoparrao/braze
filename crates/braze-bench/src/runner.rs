@@ -188,9 +188,27 @@ pub async fn run_task(
     // (hallazgo B4, docs/AUDITORIA-2026-07-v3.md: the margin needs the
     // real system prompt length plus the size of every advertised tool
     // stub, not a fixed constant).
+    // C′.1: umbral de deferral de tools — ablation > config. Computed
+    // up here because the context budget below must see the same value
+    // the engine will run with.
+    let tool_search_threshold = ablation
+        .tool_search_threshold
+        .unwrap_or(config.tool_search_threshold);
     let ollama_budget = if spec.executor_is_ollama() {
-        let tool_definitions_bytes =
-            braze_tools_core::tool_stub_definition_bytes(&tools.all_stubs_lossy().await);
+        // J-17 (docs/AUDITORIA-2026-07-v7.md): measure the stubs the
+        // model actually SEES after deferral (visible providers +
+        // `search_tools` meta-stub), not the full pre-deferral catalog —
+        // with `noise_tools` in play, budgeting on the whole catalog
+        // shrank the budget exactly for the deferral arm of the A/B,
+        // making it compact/collapse earlier than its real prompt
+        // required. Slightly conservative in the other direction once
+        // the model activates hidden tools mid-task (activated stubs
+        // join the prompt without re-budgeting), which is the safe side.
+        let visible_stubs = braze_engine::initially_visible_stubs(
+            tools.all_stubs_lossy().await,
+            tool_search_threshold,
+        );
+        let tool_definitions_bytes = braze_tools_core::tool_stub_definition_bytes(&visible_stubs);
         Some(braze_config::ollama_context_budget_tokens(
             config.ollama_num_ctx,
             config.max_tokens,
@@ -227,12 +245,9 @@ pub async fn run_task(
     // the announced-deadline notes, ablatable so their effect on
     // TurnBudgetExhausted/iteration-cap aborts is measurable.
     .with_harness_notes_enabled(!ablation.disable_harness_notes)
-    // C′.1: umbral de deferral de tools — ablation > config.
-    .with_tool_search_threshold(
-        ablation
-            .tool_search_threshold
-            .unwrap_or(config.tool_search_threshold),
-    )
+    // C′.1: umbral de deferral de tools — ablation > config (computed
+    // above, shared with the context budget).
+    .with_tool_search_threshold(tool_search_threshold)
     // C′.2: la fila puede prender la task list aunque config la tenga
     // off (default) — el brazo planner→tasks del A/B pre-registrado.
     .with_task_list_enabled(config.enable_task_list || ablation.enable_task_list)

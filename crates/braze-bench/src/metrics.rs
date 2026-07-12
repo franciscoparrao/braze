@@ -111,6 +111,17 @@ pub struct TaskResult {
     /// true`), the planner's own `Usage` counts as one round too —
     /// deliberate, it IS a model round and its cost belongs in the
     /// comparison (PLAN.md § "Split planificador/ejecutor").
+    ///
+    /// CENSORING CAVEAT (J-21, docs/AUDITORIA-2026-07-v7.md): on a
+    /// `Timeout` row this counts only the rounds that COMPLETED before
+    /// the cutoff — the turn would have used more. Averages over rows
+    /// with timeouts are a lower bound, and they flatter the weaker arm
+    /// (the one that times out more). Same applies to
+    /// `input_tokens`/`output_tokens` below (J-10): the in-flight
+    /// round's usage is lost with the dropped future, and a stream that
+    /// errors mid-round loses that round's usage too. Any between-arm
+    /// token/round comparison in the paper must either exclude
+    /// non-converged rows or state the censoring.
     pub rounds: u32,
     /// Whether a `PlanCreated` event was persisted during this run —
     /// distinguishes planned turns from unplanned ones in the JSON
@@ -145,6 +156,9 @@ pub struct TaskResult {
     /// `Some(true)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_cost_within_budget: Option<bool>,
+    /// Summed across the rounds that reported a `Usage` — see the
+    /// censoring caveat on [`Self::rounds`]: on Timeout / mid-stream
+    /// error rows these are a lower bound (J-10).
     pub input_tokens: u32,
     pub output_tokens: u32,
     /// Tokens of this task's prompts that hit an existing cache entry,
@@ -452,9 +466,27 @@ pub fn compute_metrics(
         .iter()
         .any(|event| matches!(event, AgentEvent::PlanCreated { .. }));
 
+    // J-7 (docs/AUDITORIA-2026-07-v7.md): only text AFTER the last tool
+    // event counts as the answer. Small models narrate before calling
+    // tools ("voy a leer las 2 primeras líneas...") and that narration is
+    // persisted as `AssistantText`; concatenating the whole turn let a
+    // task expecting "2" pass on the narration even when the final answer
+    // was wrong — a false PASS that favored verbose models. For turns
+    // with no tool activity every `AssistantText` is still counted
+    // (identical to the old behavior for no_tool tasks).
+    let last_tool_event_idx = events.iter().rposition(|event| {
+        matches!(
+            event,
+            AgentEvent::AssistantToolCall { .. }
+                | AgentEvent::ToolCallStarted { .. }
+                | AgentEvent::ToolCallCompleted { .. }
+        )
+    });
     let final_text = events
         .iter()
-        .filter_map(|event| match event {
+        .enumerate()
+        .filter(|(idx, _)| last_tool_event_idx.is_none_or(|tool_idx| *idx > tool_idx))
+        .filter_map(|(_, event)| match event {
             AgentEvent::AssistantText { text } => Some(text.as_str()),
             _ => None,
         })
@@ -829,6 +861,74 @@ mod tests {
             &events,
             RunOutcome::Converged,
         );
+        assert_eq!(result.expected_text_found, Some(true));
+        assert!(result.passed);
+    }
+
+    /// J-7 (docs/AUDITORIA-2026-07-v7.md): pre-tool narration must not
+    /// satisfy `expect_text_contains`. A model that narrates "voy a leer
+    /// las 2 primeras líneas" before its tool call and then answers
+    /// wrongly ("el archivo tiene 5 líneas") was a false PASS for a task
+    /// expecting "2".
+    #[test]
+    fn expect_text_contains_ignores_narration_before_the_last_tool_event() {
+        let events = vec![
+            AgentEvent::AssistantText {
+                text: "Voy a leer las 2 primeras líneas".to_string(),
+            },
+            AgentEvent::AssistantToolCall {
+                id: "1".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            AgentEvent::ToolCallStarted {
+                id: "1".to_string(),
+                name: "read_file".to_string(),
+                background: true,
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "1".to_string(),
+                    content: "línea A\nlínea B\nlínea C\nlínea D\nlínea E".to_string(),
+                    is_error: false,
+                },
+            },
+            AgentEvent::AssistantText {
+                text: "El archivo tiene 5 líneas".to_string(),
+            },
+        ];
+        let result = metrics(&task(None, false, Some("2")), &events, RunOutcome::Converged);
+        assert_eq!(result.expected_text_found, Some(false));
+        assert!(!result.passed);
+    }
+
+    /// J-7 counterpart: the answer given AFTER the last tool event still
+    /// matches, and a no-tool turn keeps the old whole-turn behavior.
+    #[test]
+    fn expect_text_contains_matches_the_answer_after_the_last_tool_event() {
+        let events = vec![
+            AgentEvent::AssistantText {
+                text: "Voy a contar las líneas".to_string(),
+            },
+            AgentEvent::ToolCallStarted {
+                id: "1".to_string(),
+                name: "read_file".to_string(),
+                background: true,
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "1".to_string(),
+                    content: "línea A\nlínea B".to_string(),
+                    is_error: false,
+                },
+            },
+            AgentEvent::AssistantText {
+                text: "El archivo tiene 2 líneas".to_string(),
+            },
+        ];
+        let result = metrics(&task(None, false, Some("2")), &events, RunOutcome::Converged);
         assert_eq!(result.expected_text_found, Some(true));
         assert!(result.passed);
     }

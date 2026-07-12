@@ -377,6 +377,42 @@ pub async fn ollama_model_digest(
         .map(str::to_string))
 }
 
+/// How long a warm-up load may take before we give up on it. Loading a
+/// mid-size model from disk into RAM/VRAM takes seconds to a couple of
+/// minutes on slow disks — far more than `LIST_MODELS_READ_TIMEOUT`, but
+/// it must not eat a meaningful slice of the sweep either.
+const WARM_UP_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Preloads `model` into the Ollama server's memory without generating
+/// anything: `POST /api/generate` with a `model` and no `prompt` is
+/// Ollama's documented load-only request. J-6 (docs/AUDITORIA-2026-07-v7.md):
+/// without this, the first task of each sweep arm paid the model's
+/// cold-load time — inflating its wall-time (and risking a spurious
+/// `[Timeout]` on CPU) on always the same task, while later arms under
+/// `--no-ollama-stop` started warm from the previous arm's resident
+/// model. Best-effort by design: a failure here means the first real
+/// request pays the load instead, which is exactly the pre-J-6 behavior
+/// — so callers log and continue rather than abort.
+pub async fn warm_up_ollama_model(base_url: &str, model: &str) -> Result<(), ModelError> {
+    let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+    let client = crate::http_client::build_client_with_timeouts(
+        std::time::Duration::from_secs(10),
+        WARM_UP_READ_TIMEOUT,
+    );
+
+    let response = client
+        .post(url)
+        .json(&serde_json::json!({ "model": model }))
+        .send()
+        .await
+        .map_err(|e| ModelError::Request(format!("ollama warm-up failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(http_error_to_model_error(response, "ollama").await);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

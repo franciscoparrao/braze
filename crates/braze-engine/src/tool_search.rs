@@ -89,6 +89,19 @@ pub(crate) fn apply_deferral(
     DeferredInventory { visible, hidden }
 }
 
+/// El inventario que el modelo VE en la primera ronda de una sesión
+/// fresca (nada activado todavía): la partición de [`apply_deferral`]
+/// con el set de activadas vacío, incluyendo el stub del meta-tool si
+/// algo quedó oculto. Público para que los composition roots que
+/// dimensionan presupuestos de contexto (J-17,
+/// docs/AUDITORIA-2026-07-v7.md: `braze-bench::runner`) midan los bytes
+/// del prompt real y no del catálogo completo pre-deferral — con N
+/// noise tools ocultas, presupuestar sobre el catálogo entero le
+/// achicaba el budget justo al brazo con deferral activa.
+pub fn initially_visible_stubs(stubs: Vec<ToolStub>, threshold: usize) -> Vec<ToolStub> {
+    apply_deferral(stubs, threshold, &HashSet::new()).visible
+}
+
 /// El stub del meta-tool, con el conteo de ocultas en el summary para
 /// que el modelo sepa que el inventario visible no es todo lo que hay.
 fn search_tool_stub(hidden_count: usize) -> ToolStub {

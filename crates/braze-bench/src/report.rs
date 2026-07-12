@@ -54,11 +54,18 @@ struct BackendSummary {
     /// fields; E5's cost/quality tradeoff needs the group total, not an
     /// average that dilutes across unpriced rows).
     total_cost_usd: Option<f64>,
-    /// 95% Wilson score interval half-width around `passed/total`, in
-    /// percentage points. With `--repetitions 1` (or few repetitions) a
-    /// small local model's pass rate is mostly noise, not signal — this
-    /// makes the uncertainty visible instead of implying false precision.
-    /// See docs/AUDITORIA-2026-07.md hallazgo F3.
+    /// 95% Wilson score interval around `passed/total`, as explicit
+    /// `[low, high]` bounds in percent. With `--repetitions 1` (or few
+    /// repetitions) a small local model's pass rate is mostly noise, not
+    /// signal — this makes the uncertainty visible instead of implying
+    /// false precision. See docs/AUDITORIA-2026-07.md hallazgo F3.
+    ///
+    /// Explicit bounds rather than a `±half_width` suffix (J-5,
+    /// docs/AUDITORIA-2026-07-v7.md): the Wilson interval is centered on
+    /// the *Wilson center*, not on `passed/total`, and the two diverge
+    /// exactly at the extremes this bench lives in — 6/6 has a Wilson
+    /// interval of [61%, 100%], while "6/6 (±20pp)" read as if it were
+    /// [80%, 120%]. Printing the bounds removes the ambiguity.
     ///
     /// Known remaining limitation (N-37, docs/AUDITORIA-2026-07-v2.md):
     /// this treats each repetition of the same task as an independent
@@ -69,7 +76,8 @@ struct BackendSummary {
     /// correction, which is a larger statistical change than the rest of
     /// this fix; likewise full percentiles (p90/p99) beyond the median
     /// added here are deferred.
-    pass_rate_interval_pp: f64,
+    pass_rate_ci_low_pct: f64,
+    pass_rate_ci_high_pct: f64,
 }
 
 /// 95% Wilson score interval for a binomial proportion — chosen over the
@@ -126,7 +134,11 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
     let sum_output: u64 = counted.iter().map(|r| r.output_tokens as u64).sum();
     let sum_rounds: u64 = counted.iter().map(|r| r.rounds as u64).sum();
     let n = total.max(1) as f64;
-    let (_center, half_width) = wilson_interval(passed, total);
+    let (center, half_width) = wilson_interval(passed, total);
+    // The interval is centered on the Wilson center, NOT on passed/total
+    // (J-5): clamp to [0, 1] and report both bounds explicitly.
+    let ci_low = (center - half_width).max(0.0);
+    let ci_high = (center + half_width).min(1.0);
 
     let mut wall_times: Vec<u128> = counted.iter().map(|r| r.wall_time_ms).collect();
     wall_times.sort_unstable();
@@ -149,7 +161,8 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
         compaction_count: counted.iter().map(|r| r.compaction_count).sum(),
         summary_fallbacks: counted.iter().map(|r| r.summary_fallbacks).sum(),
         total_cost_usd: sum_optional_f64(counted.iter().map(|r| r.estimated_cost_usd)),
-        pass_rate_interval_pp: half_width * 100.0,
+        pass_rate_ci_low_pct: ci_low * 100.0,
+        pass_rate_ci_high_pct: ci_high * 100.0,
     }
 }
 
@@ -228,7 +241,7 @@ pub fn print_table(results: &[TaskResult]) {
     println!(
         "{:<24} {:>16} {:>8} {:>12} {:>10} {:>14} {:>16} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",
         "backend",
-        "pass_rate(±95%)",
+        "pass_rate[95%CI]",
         "avg_rounds",
         "avg_ms",
         "median_ms",
@@ -248,8 +261,8 @@ pub fn print_table(results: &[TaskResult]) {
         let rows: Vec<&TaskResult> = results.iter().filter(|r| r.backend == backend).collect();
         let summary = summarize(backend, &rows);
         let pass_rate_cell = format!(
-            "{}/{} (±{:.0}pp)",
-            summary.passed, summary.total, summary.pass_rate_interval_pp
+            "{}/{} [{:.0},{:.0}]%",
+            summary.passed, summary.total, summary.pass_rate_ci_low_pct, summary.pass_rate_ci_high_pct
         );
         println!(
             "{:<24} {:>16} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",

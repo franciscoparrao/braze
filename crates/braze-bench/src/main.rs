@@ -225,6 +225,22 @@ async fn run() -> Result<(), BenchError> {
             continue;
         }
 
+        // J-6 (docs/AUDITORIA-2026-07-v7.md): load every local model this
+        // arm uses BEFORE its first task, so no arm's first task pays the
+        // cold-load time. Without this the first arm of a sweep started
+        // cold (inflated wall-time / spurious timeouts, always on the
+        // suite's first task) while later arms under `--no-ollama-stop`
+        // inherited the previous arm's resident model — a systematic
+        // between-arm bias. Best effort: on failure the first real
+        // request pays the load, which is exactly the old behavior.
+        for model in spec.ollama_models(&config) {
+            if let Err(err) =
+                braze_model::warm_up_ollama_model(&config.ollama_base_url, &model).await
+            {
+                eprintln!("braze-bench: warm-up de '{model}' falló (se continúa igual): {err}");
+            }
+        }
+
         for task in &tasks {
             for repetition in 0..cli.repetitions {
                 if cli.repetitions > 1 {

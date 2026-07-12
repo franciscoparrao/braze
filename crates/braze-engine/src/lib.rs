@@ -19,3 +19,4 @@ mod protocol_check;
 pub use engine::{DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine, synthesize_orphan_repairs};
 pub use hooks::{EngineHook, PromptBudgetAuditHook};
 pub use error::EngineError;
+pub use tool_search::initially_visible_stubs;
