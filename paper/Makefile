@@ -3,10 +3,14 @@
 
 all: figs pdf
 
+# Los scripts declaran sus rutas relativas a la RAÍZ del repo ("Correr
+# desde la raíz del repo", ver el encabezado de cada uno): leen
+# docs/sweep-*.json y escriben paper/figs/ — por eso el cd .. antes de
+# cada Rscript, este Makefile vive en paper/.
 figs:
-	Rscript R/fig1_curva.R
-	Rscript R/fig2_rescate.R
-	Rscript R/fig3_search_tools.R
+	cd .. && Rscript paper/R/fig1_curva.R
+	cd .. && Rscript paper/R/fig2_rescate.R
+	cd .. && Rscript paper/R/fig3_search_tools.R
 
 pdf:
 	pdflatex -interaction=nonstopmode main.tex
