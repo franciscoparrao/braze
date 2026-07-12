@@ -42,20 +42,60 @@ pub enum ActionDescriptor {
 
 /// Human-readable one-liner — this is exactly the string that ends up in
 /// braze-events::AgentEvent::PermissionRequested/PermissionDecided once
-/// braze-engine wires this crate to braze-session (Fase 5).
+/// braze-engine wires this crate to braze-session (Fase 5), AND the string
+/// both approval prompts (braze-cli's terminal prompt, braze-tui's
+/// overlay) put in front of the human.
+///
+/// Control characters are neutralized to caret notation here, at the
+/// single seam every consumer shares (J-19, docs/AUDITORIA-2026-07-v7.md):
+/// the payloads are model-controlled (a shell argv) or third-party-
+/// controlled (an MCP server's tool/server names), and raw ANSI escapes in
+/// them could repaint the very prompt the user is deciding on — hide the
+/// dangerous half of a command, recolor `rm -rf` as benign, or forge the
+/// "y permitir · n denegar" hint line. `^[` where an ESC would have been
+/// is ugly, visible, and honest — exactly what a confirmation prompt
+/// should show.
 impl fmt::Display for ActionDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::WriteFile { path } => write!(f, "write file {}", path.display()),
-            Self::DeleteFile { path } => write!(f, "delete file {}", path.display()),
-            Self::ReadPath { path } => write!(f, "read path {}", path.display()),
-            Self::ShellCommand { command } => write!(f, "run `{}`", command.join(" ")),
+        let raw = match self {
+            Self::WriteFile { path } => format!("write file {}", path.display()),
+            Self::DeleteFile { path } => format!("delete file {}", path.display()),
+            Self::ReadPath { path } => format!("read path {}", path.display()),
+            Self::ShellCommand { command } => format!("run `{}`", command.join(" ")),
             Self::McpToolCall { server, tool } => {
-                write!(f, "call MCP tool `{tool}` on server `{server}`")
+                format!("call MCP tool `{tool}` on server `{server}`")
             }
-            Self::Other { label } => write!(f, "{label}"),
+            Self::Other { label } => label.clone(),
+        };
+        f.write_str(&sanitize_control_chars(&raw))
+    }
+}
+
+/// Replaces every control character with a visible stand-in: C0 controls
+/// (ESC, CR, backspace, newline, ...) become caret notation (`^[`, `^M`,
+/// `^H`, `^J`), DEL becomes `^?`, and any other Unicode control (C1 range)
+/// becomes U+FFFD. Plain text passes through byte-identical. Public so
+/// other user-facing surfaces that print attacker-influenced strings
+/// outside this Display (e.g. `braze permissions suggest`'s report, which
+/// renders persisted `PermissionKey`s) can share the exact same treatment.
+pub fn sanitize_control_chars(text: &str) -> String {
+    // Fast path: nothing to do for the overwhelmingly common clean case.
+    if !text.chars().any(char::is_control) {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        match c {
+            '\u{00}'..='\u{1f}' => {
+                out.push('^');
+                out.push(char::from(c as u8 + 0x40));
+            }
+            '\u{7f}' => out.push_str("^?"),
+            c if c.is_control() => out.push('\u{fffd}'),
+            c => out.push(c),
         }
     }
+    out
 }
 
 #[cfg(test)]
@@ -112,5 +152,40 @@ mod tests {
             label: "call MCP tool foo".to_string(),
         };
         assert_eq!(action.to_string(), "call MCP tool foo");
+    }
+
+    /// J-19 (docs/AUDITORIA-2026-07-v7.md): a model-controlled argv (or a
+    /// hostile MCP server's tool name) carrying ANSI escapes must not be
+    /// able to repaint the approval prompt — every control char renders
+    /// as a visible stand-in instead of being interpreted by the
+    /// terminal.
+    #[test]
+    fn display_neutralizes_ansi_escapes_and_control_chars() {
+        let action = ActionDescriptor::ShellCommand {
+            command: vec![
+                "echo".to_string(),
+                // ESC[2K erases the prompt line; \r returns the cursor;
+                // both are classic prompt-forgery primitives.
+                "\u{1b}[2K\rrm -rf /".to_string(),
+            ],
+        };
+        assert_eq!(action.to_string(), "run `echo ^[[2K^Mrm -rf /`");
+
+        let action = ActionDescriptor::McpToolCall {
+            server: "srv".to_string(),
+            tool: "read\u{1b}[1A\u{7f}file".to_string(),
+        };
+        assert_eq!(
+            action.to_string(),
+            "call MCP tool `read^[[1A^?file` on server `srv`"
+        );
+    }
+
+    /// The sanitizer is a byte-identical pass-through for clean text —
+    /// the 99.9% case must not pay any rendering difference.
+    #[test]
+    fn sanitize_control_chars_passes_clean_text_through() {
+        let clean = "run `cargo test --workspace` con acentos y ñ";
+        assert_eq!(sanitize_control_chars(clean), clean);
     }
 }

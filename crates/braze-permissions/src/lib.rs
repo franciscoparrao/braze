@@ -43,7 +43,7 @@ mod error;
 mod guard;
 mod question;
 
-pub use action::ActionDescriptor;
+pub use action::{ActionDescriptor, sanitize_control_chars};
 pub use allowlist::WorkdirAllowlist;
 pub use classifier::{
     ActionClassifier, AlwaysIrreversibleClassifier, DefaultClassifier, Reversibility,

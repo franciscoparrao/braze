@@ -37,13 +37,19 @@ pub struct PermissionStat {
 
 /// Categoría legible + etiqueta de una `PermissionKey`, para el reporte.
 pub fn category_and_label(key: &PermissionKey) -> (&'static str, String) {
-    match key {
+    let (category, label) = match key {
         PermissionKey::Shell { command } => ("shell", command.join(" ")),
         PermissionKey::WriteFile { path } => ("write", path.display().to_string()),
         PermissionKey::DeleteFile { path } => ("delete", path.display().to_string()),
         PermissionKey::ReadPath { path } => ("read", path.display().to_string()),
         PermissionKey::McpToolCall { server, tool } => ("mcp", format!("{server}::{tool}")),
-    }
+    };
+    // J-19 (docs/AUDITORIA-2026-07-v7.md): the keys were persisted from
+    // model/MCP-controlled strings — a session log can carry ANSI escapes
+    // in an argv or tool name, and this label goes raw to the operator's
+    // terminal. Same seam-level treatment as `ActionDescriptor`'s
+    // `Display`.
+    (category, braze_permissions::sanitize_control_chars(&label))
 }
 
 /// Agrega los `PermissionDecided` (con `key: Some`) de cada sesión —

@@ -66,8 +66,14 @@ impl DefaultClassifier {
             return false;
         };
         match program {
-            "ls" | "pwd" | "echo" | "wc" | "whoami" | "date" | "which" | "true" | "false" => true,
-            "cat" | "head" | "tail" | "file" | "diff" | "grep" => {
+            "pwd" | "echo" | "whoami" | "date" | "which" | "true" | "false" => true,
+            // `ls` and `wc` take paths just like the content readers below
+            // — J-18 (docs/AUDITORIA-2026-07-v7.md): classifying them
+            // unconditionally safe let `ls -la /home/otro/.ssh` enumerate
+            // key names and `wc -c /etc/shadow` open and read an arbitrary
+            // file, with no confirmation — the same leak class N-8b closed
+            // for `cat` and friends.
+            "ls" | "wc" | "cat" | "head" | "tail" | "file" | "diff" | "grep" => {
                 self.all_path_like_args_allowed(command)
             }
             "find" => is_safe_find(command) && self.all_path_like_args_allowed(command),
@@ -590,6 +596,14 @@ mod tests {
             &["tail", "/etc/shadow"][..],
             &["file", "/etc/shadow"][..],
             &["diff", "/etc/passwd", "/dev/null"][..],
+            // J-18 (docs/AUDITORIA-2026-07-v7.md): `ls`/`wc` escaped this
+            // gate — enumeration (`ls ~/.ssh` leaks key names) and `wc`
+            // (opens and reads the whole file to count) are the same leak
+            // class as the content readers above.
+            &["ls", "-la", "/home/other/.ssh"][..],
+            &["ls", "/home"][..],
+            &["wc", "-c", "/etc/shadow"][..],
+            &["wc", "-l", "/home/other/.ssh/id_rsa"][..],
         ] {
             assert_eq!(
                 classifier().classify(&shell(parts)),
@@ -612,6 +626,11 @@ mod tests {
             &["tail", "-f", "file.txt"][..],
             &["file", "file.txt"][..],
             &["diff", "a", "b"][..],
+            // J-18: `ls`/`wc` moved to the path-checked arm — the common
+            // in-workdir shapes must stay confirmation-free.
+            &["ls", "-la"][..],
+            &["ls", "src"][..],
+            &["wc", "-l", "file.txt"][..],
         ] {
             assert_eq!(
                 classifier().classify(&shell(parts)),
