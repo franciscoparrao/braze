@@ -295,13 +295,14 @@ excluidos/re-corridos con transparencia (listar los 3 casos).}
 % J-6: los sweeps pre-fix no tenían warm-up por brazo — posible sesgo de
 %   wall-time a favor de brazos tardíos bajo --no-ollama-stop; no afecta
 %   pass rates salvo timeouts en la primera tarea del primer brazo.
-% J-2: en el brazo tasks+lead (sweep-planlead-2026-07-11), el resumen de
-%   la task list reseteaba la racha de fallos del EscalatingBackend: la
-%   escalación reactiva estaba estructuralmente apagada en ese brazo (la
-%   apertura proactiva del lead no se ve afectada, que es el mecanismo
-%   dominante medido — ver I-1 v6). Matiza la lectura de "tasks+lead
-%   resta": parte puede ser esta interferencia, no solo la redundancia
-%   de andamiajes. Declarar o re-correr el brazo con el fix.
+% J-2: RESUELTO CON RE-RUN (docs/sweep-planlead-taskslead-postfix-2026-07-11.md):
+%   en el sweep original el resumen de la task list reseteaba la racha de
+%   fallos del EscalatingBackend (escalación reactiva muerta en el brazo
+%   tasks+lead). El re-run controlado post-fix (190 corridas, ancla
+%   incluida) muestra 9 escalaciones reactivas reales y el MISMO
+%   veredicto: tasks+lead 83.2% vs lead solo 92.6% (ancla en su banda
+%   92-92.6% por 5ª vez). "Tasks+lead resta" es interferencia real de
+%   andamiajes, no el artefacto — citar el re-run como control.
 % J-7: expect_text_contains evaluaba TODO el texto del turno (narración
 %   pre-tool-call incluida) — posibles falsos PASS direccionales hacia
 %   modelos verbosos; las celdas apretadas deberían re-verificarse con

@@ -1,5 +1,14 @@
 # El eslabón final: ¿el planner arreglado compone con el lead?
 
+> **⚠ Nota posterior (2026-07-12)**: la auditoría v7 encontró que en el brazo
+> `+plan+lead+ablate:task-list` de ESTE sweep la escalación reactiva del lead
+> estaba muerta por construcción (J-2, el resumen de la task list reseteaba la
+> racha de fallos). El re-run controlado post-fix
+> (`docs/sweep-planlead-taskslead-postfix-2026-07-11.md`) **confirma el
+> veredicto** con el mecanismo limpio: tasks+lead 83.2% vs 92.6% del ancla,
+> con 9 escalaciones reactivas reales disparando. La observación 2 y la
+> recomendación 4 quedan vigentes sin cambios.
+
 Fecha: 2026-07-11
 Contexto: tras el rescate del planner (`docs/sweep-planner-ab-2026-07-11.md`),
 quedaba la última pregunta del split: si las entregas arregladas del plan
