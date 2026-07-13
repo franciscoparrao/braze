@@ -236,6 +236,7 @@ dependencies = [
  "braze-config",
  "braze-engine",
  "braze-events",
+ "braze-memory",
  "braze-model",
  "braze-permissions",
  "braze-session",
@@ -260,6 +261,7 @@ dependencies = [
  "braze-engine",
  "braze-events",
  "braze-mcp-client",
+ "braze-memory",
  "braze-model",
  "braze-permissions",
  "braze-session",
@@ -293,6 +295,7 @@ dependencies = [
  "braze-config",
  "braze-events",
  "braze-mcp-client",
+ "braze-memory",
  "braze-model",
  "braze-permissions",
  "braze-session",
@@ -330,6 +333,18 @@ dependencies = [
  "braze-tools-core",
  "braze-types",
  "rmcp",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "braze-memory"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

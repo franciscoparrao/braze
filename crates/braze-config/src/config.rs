@@ -502,6 +502,16 @@ pub struct Config {
     /// exige que el bench siga al default de producción).
     #[serde(default)]
     pub environment_block: bool,
+    /// docs/project-memory-design.md: anexa al system prompt un resumen
+    /// determinístico entre sesiones (archivos tocados, tareas
+    /// completadas vía la lista tipada) persistido en
+    /// `.braze/memory.json` bajo la raíz del proyecto (git toplevel, o
+    /// `cwd` si no hay repo). OFF por default — mismo posicionamiento
+    /// que `enable_task_list`: una palanca nueva entra apagada y se
+    /// promueve solo si su propio A/B (`+ablate:project-memory`) la
+    /// valida, no por asunción.
+    #[serde(default)]
+    pub enable_project_memory: bool,
     /// D′ — skills locales explicit-only; ver [`SkillsConfig`]. Solo
     /// desde el config file (estructurado, como `references`).
     #[serde(default)]
@@ -587,6 +597,7 @@ impl Default for Config {
             tool_search_threshold: default_tool_search_threshold(),
             enable_task_list: false,
             environment_block: false,
+            enable_project_memory: false,
             skills: SkillsConfig::default(),
         }
     }
@@ -829,6 +840,9 @@ impl Config {
         }
         if let Some(v) = overrides.environment_block {
             self.environment_block = v;
+        }
+        if let Some(v) = overrides.enable_project_memory {
+            self.enable_project_memory = v;
         }
         if let Some(v) = overrides.skills {
             self.skills = v;

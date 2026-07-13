@@ -525,12 +525,37 @@ async fn build_engine(
     } else {
         None
     };
+    // docs/project-memory-design.md: construido ANTES del system prompt
+    // (necesita el resumen ya renderizado) pero registrado como hook
+    // DESPUÉS de construir el Engine, más abajo — mismo orden que
+    // `environment_snapshot`. `ProjectMemoryHook::new` carga lo que ya
+    // exista en `.braze/memory.json` (best-effort: un archivo roto no
+    // bloquea el arranque de la sesión, ver su doc comment).
+    let project_memory_hook = if config.enable_project_memory {
+        let project_root = braze_memory::resolve_project_root(cwd);
+        let memory_path = braze_memory::default_memory_path(&project_root);
+        let store: std::sync::Arc<dyn braze_memory::ProjectMemoryStore> =
+            std::sync::Arc::new(braze_memory::FileProjectMemoryStore::new(memory_path));
+        let project_key = project_root.display().to_string();
+        Some(std::sync::Arc::new(
+            braze_engine::ProjectMemoryHook::new(store, project_key).await,
+        ))
+    } else {
+        None
+    };
+    let project_memory_snapshot: Option<String> = project_memory_hook.as_ref().and_then(|hook| {
+        braze_memory::render_project_memory_section(
+            &hook.snapshot(),
+            braze_memory::DEFAULT_PROJECT_MEMORY_BUDGET_TOKENS,
+        )
+    });
     let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
         braze_config::default_system_prompt(
             cwd,
             model_hint_for_prompt.as_deref(),
             &config.references,
             environment_snapshot.as_deref(),
+            project_memory_snapshot.as_deref(),
         )
     });
 
@@ -627,6 +652,13 @@ async fn build_engine(
                 config.skills.max_loaded_per_turn,
             );
         }
+    }
+    // docs/project-memory-design.md: registrado como hook audit-only
+    // (Paquete B′) — observa `AgentEvent`s y persiste a
+    // `.braze/memory.json` sin influir el turno. `None` si
+    // `config.enable_project_memory` es `false` (el caso común).
+    if let Some(hook) = project_memory_hook {
+        engine = engine.with_hook(hook);
     }
 
     if let Some(budget) = ollama_budget {

@@ -2465,6 +2465,72 @@ de este documento): correr la batería `g10-weak-skills` sobre
 `gpt-oss:20b` antes de promoverlo a modelo local recomendado en
 `CLAUDE.md` (reemplazando a `qwen3.5-coder`).
 
+## `ProjectMemory` implementado: memoria de proyecto entre sesiones (2026-07-13)
+
+Continuación de `docs/project-memory-design.md` (diseño de la sesión
+anterior). El usuario confirmó "vamos con eso entonces" y se implementó
+el alcance V1 completo tal como quedó pre-registrado, sin desviaciones:
+
+1. **`AgentEvent::TaskCompleted { description }`** (nueva variante,
+   `braze-events`) — cierra el gap que el propio diseño anotó: la task
+   list tipada (`task_list.rs`) vive solo en memoria del `Engine` y no
+   emitía señal durable al completar una tarea. `TaskList::update` ahora
+   devuelve `Result<Option<String>, String>` (la descripción cuando la
+   llamada deja el estado en `Done`); el call site en `engine.rs`
+   persiste el evento nuevo junto al `ToolCallCompleted` de siempre.
+2. **Crate `braze-memory`** (15º del workspace) — `ProjectMemory` (struct
+   capado: `touched_files` máx 50, `completed_signals` máx 30, dedup
+   determinístico, sin llamar a un reloj internamente),
+   `ProjectMemoryStore` trait + `FileProjectMemoryStore` (write atómico
+   vía temp+rename, JSON pretty-printed y con orden de campos estable
+   para no ensuciar diffs), `resolve_project_root`/`project_key_for`
+   (walk-up hasta `.git`, mismo problema que la detección de proyecto de
+   `context_manager.py`), y `render_project_memory_section` (presupuesto
+   de tokens, trunca por línea completa, nunca a la mitad).
+3. **`ProjectMemoryHook`** (`braze-engine`, sobre `EngineHook` — Paquete
+   B′, mismo patrón que `PromptBudgetAuditHook`) — observa
+   `AssistantToolCall`+`ToolCallCompleted` correlacionados por id (mismo
+   patrón que `SimpleContextCompactor`'s `tool_names_by_id`) para
+   `write_file`/`edit_file` exitosos, y `TaskCompleted` directo. 100%
+   determinístico, cero llamadas a modelo — la decisión de diseño
+   central del documento original.
+4. **Inyección** — nuevo parámetro `project_memory: Option<&str>` en
+   `default_system_prompt` (mismo contrato que `environment`, sección
+   propia "`Project memory (from earlier sessions):`"), wireado en
+   `build_engine` de `braze-cli` y en `runner.rs` de `braze-bench`.
+   `Config::enable_project_memory` (off por default, env var
+   `BRAZE_ENABLE_PROJECT_MEMORY`, misma convención que
+   `enable_task_list`).
+5. **`+ablate:project-memory`** en `braze-bench` — clave habilitante,
+   mismo patrón que `task-list`. Caveat honesto documentado en el propio
+   código: un sandbox del bench es fresco por repetición, así que la
+   palanca mide que el MECANISMO dispara dentro de un turno, no el valor
+   cross-sesión (eso necesita el suite multi-turno que el roadmap v7 ya
+   tenía pendiente — sin cambios en esa prioridad).
+
+**Verificado en vivo, no solo compilado**: dos smokes reales contra
+`gpt-oss:20b` en Nitro. (1) Una sesión escribe `notes.txt` →
+`.braze/memory.json` capturó `touched_files` correctamente; una SEGUNDA
+sesión en el mismo directorio, preguntada "sin usar herramientas, qué
+archivos se tocaron en sesiones anteriores", **respondió correctamente
+desde el prompt inyectado** — el loop completo hook→store→render→inyección→lectura
+del modelo confirmado de punta a punta. (2) Con `task-list` también
+activo: `task_add`+`task_update(done)` → `completed_signals` capturó la
+descripción con `source: task_list_completion`. (3) Negativo: sin la env
+var, no se crea ningún `.braze/`, confirmando off-por-default.
+
+954 tests workspace verdes (39 nuevos: 4 `braze-events`/`braze-session`/
+`braze-engine` para `TaskCompleted`, 16 `braze-memory`, 6
+`ProjectMemoryHook`, 2 `braze-config` para el nuevo parámetro del
+prompt, 1 `braze-bench` para la clave del bench, más ajustes de firma en
+~15 tests preexistentes de `default_system_prompt`), clippy `-D
+warnings` limpio en los 15 crates. `cargo fmt --check` tiene 110 diffs
+mostrados, pero **confirmados preexistentes** (drift de versión de
+rustfmt anterior a esta sesión, verificado con `git stash`) — no se
+tocó nada fuera de lo que este trabajo cambió.
+
+Nada commiteado todavía.
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace

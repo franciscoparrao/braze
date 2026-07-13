@@ -9,6 +9,7 @@
 
 mod engine;
 mod hooks;
+mod project_memory_hook;
 mod task_list;
 mod tool_search;
 mod error;
@@ -18,5 +19,6 @@ mod protocol_check;
 
 pub use engine::{DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine, synthesize_orphan_repairs};
 pub use hooks::{EngineHook, PromptBudgetAuditHook};
+pub use project_memory_hook::ProjectMemoryHook;
 pub use error::EngineError;
 pub use tool_search::initially_visible_stubs;

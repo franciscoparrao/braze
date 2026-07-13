@@ -169,14 +169,46 @@ pub async fn run_task(
     // ungating braze-cli got; an OpenRouter-served GLM/Qwen needs its
     // native-template hint exactly like an Ollama-served one.
     let model_hint = Some(spec.executor_model_name(config));
+    // docs/project-memory-design.md: `+ablate:project-memory` mide que el
+    // mecanismo del hook dispara dentro de un turno — un sandbox de
+    // braze-bench es fresco por repetición (`TaskSandbox::new` más
+    // arriba), así que nunca hay memoria de una sesión previa para
+    // cargar acá; el hook igual se construye y registra de verdad
+    // (`.braze/memory.json` dentro del sandbox), fiel al wiring de
+    // producción, para que el mecanismo sea verificable aunque su valor
+    // cross-sesión necesite el suite multi-turno que el roadmap v7 ya
+    // anota como pendiente.
+    let project_memory_hook = if ablation.enable_project_memory {
+        let memory_path = braze_memory::default_memory_path(sandbox.path());
+        let store: std::sync::Arc<dyn braze_memory::ProjectMemoryStore> =
+            std::sync::Arc::new(braze_memory::FileProjectMemoryStore::new(memory_path));
+        let project_key = sandbox.path().display().to_string();
+        Some(std::sync::Arc::new(
+            braze_engine::ProjectMemoryHook::new(store, project_key).await,
+        ))
+    } else {
+        None
+    };
+    let project_memory_snapshot: Option<String> = project_memory_hook.as_ref().and_then(|hook| {
+        braze_memory::render_project_memory_section(
+            &hook.snapshot(),
+            braze_memory::DEFAULT_PROJECT_MEMORY_BUDGET_TOKENS,
+        )
+    });
+
     // No references (opencode-10): the bench sandbox is hermetic by
     // design — a user's reference dirs leaking into the measured system
     // prompt would make pass rates depend on local config.
     // Sin environment block (E′ I.6): el sandbox no es un repo git y el
     // bench mide el prompt default de producción (environment_block es
     // off por default — si algún día se promueve, N-36 exige seguirlo).
-    let system_prompt =
-        braze_config::default_system_prompt(sandbox.path(), model_hint.as_deref(), &[], None);
+    let system_prompt = braze_config::default_system_prompt(
+        sandbox.path(),
+        model_hint.as_deref(),
+        &[],
+        None,
+        project_memory_snapshot.as_deref(),
+    );
 
     // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget
     // — without it, a bench pass rate for an Ollama backend measured a
@@ -291,6 +323,12 @@ pub async fn run_task(
         && let Some(planner) = spec.build_planner(config, sampling)?
     {
         engine = engine.with_planner(planner);
+    }
+
+    // docs/project-memory-design.md: registrado como hook audit-only,
+    // mismo patrón que `PromptBudgetAuditHook` arriba.
+    if let Some(hook) = project_memory_hook {
+        engine = engine.with_hook(hook);
     }
 
     let started = Instant::now();

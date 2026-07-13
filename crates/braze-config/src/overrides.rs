@@ -121,6 +121,10 @@ pub struct ConfigOverrides {
     /// (`BRAZE_ENVIRONMENT_BLOCK`).
     #[serde(default)]
     pub environment_block: Option<bool>,
+    /// docs/project-memory-design.md — memoria de proyecto entre
+    /// sesiones (`BRAZE_ENABLE_PROJECT_MEMORY`).
+    #[serde(default)]
+    pub enable_project_memory: Option<bool>,
     /// D′ — skills locales; reemplazo completo, file-only (estructurado,
     /// misma postura que `references`).
     #[serde(default)]
@@ -333,6 +337,16 @@ impl ConfigOverrides {
                             reason: e.to_string(),
                         })?;
                     overrides.enable_task_list = Some(parsed);
+                }
+                "ENABLE_PROJECT_MEMORY" => {
+                    let parsed = value
+                        .parse::<bool>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.enable_project_memory = Some(parsed);
                 }
                 "TOOL_SEARCH_THRESHOLD" => {
                     let parsed = value

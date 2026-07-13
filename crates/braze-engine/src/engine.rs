@@ -1774,10 +1774,13 @@ impl Engine {
 
     /// C′.2: applies one `task_add`/`task_update` call to the in-memory
     /// list and renders the tool result the model sees — `(content,
-    /// is_error)`. Malformed arguments come back as recoverable tool
-    /// errors with the actionable detail (never a hard failure: the
-    /// model can retry with fixed arguments).
-    fn handle_task_tool_call(&self, call: &ToolCall) -> (String, bool) {
+    /// is_error, completed_description)`. Malformed arguments come back
+    /// as recoverable tool errors with the actionable detail (never a
+    /// hard failure: the model can retry with fixed arguments).
+    /// `completed_description` is `Some` only when this call transitioned
+    /// a task to `Done` — the caller uses it to also persist
+    /// `AgentEvent::TaskCompleted`.
+    fn handle_task_tool_call(&self, call: &ToolCall) -> (String, bool, Option<String>) {
         let mut task_list = self.task_list.lock().unwrap();
         if call.name == crate::task_list::TASK_ADD_TOOL {
             let Some(description) = call
@@ -1789,12 +1792,14 @@ impl Engine {
                 return (
                     "task_add needs a non-empty 'description' string".to_string(),
                     true,
+                    None,
                 );
             };
             let id = task_list.add(description);
             return (
                 format!("added task {id}. {}", task_list.summary_line()),
                 false,
+                None,
             );
         }
         let id = call.arguments.get("id").and_then(|v| v.as_u64());
@@ -1805,13 +1810,14 @@ impl Engine {
             .and_then(crate::task_list::TaskStatus::parse);
         match (id, status) {
             (Some(id), Some(status)) => match task_list.update(id as usize, status) {
-                Ok(()) => (task_list.summary_line(), false),
-                Err(reason) => (reason, true),
+                Ok(completed) => (task_list.summary_line(), false, completed),
+                Err(reason) => (reason, true, None),
             },
             _ => (
                 "task_update needs an integer 'id' and a 'status' of pending/in_progress/done"
                     .to_string(),
                 true,
+                None,
             ),
         }
     }
@@ -2344,7 +2350,7 @@ impl Engine {
                 && (call.name == crate::task_list::TASK_ADD_TOOL
                     || call.name == crate::task_list::TASK_UPDATE_TOOL)
             {
-                let (content, is_error) = self.handle_task_tool_call(&call);
+                let (content, is_error, completed) = self.handle_task_tool_call(&call);
                 self.append_and_notify(
                     session,
                     &AgentEvent::ToolCallCompleted {
@@ -2358,6 +2364,14 @@ impl Engine {
                     observer,
                 )
                 .await?;
+                if let Some(description) = completed {
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::TaskCompleted { description },
+                        observer,
+                    )
+                    .await?;
+                }
                 continue;
             }
 
@@ -3940,6 +3954,7 @@ fn event_text_len(event: &AgentEvent) -> usize {
         | AgentEvent::HookErrored { .. }
         | AgentEvent::SkillLoaded { .. }
         | AgentEvent::SkillLoadSkipped { .. }
+        | AgentEvent::TaskCompleted { .. }
         | AgentEvent::Unknown => 0,
     }
 }
@@ -8433,6 +8448,126 @@ mod tests {
             "the seeded list rides the first executor request: {round1_text}"
         );
         assert!(round1_text.contains("2 [pending] responder"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Marking a task `done` via `task_update` must persist
+    /// `AgentEvent::TaskCompleted` with that task's description — the
+    /// durable signal `braze-memory`'s `ProjectMemoryHook` depends on,
+    /// since the task list itself is in-memory only (J-4).
+    #[tokio::test]
+    async fn marking_a_task_done_persists_task_completed() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "task_add".to_string(),
+                    arguments: serde_json::json!({"description": "leer notas.txt"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "task_update".to_string(),
+                    arguments: serde_json::json!({"id": 1, "status": "done"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "leé el archivo", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::TaskCompleted { description } if description == "leer notas.txt"
+            )),
+            "task_update to done must persist TaskCompleted with the task's description"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The mirror case: `task_add` alone, or a transition to
+    /// `in_progress`, must NOT persist `TaskCompleted` — only an actual
+    /// completion should.
+    #[tokio::test]
+    async fn adding_or_progressing_a_task_does_not_persist_task_completed() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "task_add".to_string(),
+                    arguments: serde_json::json!({"description": "leer notas.txt"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "task_update".to_string(),
+                    arguments: serde_json::json!({"id": 1, "status": "in_progress"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("trabajando".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "leé el archivo", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TaskCompleted { .. })),
+            "task_add and in_progress transitions must never persist TaskCompleted"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

@@ -341,6 +341,10 @@ impl ContextCompactor for SimpleContextCompactor {
                 | AgentEvent::HookErrored { .. }
                 | AgentEvent::SkillLoaded { .. }
                 | AgentEvent::SkillLoadSkipped { .. }
+                // Audit-only trace for downstream consumers (braze-memory's
+                // ProjectMemoryHook) — not conversational content, nothing
+                // to fold into the tactical digest.
+                | AgentEvent::TaskCompleted { .. }
                 | AgentEvent::Unknown => {}
             }
         }

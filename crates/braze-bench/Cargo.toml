@@ -21,6 +21,7 @@ braze-tools-core = { workspace = true }
 braze-tools-local = { workspace = true }
 braze-model = { workspace = true }
 braze-engine = { workspace = true }
+braze-memory = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
 clap = { workspace = true }
 serde = { workspace = true }

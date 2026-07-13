@@ -89,12 +89,17 @@ impl TaskList {
     }
 
     /// `Err` con mensaje accionable (vuelve al modelo como tool result
-    /// de error) cuando el id no existe.
-    pub(crate) fn update(&mut self, id: usize, status: TaskStatus) -> Result<(), String> {
+    /// de error) cuando el id no existe. `Ok(Some(description))` cuando
+    /// la llamada deja el estado en `Done` (sin importar el estado
+    /// previo — incluye Done→Done) — la señal que el caller usa para
+    /// emitir `AgentEvent::TaskCompleted` (braze-memory's
+    /// `ProjectMemoryHook` la consume). `Ok(None)` para pending/
+    /// in_progress: nada que reportar afuera.
+    pub(crate) fn update(&mut self, id: usize, status: TaskStatus) -> Result<Option<String>, String> {
         match self.entries.iter_mut().find(|entry| entry.id == id) {
             Some(entry) => {
                 entry.status = status;
-                Ok(())
+                Ok((status == TaskStatus::Done).then(|| entry.description.clone()))
             }
             None => Err(format!(
                 "no task with id {id} — current ids: {}",
@@ -226,6 +231,26 @@ mod tests {
 
         list.update(2, TaskStatus::Done).unwrap();
         assert!(!list.has_open_tasks(), "all done → reinjection turns off");
+    }
+
+    /// `update` reports the completed task's description only on a
+    /// transition INTO `Done` — the signal `braze-memory`'s
+    /// `ProjectMemoryHook` consumes via `AgentEvent::TaskCompleted`. Any
+    /// other transition, including Done→Done, is `Ok(None)`: nothing new
+    /// to report.
+    #[test]
+    fn update_reports_the_description_only_on_transition_to_done() {
+        let mut list = TaskList::default();
+        list.add("leer el archivo");
+
+        let to_in_progress = list.update(1, TaskStatus::InProgress).unwrap();
+        assert_eq!(to_in_progress, None, "pending -> in_progress is not a completion");
+
+        let to_done = list.update(1, TaskStatus::Done).unwrap();
+        assert_eq!(to_done, Some("leer el archivo".to_string()));
+
+        let done_again = list.update(1, TaskStatus::Done).unwrap();
+        assert_eq!(done_again, Some("leer el archivo".to_string()));
     }
 
     /// The planner bridge: numbered lines seed tasks; prose lines don't.

@@ -230,6 +230,18 @@ pub enum AgentEvent {
         name: String,
         reason: String,
     },
+    /// A typed task list entry (`crate::task_list` in braze-engine)
+    /// transitioned to `done` via `task_update`. The task list itself is
+    /// deliberately NOT persisted as its own state (in-memory, reset per
+    /// turn — see that module's doc comment) — this event is the only
+    /// durable trace that a task was completed, specifically so a
+    /// downstream consumer (a hook, `braze-memory`'s `ProjectMemoryHook`)
+    /// can build a deterministic cross-session signal without re-deriving
+    /// it from raw tool-call arguments. Audit-only, never rendered back
+    /// to the model.
+    TaskCompleted {
+        description: String,
+    },
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only

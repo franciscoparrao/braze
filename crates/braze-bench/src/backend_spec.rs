@@ -660,6 +660,18 @@ pub struct AblationOverrides {
     /// Ollama structured outputs (`format` = envelope JSON schema), so
     /// the decoder cannot emit anything but the envelope.
     pub enable_constrained_tools: bool,
+    /// `+ablate:project-memory` — ENABLES `braze_engine::ProjectMemoryHook`
+    /// for this row (docs/project-memory-design.md). Same documented
+    /// enabling-key exception as `enable_task_list`. Honest caveat: a
+    /// bench task's sandbox is fresh per repetition
+    /// (`TaskSandbox::new`), so within ONE task run there is never a
+    /// prior session's memory to load from — this key measures that the
+    /// hook mechanism fires correctly within a turn (touched files,
+    /// `TaskCompleted` signals persisted to the sandbox's own
+    /// `.braze/memory.json`), not the cross-session value the design
+    /// doc's own § "mejor opción" flags as needing a multi-turn suite
+    /// this bench doesn't have yet.
+    pub enable_project_memory: bool,
 }
 
 impl AblationOverrides {
@@ -672,9 +684,9 @@ impl AblationOverrides {
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
-         task-list, prompt-tools, constrained-tools, best-of-n=N, tactical-window=N, \
-         tactical-threshold=N, full-observations=N, tool-search-threshold=N, \
-         lead-turns=N, lead-threshold=N, lead-window=N";
+         task-list, prompt-tools, constrained-tools, project-memory, best-of-n=N, \
+         tactical-window=N, tactical-threshold=N, full-observations=N, \
+         tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N";
 
     fn parse(raw: &str) -> Result<Self, BenchError> {
         let mut out = Self::default();
@@ -712,6 +724,7 @@ impl AblationOverrides {
                 "task-list" => out.enable_task_list = true,
                 "prompt-tools" => out.enable_prompt_tools = true,
                 "constrained-tools" => out.enable_constrained_tools = true,
+                "project-memory" => out.enable_project_memory = true,
                 "tool-search-threshold" => {
                     out.tool_search_threshold = Some(Self::parse_usize(key, value)?)
                 }
@@ -801,6 +814,9 @@ impl AblationOverrides {
         }
         if self.enable_constrained_tools {
             parts.push("constrained-tools".to_string());
+        }
+        if self.enable_project_memory {
+            parts.push("project-memory".to_string());
         }
         if let Some(n) = self.tool_search_threshold {
             parts.push(format!("tool-search-threshold={n}"));
@@ -1458,6 +1474,23 @@ mod tests {
 
         let baseline = BackendSpec::parse("ollama:llama3.2:1b").unwrap();
         assert!(!baseline.ablation().prompt_tools_active());
+    }
+
+    /// `+ablate:project-memory` — same enabling-key exception as
+    /// `task-list` (docs/project-memory-design.md).
+    #[test]
+    fn project_memory_key_parses_and_displays() {
+        let config = Config::default();
+
+        let arm = BackendSpec::parse("ollama:llama3.2:1b+ablate:project-memory").unwrap();
+        assert!(arm.ablation().enable_project_memory);
+        assert_eq!(
+            arm.display_name(&config),
+            "ollama:llama3.2:1b+ablate:project-memory"
+        );
+
+        let baseline = BackendSpec::parse("ollama:llama3.2:1b").unwrap();
+        assert!(!baseline.ablation().enable_project_memory);
     }
 
     #[test]

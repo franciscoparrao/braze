@@ -121,6 +121,12 @@ impl ModelFamily {
 /// never told about might as well not exist. Description-less entries
 /// are allowlisted but not advertised (see [`crate::ReferenceConfig`]);
 /// callers with no references (braze-bench's sandbox) pass `&[]`.
+/// `project_memory` (docs/project-memory-design.md) is a pre-rendered
+/// cross-session summary — `braze_memory::render_project_memory_section`
+/// already applied its own token budget, this library only formats it
+/// verbatim, same posture as `environment`. `None` (braze-bench always;
+/// braze-cli unless `Config::enable_project_memory`) appends nothing —
+/// off by default, same posture as the typed task list.
 ///
 /// Earlier versions of this shipped a single generic sentence with no
 /// tool-use guidance, no anti-loop rules, and no working directory — the
@@ -141,6 +147,7 @@ pub fn default_system_prompt(
     model_name: Option<&str>,
     references: &[crate::ReferenceConfig],
     environment: Option<&str>,
+    project_memory: Option<&str>,
 ) -> String {
     let family_hint = model_name
         .map(ModelFamily::from_model_name)
@@ -151,6 +158,13 @@ pub fn default_system_prompt(
     let environment_section = match environment {
         Some(snapshot) if !snapshot.trim().is_empty() => {
             format!("\n\nEnvironment:\n{}", snapshot.trim_end())
+        }
+        _ => String::new(),
+    };
+
+    let project_memory_section = match project_memory {
+        Some(section) if !section.trim().is_empty() => {
+            format!("\n\nProject memory (from earlier sessions):\n{}", section.trim_end())
         }
         _ => String::new(),
     };
@@ -194,7 +208,7 @@ pub fn default_system_prompt(
          narrate never actually happens.\n\
          - Relative paths are resolved against the working directory above.\n\
          - Old tool results may appear collapsed to one line to save space — \
-         re-run the tool if you need their full content.{family_hint}{references_section}{environment_section}",
+         re-run the tool if you need their full content.{family_hint}{references_section}{environment_section}{project_memory_section}",
         cwd.display()
     )
 }
@@ -250,14 +264,14 @@ mod tests {
 
     #[test]
     fn default_system_prompt_includes_cwd_and_anti_loop_guidance() {
-        let prompt = default_system_prompt(Path::new("/home/user/project"), None, &[], None);
+        let prompt = default_system_prompt(Path::new("/home/user/project"), None, &[], None, None);
         assert!(prompt.contains("/home/user/project"));
         assert!(prompt.contains("Never call the same tool"));
     }
 
     #[test]
     fn default_system_prompt_tells_the_model_to_act_not_just_narrate() {
-        let prompt = default_system_prompt(Path::new("/home/user/project"), None, &[], None);
+        let prompt = default_system_prompt(Path::new("/home/user/project"), None, &[], None, None);
         assert!(prompt.contains("call the tool for it in the same turn"));
     }
 
@@ -265,35 +279,35 @@ mod tests {
 
     #[test]
     fn no_model_name_gets_no_family_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), None, &[], None);
+        let prompt = default_system_prompt(Path::new("/p"), None, &[], None, None);
         assert!(!prompt.contains("tool_call"));
         assert!(!prompt.contains("<function="));
     }
 
     #[test]
     fn an_unrecognized_model_name_gets_no_family_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("llama3.1"), &[], None);
+        let prompt = default_system_prompt(Path::new("/p"), Some("llama3.1"), &[], None, None);
         assert!(!prompt.contains("tool_call"));
         assert!(!prompt.contains("<function="));
     }
 
     #[test]
     fn a_qwen2_model_gets_the_tagged_json_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"), &[], None);
+        let prompt = default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"), &[], None, None);
         assert!(prompt.contains("<tool_call>"));
         assert!(!prompt.contains("<function="));
     }
 
     #[test]
     fn a_qwen3_coder_model_gets_the_xml_hint_not_the_tagged_one() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("qwen3.5-coder:latest"), &[], None);
+        let prompt = default_system_prompt(Path::new("/p"), Some("qwen3.5-coder:latest"), &[], None, None);
         assert!(prompt.contains("<function="));
         assert!(!prompt.contains("<tool_call>"));
     }
 
     #[test]
     fn model_family_matching_is_case_insensitive() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"), &[], None);
+        let prompt = default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"), &[], None, None);
         assert!(prompt.contains("<tool_call>"));
     }
 
@@ -305,7 +319,7 @@ mod tests {
     /// exactly there.
     #[test]
     fn a_glm_model_gets_the_arg_tag_hint_including_openrouter_style_names() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("z-ai/glm-5.2"), &[], None);
+        let prompt = default_system_prompt(Path::new("/p"), Some("z-ai/glm-5.2"), &[], None, None);
         assert!(prompt.contains("<arg_key>"), "got: {prompt}");
         assert!(prompt.contains("<arg_value>"));
         assert!(!prompt.contains("<tool_call>"));
@@ -318,7 +332,7 @@ mod tests {
     /// nudging the model toward something it was never trained on.
     #[test]
     fn a_gemma_model_gets_no_hint_no_observed_leak_grammar() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("gemma4:e4b"), &[], None);
+        let prompt = default_system_prompt(Path::new("/p"), Some("gemma4:e4b"), &[], None, None);
         assert!(!prompt.contains("<arg_key>"));
         assert!(!prompt.contains("<tool_call>"));
         assert!(!prompt.contains("<function="));
@@ -340,12 +354,12 @@ mod tests {
                 description: None,
             },
         ];
-        let prompt = default_system_prompt(Path::new("/p"), None, &references, None);
+        let prompt = default_system_prompt(Path::new("/p"), None, &references, None, None);
         assert!(prompt.contains("Reference directories"), "got: {prompt}");
         assert!(prompt.contains("/home/user/api-docs: API reference docs"));
         assert!(!prompt.contains("/home/user/scratch"));
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None);
         assert!(!without.contains("Reference directories"));
     }
 
@@ -358,15 +372,42 @@ mod tests {
             None,
             &[],
             Some("- date: 2026-07-10\n- git branch: main"),
+            None,
         );
         assert!(with.contains("Environment:\n- date: 2026-07-10"), "got: {with}");
         assert!(with.contains("- git branch: main"));
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None);
         assert!(!without.contains("Environment:"));
 
-        let blank = default_system_prompt(Path::new("/p"), None, &[], Some("   "));
+        let blank = default_system_prompt(Path::new("/p"), None, &[], Some("   "), None);
         assert!(!blank.contains("Environment:"), "blank snapshot adds nothing");
+    }
+
+    /// `project_memory` mirrors `environment`'s contract exactly: `Some`
+    /// lands verbatim under its own heading, blank/`None` appends
+    /// nothing, and it's independent of whether `environment` is also
+    /// set (docs/project-memory-design.md).
+    #[test]
+    fn a_project_memory_section_is_appended_verbatim_when_provided() {
+        let with = default_system_prompt(
+            Path::new("/p"),
+            None,
+            &[],
+            None,
+            Some("Objective: build the CLI\n- src/main.rs (write_file)"),
+        );
+        assert!(
+            with.contains("Project memory (from earlier sessions):\nObjective: build the CLI"),
+            "got: {with}"
+        );
+        assert!(with.contains("- src/main.rs (write_file)"));
+
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None);
+        assert!(!without.contains("Project memory"));
+
+        let blank = default_system_prompt(Path::new("/p"), None, &[], None, Some("   "));
+        assert!(!blank.contains("Project memory"), "blank section adds nothing");
     }
 
     #[test]
