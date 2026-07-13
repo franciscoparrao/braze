@@ -461,10 +461,19 @@ impl BackendSpec {
                     .model_override
                     .clone()
                     .unwrap_or_else(|| config.ollama_model.clone());
+                // Brazos B/C del A/B de constrained decoding
+                // (docs/constrained-decoding-ab-design.md). Solo el
+                // executor: `build` corre también para las mitades
+                // planner/lead, pero esas son specs propios cuyo
+                // `ablation` es el default vacío — un lead nativo detrás
+                // de un worker prompt-tools queda nativo, que es lo
+                // correcto.
                 let mut backend =
                     OllamaBackend::with_base_url(model, config.ollama_base_url.clone())
                         .with_num_ctx(config.ollama_num_ctx)
-                        .with_temperature(sampling.temperature);
+                        .with_temperature(sampling.temperature)
+                        .with_prompt_tools(self.ablation().enable_prompt_tools)
+                        .with_constrained_tools(self.ablation().enable_constrained_tools);
                 if let Some(seed) = sampling.seed {
                     backend = backend.with_seed(seed);
                 }
@@ -640,6 +649,17 @@ pub struct AblationOverrides {
     /// SLM distractors) — the suffix still means what every suffix
     /// means: "this row diverges from the config default".
     pub enable_task_list: bool,
+    /// `+ablate:prompt-tools` — brazo B del A/B pre-registrado de
+    /// constrained decoding (docs/constrained-decoding-ab-design.md): el
+    /// request Ollama va SIN el campo `tools` (inventario como addendum
+    /// del system prompt + envelope JSON), y el engine parsea el envelope
+    /// de vuelta. Enabling key, same documented exception as
+    /// `enable_task_list`. Ollama-only — `main` warns for other executors.
+    pub enable_prompt_tools: bool,
+    /// `+ablate:constrained-tools` — brazo C: prompt-tools (implied) plus
+    /// Ollama structured outputs (`format` = envelope JSON schema), so
+    /// the decoder cannot emit anything but the envelope.
+    pub enable_constrained_tools: bool,
 }
 
 impl AblationOverrides {
@@ -652,8 +672,8 @@ impl AblationOverrides {
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
-         task-list, best-of-n=N, tactical-window=N, tactical-threshold=N, \
-         full-observations=N, tool-search-threshold=N, \
+         task-list, prompt-tools, constrained-tools, best-of-n=N, tactical-window=N, \
+         tactical-threshold=N, full-observations=N, tool-search-threshold=N, \
          lead-turns=N, lead-threshold=N, lead-window=N";
 
     fn parse(raw: &str) -> Result<Self, BenchError> {
@@ -690,6 +710,8 @@ impl AblationOverrides {
                     out.lead_failure_threshold = Some(Self::parse_usize(key, value)?)
                 }
                 "task-list" => out.enable_task_list = true,
+                "prompt-tools" => out.enable_prompt_tools = true,
+                "constrained-tools" => out.enable_constrained_tools = true,
                 "tool-search-threshold" => {
                     out.tool_search_threshold = Some(Self::parse_usize(key, value)?)
                 }
@@ -718,6 +740,14 @@ impl AblationOverrides {
                 "'+ablate:' key '{key}' value '{value}' must be a non-negative integer"
             ))
         })
+    }
+
+    /// Whether this row runs the Ollama executor in prompt-tools mode at
+    /// all — `constrained-tools` implies `prompt-tools`
+    /// (docs/constrained-decoding-ab-design.md § "Mecanismo mínimo",
+    /// punto 5), so brazo C only needs its own key.
+    pub fn prompt_tools_active(&self) -> bool {
+        self.enable_prompt_tools || self.enable_constrained_tools
     }
 
     /// Renders the active overrides back into `"+ablate:..."` form for
@@ -765,6 +795,12 @@ impl AblationOverrides {
         }
         if self.enable_task_list {
             parts.push("task-list".to_string());
+        }
+        if self.enable_prompt_tools {
+            parts.push("prompt-tools".to_string());
+        }
+        if self.enable_constrained_tools {
+            parts.push("constrained-tools".to_string());
         }
         if let Some(n) = self.tool_search_threshold {
             parts.push(format!("tool-search-threshold={n}"));
@@ -1388,6 +1424,40 @@ mod tests {
     fn a_numeric_ablate_key_missing_its_value_is_a_startup_error() {
         let result = BackendSpec::parse("ollama:qwen2.5:3b+ablate:best-of-n");
         assert!(matches!(result, Err(BenchError::Startup(_))));
+    }
+
+    /// Brazos B/C del A/B de constrained decoding
+    /// (docs/constrained-decoding-ab-design.md): each arm's key parses,
+    /// echoes in the display name (so baseline and ablated rows stay
+    /// distinguishable in the report), and `constrained-tools` implies
+    /// prompt-tools mode without needing both keys.
+    #[test]
+    fn prompt_tools_and_constrained_tools_keys_parse_and_display() {
+        let config = Config::default();
+
+        let b_arm = BackendSpec::parse("ollama:llama3.2:1b+ablate:prompt-tools").unwrap();
+        assert!(b_arm.ablation().enable_prompt_tools);
+        assert!(!b_arm.ablation().enable_constrained_tools);
+        assert!(b_arm.ablation().prompt_tools_active());
+        assert_eq!(
+            b_arm.display_name(&config),
+            "ollama:llama3.2:1b+ablate:prompt-tools"
+        );
+
+        let c_arm = BackendSpec::parse("ollama:llama3.2:1b+ablate:constrained-tools").unwrap();
+        assert!(!c_arm.ablation().enable_prompt_tools);
+        assert!(c_arm.ablation().enable_constrained_tools);
+        assert!(
+            c_arm.ablation().prompt_tools_active(),
+            "constrained-tools must imply prompt-tools mode"
+        );
+        assert_eq!(
+            c_arm.display_name(&config),
+            "ollama:llama3.2:1b+ablate:constrained-tools"
+        );
+
+        let baseline = BackendSpec::parse("ollama:llama3.2:1b").unwrap();
+        assert!(!baseline.ablation().prompt_tools_active());
     }
 
     #[test]

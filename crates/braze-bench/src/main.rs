@@ -194,6 +194,23 @@ async fn run() -> Result<(), BenchError> {
         }
     }
 
+    // Mismo patrón H-13 para los brazos del A/B de constrained decoding
+    // (docs/constrained-decoding-ab-design.md): `prompt-tools`/
+    // `constrained-tools` solo llegan al builder de Ollama — en un
+    // executor Anthropic/OpenRouter la fila correría en modo nativo
+    // mientras su display name promete el envelope, y el engine además
+    // parsearía envelopes que el modelo nunca fue instruido a emitir.
+    for (_, spec) in &specs {
+        if spec.ablation().prompt_tools_active() && !spec.executor_is_ollama() {
+            eprintln!(
+                "braze-bench: advertencia: '+ablate:prompt-tools'/'constrained-tools' solo \
+                 aplican a executors Ollama — '{}' corre con tool-calling nativo y su fila \
+                 NO mide la modalidad prompt que su nombre declara.",
+                spec.display_name(&config)
+            );
+        }
+    }
+
     let mut results: Vec<TaskResult> = Vec::new();
     let task_timeout = Duration::from_secs(cli.task_timeout_secs);
     if cli.repetitions > 1 {

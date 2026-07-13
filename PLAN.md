@@ -2256,6 +2256,163 @@ confirma que si el resumen *también* viene vacío, el turno sigue
 fallando en vez de reportar éxito silencioso. Workspace completo verde,
 clippy limpio, `rustfmt --check` sin diffs.
 
+## Prompt-tools + constrained decoding — mecanismo del A/B pre-registrado (2026-07-12)
+
+Implementación del "mecanismo mínimo" de
+`docs/constrained-decoding-ab-design.md` (origen: revisión de
+`JustVugg/colibri` #48 — el espectro *constrained decoding (capa de
+inferencia) ↔ rescate/reparación (capa de harness)*). Tres piezas, cada
+una gateada y off por default en todos los composition roots:
+
+- **`braze-model`**: `OllamaBackend::with_prompt_tools` /
+  `with_constrained_tools` → `ToolTransport::{Native, Prompt}` en
+  `ollama_wire`. En modo prompt el request va SIN el campo `tools` — el
+  inventario (nombre, summary, input_schema por tool) se renderiza como
+  addendum del system prompt (`render_prompt_tools_addendum`) con las
+  instrucciones del *envelope* (`{"action": "tool_call"|"final_answer",
+  "reasoning"?, ...}` — el campo `reasoning` es la mitigación del format
+  tax, parte del diseño). Con `constrained` (implica prompt), `format` =
+  JSON schema del envelope (`build_envelope_format`, `oneOf` con `enum`
+  de los nombres reales) vía Ollama structured outputs.
+- **`braze-engine`**: `with_envelope_parsing_enabled` — parse del
+  envelope como **canal primario**, ANTES de la escalera de rescate y
+  fuera de su contabilidad (la verificación del mecanismo del A/B es
+  `rescues ≈ 0` en el brazo C; contarlo como rescue la haría
+  insatisfacible por construcción). `tool_call` → despacho con id
+  sintetizado `envelope-{uuid}` y el `reasoning` sobrevive como texto de
+  la ronda; `final_answer` → el `text` interno reemplaza al JSON crudo y
+  SUPRIME la escalera esa ronda (una respuesta declarada final que
+  parece tool call no se re-interpreta). Lo que no parsea cae a la
+  escalera normal — el brazo B mide exactamente "prompt-tools con la red
+  de seguridad actual". Ronda de planner: siempre off, mismo patrón F7.
+- **`braze-bench`**: claves `+ablate:prompt-tools` (brazo B) y
+  `+ablate:constrained-tools` (brazo C); solo el executor las recibe
+  (las mitades planner/lead son specs propios con ablation vacío);
+  warning H-13-style en `main` para executors no-Ollama.
+
+Verificación: 926 tests workspace verdes (15 nuevos: 5 wire, 9 engine,
+1 bench), clippy `-D warnings` limpio, y smoke en vivo contra Nitro
+(suite `smoke.toml`, qwen2.5:3b, seed 7): brazo A nativo intacto
+(`tool_count=6`, 2/2), brazo B con addendum y sin `tools` en el wire,
+brazo C 2/2 con `format` activo — envelope tool_call despachó un
+`read_file` real y el envelope final_answer cerró el turno, con
+`rescues=0` y `schema_fail=0` (la firma del mecanismo). Bonus
+pre-declarado verificado: `gemma3:1b` (HTTP 400 "does not support
+tools" en nativo, 0/2 sin poder correr) CORRE con `constrained-tools`
+(1/2; el fallo restante es semántico del 1b) — la demo de "unlock" de
+modelos que la API nativa excluye. El sweep de 1.045 corridas y su
+veredicto quedan para `docs/sweep-constrained-decoding-2026-07-12.md`.
+
+## Venue decidido y migración de template (2026-07-12)
+
+Venue: **EMSE** (Empirical Software Engineering, Springer) — decidido tras
+`/paper-match` con restricción de IF de JCR (descarta TMLR pese a fit
+fuerte: Scopus/DOAJ pero sin JIF, estructural) y OA por lo bajo híbrido
+(EMSE lo cumple). Análisis completo en
+`~/vault/journals/_matches/2026-07-12_14-20_braze-harness-paper.md`.
+Alternativa anotada si el reframe SE no se justifica en tiempo: JAIR
+(diamond OA, IF 4.0, sin reframe).
+
+`paper/main.tex` migrado del `article` genérico al template oficial de
+Springer, **SVJour3** (NO el `sn-jnl` más nuevo de Springer Nature —
+confirmado 2026-07-12 vía FAQ/submission guidelines de EMSE, que apunta
+explícitamente al "Overleaf SVJour3 General Template"; los `sn-jnl.cls`
+encontrados en otros proyectos del usuario son para journals distintos).
+`svjour3.cls`/`svglov3.clo` descargados del zip oficial de Springer
+(`media.springer.com`, ya no en CTAN); `spbasic.bst` (bibliografía
+autor-año "engineering and computer science" de Springer, la que EMSE
+usa) descargado por separado — CTAN también lo retiró, se tomó de un
+mirror personal verificado (jkitchin/texmf). Los tres archivos quedan
+versionados en `paper/` junto al fuente (licencia LPPL estándar de
+Springer, uso normal en toda la comunidad LaTeX). Cambios en `main.tex`:
+`\documentclass[smallcondensed,natbib]{svjour3}` +
+`\journalname{Empirical Software Engineering}`, `\title`/`\author`/
+`\institute` en la sintaxis de SVJour3, `\keywords` dentro del abstract,
+`\bibliographystyle{spbasic}` (antes `plainnat`). Un `≤` unicode suelto
+en un `\todo{}` (no relacionado con la migración, preexistente) rompía
+`pdflatex`; reemplazado por `$\le$`. Verificado: ciclo completo
+`pdflatex → bibtex → pdflatex ×2` limpio, 7 páginas, cabecera "Empirical
+Software Engineering manuscript No." confirmando el journal correcto.
+
+## Prosa del manuscrito EMSE completa (2026-07-12)
+
+Los 33 TODOs de prosa de `paper/main.tex` (Introduction, Related Work,
+§3 Harness, §4 Setup, §5 Results ×5 subsecciones, Discussion, Threats
+to Validity, Conclusion, Artifact availability, apéndices) escritos y
+verificados contra los `docs/sweep-*.md` citados en cada uno — sin
+inventar números; cifras no verificables en un doc primario (p.ej. la
+transcripción exacta de los 3 casos de fallo de infraestructura) se
+reportaron con el conteo real disponible, no con el placeholder
+original. Quedan **8 TODOs**, todos dependientes de una decisión o
+acción externa: título final, afiliación, email, 2× DOI de Zenodo
+(pendiente `/zenodo`), URL del repo, hash de commit del sweep de
+constrained decoding (pendiente el commit del mecanismo — el sweep
+corrió contra un working tree sucio sobre `df516e3`), y la
+transcripción verbatim de los 2-3 textos de pre-registro con sus
+commits exactos (mecánico, no bloqueante). Ciclo `pdflatex → bibtex →
+pdflatex ×2` limpio en cada paso intermedio, 18 páginas finales, cero
+warnings de bibtex.
+
+Referencias placeholder de `refs.bib` resueltas contra fuentes
+verificadas (WebSearch/WebFetch, no inventadas): `todoSLMsurvey` →
+Lu et al. 2024 (arXiv:2409.15790), `todoReasoningDegrades` → Qi 2026
+(arXiv:2604.02155, "Brief Is Better"), `qwen3coder` → autores completos
+del TR de Qwen3-Coder-Next (arXiv:2603.00729), `corradini2025` → DOI
+10.3390/bdcc9070189 confirmado. Agregada `wang2026openhands` (MLSys
+2026, arXiv:2511.03690) para el párrafo de OpenHands en Related Work.
+
+El sweep de constrained decoding (lanzado en la sesión anterior, ver §
+arriba) terminó mientras se escribía la prosa: **CERRADO, dispara la
+cláusula de iteración pre-registrada** (ni adopta ni rechaza en los
+términos estrictos — llama3.2:1b tiene signo positivo pero CI cruza
+cero y el mecanismo no verifica; gemma4:e2b es negativo). Veredicto
+completo en `docs/sweep-constrained-decoding-2026-07-12.md`; entra al
+paper en §5.5 (Secondary levers and ablations) como negativo
+diagnosticado con iteración identificada y diferida, mismo espíritu que
+el A/B del planner pero sin el segundo tiempo.
+
+## Iteración del A/B constrained decoding: RECHAZADO (2026-07-12)
+
+Continuación de § "Prosa del manuscrito EMSE completa" arriba. El
+usuario pidió priorizar `docs/local-backend-stencil-design.md` (hand-off
+de otra sesión, propone `LocalBackend` in-process + `stencil`, un
+sampler con masking de logits — condicionado explícitamente al
+veredicto del A/B de constrained decoding). El sweep original disparó
+la cláusula de iteración (ni adopta ni rechaza limpio); antes de invertir
+en la infraestructura de `LocalBackend`/`stencil` se corrió la única
+iteración pre-declarada — `oneOf` por tool en `build_envelope_format`
+(`crates/braze-model/src/ollama_wire.rs`) en vez de `arguments:
+{"type":"object"}` genérico — por ser dramáticamente más barata (medio
+día + 1h de Nitro) y probar exactamente la misma hipótesis que
+`stencil` probaría, sin construir nada nuevo.
+
+Resultado: el mecanismo verifica perfecto (`schema_validation_failures`
+99→0 en llama3.2:1b, smoke a n=19 confirmado antes de gastar el sweep
+completo) — pero el pass rate **empeora** en las tres filas re-medidas
+(380 corridas, `docs/sweep-constrained-decoding-iteration-2026-07-12.json`):
+llama3.2:1b −13.7pp, gemma4:e2b −17.9pp, qwen2.5:3b (control) −17.9pp,
+todos con IC Newcombe 95% fuera de cero. Desglose por tarea en
+llama3.2:1b: `glob_basic`/`grep_basic` pasan de 100%→0% — comprometer al
+decoder con el schema exacto de una tool específica produce llamadas
+sintácticamente perfectas pero peor ejecutadas, no mejor. **Veredicto
+final: RECHAZAR, sin ambigüedad.** La capa de harness (rescate textual)
+sigue siendo el tradeoff correcto; tener acceso al decoder no lo cambia,
+ni con schema laxo ni con schema estricto. Detalle completo en
+`docs/sweep-constrained-decoding-2026-07-12.md` § "Iteración".
+
+**Implicación directa**: `docs/local-backend-stencil-design.md` queda
+marcado **DESCARTADO** — la iteración probó la versión MÁS estricta de
+constraint que `stencil` habría implementado (schema real por tool vía
+masking, no solo el sobre), y empeoró el resultado. No se persigue esa
+propuesta sobre esta base; si el eje de capacidad de modelo (offloading
+de MoE, § Hardware de ese documento) se retoma, debe motivarse por sí
+mismo, no por constrained decoding.
+
+Prosa del paper (`paper/main.tex` §5.5 y lista de contribuciones)
+actualizada al veredicto final. Ciclo `pdflatex → bibtex → pdflatex ×2`
+limpio, 18 páginas. 146 tests de `braze-model` verdes (1 test nuevo,
+1 reescrito), workspace completo y clippy limpios. Nada commiteado.
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace

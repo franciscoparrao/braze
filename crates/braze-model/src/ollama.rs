@@ -12,7 +12,8 @@ use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
 use crate::http_error::http_error_to_model_error;
 use crate::ollama_wire::{
-    OllamaSampling, OllamaStreamState, build_request, extract_next_ndjson_line, parse_ndjson_line,
+    OllamaSampling, OllamaStreamState, ToolTransport, build_request, extract_next_ndjson_line,
+    parse_ndjson_line,
 };
 
 const DEFAULT_BASE_URL: &str = "http://localhost:11434";
@@ -52,6 +53,15 @@ pub struct OllamaBackend {
     top_p: Option<f32>,
     top_k: Option<u32>,
     repeat_penalty: Option<f32>,
+    /// Brazos B/C del A/B pre-registrado
+    /// (docs/constrained-decoding-ab-design.md): `prompt_tools` renders
+    /// the inventory as a system-prompt addendum instead of the `tools`
+    /// field; `constrained_tools` additionally forces the envelope's JSON
+    /// schema on the decoder via `format` (and implies `prompt_tools`).
+    /// Both `false` (native tool-calling) in every composition root —
+    /// only `braze-bench`'s `+ablate:` keys set them.
+    prompt_tools: bool,
+    constrained_tools: bool,
 }
 
 impl OllamaBackend {
@@ -67,6 +77,8 @@ impl OllamaBackend {
             top_p: None,
             top_k: None,
             repeat_penalty: None,
+            prompt_tools: false,
+            constrained_tools: false,
         }
     }
 
@@ -83,6 +95,8 @@ impl OllamaBackend {
             top_p: None,
             top_k: None,
             repeat_penalty: None,
+            prompt_tools: false,
+            constrained_tools: false,
         }
     }
 
@@ -130,6 +144,40 @@ impl OllamaBackend {
         self.repeat_penalty = Some(repeat_penalty);
         self
     }
+
+    /// Brazo B del A/B pre-registrado
+    /// (docs/constrained-decoding-ab-design.md): requests advertise tools
+    /// via a system-prompt addendum (envelope instructions + inventory)
+    /// instead of the native `tools` field. The engine's envelope parser
+    /// consumes the reply; whatever doesn't parse falls to the normal
+    /// textual-rescue ladder. Chainable, same shape as
+    /// [`OllamaBackend::with_temperature`].
+    pub fn with_prompt_tools(mut self, enabled: bool) -> Self {
+        self.prompt_tools = enabled;
+        self
+    }
+
+    /// Brazo C: on top of prompt-tools mode (implied), constrains the
+    /// decoder to the envelope's JSON schema via Ollama structured
+    /// outputs (`format`) — syntax becomes impossible to break instead of
+    /// repaired after the fact. Chainable.
+    pub fn with_constrained_tools(mut self, enabled: bool) -> Self {
+        self.constrained_tools = enabled;
+        self
+    }
+
+    /// The [`ToolTransport`] the configured flags resolve to —
+    /// `constrained_tools` implies prompt mode even if
+    /// [`OllamaBackend::with_prompt_tools`] was never called.
+    fn tool_transport(&self) -> ToolTransport {
+        if self.prompt_tools || self.constrained_tools {
+            ToolTransport::Prompt {
+                constrained: self.constrained_tools,
+            }
+        } else {
+            ToolTransport::Native
+        }
+    }
 }
 
 #[async_trait]
@@ -158,9 +206,12 @@ impl ModelBackend for OllamaBackend {
                 top_k: self.top_k,
                 repeat_penalty: self.repeat_penalty,
             },
+            self.tool_transport(),
         );
         tracing::info!(
             tool_count = body.tools.len(),
+            prompt_tools = self.prompt_tools || self.constrained_tools,
+            constrained = self.constrained_tools,
             num_ctx = self.num_ctx,
             num_predict = body.options.num_predict,
             "starting ollama completion turn"

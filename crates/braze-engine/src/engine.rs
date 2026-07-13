@@ -244,6 +244,13 @@ pub struct Engine {
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
     textual_rescue_enabled: bool,
+    /// Parses whole-response JSON *envelopes* (`{"action": "tool_call" |
+    /// "final_answer", ...}`) into tool calls / final text — the return
+    /// channel of `OllamaBackend`'s prompt-tools/constrained modes
+    /// (docs/constrained-decoding-ab-design.md). `false` (the default)
+    /// everywhere except the `+ablate:prompt-tools`/`constrained-tools`
+    /// bench rows — see [`Engine::with_envelope_parsing_enabled`].
+    envelope_parsing_enabled: bool,
     /// Optional planner backend (PLAN.md § "Split planificador/ejecutor"):
     /// a stronger model that produces a one-shot plan before the turn's
     /// first executor round, persisted as [`AgentEvent::PlanCreated`].
@@ -390,6 +397,7 @@ impl Engine {
             skills_max_body_tokens: 1200,
             skills_max_loaded_per_turn: 2,
             textual_rescue_enabled: true,
+            envelope_parsing_enabled: false,
             planner: None,
         }
     }
@@ -514,6 +522,23 @@ impl Engine {
     /// shape as [`Engine::with_context_budget`].
     pub fn with_textual_rescue_enabled(mut self, enabled: bool) -> Self {
         self.textual_rescue_enabled = enabled;
+        self
+    }
+
+    /// Enables (`enabled: true`) whole-response envelope parsing — the
+    /// return channel of the prompt-tools/constrained-decoding A/B
+    /// (docs/constrained-decoding-ab-design.md): a response that is
+    /// entirely `{"action": "tool_call", "name": ..., "arguments": ...}`
+    /// becomes a tool call (its optional `reasoning` stays as the round's
+    /// text), and `{"action": "final_answer", "text": ...}` becomes the
+    /// final text. Deliberately NOT a rung of the rescue ladder and never
+    /// counted as a rescue: in this mode the envelope is the *primary*
+    /// parse channel (the backend instructed the model to emit it), and
+    /// the A/B's mechanism check is precisely `rescues ≈ 0` on the
+    /// constrained arm. What doesn't parse falls through to the normal
+    /// ladder. `false` (the default) is a strict no-op. Chainable.
+    pub fn with_envelope_parsing_enabled(mut self, enabled: bool) -> Self {
+        self.envelope_parsing_enabled = enabled;
         self
     }
 
@@ -729,6 +754,7 @@ impl Engine {
             observer,
             emit_deltas,
             self.textual_rescue_enabled,
+            self.envelope_parsing_enabled,
         )
         .await
     }
@@ -749,6 +775,11 @@ impl Engine {
     /// `attempt_planning_round` even looks at `outcome.tool_calls`
     /// (already ignored there), silently deleting the very steps that
     /// named a tool from the persisted `PlanCreated` plan.
+    ///
+    /// `envelope_enabled` is threaded the same way (planner round: always
+    /// `false`) — a plan that happens to be a whole-response JSON object
+    /// must stay plan text, and the planner backend is never in
+    /// prompt-tools mode anyway.
     async fn complete_once_with(
         &self,
         model: &dyn ModelBackend,
@@ -756,6 +787,7 @@ impl Engine {
         observer: &mut dyn TurnObserver,
         emit_deltas: bool,
         rescue_enabled: bool,
+        envelope_enabled: bool,
     ) -> Result<RoundOutcome, EngineError> {
         let mut stream = model.complete(req).await?;
 
@@ -879,8 +911,39 @@ impl Engine {
         // `run_turn` can persist `AgentEvent::TextualRescueApplied` — the
         // action already existed (the `tracing::info!` calls below), this
         // just gives it a counted, bench-readable trail too.
+        // Envelope parsing (docs/constrained-decoding-ab-design.md) runs
+        // BEFORE the rescue ladder and outside its accounting: in
+        // prompt-tools mode the envelope is the instructed, primary
+        // format — treating it as a rescue would make the A/B's own
+        // mechanism check (`rescues ≈ 0` on the constrained arm)
+        // unsatisfiable by construction. A parsed `final_answer` also
+        // suppresses the ladder below: the model explicitly declared the
+        // text final, and a JSON-looking final answer must not be
+        // re-interpreted as a tool call.
+        let mut envelope_handled = false;
+        if envelope_enabled
+            && tool_calls.is_empty()
+            && let Some(envelope) = parse_envelope_response(&text_buffer)
+        {
+            envelope_handled = true;
+            match envelope {
+                EnvelopeResponse::ToolCall { call, reasoning } => {
+                    tracing::info!(
+                        tool = %call.name,
+                        "parsed a prompt-tools envelope tool call"
+                    );
+                    tool_calls.push(call);
+                    text_buffer = reasoning.unwrap_or_default();
+                }
+                EnvelopeResponse::FinalAnswer { text } => {
+                    tracing::info!("parsed a prompt-tools envelope final answer");
+                    text_buffer = text;
+                }
+            }
+        }
+
         let mut rescue_applied: Option<String> = None;
-        if rescue_enabled && tool_calls.is_empty() {
+        if rescue_enabled && !envelope_handled && tool_calls.is_empty() {
             type TextualExtractor = fn(&str) -> (Vec<ToolCall>, String);
             const RESCUE_LADDER: &[(TextualExtractor, &str)] = &[
                 (
@@ -1788,7 +1851,7 @@ impl Engine {
         // extracted and discarded by the textual rescue before this
         // function even sees it.
         let outcome = match self
-            .complete_once_with(planner.as_ref(), req, observer, false, false)
+            .complete_once_with(planner.as_ref(), req, observer, false, false, false)
             .await
         {
             Ok(outcome) => outcome,
@@ -3018,6 +3081,67 @@ fn candidate_signature(outcome: &RoundOutcome) -> Vec<(String, String)> {
 /// [`extract_tagged_tool_calls`].
 fn try_parse_textual_tool_call(text: &str) -> Option<ToolCall> {
     parse_tool_call_json(trim_json_fences(text))
+}
+
+/// A parsed prompt-tools *envelope* — the response format
+/// `OllamaBackend`'s prompt-tools/constrained modes instruct the model to
+/// emit (docs/constrained-decoding-ab-design.md § "Mecanismo mínimo"):
+/// one JSON object that is either a tool call or the final answer, with
+/// an optional in-schema `reasoning` field as the model's thinking space.
+enum EnvelopeResponse {
+    ToolCall {
+        call: ToolCall,
+        /// Preserved as the round's text (the model narrating before a
+        /// call is the normal shape of a native round too).
+        reasoning: Option<String>,
+    },
+    FinalAnswer {
+        /// Replaces the raw envelope JSON as the round's text — the
+        /// `reasoning` field is deliberately dropped here: it was the
+        /// model's scratchpad, and the declared answer is `text`.
+        text: String,
+    },
+}
+
+/// Parses a whole response (modulo ```json fences) as an envelope.
+/// `None` for anything else — prose, non-envelope JSON (which must stay
+/// eligible for the rescue ladder), an unknown `action`, or an envelope
+/// with the wrong field types. Lenient in exactly one place: a
+/// `tool_call` without `arguments` gets `{}` — the unconstrained (B)
+/// arm's models omit it for no-arg tools often enough that rejecting it
+/// would measure strictness, not modality. The synthesized id mirrors the
+/// rescue ladder's (unique within the session log; no backend id ever
+/// existed), with its own prefix so a transcript reader can tell the
+/// channels apart.
+fn parse_envelope_response(text: &str) -> Option<EnvelopeResponse> {
+    let value: serde_json::Value = serde_json::from_str(trim_json_fences(text)).ok()?;
+    let reasoning = value
+        .get("reasoning")
+        .and_then(serde_json::Value::as_str)
+        .filter(|reasoning| !reasoning.trim().is_empty())
+        .map(str::to_string);
+    match value.get("action")?.as_str()? {
+        "tool_call" => {
+            let name = value.get("name")?.as_str()?.to_string();
+            let arguments = match value.get("arguments") {
+                Some(arguments) if arguments.is_object() => arguments.clone(),
+                Some(_) => return None,
+                None => serde_json::json!({}),
+            };
+            Some(EnvelopeResponse::ToolCall {
+                call: ToolCall {
+                    id: format!("envelope-{}", uuid::Uuid::new_v4()),
+                    name,
+                    arguments,
+                },
+                reasoning,
+            })
+        }
+        "final_answer" => Some(EnvelopeResponse::FinalAnswer {
+            text: value.get("text")?.as_str()?.to_string(),
+        }),
+        _ => None,
+    }
 }
 
 /// Strips an optional ```json / ``` fence (and surrounding whitespace)
@@ -10193,6 +10317,278 @@ mod tests {
                 AgentEvent::TextualRescueApplied { parser } if parser.contains("Qwen/Hermes")
             )),
             "a rescued <tool_call> block must persist TextualRescueApplied naming that rung"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- Envelope parsing (A/B constrained decoding,
+    //     docs/constrained-decoding-ab-design.md) ---
+
+    #[test]
+    fn parse_envelope_response_extracts_a_tool_call_with_its_reasoning() {
+        let text = r#"{"action": "tool_call", "reasoning": "need the file",
+                       "name": "read_file", "arguments": {"path": "x.txt"}}"#;
+        match parse_envelope_response(text) {
+            Some(EnvelopeResponse::ToolCall { call, reasoning }) => {
+                assert_eq!(call.name, "read_file");
+                assert_eq!(call.arguments, serde_json::json!({"path": "x.txt"}));
+                assert!(call.id.starts_with("envelope-"));
+                assert_eq!(reasoning.as_deref(), Some("need the file"));
+            }
+            other => panic!("expected a tool call, got {}", envelope_kind(&other)),
+        }
+    }
+
+    #[test]
+    fn parse_envelope_response_defaults_missing_arguments_to_an_empty_object() {
+        let text = r#"{"action": "tool_call", "name": "list_dir"}"#;
+        match parse_envelope_response(text) {
+            Some(EnvelopeResponse::ToolCall { call, reasoning }) => {
+                assert_eq!(call.arguments, serde_json::json!({}));
+                assert_eq!(reasoning, None);
+            }
+            other => panic!("expected a tool call, got {}", envelope_kind(&other)),
+        }
+    }
+
+    #[test]
+    fn parse_envelope_response_rejects_non_object_arguments() {
+        let text = r#"{"action": "tool_call", "name": "read_file", "arguments": "x.txt"}"#;
+        assert!(parse_envelope_response(text).is_none());
+    }
+
+    #[test]
+    fn parse_envelope_response_extracts_a_final_answer_and_drops_reasoning() {
+        let text = r#"{"action": "final_answer", "reasoning": "done thinking", "text": "42"}"#;
+        match parse_envelope_response(text) {
+            Some(EnvelopeResponse::FinalAnswer { text }) => assert_eq!(text, "42"),
+            other => panic!("expected a final answer, got {}", envelope_kind(&other)),
+        }
+    }
+
+    #[test]
+    fn parse_envelope_response_accepts_a_json_fenced_envelope() {
+        let text = "```json\n{\"action\": \"final_answer\", \"text\": \"42\"}\n```";
+        assert!(matches!(
+            parse_envelope_response(text),
+            Some(EnvelopeResponse::FinalAnswer { .. })
+        ));
+    }
+
+    /// Non-envelope shapes must fall through untouched so the rescue
+    /// ladder stays the owner of every other textual format: bare
+    /// rescue-shape JSON (no `action`), an unknown action, and prose.
+    #[test]
+    fn parse_envelope_response_ignores_non_envelope_shapes() {
+        assert!(
+            parse_envelope_response(r#"{"name": "read_file", "arguments": {"path": "x"}}"#)
+                .is_none()
+        );
+        assert!(
+            parse_envelope_response(r#"{"action": "run", "name": "x", "arguments": {}}"#)
+                .is_none()
+        );
+        assert!(parse_envelope_response("I read the file and it says 42.").is_none());
+        assert!(parse_envelope_response(r#"{"action": "final_answer"}"#).is_none());
+    }
+
+    fn envelope_kind(envelope: &Option<EnvelopeResponse>) -> &'static str {
+        match envelope {
+            Some(EnvelopeResponse::ToolCall { .. }) => "a tool call",
+            Some(EnvelopeResponse::FinalAnswer { .. }) => "a final answer",
+            None => "none",
+        }
+    }
+
+    /// The envelope is the *primary* parse channel of prompt-tools mode,
+    /// not a rescue: the call must dispatch, the `reasoning` must survive
+    /// as the round's text, and — the A/B's mechanism check depends on
+    /// this — NO `TextualRescueApplied` may be persisted for it.
+    #[tokio::test]
+    async fn an_envelope_tool_call_dispatches_without_counting_as_a_rescue() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta(
+                    r#"{"action": "tool_call", "reasoning": "I will echo hi",
+                       "name": "echo", "arguments": {"text": "hi"}}"#
+                        .to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta(
+                    r#"{"action": "final_answer", "text": "done"}"#.to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_envelope_parsing_enabled(true);
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallCompleted { result, .. } if result.content == "echoed: hi")),
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text == "I will echo hi"
+            )),
+            "the envelope's reasoning must survive as the round's text"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text == "done"
+            )),
+            "the final_answer's inner text must be the turn's final text"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("\"action\"")
+            )),
+            "the raw envelope JSON must never be persisted as conversational text"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextualRescueApplied { .. })),
+            "an envelope parse must NOT count as a textual rescue — the \
+             A/B's mechanism check is `rescues ≈ 0` on the constrained arm"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A `final_answer` envelope whose inner text happens to look like a
+    /// bare-JSON tool call must stay text: the model explicitly declared
+    /// it final, so the rescue ladder is suppressed for that round.
+    #[tokio::test]
+    async fn an_envelope_final_answer_is_never_reinterpreted_by_the_rescue_ladder() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let inner = r#"{\"name\": \"echo\", \"arguments\": {\"text\": \"hi\"}}"#;
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta(format!(
+                r#"{{"action": "final_answer", "text": "{inner}"}}"#
+            )),
+            CompletionEvent::Done,
+        ]]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_envelope_parsing_enabled(true);
+
+        engine
+            .run_turn(&session, "show me the JSON for an echo call", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            0,
+            "a declared-final answer must not be dispatched as a tool call"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("\"name\"")
+            )),
+            "the inner text must be persisted verbatim as the answer"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Default-off is a strict no-op: without
+    /// `with_envelope_parsing_enabled(true)` an envelope-shaped response
+    /// takes the pre-existing path — the bare-JSON rescue fires on its
+    /// `name`/`arguments` fields and counts as a rescue, exactly as it
+    /// did before this lever existed.
+    #[tokio::test]
+    async fn envelope_parsing_disabled_leaves_the_pre_existing_rescue_path_intact() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta(
+                    r#"{"action": "tool_call", "name": "echo", "arguments": {"text": "hi"}}"#
+                        .to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextualRescueApplied { .. })),
+            "with the lever off, the bare-JSON rescue owns this shape and must count as a rescue"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

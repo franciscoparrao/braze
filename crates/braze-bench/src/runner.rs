@@ -251,6 +251,13 @@ pub async fn run_task(
     // C′.2: la fila puede prender la task list aunque config la tenga
     // off (default) — el brazo planner→tasks del A/B pre-registrado.
     .with_task_list_enabled(config.enable_task_list || ablation.enable_task_list)
+    // A/B constrained decoding (docs/constrained-decoding-ab-design.md):
+    // el canal de vuelta de los brazos `+ablate:prompt-tools`/
+    // `constrained-tools` — el envelope se parsea como canal primario
+    // (NO cuenta como rescue; la verificación del mecanismo es
+    // `rescues ≈ 0` en el brazo C). Off por default, igual que en todos
+    // los composition roots de producción.
+    .with_envelope_parsing_enabled(ablation.prompt_tools_active())
     // B′ (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte
     // II): audit-only — logs the prompt-budget breakdown per request
     // under `RUST_LOG=braze_engine=info`, the same channel the other

@@ -1,7 +1,22 @@
 # Diseño pre-registrado: A/B de constrained decoding vs escalera de rescate
 
 Fecha: 2026-07-12
-Estado: **DISEÑO — nada implementado.** Sigue la disciplina de pre-registro
+Estado: **CERRADO — RECHAZADO, con su única iteración corrida y
+también negativa.** Mecanismo implementado tal como pre-registrado
+(PLAN.md § "Prompt-tools + constrained decoding": 926 tests, smoke con
+la firma `rescues=0` en C). Sweep original de 1.045 corridas disparó la
+cláusula de iteración (ni adoptaba ni rechazaba en los términos
+estrictos). La iteración pre-declarada (`oneOf` por tool con el schema
+real en vez de `arguments` genérico) se implementó y corrió: 380
+corridas más, mecanismo verificado limpio (`schema_fail` 99→0 en
+llama3.2:1b), **pero el pass rate empeoró en las tres filas** (−13.7pp
+a −41.1pp según la comparación, todos los ICs Newcombe fuera de cero).
+Veredicto final: RECHAZAR sin ambigüedad — la capa de harness sigue
+siendo el tradeoff correcto, tener acceso al decoder no lo cambia.
+Detalle completo (dos tablas, mecanismo, lectura por tarea) en
+`docs/sweep-constrained-decoding-2026-07-12.md`. Ninguna regla de este
+documento se modificó después de correr ningún sweep. Sigue la
+disciplina de pre-registro
 del planner (PLAN.md § split) y del explorador
 (`docs/explorador-aislado-ab-design.md`): el criterio se escribe ANTES del
 sweep. Origen: la revisión de `JustVugg/colibri` (grammar-forced speculative

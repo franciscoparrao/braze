@@ -29,6 +29,36 @@ pub(crate) struct OllamaRequest {
     pub tools: Vec<OllamaTool>,
     pub stream: bool,
     pub options: OllamaOptions,
+    /// Ollama structured outputs: a JSON schema the decoder is
+    /// constrained to satisfy. Only set in
+    /// [`ToolTransport::Prompt`]`{ constrained: true }` mode (brazo C del
+    /// A/B pre-registrado, docs/constrained-decoding-ab-design.md) —
+    /// `None` omits the field entirely, leaving decoding unconstrained.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<Value>,
+}
+
+/// How the request advertises tools to the model
+/// (docs/constrained-decoding-ab-design.md § "Mecanismo mínimo"):
+///
+/// - [`ToolTransport::Native`] (the default everywhere): the `tools`
+///   field of `/api/chat`, Ollama's own tool-calling template.
+/// - [`ToolTransport::Prompt`]: NO `tools` field — the inventory is
+///   rendered into a system-prompt addendum
+///   ([`render_prompt_tools_addendum`]) instructing the model to answer
+///   with the JSON *envelope* (`{"action": "tool_call"|"final_answer",
+///   ...}`) that `braze-engine`'s envelope parser consumes. With
+///   `constrained: true`, `format` additionally carries the envelope's
+///   JSON schema ([`build_envelope_format`]) so the decoder *cannot*
+///   emit anything else — the syntactic-failure-prevention lever the A/B
+///   measures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ToolTransport {
+    #[default]
+    Native,
+    Prompt {
+        constrained: bool,
+    },
 }
 
 /// Without an explicit `num_ctx`, Ollama falls back to its Modelfile
@@ -128,13 +158,29 @@ pub(crate) fn build_request(
     model: &str,
     num_ctx: u32,
     sampling: OllamaSampling,
+    transport: ToolTransport,
 ) -> OllamaRequest {
     let mut messages = Vec::new();
 
-    if !req.system_prompt.is_empty() {
+    // Prompt mode moves the tool inventory from the `tools` field into a
+    // system-prompt addendum — appended AFTER the caller's own system
+    // prompt so everything else about the request is held constant
+    // between the A (native) and B/C (prompt) arms by construction.
+    let system_content = match transport {
+        ToolTransport::Native => req.system_prompt.clone(),
+        ToolTransport::Prompt { .. } => {
+            let addendum = render_prompt_tools_addendum(&req.tool_stubs);
+            if req.system_prompt.is_empty() {
+                addendum
+            } else {
+                format!("{}\n\n{addendum}", req.system_prompt)
+            }
+        }
+    };
+    if !system_content.is_empty() {
         messages.push(OllamaMessage {
             role: "system",
-            content: req.system_prompt.clone(),
+            content: system_content,
             tool_calls: Vec::new(),
         });
     }
@@ -143,10 +189,19 @@ pub(crate) fn build_request(
         messages.extend(to_ollama_messages(message));
     }
 
+    let (tools, format) = match transport {
+        ToolTransport::Native => (build_tools(&req.tool_stubs), None),
+        ToolTransport::Prompt { constrained: false } => (Vec::new(), None),
+        ToolTransport::Prompt { constrained: true } => {
+            (Vec::new(), Some(build_envelope_format(&req.tool_stubs)))
+        }
+    };
+
     OllamaRequest {
         model: model.to_string(),
         messages,
-        tools: build_tools(&req.tool_stubs),
+        tools,
+        format,
         stream: true,
         options: OllamaOptions {
             num_ctx,
@@ -266,6 +321,95 @@ fn build_tools(stubs: &[ToolStub]) -> Vec<OllamaTool> {
             },
         })
         .collect()
+}
+
+/// The system-prompt addendum [`ToolTransport::Prompt`] mode replaces the
+/// `tools` field with: envelope instructions plus the full inventory
+/// (name, summary, input schema per tool) — the counterpart of
+/// `braze-engine`'s envelope parser, which consumes exactly the two
+/// shapes described here. The `reasoning` field is part of the design,
+/// not an afterthought: the format-tax literature's #1 failure mode for
+/// constrained decoding is removing the model's thinking space, and an
+/// in-schema field is the minimal mitigation
+/// (docs/constrained-decoding-ab-design.md § "Mecanismo mínimo", punto 2).
+pub(crate) fn render_prompt_tools_addendum(stubs: &[ToolStub]) -> String {
+    let mut out = String::from(
+        "## Tool calling\n\
+         \n\
+         Native tool-calling is disabled. To act, reply with a SINGLE JSON object and \
+         nothing else — no prose before or after it. Two forms are accepted:\n\
+         \n\
+         To call a tool (one call per reply; you will receive its result and reply again):\n\
+         {\"action\": \"tool_call\", \"reasoning\": \"<optional: think here>\", \
+         \"name\": \"<tool name>\", \"arguments\": { ... }}\n\
+         \n\
+         To give your final answer when the task is done:\n\
+         {\"action\": \"final_answer\", \"reasoning\": \"<optional: think here>\", \
+         \"text\": \"<your answer>\"}\n\
+         \n\
+         \"arguments\" must satisfy the tool's input schema. Available tools:\n",
+    );
+    for stub in stubs {
+        let schema = stub
+            .input_schema
+            .clone()
+            .unwrap_or_else(permissive_fallback_schema);
+        out.push_str(&format!(
+            "\n### {}\n{}\nInput schema: {}\n",
+            stub.name, stub.summary, schema
+        ));
+    }
+    out
+}
+
+/// The envelope's JSON schema for Ollama structured outputs (`format`) —
+/// the ITERATED version (docs/sweep-constrained-decoding-2026-07-12.md §
+/// "Iteración"): the baseline's generic `arguments: {"type": "object"}`
+/// let a model satisfy the envelope's own syntax while still filling
+/// `arguments` with a shape that fails the *tool's* real schema — exactly
+/// the `schema_validation_failures` spike the baseline sweep measured in
+/// its constrained arm (99/95 on llama3.2:1b) despite `rescues ≈ 0`. This
+/// version replaces the single generic `tool_call` variant with one
+/// `oneOf` branch **per tool**, each pinning `name` to that tool via
+/// `const` and `arguments` to that tool's real `input_schema` — the
+/// decoder can no longer emit a syntactically-valid envelope whose
+/// arguments don't match the tool it names. A tool without a resolved
+/// schema falls back to the same permissive placeholder
+/// [`render_prompt_tools_addendum`] uses. The `final_answer` branch is
+/// unchanged. Note this makes the schema's size proportional to the
+/// tool count — the design's own risk note flags this as a concern only
+/// at MCP-gateway scale (irrelevant here: this A/B runs with `noise_tools`
+/// at 0, ~8 local tools).
+pub(crate) fn build_envelope_format(stubs: &[ToolStub]) -> Value {
+    let mut variants: Vec<Value> = stubs
+        .iter()
+        .map(|stub| {
+            let schema = stub
+                .input_schema
+                .clone()
+                .unwrap_or_else(permissive_fallback_schema);
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": {"const": "tool_call"},
+                    "reasoning": {"type": "string"},
+                    "name": {"const": stub.name},
+                    "arguments": schema
+                },
+                "required": ["action", "name", "arguments"]
+            })
+        })
+        .collect();
+    variants.push(serde_json::json!({
+        "type": "object",
+        "properties": {
+            "action": {"const": "final_answer"},
+            "reasoning": {"type": "string"},
+            "text": {"type": "string"}
+        },
+        "required": ["action", "text"]
+    }));
+    serde_json::json!({ "oneOf": variants })
 }
 
 // ---------------------------------------------------------------------
@@ -484,6 +628,7 @@ mod tests {
                 top_k: Some(20),
                 repeat_penalty: Some(1.05),
             },
+            ToolTransport::Native,
         );
         let json = serde_json::to_value(wire.options).unwrap();
         assert_eq!(json["temperature"], 0.699999988079071); // f32 0.7
@@ -491,7 +636,7 @@ mod tests {
         assert_eq!(json["top_k"], 20);
         assert_eq!(json["repeat_penalty"], 1.0499999523162842); // f32 1.05
 
-        let wire = build_request(&req, "qwen2.5:3b", 8192, sampling_02(None));
+        let wire = build_request(&req, "qwen2.5:3b", 8192, sampling_02(None), ToolTransport::Native);
         let json = serde_json::to_value(wire.options).unwrap();
         assert!(json.get("top_p").is_none());
         assert!(json.get("top_k").is_none());
@@ -507,7 +652,7 @@ mod tests {
             system_prompt: "be terse".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "llama3", 8192, sampling_02(None));
+        let wire = build_request(&req, "llama3", 8192, sampling_02(None), ToolTransport::Native);
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
         assert_eq!(wire.messages[0].content, "be terse");
@@ -528,7 +673,7 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: u32::MAX,
         };
-        let wire = build_request(&req, "llama3", 8192, sampling_02(None));
+        let wire = build_request(&req, "llama3", 8192, sampling_02(None), ToolTransport::Native);
         assert_eq!(wire.options.num_predict, i32::MAX);
     }
 
@@ -543,7 +688,7 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "llama3", 8192, sampling_02(Some(42)));
+        let wire = build_request(&req, "llama3", 8192, sampling_02(Some(42)), ToolTransport::Native);
         assert_eq!(wire.options.seed, Some(42));
     }
 
@@ -582,6 +727,201 @@ mod tests {
         let tools = build_tools(&stubs);
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].function.parameters, real_schema);
+    }
+
+    // --- ToolTransport::Prompt (A/B constrained decoding,
+    //     docs/constrained-decoding-ab-design.md) ---
+
+    fn stub(name: &str) -> ToolStub {
+        ToolStub {
+            name: name.to_string(),
+            summary: format!("does {name}"),
+            source: "local".to_string(),
+            input_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+            })),
+        }
+    }
+
+    fn prompt_mode_request() -> CompletionRequest {
+        CompletionRequest {
+            messages: vec![Message::text(Role::User, "hi")],
+            tool_stubs: vec![stub("read_file"), stub("write_file")],
+            system_prompt: "be terse".to_string(),
+            max_tokens: 100,
+        }
+    }
+
+    /// Brazo B: no `tools` field on the wire, the inventory travels as a
+    /// system-prompt addendum instead, and decoding stays unconstrained
+    /// (`format` absent).
+    #[test]
+    fn prompt_transport_moves_tools_into_the_system_prompt_addendum() {
+        let wire = build_request(
+            &prompt_mode_request(),
+            "llama3.2:1b",
+            8192,
+            sampling_02(None),
+            ToolTransport::Prompt { constrained: false },
+        );
+
+        assert!(wire.tools.is_empty());
+        assert!(wire.format.is_none());
+        let json = serde_json::to_value(&wire).unwrap();
+        assert!(json.get("tools").is_none(), "empty tools must serialize to no field");
+        assert!(json.get("format").is_none());
+
+        assert_eq!(wire.messages[0].role, "system");
+        let system = &wire.messages[0].content;
+        assert!(system.starts_with("be terse"), "caller's prompt must come first");
+        assert!(system.contains("### read_file"));
+        assert!(system.contains("### write_file"));
+        assert!(system.contains("\"action\": \"tool_call\""));
+        assert!(system.contains("\"action\": \"final_answer\""));
+        // Each tool's real input schema must reach the addendum — the
+        // model has no other source for argument shapes in this mode.
+        assert!(system.contains("\"required\":[\"path\"]"));
+    }
+
+    /// Brazo C: same addendum as B, plus `format` carrying the envelope
+    /// schema — one `oneOf` variant per tool (the iteration,
+    /// docs/sweep-constrained-decoding-2026-07-12.md § "Iteración") plus
+    /// the `final_answer` variant.
+    #[test]
+    fn constrained_transport_adds_a_per_tool_envelope_format_schema() {
+        let wire = build_request(
+            &prompt_mode_request(),
+            "llama3.2:1b",
+            8192,
+            sampling_02(None),
+            ToolTransport::Prompt { constrained: true },
+        );
+
+        assert!(wire.tools.is_empty());
+        let format = wire.format.expect("constrained mode must set format");
+        let variants = format["oneOf"].as_array().expect("oneOf must be an array");
+        // 2 tools + final_answer.
+        assert_eq!(variants.len(), 3);
+
+        let read_file = variants
+            .iter()
+            .find(|v| v["properties"]["name"]["const"] == "read_file")
+            .expect("a read_file variant must exist");
+        assert_eq!(read_file["properties"]["action"]["const"], "tool_call");
+        // The tool's REAL input_schema must gate `arguments` — the fix
+        // for the baseline's schema_validation_failures spike (the
+        // generic {"type":"object"} let malformed args pass).
+        assert_eq!(
+            read_file["properties"]["arguments"],
+            serde_json::json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+            })
+        );
+
+        let write_file = variants
+            .iter()
+            .find(|v| v["properties"]["name"]["const"] == "write_file")
+            .expect("a write_file variant must exist");
+        assert_eq!(
+            write_file["properties"]["arguments"]["required"],
+            serde_json::json!(["path"])
+        );
+
+        let final_answer = variants
+            .iter()
+            .find(|v| v["properties"]["action"]["const"] == "final_answer")
+            .expect("a final_answer variant must exist");
+        assert!(final_answer["properties"].get("name").is_none());
+
+        // Both tool-call and final-answer variants must still let the
+        // model think in-schema — the format-tax mitigation is part of
+        // the design, unaffected by this iteration.
+        assert_eq!(
+            read_file["properties"]["reasoning"]["type"],
+            serde_json::json!("string")
+        );
+        assert_eq!(
+            final_answer["properties"]["reasoning"]["type"],
+            serde_json::json!("string")
+        );
+    }
+
+    /// A tool without a resolved schema falls back to the same permissive
+    /// placeholder the prompt-tools addendum uses, mirroring
+    /// `addendum_uses_permissive_schema_for_schemaless_stubs` — the
+    /// iteration must not panic or silently omit a schemaless tool's
+    /// variant.
+    #[test]
+    fn constrained_format_falls_back_to_permissive_schema_for_schemaless_stubs() {
+        let stubs = vec![ToolStub {
+            name: "mcp_tool".to_string(),
+            summary: "an MCP tool".to_string(),
+            source: "mcp:x".to_string(),
+            input_schema: None,
+        }];
+        let format = build_envelope_format(&stubs);
+        let variants = format["oneOf"].as_array().unwrap();
+        let mcp_variant = variants
+            .iter()
+            .find(|v| v["properties"]["name"]["const"] == "mcp_tool")
+            .expect("a variant for the schemaless tool must exist");
+        assert_eq!(
+            mcp_variant["properties"]["arguments"],
+            serde_json::json!({"type": "object", "additionalProperties": true})
+        );
+    }
+
+    /// Prompt mode with an empty caller system prompt still gets the
+    /// addendum as the system message — the envelope instructions are
+    /// the model's only way to act in this mode.
+    #[test]
+    fn prompt_transport_with_empty_system_prompt_still_sends_the_addendum() {
+        let mut req = prompt_mode_request();
+        req.system_prompt = String::new();
+        let wire = build_request(
+            &req,
+            "llama3.2:1b",
+            8192,
+            sampling_02(None),
+            ToolTransport::Prompt { constrained: false },
+        );
+        assert_eq!(wire.messages[0].role, "system");
+        assert!(wire.messages[0].content.starts_with("## Tool calling"));
+    }
+
+    /// Native transport is byte-for-byte what it was before the A/B
+    /// levers existed: tools on the wire, no addendum, no format.
+    #[test]
+    fn native_transport_is_unchanged_by_the_new_levers() {
+        let wire = build_request(
+            &prompt_mode_request(),
+            "llama3.2:1b",
+            8192,
+            sampling_02(None),
+            ToolTransport::Native,
+        );
+        assert_eq!(wire.tools.len(), 2);
+        assert!(wire.format.is_none());
+        assert_eq!(wire.messages[0].content, "be terse");
+    }
+
+    /// A stub without a schema falls back to the permissive placeholder
+    /// in the addendum, mirroring `build_tools`' two-tier policy.
+    #[test]
+    fn addendum_uses_permissive_schema_for_schemaless_stubs() {
+        let stubs = vec![ToolStub {
+            name: "mcp_tool".to_string(),
+            summary: "an MCP tool".to_string(),
+            source: "mcp:x".to_string(),
+            input_schema: None,
+        }];
+        let addendum = render_prompt_tools_addendum(&stubs);
+        assert!(addendum.contains("### mcp_tool"));
+        assert!(addendum.contains("\"additionalProperties\":true"));
     }
 
     #[test]
