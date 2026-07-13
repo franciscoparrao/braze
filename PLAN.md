@@ -2413,6 +2413,58 @@ actualizada al veredicto final. Ciclo `pdflatex → bibtex → pdflatex ×2`
 limpio, 18 páginas. 146 tests de `braze-model` verdes (1 test nuevo,
 1 reescrito), workspace completo y clippy limpios. Nada commiteado.
 
+## `LocalBackend`/`stencil`: veredicto partido, capacidad sobrevive (2026-07-13)
+
+Continuación de § "Iteración del A/B constrained decoding: RECHAZADO"
+arriba. El usuario aportó el contexto exacto para desacoplar las dos
+mitades de `docs/local-backend-stencil-design.md`: el A/B mató
+`stencil` (constrained decoding in-process), pero **no** mata el eje de
+capacidad de modelo (§ Hardware de ese doc, offloading de MoE) — son
+preguntas independientes, y el resultado del A/B (controlar el decoder
+no ayuda a los débiles) si acaso refuerza que la palanca que queda es
+un modelo más capaz, no el constraint.
+
+Decisión tomada (opción "solo backlog, decidir con datos" de un menú de
+3): **no comprometer `LocalBackend` ni la compra de RAM todavía.** Antes
+de eso, reviso qué del prerrequisito de `braze-bench` (¿un modelo que ya
+cabe en Nitro supera a `qwen3.5-coder`?) ya estaba respondido por
+sweeps previos: `qwen2.5:7b` **ya perdió** esa comparación en
+`docs/sweep-curva-multiescala-2026-07-10.md` (80% vs 98% baseline,
+−18pp, no cierra ni con `+lead`) — descalificado sin gastar sweep nuevo.
+`gpt-oss:20b` sigue siendo la única pregunta abierta real (no instalado
+en Nitro); `gemma4:12b` (sí instalado, nunca probado en este suite)
+queda como candidato bonus gratis.
+
+`docs/local-backend-stencil-design.md` reescrito con veredicto partido
+explícito: `stencil` DESCARTADO (histórico, no ejecutar); `LocalBackend`
+por capacidad DESACOPLADO y vivo, gateado al mismo prerrequisito sin
+correr. El "Prompt para retomar" del final del doc se reescribió para
+no proponer `stencil` en una sesión futura por accidente.
+
+## `gpt-oss:20b` gana el prerrequisito de hardware — LocalBackend cerrado (2026-07-13)
+
+Continuación inmediata de § anterior. El usuario pidió correr el
+prerrequisito. `ollama pull gpt-oss:20b` en Nitro (no estaba instalado)
++ sweep de 285 corridas (`gpt-oss:20b`/`gemma4:12b`/`qwen3.5-coder`
+como ancla en el MISMO sweep, `docs/sweep-capacity-hardware-2026-07-13.md`),
+lanzado desacoplado del harness (patrón setsid/nohup ya establecido).
+Resultado: **`gpt-oss:20b` limpia la barra en las dos dimensiones**
+— 98.9% pass rate (+6.3pp sobre `qwen3.5-coder`, IC Newcombe fuera de
+cero) y 13.0s de latencia (1.9× más rápido que los 24.7s del ancla).
+Mecanismo limpio (`schema_fail=0`, una sola falla en 95 corridas).
+`gemma4:12b` quedó descalificado igual que `qwen2.5:7b` (peor en las
+dos dimensiones).
+
+**Implicación**: `gpt-oss:20b` corre hoy vía `OllamaBackend` normal,
+sin offloading ni RAM nueva — la ganancia de capacidad que
+`docs/local-backend-stencil-design.md` perseguía ya está capturada sin
+construir nada de lo que ese documento proponía. `LocalBackend`
+in-process queda sin justificación activa; el documento entero se
+archivó como histórico (§ "Cierre"). Acción derivada pendiente (fuera
+de este documento): correr la batería `g10-weak-skills` sobre
+`gpt-oss:20b` antes de promoverlo a modelo local recomendado en
+`CLAUDE.md` (reemplazando a `qwen3.5-coder`).
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace

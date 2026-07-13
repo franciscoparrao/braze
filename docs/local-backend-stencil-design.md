@@ -1,24 +1,75 @@
 # Diseño: `LocalBackend` in-process + `stencil` (constrained decoding nativo)
 
-Fecha: 2026-07-12
-Estado: **DESCARTADO (2026-07-12, mismo día) — el A/B que gateaba esta
-decisión cerró RECHAZADO, con su única iteración corrida y también
-negativa.** El sweep original (1.045 corridas) disparó la cláusula de
-iteración de `docs/constrained-decoding-ab-design.md` — ni el caso
-"ayuda" ni el caso "domina el format tax" que este documento contemplaba
-en el § siguiente. La iteración (`oneOf` por tool con el schema real, la
-versión MÁS estricta de constraint que `stencil` habría implementado)
-se corrió: verificó el mecanismo limpio (`schema_validation_failures`
-99→0 en llama3.2:1b) pero el pass rate **empeoró** en las tres filas
-medidas (−13.7pp a −41.1pp, todos los ICs fuera de cero). Detalle
-completo en `docs/sweep-constrained-decoding-2026-07-12.md` §
-"Implicación para local-backend-stencil-design.md". No hay señal en
-estos datos de que subir el rigor del constraint compre nada — al
-contrario, lo empeora. **No se persigue este documento sobre esta
-base.** Si el eje de capacidad de modelo (§ Hardware, offloading de MoE)
-se retoma en el futuro, debería motivarse por sí mismo, no por
-constrained decoding. El resto del documento queda como archivo
-histórico de la propuesta original.
+Fecha: 2026-07-12/13
+Estado: **CERRADO (2026-07-13) — `stencil` DESCARTADO;
+`LocalBackend`-por-CAPACIDAD prerrequisito RESUELTO y el documento
+ARCHIVADO como histórico.** `gpt-oss:20b` supera a `qwen3.5-coder` en
+pass rate Y latencia sirviendo desde la infraestructura actual de
+Nitro, sin offloading ni RAM nueva — la ganancia de capacidad que este
+documento perseguía ya está capturada sin construir nada de lo que
+propone. Ningún `impl ModelBackend` nuevo se justifica con esta
+evidencia. Ver § "LocalBackend-por-capacidad" abajo para el detalle y
+`docs/sweep-capacity-hardware-2026-07-13.md` para los datos.
+
+## `stencil` (constrained decoding in-process) — DESCARTADO
+
+El A/B que gateaba esta mitad (`docs/constrained-decoding-ab-design.md`)
+cerró RECHAZADO, con su única iteración corrida y también negativa: el
+sweep original (1.045 corridas) disparó la cláusula de iteración, y la
+iteración (`oneOf` por tool con el schema real — la versión MÁS
+estricta de constraint que `stencil` habría implementado) verificó el
+mecanismo limpio (`schema_validation_failures` 99→0 en llama3.2:1b)
+pero el pass rate **empeoró** en las tres filas medidas (−13.7pp a
+−41.1pp, todos los ICs fuera de cero). Detalle completo en
+`docs/sweep-constrained-decoding-2026-07-12.md`. No hay señal en estos
+datos de que subir el rigor del constraint compre nada — al contrario,
+lo empeora. **No se persigue esta mitad.** El hallazgo entra al paper
+(§ ablations) como evidencia a favor de la tesis del harness: la
+escalera de rescate es el tradeoff correcto; controlar el decoder no
+ayuda a los modelos débiles y además cuesta.
+
+## `LocalBackend`-por-capacidad (§ Hardware) — PRERREQUISITO RESUELTO: `gpt-oss:20b` gana, sin RAM nueva
+
+Esto mata solo la mitad de "constrained decoding". La mitad de
+CAPACIDAD (correr en Nitro un modelo más capaz, independiente de si
+restringir el decoder ayuda) no depende del veredicto de arriba.
+
+**Prerrequisito corrido 2026-07-13** (`docs/sweep-capacity-hardware-2026-07-13.md`,
+285 corridas, `gpt-oss:20b`/`gemma4:12b`/`qwen3.5-coder` como ancla en
+el mismo sweep): `gpt-oss:20b` (recién bajado — no estaba instalado)
+**limpia la barra en las dos dimensiones**, sin tocar RAM ni offloading:
+
+| Modelo | Pass rate | Latencia | vs `qwen3.5-coder` (mismo sweep) |
+|---|---|---|---|
+| **`gpt-oss:20b`** | **98.9%** (94/95) | **13.0s** | **+6.3pp** [+0.2,+14.0] Newcombe95%, **1.9× más rápido** |
+| `gemma4:12b` | 82.1% | 29.8s | −10.5pp, más lento — descalificado, igual que Qwen2.5-7B |
+| `qwen2.5:7b` | 80% [71,87] (sweep previo) | 5.1s (sweep previo) | −18pp — descalificado sin re-testear |
+
+Mecanismo limpio: `schema_fail=0`, `rescues=0`, una sola falla en 95
+corridas (`grep_basic`, `assertion_tool_call`) — la ganancia no es un
+artefacto de medición.
+
+**Implicación — cambia la recomendación del documento original**:
+`gpt-oss:20b` corre hoy vía `OllamaBackend` normal, sirviendo desde los
+16GB actuales de Nitro sin ningún truco de offloading. Eso significa
+que **la ganancia ya está capturada sin `LocalBackend` in-process ni
+compra de RAM** — el camino más barato (cambiar qué modelo sirve Nitro
+por default) ya resuelve lo que el eje de capacidad buscaba. La
+pregunta "¿vale la pena el 30B-A3B offloaded a 64GB?" pasa de
+prerrequisito bloqueante a curiosidad de segundo orden, sin
+justificación de negocio clara todavía — nadie va a construir
+`LocalBackend` (crate nuevo, mistral.rs/candle, GGUF in-process) para
+perseguir una mejora marginal sobre un modelo que YA gana con la
+infraestructura existente. **`LocalBackend` queda sin justificación
+activa; el documento entero se archiva como histórico.**
+
+**Acción recomendada, fuera del scope de este documento**: promover
+`gpt-oss:20b` a modelo local recomendado en `CLAUDE.md` § "Modelos
+locales recomendados", reemplazando a `qwen3.5-coder` como mejor local
+del proyecto — con la salvedad de que este sweep es n=95 de un solo A/B
+de capacidad, no la batería completa de skills (`g10-weak-skills`) que
+calibró a `qwen3.5-coder` originalmente; correr esa batería antes de
+promoverlo formalmente.
 
 ---
 
@@ -27,6 +78,16 @@ Hand-off desde una sesión de análisis (a raíz de `JustVugg/colibri`).
 _Actualizado 2026-07-12: se agregó § Hardware (Nitro, offloading vs streaming,
 modelo candidato por RAM) y se corrigió § alcance — la primera versión descartó
 de más al meter offloading y streaming en la misma bolsa._
+
+> **Nota de archivo (2026-07-13, actualizada)**: todo lo que sigue de
+> acá para abajo es la PROPUESTA ORIGINAL, escrita antes de que ambos
+> ejes cerraran. **El documento completo está archivado como
+> histórico** — ni `stencil` (rechazado por el A/B) ni `LocalBackend`
+> in-process (sin justificación: `gpt-oss:20b` ya gana sin construirlo,
+> ver § arriba) tienen trabajo pendiente. No ejecutar nada de lo que
+> sigue — "Qué construir", "La única decisión abierta", "Alcance V1" y
+> el "Prompt para retomar" del final quedan todos obsoletos. Se
+> conserva solo como registro de cómo se llegó a la decisión.
 
 ## Origen y relación con el A/B en curso
 
@@ -197,37 +258,22 @@ antes de leer ese resultado.**
 - El format tax (documentado) puede hacer el resultado negativo — lo cual es un
   hallazgo válido, no un fracaso.
 
-## Cómo retomar (en sesión de Braze)
+## Cierre (2026-07-13)
 
-Prerrequisito: que el A/B de constrained decoding haya cerrado y su conclusión
-esté escrita en `docs/sweep-constrained-decoding-2026-07-12.md`.
+**No queda nada que retomar de este documento.** El prerrequisito de
+hardware se corrió (`docs/sweep-capacity-hardware-2026-07-13.md`):
+`gpt-oss:20b` supera a `qwen3.5-coder` en pass rate Y latencia sirviendo
+desde la infraestructura actual, sin offloading ni RAM nueva. Eso
+resuelve la pregunta que motivaba todo el eje de capacidad sin construir
+nada de lo que este documento proponía — ni `LocalBackend` in-process
+ni la compra de RAM tienen justificación activa. La única acción
+derivada (fuera del scope de este documento) es evaluar promover
+`gpt-oss:20b` a modelo local recomendado en `CLAUDE.md`, tras correr la
+batería `g10-weak-skills` que calibró a `qwen3.5-coder` originalmente
+(ver limitaciones de `docs/sweep-capacity-hardware-2026-07-13.md`).
 
-1. Leer ese resultado. Si constrained NO ayuda → parar acá y anotar por qué.
-2. **Hardware (§ Hardware):** medir en `braze-bench` un 7–8B / gpt-oss-20B que ya
-   cabe en Nitro contra `qwen3.5-coder`. Si el techo as-is no basta, decidir la
-   compra de RAM (16→64 GB) para el 30B-A3B offloaded ANTES de seguir. No combinar
-   PCs del cluster.
-3. Elegir sustrato (mistral.rs recomendado); congelar el alcance V1 de arriba.
-4. Scaffold `stencil` primero (substrato-independiente, testeable con vocab
-   mock): schema del envelope → máscara de tokens; tests de que la máscara solo
-   deja pasar tokens que satisfacen el `oneOf` del envelope.
-5. `LocalBackend` como 4º `impl ModelBackend` (plantilla: `ollama.rs`), sobre el
-   sustrato elegido, enchufando `stencil` en el sampler.
-6. Registrar en `braze-config` + `braze-cli`; correr `braze-bench` con el brazo
-   constrained-nativo contra el baseline.
-
-### Prompt para retomar (copiar en la sesión de Braze)
-
-> Restaura el contexto de braze. Vamos a implementar `LocalBackend` + `stencil`
-> según `docs/local-backend-stencil-design.md`. Primero verifica que el A/B de
-> constrained decoding haya cerrado (`docs/sweep-constrained-decoding-2026-07-12.md`)
-> y lee su conclusión — si el constraint no ayudó a los débiles, para y dime por
-> qué. Si ayudó: congela el alcance V1 del doc, elige sustrato (mistral.rs
-> recomendado), y scaffoldea primero `stencil` (schema del envelope → máscara de
-> logits, testeable con vocabulario mock), luego el `LocalBackend` como 4º
-> `impl ModelBackend` usando `crates/braze-model/src/ollama.rs` como plantilla.
-> Valida con `braze-bench` contra el baseline. No reimplementes el transformer;
-> apóyate en el sustrato. Nombre `stencil` provisional. Antes de nada, mide en
-> braze-bench si un modelo que ya cabe en Nitro (7–8B / gpt-oss-20B) supera a
-> qwen3.5-coder; si no, evalúa subir Nitro a 64 GB de RAM para offloadear un
-> Qwen3-30B-A3B (no combines PCs del cluster — la LAN mata la latencia).
+Si en el futuro cambia el panorama (Nitro cambia de hardware, aparece un
+modelo local sensiblemente mejor que ninguno de los servidos por Ollama,
+o el proyecto necesita control del decoder por una razón distinta a
+tool-calling), este documento sirve como registro de qué ya se
+descartó y por qué — no como punto de partida para retomar directo.
