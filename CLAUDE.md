@@ -151,13 +151,27 @@ Paquete 3 de v6.)
 
 ## Modelos locales recomendados (Ollama)
 
-**El mejor modelo local del proyecto es `qwen3.5-coder` corriendo en
-Nitro** (sweep 2026-07-06, datos en `docs/sweep-nitro-sampling-2026-07-06/`):
-**6/6 en `g10-weak-skills`** a temp 0.2 — primer modelo local que satura
-las skills débiles (error_recovery + distractor_selection), ~20-27s por
-tarea en Nitro. Caveat: es *thinking model* — Ollama devuelve el
-razonamiento en un campo `thinking` separado y con `num_predict` chico el
-content puede salir vacío; presupuestar tokens. Para la familia Qwen
+**El mejor modelo local del proyecto es `gpt-oss:20b` corriendo en
+Nitro** (sweep de capacidad 2026-07-13,
+`docs/sweep-capacity-hardware-2026-07-13.md` +
+`docs/sweep-g10-weak-skills-gptoss20b-2026-07-13.json`) — reemplaza a
+`qwen3.5-coder` en esta recomendación. MoE ~3.6B activos, corre en los
+16GB RAM de Nitro sin offloading ni cambios de infraestructura.
+**6/6 en `g10-weak-skills`** (satura error_recovery + distractor_selection,
+igual que `qwen3.5-coder`), y en `default.toml` (n=95, sweep del mismo
+día) **98.9% pass rate a 13.0s promedio por tarea** — supera a
+`qwen3.5-coder` en pass rate (+6.3pp, IC Newcombe fuera de cero) y es
+~1.9× más rápido (13.0s vs 24.7s), con mecanismo limpio
+(`schema_validation_failures=0`). Detalle completo de la decisión —
+incluye por qué se descartó construir un `LocalBackend` in-process para
+conseguir esta mejora — en `docs/local-backend-stencil-design.md`.
+
+`qwen3.5-coder` sigue siendo un modelo local sólido (sweep 2026-07-06,
+`docs/sweep-nitro-sampling-2026-07-06/`: 6/6 en `g10-weak-skills` a temp
+0.2, ~20-27s por tarea) pero ya no es la primera recomendación. Caveat
+vigente para `qwen3.5-coder`: es *thinking model* — Ollama devuelve el
+razonamiento en un campo `thinking` separado y con `num_predict` chico
+el content puede salir vacío; presupuestar tokens. Para la familia Qwen
 **chica** (qwen2.5:3b), el sampling recomendado por Qwen (temp 0.7 /
 top_p 0.8 / top_k 20 / repeat_penalty 1.05, flags de braze-bench) rinde
 mejor que el 0.2 default del bench (0/6 → 2/6 en g10, direccional en dos
