@@ -1321,6 +1321,7 @@ impl Engine {
                 if self
                     .attempt_tools_free_summary_round(session, &messages, observer)
                     .await?
+                    == SummaryFallbackOutcome::Summarized
                 {
                     return Ok(());
                 }
@@ -1522,13 +1523,45 @@ impl Engine {
                              dispatched at least one; attempting a tools-free summary round \
                              instead of discarding that progress"
                         );
-                        if self
+                        match self
                             .attempt_tools_free_summary_round(session, &messages, observer)
                             .await?
                         {
-                            self.consecutive_turns_without_tool_calls
-                                .store(0, std::sync::atomic::Ordering::SeqCst);
-                            return Ok(());
+                            SummaryFallbackOutcome::Summarized => {
+                                self.consecutive_turns_without_tool_calls
+                                    .store(0, std::sync::atomic::Ordering::SeqCst);
+                                return Ok(());
+                            }
+                            // Memory-distillation smoke 2026-07-16 against
+                            // gpt-oss:20b/Nitro: both transfer tasks had
+                            // already written the expected fix to disk when
+                            // the model closed the turn — AND the summary
+                            // fallback — with an empty content channel (a
+                            // reasoning-model quirk: thinking arrives in a
+                            // separate field, content can legitimately come
+                            // back ""). The tool results are persisted and
+                            // the fallback attempt is on record as
+                            // `SummaryFallbackAttempted` + its `Usage`, so
+                            // ending the turn beats reporting the whole
+                            // thing as a hard failure. The best-of-n
+                            // false-convergence risk `EmptyModelResponse`
+                            // guards doesn't apply: this branch requires
+                            // dispatched tool calls plus a paid fallback
+                            // round, never a bare empty first round.
+                            SummaryFallbackOutcome::Empty => {
+                                tracing::warn!(
+                                    round,
+                                    "summary fallback also returned empty; ending the turn with \
+                                     the already-persisted tool results instead of failing it"
+                                );
+                                self.consecutive_turns_without_tool_calls
+                                    .store(0, std::sync::atomic::Ordering::SeqCst);
+                                return Ok(());
+                            }
+                            // A dead fallback call may be a real backend
+                            // failure — keep surfacing it as the error the
+                            // turn would have raised without the fallback.
+                            SummaryFallbackOutcome::CallFailed => {}
                         }
                     }
                     return Err(EngineError::EmptyModelResponse);
@@ -1645,6 +1678,7 @@ impl Engine {
         if self
             .attempt_tools_free_summary_round(session, &messages, observer)
             .await?
+            == SummaryFallbackOutcome::Summarized
         {
             return Ok(());
         }
@@ -1954,28 +1988,30 @@ impl Engine {
 
     /// Makes one last tools-free request asking the model to summarize
     /// whatever it learned and answer with that — persisted as a normal
-    /// `AssistantText` (`Ok(true)`) on success. Two call sites, both
-    /// "the turn didn't converge normally but there may already be real
-    /// progress worth summarizing instead of just failing outright":
-    /// [`Engine::run_turn`] exhausting [`MAX_TURN_ITERATIONS`], and (U-1,
-    /// found live 2026-07-07 against qwen3.5-coder/Nitro) a round mid-turn
-    /// coming back with neither text nor a tool call *after* this turn
-    /// already dispatched at least one successful tool call — each caller
-    /// logs its own context and picks its own `EngineError` fallback on
-    /// `Ok(false)`, since "exhausted the iteration cap" and "went empty
-    /// right after real work" are different failures worth telling apart
-    /// in logs.
+    /// `AssistantText` ([`SummaryFallbackOutcome::Summarized`]) on
+    /// success. Callers share the shape "the turn didn't converge
+    /// normally but there may already be real progress worth summarizing
+    /// instead of just failing outright": [`Engine::run_turn`] exhausting
+    /// [`MAX_TURN_ITERATIONS`] or its token budget, and (U-1, found live
+    /// 2026-07-07 against qwen3.5-coder/Nitro) a round mid-turn coming
+    /// back with neither text nor a tool call *after* this turn already
+    /// dispatched at least one successful tool call — each caller logs
+    /// its own context and picks its own reaction to a non-`Summarized`
+    /// outcome, since "exhausted the iteration cap", "went empty right
+    /// after real work" and "the fallback call itself died" are different
+    /// situations worth telling apart.
     ///
-    /// `Ok(false)` when this attempt itself fails or produces nothing
-    /// usable — a legitimate hard failure (e.g. the backend is
-    /// unreachable) is surfaced by the caller as an error rather than
-    /// silently swallowed here.
+    /// [`SummaryFallbackOutcome::Empty`] when the call completed but
+    /// produced nothing usable; [`SummaryFallbackOutcome::CallFailed`]
+    /// when the attempt itself failed — a legitimate hard failure (e.g.
+    /// the backend is unreachable) is surfaced by the caller as an error
+    /// rather than silently swallowed here.
     async fn attempt_tools_free_summary_round(
         &self,
         session: &SessionId,
         messages: &[Message],
         observer: &mut dyn TurnObserver,
-    ) -> Result<bool, EngineError> {
+    ) -> Result<SummaryFallbackOutcome, EngineError> {
         // H-3 (docs/AUDITORIA-2026-07-v5.md): records that this fallback was
         // *reached for*, regardless of whether it goes on to succeed —
         // success is separately visible as the `AssistantText` this
@@ -2009,7 +2045,7 @@ impl Engine {
                     error = %err,
                     "tools-free summary round's model call itself failed"
                 );
-                return Ok(false);
+                return Ok(SummaryFallbackOutcome::CallFailed);
             }
         };
 
@@ -2125,7 +2161,7 @@ impl Engine {
             // punchline.
             let cleaned = strip_leaked_tool_call_shapes(&text_buffer);
             if cleaned.trim().is_empty() {
-                return Ok(false);
+                return Ok(SummaryFallbackOutcome::Empty);
             }
             observer.on_text_delta(&cleaned);
             self.append_and_notify(
@@ -2134,10 +2170,18 @@ impl Engine {
                 observer,
             )
             .await?;
-            return Ok(true);
+            return Ok(SummaryFallbackOutcome::Summarized);
         }
 
-        Ok(false)
+        // `saw_done` with no text: the call ran to completion and just
+        // produced nothing. Without `Done`, the stream died (or ended)
+        // mid-response — indistinguishable here from a real backend
+        // failure, so it must keep reading as one.
+        if saw_done {
+            Ok(SummaryFallbackOutcome::Empty)
+        } else {
+            Ok(SummaryFallbackOutcome::CallFailed)
+        }
     }
 
     /// Records each requested tool call, spawns it as a background task via
@@ -3550,6 +3594,26 @@ fn extract_pythonic_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
     }
     remaining.push_str(rest);
     (calls, remaining.trim().to_string())
+}
+
+/// What [`Engine::attempt_tools_free_summary_round`] actually got out of
+/// its one extra model call. A plain `bool` used to conflate the two
+/// non-success shapes, and they deserve different handling at the U-1
+/// call site: `Empty` (the call completed but produced nothing usable) is
+/// the reasoning-model quirk observed live with gpt-oss:20b on the
+/// memory-distillation smoke (2026-07-16) — thinking-channel models can
+/// finish a turn whose real work already landed on disk with a final
+/// content of "" — while `CallFailed` (the fallback's own request or
+/// stream died) may hide a real backend failure (auth, network, rate
+/// limit) that must keep surfacing as an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SummaryFallbackOutcome {
+    /// Usable summary text was produced and persisted as `AssistantText`.
+    Summarized,
+    /// The model call completed normally but yielded no usable text.
+    Empty,
+    /// The fallback's own model call or stream failed before completing.
+    CallFailed,
 }
 
 /// Strips any tool-call-shaped block the rescue ladder recognizes,
@@ -5285,12 +5349,16 @@ mod tests {
     }
 
     /// Same shape as the recovery test above, but the tools-free summary
-    /// attempt *also* comes back empty — the turn must still surface
-    /// `EmptyModelResponse` rather than silently reporting success with
-    /// nothing to show for the follow-up round.
+    /// attempt *also* comes back empty. This used to surface
+    /// `EmptyModelResponse` — until the memory-distillation smoke
+    /// (2026-07-16, gpt-oss:20b/Nitro) showed reasoning models can close
+    /// both the round AND the fallback with an empty content channel
+    /// while the actual fix is already on disk. The turn must now end Ok
+    /// with the tool results preserved and NO fabricated final answer —
+    /// while a fallback whose *call itself* dies keeps failing (next
+    /// test), so real backend errors don't hide behind this tolerance.
     #[tokio::test]
-    async fn an_empty_round_after_a_dispatched_tool_call_still_fails_if_the_summary_round_is_also_empty()
-     {
+    async fn an_empty_summary_round_after_a_dispatched_tool_call_ends_the_turn_without_failing() {
         let (store, dir) = temp_store();
         let session = SessionId::new();
 
@@ -5323,8 +5391,124 @@ mod tests {
 
         let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
         assert!(
+            result.is_ok(),
+            "expected the turn to end Ok with its tool results preserved, got {result:?}"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        // The real work the old hard failure threw away must be there.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolCallCompleted { .. })),
+            "expected the dispatched tool call's result to be persisted, got: {events:?}"
+        );
+        // The fallback attempt stays on record (H-3) …
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::SummaryFallbackAttempted)),
+            "expected SummaryFallbackAttempted to be persisted, got: {events:?}"
+        );
+        // … but nothing may be invented as a final answer: tolerating the
+        // empty summary must not fabricate an `AssistantText`.
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { .. })),
+            "an empty summary must not persist a fabricated final answer, got: {events:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A `ModelBackend` scripted per-call like `ScriptedModel`, except its
+    /// N-th call (0-indexed) fails outright at the request level — used to
+    /// prove the empty-summary tolerance above does NOT extend to a
+    /// fallback whose own model call dies: that shape may be a real
+    /// backend failure (auth, network, rate limit) and must keep
+    /// surfacing as an error.
+    struct ScriptedModelFailingOnCall {
+        rounds: AsyncMutex<std::collections::VecDeque<Vec<CompletionEvent>>>,
+        fail_on_attempt: u32,
+        calls: AtomicU32,
+    }
+
+    #[async_trait]
+    impl ModelBackend for ScriptedModelFailingOnCall {
+        fn name(&self) -> &str {
+            "scripted-failing-on-call"
+        }
+
+        async fn complete(
+            &self,
+            _req: CompletionRequest,
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
+            let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
+            if attempt == self.fail_on_attempt {
+                return Err(ModelError::Request(
+                    "simulated backend failure on the summary fallback".to_string(),
+                ));
+            }
+            let mut rounds = self.rounds.lock().await;
+            let round = rounds
+                .pop_front()
+                .unwrap_or_else(|| vec![CompletionEvent::Done]);
+            Ok(Box::pin(futures::stream::iter(round.into_iter().map(Ok))))
+        }
+    }
+
+    /// Same shape again, but the summary fallback's model call itself
+    /// fails instead of returning empty — the turn must still surface
+    /// `EmptyModelResponse`, not ride the empty-summary tolerance.
+    #[tokio::test]
+    async fn an_empty_round_still_fails_if_the_summary_rounds_call_itself_dies() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModelFailingOnCall {
+            rounds: AsyncMutex::new(
+                vec![
+                    vec![
+                        CompletionEvent::ToolCallRequested {
+                            id: "call-1".to_string(),
+                            name: "echo".to_string(),
+                            arguments: serde_json::json!({ "text": "hola" }),
+                        },
+                        CompletionEvent::Done,
+                    ],
+                    vec![CompletionEvent::Done],
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            // Call 0: tool call round. Call 1: empty round. Call 2: the
+            // summary fallback — dies at the request level.
+            fail_on_attempt: 2,
+            calls: AtomicU32::new(0),
+        };
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
             matches!(result, Err(EngineError::EmptyModelResponse)),
-            "expected the still-empty summary round to surface as an error, got {result:?}"
+            "expected a dead fallback call to keep surfacing as an error, got {result:?}"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

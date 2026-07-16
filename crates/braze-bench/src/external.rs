@@ -12,24 +12,21 @@
 //! rows can sit in the same report/JSON without a separate code path in
 //! `report.rs`.
 //!
-//! **Deliberately not wired to a live adapter.** mini-swe-agent (or any
-//! other baseline) isn't installed in this environment, and installing
-//! third-party tooling isn't something to do without being asked. Wiring
-//! a real one is: implement [`ExternalHarness`] for it (typically
-//! shelling out to its CLI inside the sandbox directory, same convention
-//! `stop_ollama_model` in `main.rs` already uses for subprocess calls),
-//! then add a `--external <name>=<command>` spec form parsed alongside
-//! `--backends` in `main.rs`, converting via
-//! [`external_outcome_to_task_result`] in place of `metrics::compute_metrics`
-//! for that row. Kept `#[allow(dead_code)]` at the module level rather
-//! than half-wiring a CLI flag with nothing real behind it.
-
-#![allow(dead_code)]
+//! **Wired to one in-process adapter** (`bare_lead_baseline.rs`'s
+//! `BareLeadExecutor`, 2026-07-13 — EMSE review Issue 1,
+//! `docs/external-harness-baseline-design.md`), reached via `--external
+//! bare-lead:<spec>` in `main.rs`. A subprocess-based adapter (shelling out
+//! to mini-swe-agent or similar, same convention `stop_ollama_model` in
+//! `main.rs` uses for subprocess calls) would implement [`ExternalHarness`]
+//! the same way and convert via [`external_outcome_to_task_result`] — this
+//! contract was designed generic enough for either.
 
 use std::path::Path;
 use std::time::Duration;
 
+use crate::error::BenchError;
 use crate::metrics::{FailureCause, TaskResult};
+use crate::sandbox::TaskSandbox;
 use crate::task::TaskDef;
 
 /// One task run through an external baseline harness, executed as a
@@ -102,6 +99,10 @@ pub fn external_outcome_to_task_result(
             backend: backend_name.to_string(),
             task_id: task.id.clone(),
             skill: task.skill.clone(),
+            memory_condition: None,
+            memory_file: None,
+            memory_budget_tokens: None,
+            memory_tokens: 0,
             repetition,
             converged: false,
             run_error: Some(run_error),
@@ -166,6 +167,10 @@ pub fn external_outcome_to_task_result(
         backend: backend_name.to_string(),
         task_id: task.id.clone(),
         skill: task.skill.clone(),
+        memory_condition: None,
+        memory_file: None,
+        memory_budget_tokens: None,
+        memory_tokens: 0,
         repetition,
         converged: true,
         run_error: None,
@@ -209,6 +214,48 @@ pub fn external_outcome_to_task_result(
     }
 }
 
+/// Runs `task` against `harness`, managing the sandbox lifecycle the same
+/// way `runner::run_task` does for braze's own rows (fresh `TaskSandbox`,
+/// `expect_file_contains` checked against its final state before it drops
+/// at the end of this function) — kept separate from `runner::run_task`
+/// itself since an external harness never touches a `SessionStore` or
+/// `braze_engine::Engine` at all.
+pub async fn run_external_task(
+    harness: &dyn ExternalHarness,
+    task: &TaskDef,
+    repetition: u32,
+    timeout: Duration,
+) -> Result<TaskResult, BenchError> {
+    let sandbox = TaskSandbox::new(task)?;
+    let outcome = harness.run(task, sandbox.path(), timeout).await;
+
+    let expected_files_found = if task.expect_file_contains.is_empty() {
+        None
+    } else {
+        Some(
+            task.expect_file_contains
+                .iter()
+                .all(|(relative_path, expected_substrings)| {
+                    let Ok(contents) = std::fs::read_to_string(sandbox.path().join(relative_path))
+                    else {
+                        return false;
+                    };
+                    expected_substrings.iter().all(|needle| {
+                        crate::metrics::contains_as_a_bounded_token(&contents, needle)
+                    })
+                }),
+        )
+    };
+
+    Ok(external_outcome_to_task_result(
+        &harness.name(),
+        task,
+        repetition,
+        outcome,
+        expected_files_found,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +275,9 @@ mod tests {
             expect_max_tokens: None,
             expect_max_cost_usd: None,
             noise_tools: 0,
+            memory_condition: None,
+            memory_file: None,
+            memory_budget_tokens: None,
         }
     }
 
@@ -298,6 +348,27 @@ mod tests {
         let result = external_outcome_to_task_result("external:fake", &t, 0, outcome, None);
         assert!(result.passed);
         assert_eq!(result.expected_tool_called, None);
+    }
+
+    #[test]
+    fn external_rows_do_not_report_task_memory_as_injected() {
+        let mut t = task(Some("4"), true);
+        t.memory_condition = Some("human-playbook".to_string());
+        t.memory_file = Some(std::path::PathBuf::from("playbook.json"));
+        t.memory_budget_tokens = Some(500);
+        let outcome = ExternalRunOutcome {
+            final_text: "4".to_string(),
+            wall_time: Duration::from_millis(200),
+            run_error: None,
+        };
+
+        let result = external_outcome_to_task_result("external:fake", &t, 0, outcome, None);
+
+        assert!(result.passed);
+        assert_eq!(result.memory_condition, None);
+        assert_eq!(result.memory_file, None);
+        assert_eq!(result.memory_budget_tokens, None);
+        assert_eq!(result.memory_tokens, 0);
     }
 
     #[test]

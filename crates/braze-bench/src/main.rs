@@ -4,11 +4,14 @@
 //! backends" entry for why this exists and its safety posture.
 
 mod backend_spec;
+mod bare_lead_baseline;
 mod error;
 mod external;
+mod memory;
 mod metadata;
 mod metrics;
 mod noise;
+mod preserve;
 mod report;
 mod runner;
 mod sandbox;
@@ -22,6 +25,7 @@ use clap::Parser;
 
 use backend_spec::BackendSpec;
 use error::BenchError;
+use external::ExternalHarness;
 use metrics::{TaskResult, harness_error_result};
 
 /// `braze-bench <suite.toml> --backends <spec,spec,...> [--output <path.json>]`
@@ -44,8 +48,10 @@ struct Cli {
     /// del harness para esta fila del sweep — claves: no-rescue,
     /// no-post-edit-check, strict-edit, best-of-n=N, tactical-window=N,
     /// tactical-threshold=N, full-observations=N (E1,
-    /// docs/AUDITORIA-2026-07-v3.md).
-    #[arg(long, value_delimiter = ',', required = true)]
+    /// docs/AUDITORIA-2026-07-v3.md). No requerido si `--external` se pasa
+    /// solo (se valida en runtime que al menos uno de los dos esté
+    /// presente, ver `run()`).
+    #[arg(long, value_delimiter = ',')]
     backends: Vec<String>,
     /// Si se pasa, además de la tabla en stdout escribe los resultados
     /// crudos (uno por tarea) como JSON en esta ruta.
@@ -104,6 +110,18 @@ struct Cli {
     /// modelo. Ver docs/AUDITORIA-2026-07.md.
     #[arg(long)]
     no_ollama_stop: bool,
+    /// Corre un baseline de harness externo (bypassa `braze_engine::Engine`
+    /// por completo, EMSE review Issue 1 —
+    /// `docs/external-harness-baseline-design.md`) además de los
+    /// `--backends` de arriba, sobre la misma suite. Único adapter hoy:
+    /// `bare-lead:<spec>`, donde `<spec>` usa la misma gramática que
+    /// `--backends` pero DEBE llevar un sufijo `+lead:` (un loop
+    /// lead+executor desde cero, ni rescate textual, ni compactación, ni
+    /// tool deferral, ni post-edit check — ver
+    /// `bare_lead_baseline.rs`). Ej.:
+    /// `--external "bare-lead:ollama:llama3.2:1b+lead:ollama:gemma4:e4b"`.
+    #[arg(long, value_delimiter = ',')]
+    external: Vec<String>,
 }
 
 #[tokio::main]
@@ -131,8 +149,29 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<(), BenchError> {
     let cli = Cli::parse();
+    if cli.backends.is_empty() && cli.external.is_empty() {
+        return Err(BenchError::Startup(
+            "se requiere al menos uno de --backends o --external".to_string(),
+        ));
+    }
     let config = braze_config::Config::load()?;
     let tasks = task::load_suite(&cli.suite)?;
+
+    // Opt-in transcript preservation (Issue 4,
+    // docs/emse-review-2026-07-13-checklist.md) — was an uncommitted local
+    // patch (docs/sweep-search-tools-ab-n15-2026-07-12.md:116), now a real
+    // env var. Off by default: `None` here means every `run_task` call
+    // below behaves exactly as it did before this existed.
+    let preserve_root = preserve::keep_sessions_enabled().then(|| {
+        let root = PathBuf::from(preserve::DEFAULT_PRESERVE_ROOT);
+        eprintln!(
+            "braze-bench: BRAZE_BENCH_KEEP_SESSIONS activo — sandbox y transcripciones de \
+             cada run se preservan en {}/ (no se borran por defecto — limpiar a mano cuando \
+             ya no se necesiten)",
+            root.display()
+        );
+        root
+    });
 
     if tasks.is_empty() {
         return Err(BenchError::Startup(format!(
@@ -282,8 +321,16 @@ async fn run() -> Result<(), BenchError> {
                     top_k: cli.top_k,
                     repeat_penalty: cli.repeat_penalty,
                 };
-                match runner::run_task(spec, &config, task, repetition, task_timeout, sampling)
-                    .await
+                match runner::run_task(
+                    spec,
+                    &config,
+                    task,
+                    repetition,
+                    task_timeout,
+                    sampling,
+                    preserve_root.as_deref(),
+                )
+                .await
                 {
                     Ok(result) => results.push(result),
                     Err(err) => {
@@ -309,6 +356,103 @@ async fn run() -> Result<(), BenchError> {
         // and/or a local planner) before the next backend spec builds its
         // own — see the `no_ollama_stop` doc comment above for why this
         // isn't just tidiness.
+        if !cli.no_ollama_stop {
+            for model in spec.ollama_models(&config) {
+                stop_ollama_model(&model).await;
+            }
+        }
+    }
+
+    // External harness baseline(s) — EMSE review Issue 1
+    // (docs/external-harness-baseline-design.md). Same sequential-on-purpose
+    // reasoning as the `--backends` loop above; runs after it so a sweep
+    // combining both never contends over the same Ollama models at once.
+    for raw_external in &cli.external {
+        let Some(rest) = raw_external.strip_prefix("bare-lead:") else {
+            eprintln!(
+                "braze-bench: omitiendo --external '{raw_external}': solo se soporta el prefijo \
+                 'bare-lead:' hoy (docs/external-harness-baseline-design.md)"
+            );
+            continue;
+        };
+        let spec = match backend_spec::BackendSpec::parse(rest) {
+            Ok(spec) => spec,
+            Err(err) => {
+                eprintln!("braze-bench: omitiendo --external '{raw_external}': {err}");
+                continue;
+            }
+        };
+        let sampling = backend_spec::SamplingSpec {
+            temperature: cli.temperature,
+            seed: cli.seed,
+            top_p: cli.top_p,
+            top_k: cli.top_k,
+            repeat_penalty: cli.repeat_penalty,
+        };
+        let executor = match spec.build(&config, sampling) {
+            Ok(executor) => executor,
+            Err(err) => {
+                eprintln!("braze-bench: omitiendo --external '{raw_external}': {err}");
+                continue;
+            }
+        };
+        let lead = match spec.build_lead(&config, sampling) {
+            Ok(Some(lead)) => lead,
+            Ok(None) => {
+                eprintln!(
+                    "braze-bench: omitiendo --external '{raw_external}': 'bare-lead:' requiere \
+                     un sufijo '+lead:' en el spec"
+                );
+                continue;
+            }
+            Err(err) => {
+                eprintln!("braze-bench: omitiendo --external '{raw_external}': {err}");
+                continue;
+            }
+        };
+        let harness =
+            bare_lead_baseline::BareLeadExecutor::new(lead, executor, spec.display_name(&config));
+
+        for model in spec.ollama_models(&config) {
+            if let Err(err) =
+                braze_model::warm_up_ollama_model(&config.ollama_base_url, &model).await
+            {
+                eprintln!("braze-bench: warm-up de '{model}' falló (se continúa igual): {err}");
+            }
+        }
+
+        for task in &tasks {
+            for repetition in 0..cli.repetitions {
+                if cli.repetitions > 1 {
+                    println!(
+                        "-> {} :: {} (rep {}/{})",
+                        harness.name(),
+                        task.id,
+                        repetition + 1,
+                        cli.repetitions
+                    );
+                } else {
+                    println!("-> {} :: {}", harness.name(), task.id);
+                }
+                match external::run_external_task(&harness, task, repetition, task_timeout).await {
+                    Ok(result) => results.push(result),
+                    Err(err) => {
+                        eprintln!(
+                            "braze-bench: fallo irrecuperable corriendo '{}' contra '{}': {err}",
+                            task.id,
+                            harness.name()
+                        );
+                        results.push(harness_error_result(
+                            &harness.name(),
+                            task,
+                            repetition,
+                            &err,
+                        ));
+                    }
+                }
+            }
+        }
+
         if !cli.no_ollama_stop {
             for model in spec.ollama_models(&config) {
                 stop_ollama_model(&model).await;

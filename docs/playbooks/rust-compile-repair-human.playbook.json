@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "rust-borrow-checker-scope-before-clone",
+  "title": "Fix Rust borrow checker errors by narrowing borrow scopes before cloning",
+  "lifecycle": "approved",
+  "task_family": "rust_compile_repair",
+  "applies_when": [
+    "The task edits Rust code",
+    "cargo check reports borrow checker errors such as E0499, E0502, or E0382",
+    "The same compiler error persists after an attempted local edit"
+  ],
+  "failure_signals": [
+    "The model proposes cloning before identifying the active borrow",
+    "The model edits several functions before running cargo check",
+    "A ToolResult repeats the same compiler error after an edit"
+  ],
+  "preconditions": [
+    "Read the complete function that owns the failing borrow",
+    "Identify where the immutable and mutable borrows overlap"
+  ],
+  "method_steps": [
+    "Find the smallest scope that needs the immutable borrow",
+    "Move dependent calculations before the mutable borrow starts",
+    "Prefer a local temporary variable over cloning owned state",
+    "Apply one minimal edit and run cargo check before further changes"
+  ],
+  "verification": [
+    "cargo check --quiet --message-format=short",
+    "Run the closest unit test if the module already has one"
+  ],
+  "avoid": [
+    "Do not add clone as the first fix",
+    "Do not rewrite public APIs unless the local scope change cannot work",
+    "Do not edit unrelated files while the compiler error is still unresolved"
+  ],
+  "escalate_if": [
+    "The same borrow checker error remains after two verified minimal edits",
+    "The fix requires changing public API or data ownership across modules"
+  ],
+  "source": {
+    "origin": "human",
+    "session_id": null,
+    "transcript_path": null,
+    "tutor_backend": null,
+    "tutor_model": null,
+    "created_at": "2026-07-16"
+  },
+  "evidence": {
+    "validated_runs": 0,
+    "failed_runs": 0,
+    "last_used_at": null,
+    "notes": "Paper 2 pilot ceiling condition: human-authored procedural memory."
+  }
+}

@@ -2,9 +2,10 @@
 //! `braze_engine::Engine` — same composition `braze-cli` does at
 //! startup, minus MCP servers (determinism: no dependency on what
 //! happens to be configured/reachable) and with permission confirmation
-//! replaced by [`DenyAll`] (see module doc on why, and PLAN.md's
+//! replaced by [`BenchPrompt`] (see its doc on why, and PLAN.md's
 //! "Hallazgo de diseño no anticipado").
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,7 +19,8 @@ use braze_types::SessionId;
 
 use crate::backend_spec::{BackendSpec, SamplingSpec};
 use crate::error::BenchError;
-use crate::metrics::{RunOutcome, TaskResult, compute_metrics};
+use crate::metrics::{MemoryRunMetrics, RunOutcome, TaskResult, compute_metrics};
+use crate::preserve;
 use crate::sandbox::TaskSandbox;
 use crate::task::TaskDef;
 
@@ -30,34 +32,118 @@ use crate::task::TaskDef;
 /// it is. See docs/AUDITORIA-2026-07.md hallazgo F2.
 pub const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// Always denies, after persisting the same `PermissionRequested`/
-/// `PermissionDecided` pair the real confirmation prompts do (see
-/// `braze-cli::TerminalConfirmationPrompt`, `braze-tui::approval`) —
-/// without this, a denial never shows up in the session log, so
-/// `metrics::compute_metrics`'s `permission_denials` count stays stuck at
-/// 0 and the denial gets miscounted as a `tool_execution_failures`
-/// instead (the engine already appended `ToolCallStarted` before the
-/// tool's own dispatch path rejects it). See N-35,
-/// docs/AUDITORIA-2026-07-v2.md.
+/// Decides irreversible-flagged actions without a human, persisting the
+/// same `PermissionRequested`/`PermissionDecided` pair the real
+/// confirmation prompts do (see `braze-cli::TerminalConfirmationPrompt`,
+/// `braze-tui::approval`) — without this, a denial never shows up in the
+/// session log, so `metrics::compute_metrics`'s `permission_denials`
+/// count stays stuck at 0 and the denial gets miscounted as a
+/// `tool_execution_failures` instead (the engine already appended
+/// `ToolCallStarted` before the tool's own dispatch path rejects it).
+/// See N-35, docs/AUDITORIA-2026-07-v2.md.
+///
+/// The decision is deny-everything with ONE carve-out:
+/// [`is_benchable_cargo`] (`cargo check`/`build`/`test`, no
+/// config-injection flags). `DefaultClassifier` rightly refuses to
+/// blanket-allow cargo interactively — `cargo check` runs an arbitrary
+/// `build.rs` — but in the bench that ship has sailed: the sandbox
+/// project is model-authored and the post-edit guardrail already runs
+/// `cargo check` on it after every edit without asking anyone. What the
+/// blanket denial actually measured (memory-distillation sweep
+/// 2026-07-16, gpt-oss:20b: 12 denials across 15 tasks) was harness
+/// friction — a human at the interactive prompt would answer "yes" to
+/// every one of these — and it taxed the conditions that verify more,
+/// exactly the contrast that suite exists to measure.
 ///
 /// Combined with a `WorkdirAllowlist` scoped to a throwaway sandbox
 /// directory, this means: safe/reversible actions (reads, writes inside
 /// the sandbox, allowlisted shell commands) proceed exactly as they would
-/// interactively, while anything the classifier flags `Irreversible` — a
-/// hallucinated `dd`/`curl`/`mv`, a write outside the sandbox — is
-/// refused before it ever runs for real.
-struct DenyAll {
+/// interactively, cargo's build/verify subcommands proceed as a human
+/// supervisor would have approved, and everything else the classifier
+/// flags `Irreversible` — a hallucinated `dd`/`curl`/`mv`, a write
+/// outside the sandbox — is refused before it ever runs for real.
+struct BenchPrompt {
     session: SessionId,
     store: Arc<dyn SessionStore>,
 }
 
+/// `cargo check`/`cargo build`/`cargo test` only, and only without the
+/// flags that turn "compile the sandbox project" into "execute something
+/// else": `--manifest-path` retargets an arbitrary project (whose
+/// `build.rs` then runs), `--config` can inject `rustc-wrapper`/runner
+/// executables inline, `-Z` unlocks unstable behavior. `cargo run` stays
+/// denied outright — it exists to execute the produced binary.
+///
+/// Accepted both as a direct argv (`["cargo", "check"]`) and wrapped in
+/// the `["bash", "-lc", "cargo check"]` shape — the preserved-session
+/// diagnosis of 2026-07-16 showed gpt-oss:20b sends EVERY shell command
+/// through `bash -lc`, so a carve-out that only matched `command[0] ==
+/// "cargo"` never fired once across a whole sweep. The unwrapping is
+/// deliberately strict (see [`unwrap_single_shell_script`]): a script
+/// with any shell metacharacter is not "a cargo command in a wrapper",
+/// it's a shell program, and stays denied.
+pub(crate) fn is_benchable_cargo(action: &ActionDescriptor) -> bool {
+    let ActionDescriptor::ShellCommand { command } = action else {
+        return false;
+    };
+    match unwrap_single_shell_script(command) {
+        Some(tokens) => is_plain_cargo_verify(&tokens),
+        None => {
+            let tokens: Vec<&str> = command.iter().map(String::as_str).collect();
+            is_plain_cargo_verify(&tokens)
+        }
+    }
+}
+
+/// `["bash"|"sh", <only -c/-l style flags, at least one c>, <script>]` →
+/// the script's whitespace-split tokens, and `None` for anything else —
+/// including any script character outside `[A-Za-z0-9 _.=/-]`. The
+/// whitelist is the security boundary: it excludes every shell
+/// metacharacter (`;`, `|`, `&`, `$`, backticks, quotes, redirection,
+/// globs, `~`), so a `Some` result is guaranteed to be a single plain
+/// command, not a composite/expanding shell program wearing one's shape.
+fn unwrap_single_shell_script(command: &[String]) -> Option<Vec<&str>> {
+    let (program, rest) = command.split_first()?;
+    if program != "bash" && program != "sh" {
+        return None;
+    }
+    let (script, flags) = rest.split_last()?;
+    if flags.is_empty()
+        || !flags.iter().all(|f| {
+            f.len() >= 2 && f.starts_with('-') && f[1..].chars().all(|c| c == 'c' || c == 'l')
+        })
+        || !flags.iter().any(|f| f.contains('c'))
+    {
+        return None;
+    }
+    if script.is_empty()
+        || !script.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '.' | '=' | '/' | '-')
+        })
+    {
+        return None;
+    }
+    Some(script.split_whitespace().collect())
+}
+
+/// The cargo rule itself, over an already-plain argv — see
+/// [`is_benchable_cargo`] for what's allowed and why.
+fn is_plain_cargo_verify(tokens: &[&str]) -> bool {
+    tokens.first() == Some(&"cargo")
+        && matches!(tokens.get(1), Some(&"check" | &"build" | &"test"))
+        && !tokens[2..].iter().any(|arg| {
+            arg.starts_with("--manifest-path") || arg.starts_with("--config") || arg.starts_with("-Z")
+        })
+}
+
 #[async_trait]
-impl ConfirmationPrompt for DenyAll {
+impl ConfirmationPrompt for BenchPrompt {
     async fn confirm(&self, action: &ActionDescriptor) -> bool {
+        let allowed = is_benchable_cargo(action);
         let key = braze_permissions::derive_permission_key(action);
 
         // Best-effort, same as the real prompts: a session-store hiccup
-        // here must not change the (always-deny) decision itself.
+        // here must not change the decision itself.
         let _ = self
             .store
             .append(
@@ -76,13 +162,24 @@ impl ConfirmationPrompt for DenyAll {
                 &self.session,
                 &braze_events::AgentEvent::PermissionDecided {
                     action: action.to_string(),
-                    allowed: false,
+                    allowed,
                     key,
                 },
             )
             .await;
 
-        false
+        allowed
+    }
+}
+
+fn join_memory_sections(project_memory: Option<&str>, task_memory: Option<&str>) -> Option<String> {
+    match (project_memory, task_memory) {
+        (Some(project), Some(task)) => {
+            Some(format!("{project}\n\nBenchmark procedural memory:\n{task}"))
+        }
+        (Some(project), None) => Some(project.to_string()),
+        (None, Some(task)) => Some(format!("Benchmark procedural memory:\n{task}")),
+        (None, None) => None,
     }
 }
 
@@ -91,6 +188,12 @@ impl ConfirmationPrompt for DenyAll {
 /// caller — a failed run still produces a `TaskResult` (with
 /// `converged: false` and `run_error: Some(..)`) so one bad task doesn't
 /// abort the whole suite.
+///
+/// `preserve_root`: when `Some`, this run's sandbox (final workdir state)
+/// and session transcript (JSONL rollout) are copied there before their
+/// temp copies are deleted as usual — see `preserve.rs`'s module doc. `None`
+/// (the default; `BRAZE_BENCH_KEEP_SESSIONS` unset) means zero behavior
+/// change from before this parameter existed.
 pub async fn run_task(
     spec: &BackendSpec,
     config: &Config,
@@ -98,6 +201,7 @@ pub async fn run_task(
     repetition: u32,
     timeout: Duration,
     sampling: SamplingSpec,
+    preserve_root: Option<&Path>,
 ) -> Result<TaskResult, BenchError> {
     let sandbox = TaskSandbox::new(task)?;
 
@@ -125,11 +229,11 @@ pub async fn run_task(
 
     let allowlist = WorkdirAllowlist::new(sandbox.path());
     let classifier = DefaultClassifier::new(WorkdirAllowlist::new(sandbox.path()));
-    let deny_all = DenyAll {
+    let prompt = BenchPrompt {
         session,
         store: Arc::clone(&store),
     };
-    let guard = PermissionGuard::new(allowlist, Box::new(classifier), Box::new(deny_all));
+    let guard = PermissionGuard::new(allowlist, Box::new(classifier), Box::new(prompt));
     // `with_workdir`, not `new`: the bench binary's own process cwd is
     // wherever it happened to be launched from, not this task's sandbox —
     // using `new` (which defaults to the process cwd) would silently
@@ -195,6 +299,11 @@ pub async fn run_task(
             braze_memory::DEFAULT_PROJECT_MEMORY_BUDGET_TOKENS,
         )
     });
+    let task_memory = crate::memory::render_task_memory(task)?;
+    let combined_memory_snapshot = join_memory_sections(
+        project_memory_snapshot.as_deref(),
+        task_memory.as_ref().map(|memory| memory.section.as_str()),
+    );
 
     // No references (opencode-10): the bench sandbox is hermetic by
     // design — a user's reference dirs leaking into the measured system
@@ -207,7 +316,7 @@ pub async fn run_task(
         model_hint.as_deref(),
         &[],
         None,
-        project_memory_snapshot.as_deref(),
+        combined_memory_snapshot.as_deref(),
     );
 
     // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget
@@ -356,6 +465,29 @@ pub async fn run_task(
         Err(err) => return Err(err.into()),
     };
 
+    let display_name = spec.display_name(config);
+
+    // Opt-in transcript preservation (`BRAZE_BENCH_KEEP_SESSIONS`,
+    // `preserve.rs`) — copy BEFORE the usual deletion below, so the default
+    // (no env var set, `preserve_root: None`) is byte-for-byte the old
+    // behavior. Best-effort: a copy failure is logged, never fails the run
+    // itself — preservation is diagnostics, not part of the measurement.
+    if let Some(root) = preserve_root {
+        let dest = preserve::preserved_run_dir(root, &display_name, &task.id, repetition);
+        if let Err(err) = preserve::copy_dir_recursive(&session_dir, &dest.join("session")) {
+            eprintln!(
+                "braze-bench: no se pudo preservar la sesión de '{}' :: '{display_name}' (rep {repetition}): {err}",
+                task.id
+            );
+        }
+        if let Err(err) = preserve::copy_dir_recursive(sandbox.path(), &dest.join("sandbox")) {
+            eprintln!(
+                "braze-bench: no se pudo preservar el sandbox de '{}' :: '{display_name}' (rep {repetition}): {err}",
+                task.id
+            );
+        }
+    }
+
     let _ = tokio::fs::remove_dir_all(&session_dir).await;
 
     // Checked before the sandbox drops at the end of this function (its
@@ -369,29 +501,34 @@ pub async fn run_task(
             task.expect_file_contains
                 .iter()
                 .all(|(relative_path, expected_substrings)| {
-                    let Ok(contents) =
-                        std::fs::read_to_string(sandbox.path().join(relative_path))
+                    let Ok(contents) = std::fs::read_to_string(sandbox.path().join(relative_path))
                     else {
                         return false;
                     };
                     // Every expected substring must match as a bounded
                     // token — one miss fails the whole file, matching
                     // the AND semantics the field's doc comment pins.
-                    expected_substrings
-                        .iter()
-                        .all(|needle| crate::metrics::contains_as_a_bounded_token(&contents, needle))
+                    expected_substrings.iter().all(|needle| {
+                        crate::metrics::contains_as_a_bounded_token(&contents, needle)
+                    })
                 }),
         )
     };
 
     Ok(compute_metrics(
-        &spec.display_name(config),
+        &display_name,
         task,
         repetition,
         &events,
         wall_time,
         run_outcome,
         expected_files_found,
+        MemoryRunMetrics {
+            memory_tokens: task_memory
+                .as_ref()
+                .map(|memory| memory.tokens_estimate)
+                .unwrap_or(0),
+        },
         // Paquete 3: `None` when the spec's models aren't priced (or a
         // composite bills at mixed rates) — the row reports no cost
         // estimate rather than a guessed one.
@@ -414,18 +551,18 @@ mod tests {
         (Arc::new(FileSessionStore::new(dir.clone())), dir)
     }
 
-    /// Regression test for N-35 (docs/AUDITORIA-2026-07-v2.md): `DenyAll`
-    /// must persist the same `PermissionRequested`/`PermissionDecided`
-    /// pair the real confirmation prompts do — otherwise a bench run's
-    /// denials never show up in the session log, and
-    /// `metrics::compute_metrics`'s `permission_denials` count (which
+    /// Regression test for N-35 (docs/AUDITORIA-2026-07-v2.md):
+    /// `BenchPrompt` must persist the same `PermissionRequested`/
+    /// `PermissionDecided` pair the real confirmation prompts do —
+    /// otherwise a bench run's denials never show up in the session log,
+    /// and `metrics::compute_metrics`'s `permission_denials` count (which
     /// scans exactly those events) is stuck at 0 no matter how many
     /// actions actually got refused.
     #[tokio::test]
-    async fn deny_all_persists_the_denial_before_returning_false() {
+    async fn bench_prompt_persists_the_denial_before_returning_false() {
         let (store, dir) = temp_store();
         let session = SessionId::new();
-        let deny_all = DenyAll {
+        let prompt = BenchPrompt {
             session,
             store: Arc::clone(&store),
         };
@@ -433,7 +570,7 @@ mod tests {
         let action = ActionDescriptor::DeleteFile {
             path: std::path::PathBuf::from("/tmp/x"),
         };
-        let allowed = deny_all.confirm(&action).await;
+        let allowed = prompt.confirm(&action).await;
         assert!(!allowed);
 
         let events = store.load(&session).await.expect("load events");
@@ -444,5 +581,110 @@ mod tests {
         }
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The cargo carve-out: `cargo check`/`build`/`test` are approved
+    /// (and the approval is persisted, so the session log tells the
+    /// truth), while everything else — including the config-injection
+    /// flags that turn cargo into an exec primitive, and `cargo run` —
+    /// stays denied.
+    #[tokio::test]
+    async fn bench_prompt_approves_plain_cargo_verify_subcommands_and_persists_the_approval() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let prompt = BenchPrompt {
+            session,
+            store: Arc::clone(&store),
+        };
+
+        let action = ActionDescriptor::ShellCommand {
+            command: vec!["cargo".to_string(), "check".to_string()],
+        };
+        assert!(prompt.confirm(&action).await);
+
+        let events = store.load(&session).await.expect("load events");
+        match &events[1] {
+            AgentEvent::PermissionDecided { allowed, .. } => assert!(allowed),
+            other => panic!("expected PermissionDecided, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[test]
+    fn benchable_cargo_covers_verify_subcommands_only() {
+        let shell = |parts: &[&str]| ActionDescriptor::ShellCommand {
+            command: parts.iter().map(|s| s.to_string()).collect(),
+        };
+        for parts in [
+            &["cargo", "check"][..],
+            &["cargo", "build"][..],
+            &["cargo", "test"][..],
+            &["cargo", "check", "--offline"][..],
+            &["cargo", "test", "--workspace"][..],
+        ] {
+            assert!(is_benchable_cargo(&shell(parts)), "expected {parts:?} allowed");
+        }
+        for parts in [
+            &["cargo", "run"][..],
+            &["cargo", "install", "x"][..],
+            &["cargo", "publish"][..],
+            &["cargo"][..],
+            &["cargo", "check", "--manifest-path", "/otro/Cargo.toml"][..],
+            &["cargo", "check", "--manifest-path=/otro/Cargo.toml"][..],
+            &["cargo", "build", "--config", "build.rustc-wrapper='sh'"][..],
+            &["cargo", "test", "-Zunstable-options"][..],
+            &["rustc", "main.rs"][..],
+        ] {
+            assert!(!is_benchable_cargo(&shell(parts)), "expected {parts:?} denied");
+        }
+        assert!(!is_benchable_cargo(&ActionDescriptor::DeleteFile {
+            path: std::path::PathBuf::from("/tmp/x"),
+        }));
+    }
+
+    /// The `bash -lc` wrapper shape gpt-oss:20b sends every shell command
+    /// through (preserved-session diagnosis, 2026-07-16): the plain-cargo
+    /// scripts unwrap and pass, while anything with shell metacharacters,
+    /// a non-cargo script, or extra wrapper args stays denied.
+    #[test]
+    fn benchable_cargo_unwraps_the_bash_lc_shape_strictly() {
+        let shell = |parts: &[&str]| ActionDescriptor::ShellCommand {
+            command: parts.iter().map(|s| s.to_string()).collect(),
+        };
+        for parts in [
+            &["bash", "-lc", "cargo check"][..],
+            &["bash", "-lc", "cargo check --quiet"][..],
+            &["bash", "-c", "cargo test --workspace"][..],
+            &["sh", "-c", "cargo build"][..],
+            &["bash", "-l", "-c", "cargo check"][..],
+        ] {
+            assert!(is_benchable_cargo(&shell(parts)), "expected {parts:?} allowed");
+        }
+        for parts in [
+            // Composite/expanding shell programs — the metacharacter
+            // whitelist is the boundary being proven here.
+            &["bash", "-lc", "cargo check; rm -rf /"][..],
+            &["bash", "-lc", "cargo check && curl http://x"][..],
+            &["bash", "-lc", "cargo check | tee /tmp/x"][..],
+            &["bash", "-lc", "cargo check > out.txt"][..],
+            &["bash", "-lc", "cargo check $(rm -rf /)"][..],
+            &["bash", "-lc", "cargo check `id`"][..],
+            // Non-cargo scripts in the wrapper.
+            &["bash", "-lc", "rm -rf /tmp/x"][..],
+            &["bash", "-lc", "ls"][..],
+            // The cargo flag rules still apply through the wrapper.
+            &["bash", "-lc", "cargo run"][..],
+            &["bash", "-lc", "cargo check --manifest-path=/otro/Cargo.toml"][..],
+            // Malformed wrappers: no script, no -c, extra non-flag args,
+            // or a different program.
+            &["bash", "-lc"][..],
+            &["bash", "cargo check"][..],
+            &["bash", "-l", "cargo check"][..],
+            &["zsh", "-c", "cargo check"][..],
+            &["bash", "-lc", "cargo check", "extra"][..],
+        ] {
+            assert!(!is_benchable_cargo(&shell(parts)), "expected {parts:?} denied");
+        }
     }
 }

@@ -1,0 +1,47 @@
+# Pilot suite for Paper 2: procedural memory distillation.
+#
+# This is not the full A -> B -> H benchmark yet. It is a small permanent
+# fixture for the first technical milestone: inject a manual/human playbook
+# under a fixed token budget and serialize the memory condition in results.
+
+[[tasks]]
+id = "rust_borrow_fix_none"
+skill = "memory_transfer_b"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_file_contains = { "src/lib.rs" = ["let first = self.items.first().cloned();", "self.items.push(value);"] }
+expect_max_rounds = 8
+expect_max_tokens = 12000
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"memory_pilot\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Store {\n    items: Vec<String>,\n}\n\nimpl Store {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn push_and_first(&mut self, value: String) -> Option<String> {\n        let first = self.items.first();\n        self.items.push(value);\n        first.cloned()\n    }\n}\n"
+
+[[tasks]]
+id = "rust_borrow_fix_human_playbook"
+skill = "memory_transfer_b"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+memory_condition = "human-playbook"
+memory_file = "../../../docs/playbooks/rust-compile-repair-human.playbook.json"
+memory_budget_tokens = 500
+expect_file_contains = { "src/lib.rs" = ["let first = self.items.first().cloned();", "self.items.push(value);"] }
+expect_max_rounds = 8
+expect_max_tokens = 12000
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"memory_pilot\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Store {\n    items: Vec<String>,\n}\n\nimpl Store {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn push_and_first(&mut self, value: String) -> Option<String> {\n        let first = self.items.first();\n        self.items.push(value);\n        first.cloned()\n    }\n}\n"
+
+[[tasks]]
+id = "rust_non_borrow_holdout_with_playbook"
+skill = "memory_holdout_h"
+prompt = "Edit src/lib.rs to add a public function double(n: u32) -> u32 that returns n * 2."
+memory_condition = "human-playbook"
+memory_file = "../../../docs/playbooks/rust-compile-repair-human.playbook.json"
+memory_budget_tokens = 500
+expect_file_contains = { "src/lib.rs" = ["pub fn double", "n * 2"] }
+expect_max_rounds = 6
+expect_max_tokens = 9000
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"memory_holdout\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn triple(n: u32) -> u32 {\n    n * 3\n}\n"

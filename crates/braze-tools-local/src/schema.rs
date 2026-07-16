@@ -128,6 +128,10 @@ pub fn schema_for(name: &str) -> Option<ToolSchema> {
                     "items": { "type": "string" },
                     "minItems": 1,
                     "description": "Argv-style command: command[0] is the program, remaining elements are its arguments. Never a raw shell string."
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Optional timeout in seconds (clamped to 1-3600). The process is killed if it runs longer, and the call returns an error naming the bound. Omit for no per-call limit."
                 }
             },
             "required": ["command"],

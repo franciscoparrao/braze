@@ -6,7 +6,7 @@
 //! `metrics::compute_metrics` for how these fields turn into a verdict.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -109,6 +109,23 @@ pub struct TaskDef {
     /// comportamiento ni de fingerprint.
     #[serde(default)]
     pub noise_tools: usize,
+    /// Experimental Paper 2 memory condition. When `memory_file` is set,
+    /// this labels what is being injected (`"procedural"`, `"summary"`,
+    /// `"episodic"`, `"human-playbook"`, ...). It is serialized into
+    /// `TaskResult` so sweeps can compare memory conditions without
+    /// parsing task ids. If omitted while `memory_file` is present, the
+    /// runner treats it as `"procedural"`.
+    #[serde(default)]
+    pub memory_condition: Option<String>,
+    /// Optional memory/playbook file injected into the system prompt for
+    /// this task. Relative paths are resolved against the suite TOML's
+    /// directory in [`load_suite`], not against the per-run sandbox.
+    #[serde(default)]
+    pub memory_file: Option<PathBuf>,
+    /// Token budget for the rendered memory section. Defaults in the
+    /// renderer to a conservative Paper 2 pilot budget when omitted.
+    #[serde(default)]
+    pub memory_budget_tokens: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -119,7 +136,15 @@ struct TaskSuiteFile {
 /// Loads and parses a task suite from a TOML file.
 pub fn load_suite(path: &Path) -> Result<Vec<TaskDef>, BenchError> {
     let contents = std::fs::read_to_string(path)?;
-    let suite: TaskSuiteFile = toml::from_str(&contents)?;
+    let mut suite: TaskSuiteFile = toml::from_str(&contents)?;
+    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    for task in &mut suite.tasks {
+        if let Some(memory_file) = &mut task.memory_file
+            && memory_file.is_relative()
+        {
+            *memory_file = base_dir.join(&memory_file);
+        }
+    }
     Ok(suite.tasks)
 }
 
@@ -139,6 +164,9 @@ mod tests {
             expect_max_rounds = 8
             expect_max_tokens = 4000
             expect_max_cost_usd = 0.05
+            memory_condition = "procedural"
+            memory_file = "playbooks/rust-fix.json"
+            memory_budget_tokens = 500
 
             [tasks.setup_files]
             "notas.txt" = "uno\ndos\ntres\n"
@@ -157,6 +185,12 @@ mod tests {
         assert_eq!(task.expect_max_rounds, Some(8));
         assert_eq!(task.expect_max_tokens, Some(4000));
         assert_eq!(task.expect_max_cost_usd, Some(0.05));
+        assert_eq!(task.memory_condition.as_deref(), Some("procedural"));
+        assert_eq!(
+            task.memory_file.as_deref(),
+            Some(std::path::Path::new("playbooks/rust-fix.json"))
+        );
+        assert_eq!(task.memory_budget_tokens, Some(500));
         assert_eq!(
             task.expect_file_contains
                 .get("notas.txt")
@@ -189,6 +223,9 @@ mod tests {
         assert_eq!(task.expect_max_rounds, None);
         assert_eq!(task.expect_max_tokens, None);
         assert_eq!(task.expect_max_cost_usd, None);
+        assert_eq!(task.memory_condition, None);
+        assert_eq!(task.memory_file, None);
+        assert_eq!(task.memory_budget_tokens, None);
     }
 
     #[test]
@@ -234,6 +271,34 @@ mod tests {
         let tasks = load_suite(&path).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, "only");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_suite_resolves_memory_file_relative_to_suite_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "braze-bench-test-load-suite-memory-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("suite.toml");
+        std::fs::write(
+            &path,
+            r#"
+                [[tasks]]
+                id = "only"
+                prompt = "hola"
+                memory_file = "playbooks/p.json"
+            "#,
+        )
+        .unwrap();
+
+        let tasks = load_suite(&path).unwrap();
+        assert_eq!(
+            tasks[0].memory_file.as_ref(),
+            Some(&dir.join("playbooks/p.json"))
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -508,5 +573,36 @@ mod tests {
             "si_2_lead_suffix must guard the existing '+plan:' support wasn't removed \
              (asserts: {backend_spec_asserts:?})"
         );
+    }
+
+    #[test]
+    fn memory_distillation_suite_parses_and_resolves_playbook_paths() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("suites/memory-distillation.toml");
+        let tasks = load_suite(&path)
+            .expect("memory-distillation.toml must parse; check for TOML syntax issues");
+
+        assert_eq!(tasks.len(), 3);
+        assert!(
+            tasks.iter().any(|task| task.memory_file.is_none()),
+            "pilot suite needs a no-memory baseline task"
+        );
+
+        let memory_tasks: Vec<_> = tasks
+            .iter()
+            .filter(|task| task.memory_file.is_some())
+            .collect();
+        assert_eq!(memory_tasks.len(), 2);
+        for task in memory_tasks {
+            assert_eq!(task.memory_condition.as_deref(), Some("human-playbook"));
+            assert_eq!(task.memory_budget_tokens, Some(500));
+            let memory_file = task.memory_file.as_ref().expect("checked above");
+            assert!(
+                memory_file.exists(),
+                "memory file for task '{}' must exist after suite-relative resolution: {}",
+                task.id,
+                memory_file.display()
+            );
+        }
     }
 }

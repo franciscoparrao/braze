@@ -13,10 +13,21 @@ use serde_json::json;
 use tokio::process::Command;
 
 /// Arguments as they arrive in `ToolCall.arguments`:
-/// `{"command": ["ls", "-la", "/tmp"]}`.
+/// `{"command": ["ls", "-la", "/tmp"]}`, optionally with
+/// `"timeout": <secs>`.
+///
+/// `timeout` exists because models trained on other agent harnesses
+/// (Codex, Claude Code) keep sending it whether we accept it or not:
+/// the memory-distillation sweeps of 2026-07-16 (gpt-oss:20b, 14 schema
+/// validation failures across 15 tasks) showed each rejected call
+/// burning a full round on "Additional properties are not allowed" —
+/// pure harness friction. Accepting it as a real, honored parameter is
+/// strictly better than rejecting it (and better than silently
+/// stripping it: the model asked for a bound, so enforce the bound).
 #[derive(Debug, Deserialize)]
 pub struct ShellExecArgs {
     pub command: Vec<String>,
+    pub timeout: Option<u64>,
 }
 
 /// Result of spawning one process, program-agnostic.
@@ -71,7 +82,30 @@ pub async fn shell_exec(args: ShellExecArgs, workdir: &Path) -> Result<String, S
         return Err("command must contain at least the program name".to_string());
     };
 
-    let output = run(program, rest, workdir).await?;
+    let output = match args.timeout {
+        Some(secs) => {
+            // Clamped, not trusted: 0 would kill every command instantly
+            // and a model that meant milliseconds (120000) lands on the
+            // cap instead of an hour-long wait. `run`'s `kill_on_drop`
+            // makes dropping the timed-out future actually kill the
+            // child, not just stop waiting on it (N-33).
+            let secs = secs.clamp(1, 3600);
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(secs),
+                run(program, rest, workdir),
+            )
+            .await
+            {
+                Ok(result) => result?,
+                Err(_) => {
+                    return Err(format!(
+                        "command timed out after {secs}s and was killed"
+                    ));
+                }
+            }
+        }
+        None => run(program, rest, workdir).await?,
+    };
     let summary = json!({
         "exit_code": output.exit_code,
         "stdout": output.stdout,
@@ -100,6 +134,7 @@ mod tests {
         let result = shell_exec(
             ShellExecArgs {
                 command: vec!["echo".to_string(), "hello".to_string()],
+                timeout: None,
             },
             &cwd(),
         )
@@ -115,6 +150,7 @@ mod tests {
         let result = shell_exec(
             ShellExecArgs {
                 command: vec!["false".to_string()],
+                timeout: None,
             },
             &cwd(),
         )
@@ -125,7 +161,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_command_is_rejected() {
-        let result = shell_exec(ShellExecArgs { command: vec![] }, &cwd()).await;
+        let result = shell_exec(ShellExecArgs { command: vec![], timeout: None }, &cwd()).await;
         assert!(result.is_err());
     }
 
@@ -134,12 +170,57 @@ mod tests {
         let result = shell_exec(
             ShellExecArgs {
                 command: vec!["this-binary-does-not-exist-anywhere".to_string()],
+                timeout: None,
             },
             &cwd(),
         )
         .await;
 
         assert!(result.is_err());
+    }
+
+    /// A command that outlives its model-requested `timeout` is killed
+    /// and reported as a recoverable error naming the bound — not left
+    /// running, not surfaced as a spawn failure.
+    #[tokio::test]
+    async fn a_command_exceeding_its_requested_timeout_is_killed_and_reported() {
+        let started = std::time::Instant::now();
+        let result = shell_exec(
+            ShellExecArgs {
+                command: vec!["sleep".to_string(), "30".to_string()],
+                timeout: Some(1),
+            },
+            &cwd(),
+        )
+        .await;
+
+        let err = result.expect_err("sleep 30 must not survive a 1s timeout");
+        assert!(
+            err.contains("timed out after 1s"),
+            "error should name the timeout, got: {err}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the call must return promptly after the timeout, not wait out the sleep"
+        );
+    }
+
+    /// The clamp floor: `timeout: 0` (a model hallucination, or "no
+    /// limit" in some other harness's dialect) must not kill every
+    /// command instantly — it behaves as the 1s floor.
+    #[tokio::test]
+    async fn a_zero_timeout_is_clamped_not_instant_death() {
+        let result = shell_exec(
+            ShellExecArgs {
+                command: vec!["echo".to_string(), "hola".to_string()],
+                timeout: Some(0),
+            },
+            &cwd(),
+        )
+        .await
+        .expect("echo must survive a clamped zero timeout");
+
+        assert!(result.contains("hola"));
     }
 
     /// Regression test for F1: the command must actually run inside
@@ -159,6 +240,7 @@ mod tests {
         let result = shell_exec(
             ShellExecArgs {
                 command: vec!["cat".to_string(), "marker.txt".to_string()],
+                timeout: None,
             },
             &dir,
         )

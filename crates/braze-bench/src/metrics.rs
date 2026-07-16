@@ -86,11 +86,28 @@ pub enum RunOutcome {
     Failed(braze_engine::EngineError),
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MemoryRunMetrics {
+    pub memory_tokens: u32,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskResult {
     pub backend: String,
     pub task_id: String,
     pub skill: Option<String>,
+    /// Experimental Paper 2 memory condition injected for this run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_condition: Option<String>,
+    /// Memory/playbook file used for this run, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_file: Option<String>,
+    /// Configured memory budget for this run, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_budget_tokens: Option<usize>,
+    /// Approximate tokens of the rendered memory section actually injected.
+    #[serde(default)]
+    pub memory_tokens: u32,
     /// Which repetition (0-based) of this (task, backend) pair this is —
     /// always 0 when `--repetitions` is left at its default of 1. See
     /// docs/AUDITORIA-2026-07.md hallazgo F3.
@@ -277,6 +294,13 @@ pub fn harness_error_result(
         backend: backend.to_string(),
         task_id: task.id.clone(),
         skill: task.skill.clone(),
+        memory_condition: crate::memory::resolved_memory_condition(task),
+        memory_file: task
+            .memory_file
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        memory_budget_tokens: task.memory_budget_tokens,
+        memory_tokens: 0,
         repetition,
         converged: false,
         run_error: Some(error.to_string()),
@@ -364,6 +388,7 @@ pub fn compute_metrics(
     wall_time: Duration,
     run_outcome: RunOutcome,
     expected_files_found: Option<bool>,
+    memory: MemoryRunMetrics,
     pricing: Option<crate::backend_spec::PricingRates>,
 ) -> TaskResult {
     let started_ids: HashSet<&str> = events
@@ -624,6 +649,13 @@ pub fn compute_metrics(
         backend: backend.to_string(),
         task_id: task.id.clone(),
         skill: task.skill.clone(),
+        memory_condition: crate::memory::resolved_memory_condition(task),
+        memory_file: task
+            .memory_file
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        memory_budget_tokens: task.memory_budget_tokens,
+        memory_tokens: memory.memory_tokens,
         repetition,
         converged,
         run_error,
@@ -700,6 +732,9 @@ mod tests {
             expect_max_tokens: None,
             expect_max_cost_usd: None,
             noise_tools: 0,
+            memory_condition: None,
+            memory_file: None,
+            memory_budget_tokens: None,
         }
     }
 
@@ -711,7 +746,17 @@ mod tests {
     /// here doesn't vary (repetition 0, no file assertions) so each test
     /// body only names what it's actually exercising.
     fn metrics(task: &TaskDef, events: &[AgentEvent], run_outcome: RunOutcome) -> TaskResult {
-        compute_metrics("ollama:x", task, 0, events, zero(), run_outcome, None, None)
+        compute_metrics(
+            "ollama:x",
+            task,
+            0,
+            events,
+            zero(),
+            run_outcome,
+            None,
+            MemoryRunMetrics::default(),
+            None,
+        )
     }
 
     #[test]
@@ -1357,6 +1402,7 @@ mod tests {
             zero(),
             RunOutcome::Converged,
             Some(false),
+            MemoryRunMetrics::default(),
             None,
         );
         assert!(!result.passed);
@@ -1377,6 +1423,7 @@ mod tests {
             zero(),
             RunOutcome::Converged,
             Some(true),
+            MemoryRunMetrics::default(),
             None,
         );
         assert!(result.passed);
@@ -1524,6 +1571,7 @@ mod tests {
             zero(),
             RunOutcome::Converged,
             None,
+            MemoryRunMetrics::default(),
             pricing,
         )
     }
