@@ -252,10 +252,44 @@ impl SessionStore for FileSessionStore {
                         // on the *next* resume would then fail hard
                         // instead of tolerating it — a one-turn hiccup
                         // turning into a permanently unresumable session.
-                        // Truncating now, under the same lock `append`
-                        // uses, makes the on-disk file match exactly what
-                        // was just recovered, so the next `append` starts
-                        // clean.
+                        //
+                        // v8 K-5 (docs/AUDITORIA-2026-07-v8.md): the
+                        // repair must hold the N-27 advisory lock. A
+                        // read-only process (`braze permissions suggest`
+                        // loads EVERY session) that catches a live
+                        // writer mid-`write_all` would otherwise misread
+                        // the partial line as a crash artifact and
+                        // truncate the live process's log. If we already
+                        // hold this session's lock we repair directly;
+                        // otherwise we take it transiently — and if
+                        // another process holds it, we tolerate in
+                        // memory and leave the file alone (the writer's
+                        // own flow finishes the line).
+                        let already_held = {
+                            let locks = self
+                                .session_locks
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            locks.contains_key(session)
+                        };
+                        let transient_lock = if already_held {
+                            None
+                        } else {
+                            match std::fs::OpenOptions::new().append(true).open(&path) {
+                                Ok(lock_file) if lock_file.try_lock_exclusive().is_ok() => {
+                                    Some(lock_file)
+                                }
+                                _ => {
+                                    tracing::warn!(
+                                        path = ?path,
+                                        "another process holds this session's write lock; \
+                                         tolerating the partial final line in memory without \
+                                         repairing the file (v8 K-5)"
+                                    );
+                                    break;
+                                }
+                            }
+                        };
                         let valid_prefix = if line_no == 0 {
                             String::new()
                         } else {
@@ -269,6 +303,10 @@ impl SessionStore for FileSessionStore {
                                  the fragment will remain on disk until the next successful append"
                             );
                         }
+                        // A transiently-taken lock is released here (the
+                        // file handle closes); a reader must not keep
+                        // sessions locked after repairing them.
+                        drop(transient_lock);
                         break;
                     }
                     return Err(SessionError::Read(format!(
@@ -611,6 +649,61 @@ mod tests {
     /// A malformed line that is NOT the last one in the file is real
     /// corruption (not a truncated write) and must still fail loudly —
     /// the C5 tolerance is deliberately narrow.
+    /// v8 K-5 (docs/AUDITORIA-2026-07-v8.md): the N-5 repair must not
+    /// run while ANOTHER process holds the session's N-27 write lock — a
+    /// read-only process (`braze permissions suggest` loads every
+    /// session) catching a live writer mid-`write_all` would misread the
+    /// partial line as a crash artifact and truncate the live process's
+    /// log. With the lock held elsewhere: tolerate in memory, leave the
+    /// file byte-for-byte alone. With the lock free: repair as before.
+    #[tokio::test]
+    async fn load_does_not_repair_while_another_process_holds_the_write_lock() {
+        let (store, dir) = temp_store("k5-no-repair-under-foreign-lock");
+        let session = SessionId::new();
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let path = store.path_for(&session);
+
+        // Log written raw (this store never appended → holds no lock):
+        // one valid event plus a mid-write fragment, exactly what a
+        // LIVE writer's `write_all` can look like from a reader racing it.
+        let raw = format!(
+            "{}\n{}",
+            r#"{"type":"user_message","text":"hola"}"#,
+            r#"{"type":"user_message","text":"cor"#
+        );
+        tokio::fs::write(&path, &raw).await.unwrap();
+
+        // The "live writer": a separate handle holding the advisory lock.
+        let writer_lock = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writer_lock.try_lock_exclusive().unwrap();
+
+        let events = store.load(&session).await.expect("load must tolerate");
+        assert_eq!(events.len(), 1, "the partial line is skipped in memory");
+        let on_disk = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(
+            on_disk, raw,
+            "the live writer's file must not be touched while its lock is held"
+        );
+
+        // Writer gone (lock released): a cold store's load now repairs.
+        fs2::FileExt::unlock(&writer_lock).unwrap();
+        drop(writer_lock);
+        let fresh = FileSessionStore::new(dir.clone());
+        let events = fresh.load(&session).await.expect("load should not fail");
+        assert_eq!(events.len(), 1);
+        let repaired = tokio::fs::read_to_string(&path).await.unwrap();
+        assert_eq!(
+            repaired.lines().count(),
+            1,
+            "with the lock free, the fragment must be repaired away: {repaired:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     #[tokio::test]
     async fn load_still_fails_on_a_malformed_line_that_is_not_the_last_one() {
         let (store, dir) = temp_store("corrupt-middle-line");

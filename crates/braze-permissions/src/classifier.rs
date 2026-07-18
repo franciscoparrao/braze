@@ -77,7 +77,14 @@ impl DefaultClassifier {
                 self.all_path_like_args_allowed(command)
             }
             "find" => is_safe_find(command) && self.all_path_like_args_allowed(command),
-            "git" => is_safe_git(command),
+            // v8 K-2 (docs/AUDITORIA-2026-07-v8.md): `diff`/`log`/`show`
+            // también deben pasar el path-check — sin él, `git diff
+            // --no-index /etc/shadow /dev/null` clasificaba Reversible y
+            // volcaba cualquier archivo del sistema al contexto, la
+            // misma clase de fuga que N-8b/J-18 cerraron para `cat` y
+            // compañía. Las revisiones/rangos (`HEAD~1`, `main..dev`)
+            // pasan el check como paths relativos bajo el workdir.
+            "git" => is_safe_git(command) && self.all_path_like_args_allowed(command),
             "env" => is_safe_env(command),
             _ => false,
         }
@@ -102,9 +109,22 @@ impl DefaultClassifier {
 impl ActionClassifier for DefaultClassifier {
     fn classify(&self, action: &ActionDescriptor) -> Reversibility {
         match action {
-            ActionDescriptor::WriteFile { path }
-            | ActionDescriptor::DeleteFile { path }
-            | ActionDescriptor::ReadPath { path } => {
+            ActionDescriptor::WriteFile { path } | ActionDescriptor::DeleteFile { path } => {
+                // v8 K-3 (docs/AUDITORIA-2026-07-v8.md): `.braze/`
+                // guarda `memory.json`, cuyo contenido se inyecta al
+                // system prompt de TODAS las sesiones futuras del
+                // proyecto. Una escritura del modelo ahí es persistencia
+                // de instrucciones cross-sesión, no un archivo
+                // reversible del workdir — siempre pide confirmación.
+                if path.components().any(|c| c.as_os_str() == ".braze") {
+                    Reversibility::Irreversible
+                } else if self.allowlist.is_allowed(path) {
+                    Reversibility::Reversible
+                } else {
+                    Reversibility::Irreversible
+                }
+            }
+            ActionDescriptor::ReadPath { path } => {
                 if self.allowlist.is_allowed(path) {
                     Reversibility::Reversible
                 } else {
@@ -244,7 +264,15 @@ fn is_safe_git(command: &[String]) -> bool {
     match command.get(1).map(String::as_str) {
         Some("status") => true,
         Some("diff") | Some("log") | Some("show") => !command[2..].iter().any(|arg| {
-            arg == "-o" || arg == "--output" || arg.starts_with("--output=") || arg == "--ext-diff"
+            arg == "-o"
+                || arg == "--output"
+                || arg.starts_with("--output=")
+                || arg == "--ext-diff"
+                // v8 K-2: `-O<orderfile>` hace que git LEA un archivo
+                // arbitrario (y `-O` separado tomaría el siguiente arg)
+                // — un read primitive disfrazado de flag, que además el
+                // path-check no ve porque empieza con '-'.
+                || arg.starts_with("-O")
         }),
         Some("branch") => command.len() == 2,
         _ => false,
@@ -611,6 +639,84 @@ mod tests {
                 "expected {parts:?} to be Irreversible"
             );
         }
+    }
+
+    /// v8 K-2 (docs/AUDITORIA-2026-07-v8.md): `git diff/log/show` were
+    /// the last readers exempt from the N-8b/J-18 path check — `git diff
+    /// --no-index /etc/shadow /dev/null` classified Reversible and dumped
+    /// any file on the system into the model's context. Same gate now.
+    #[test]
+    fn git_read_subcommands_outside_workdir_are_irreversible() {
+        for parts in [
+            &["git", "diff", "--no-index", "/etc/shadow", "/dev/null"][..],
+            &["git", "log", "-p", "/etc/passwd"][..],
+            &["git", "show", "/home/other/.ssh/id_rsa"][..],
+            // `-O<orderfile>` makes git READ an arbitrary file, and the
+            // path check can't see it (starts with '-') — denied as a
+            // flag instead.
+            &["git", "diff", "-O/etc/orderfile"][..],
+            &["git", "diff", "-O", "orderfile"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Irreversible,
+                "expected {parts:?} to be Irreversible"
+            );
+        }
+    }
+
+    /// The common in-repo git shapes must stay confirmation-free —
+    /// revisions and ranges (`HEAD~1`, `main..dev`) pass the path check
+    /// as relative paths under the workdir.
+    #[test]
+    fn git_read_subcommands_inside_workdir_stay_reversible() {
+        for parts in [
+            &["git", "status"][..],
+            &["git", "branch"][..],
+            &["git", "diff"][..],
+            &["git", "diff", "HEAD~1"][..],
+            &["git", "diff", "main..feature", "src/main.rs"][..],
+            &["git", "log", "--oneline", "-5"][..],
+            &["git", "show", "HEAD:src/main.rs"][..],
+        ] {
+            assert_eq!(
+                classifier().classify(&shell(parts)),
+                Reversibility::Reversible,
+                "expected {parts:?} to be Reversible"
+            );
+        }
+    }
+
+    /// v8 K-3: `.braze/` holds `memory.json`, which is injected into the
+    /// system prompt of every future session of the project — a model
+    /// write there is cross-session instruction persistence, never a
+    /// silent Reversible write, even inside the workdir. Reads stay
+    /// Reversible (the content already reaches the model via injection).
+    #[test]
+    fn writes_under_dot_braze_are_irreversible_even_inside_the_workdir() {
+        for path in [".braze/memory.json", "/home/user/project/.braze/memory.json"] {
+            assert_eq!(
+                classifier().classify(&ActionDescriptor::WriteFile {
+                    path: std::path::PathBuf::from(path),
+                }),
+                Reversibility::Irreversible,
+                "expected write to {path:?} to be Irreversible"
+            );
+            assert_eq!(
+                classifier().classify(&ActionDescriptor::DeleteFile {
+                    path: std::path::PathBuf::from(path),
+                }),
+                Reversibility::Irreversible,
+                "expected delete of {path:?} to be Irreversible"
+            );
+        }
+        assert_eq!(
+            classifier().classify(&ActionDescriptor::ReadPath {
+                path: std::path::PathBuf::from(".braze/memory.json"),
+            }),
+            Reversibility::Reversible,
+            "reading .braze stays Reversible"
+        );
     }
 
     /// The same commands reading only inside the workdir must remain

@@ -45,6 +45,15 @@ pub fn project_key_for(cwd: &Path) -> String {
 /// the design doc's recommendation to version it alongside the project
 /// rather than in a global XDG directory (§ "mejor opción para nuestra
 /// configuración").
+///
+/// Caveat de seguridad (v8 K-3, docs/AUDITORIA-2026-07-v8.md): commitear
+/// `memory.json` al repo significa que CLONAR un repo ajeno puede traer
+/// una memoria pre-sembrada que se inyecta al system prompt. Las
+/// defensas del render (campos sanitizados, `objective`/`notes` nunca
+/// renderizados en V1, sección enmarcada como datos) acotan el daño,
+/// pero la recomendación segura es `.gitignore`ar `.braze/` en repos
+/// que acepten contribuciones de terceros hasta que exista una decisión
+/// de confianza explícita para memoria ajena.
 pub fn default_memory_path(project_root: &Path) -> PathBuf {
     project_root.join(".braze").join("memory.json")
 }

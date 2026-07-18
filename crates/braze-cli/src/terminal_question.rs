@@ -48,8 +48,14 @@ impl QuestionPrompt for TerminalQuestionPrompt {
     /// guesses a choice on the user's behalf (same safety default as the
     /// y/n prompt: anything but an unambiguous answer means "no answer").
     async fn ask(&self, question: &str, options: &[String]) -> Option<usize> {
+        // v8 K-4 (docs/AUDITORIA-2026-07-v8.md): `question`/`options`
+        // los escribe el MODELO — la misma seam que J-19 cerró para los
+        // approval prompts. Sin sanitizar, ANSI embebido puede repintar
+        // el terminal o forjar visualmente un prompt de aprobación.
+        let question = braze_permissions::sanitize_control_chars(question);
         let mut menu = format!("\n{question}\n");
         for (i, option) in options.iter().enumerate() {
+            let option = braze_permissions::sanitize_control_chars(option);
             menu.push_str(&format!("  {}) {option}\n", i + 1));
         }
         menu.push_str(&format!("Elige [1-{}]: ", options.len()));
