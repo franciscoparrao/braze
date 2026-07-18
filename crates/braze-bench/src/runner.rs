@@ -259,6 +259,13 @@ pub async fn run_task(
             task.noise_tools,
         )));
     }
+    // Ancla BFCL: tools objetivo declaradas por la tarea, con schema real
+    // y resultado enlatado (docs/bfcl-anchor-design-2026-07-18.md).
+    if !task.synthetic_tools.is_empty() {
+        providers.push(Box::new(crate::synthetic::SyntheticToolsProvider::new(
+            task.synthetic_tools.clone(),
+        )));
+    }
     let tools = braze_tools_core::ToolRegistry::new(providers);
 
     let model = spec.build_agent_model(config, sampling)?;

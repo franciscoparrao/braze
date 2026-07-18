@@ -13,6 +13,7 @@ mod metrics;
 mod noise;
 mod preserve;
 mod report;
+mod synthetic;
 mod runner;
 mod sandbox;
 mod task;
