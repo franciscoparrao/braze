@@ -45,6 +45,10 @@ pub enum FailureCause {
     /// The turn converged, but `expect_file_contains` didn't match the
     /// sandbox's actual filesystem state.
     AssertionFiles,
+    /// The turn converged, but `cargo check` failed in the sandbox
+    /// afterwards (`expect_cargo_check`, v8 K-9) — the model's edit
+    /// doesn't compile, regardless of what the substring needles say.
+    AssertionCargoCheck,
     /// The turn converged, but used more model rounds than
     /// `expect_max_rounds` allowed (v4 P0.4 — budget assertions). A
     /// config that passes the correctness checks in 14 rounds is worse
@@ -159,6 +163,13 @@ pub struct TaskResult {
     pub expected_tool_called: Option<bool>,
     pub expected_text_found: Option<bool>,
     pub expected_files_found: Option<bool>,
+    /// v8 K-9: whether `cargo check` exited 0 in the sandbox after the
+    /// run. `None` — `expect_cargo_check` not declared on the `TaskDef`;
+    /// `Some(true)`/`Some(false)` — declared and passed/failed. Same
+    /// `Option<bool>` "not asserted / asserted-passed / asserted-failed"
+    /// contract as [`Self::expected_files_found`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_cargo_check_passed: Option<bool>,
     /// v4 P0.4 (docs/AUDITORIA-2026-07-v4.md): whether the turn stayed
     /// within `expect_max_rounds`. `None` — no rounds budget declared on
     /// the `TaskDef` (so the budget was trivially satisfied and not
@@ -315,6 +326,7 @@ pub fn harness_error_result(
         expected_tool_called: None,
         expected_text_found: None,
         expected_files_found: None,
+        expected_cargo_check_passed: None,
         // Nothing ran, so no budget assertion was evaluated either —
         // `None` (not asserted) rather than `Some(false)` (budget blown).
         // Same "not reported" semantics as the cache fields below.
@@ -388,6 +400,7 @@ pub fn compute_metrics(
     wall_time: Duration,
     run_outcome: RunOutcome,
     expected_files_found: Option<bool>,
+    expected_cargo_check_passed: Option<bool>,
     memory: MemoryRunMetrics,
     pricing: Option<crate::backend_spec::PricingRates>,
 ) -> TaskResult {
@@ -624,6 +637,7 @@ pub fn compute_metrics(
         && (!task.expect_no_tool_call || tool_call_names.is_empty())
         && expected_text_found.unwrap_or(true)
         && expected_files_found.unwrap_or(true)
+        && expected_cargo_check_passed.unwrap_or(true)
         && expected_rounds_within_budget.unwrap_or(true)
         && expected_tokens_within_budget.unwrap_or(true)
         && expected_cost_within_budget.unwrap_or(true);
@@ -644,6 +658,8 @@ pub fn compute_metrics(
             Some(FailureCause::AssertionText)
         } else if expected_files_found == Some(false) {
             Some(FailureCause::AssertionFiles)
+        } else if expected_cargo_check_passed == Some(false) {
+            Some(FailureCause::AssertionCargoCheck)
         } else if expected_rounds_within_budget == Some(false) {
             Some(FailureCause::AssertionMaxRounds)
         } else if expected_tokens_within_budget == Some(false) {
@@ -680,6 +696,7 @@ pub fn compute_metrics(
         expected_tool_called,
         expected_text_found,
         expected_files_found,
+        expected_cargo_check_passed,
         expected_rounds_within_budget,
         expected_tokens_within_budget,
         expected_cost_within_budget,
@@ -737,6 +754,7 @@ mod tests {
             expect_no_tool_call,
             expect_text_contains: expect_text_contains.map(str::to_string),
             expect_file_contains: HashMap::new(),
+            expect_cargo_check: false,
             skill: None,
             expect_max_rounds: None,
             expect_max_tokens: None,
@@ -763,6 +781,7 @@ mod tests {
             events,
             zero(),
             run_outcome,
+            None,
             None,
             MemoryRunMetrics::default(),
             None,
@@ -1412,6 +1431,7 @@ mod tests {
             zero(),
             RunOutcome::Converged,
             Some(false),
+            None,
             MemoryRunMetrics::default(),
             None,
         );
@@ -1433,6 +1453,7 @@ mod tests {
             zero(),
             RunOutcome::Converged,
             Some(true),
+            None,
             MemoryRunMetrics::default(),
             None,
         );
@@ -1580,6 +1601,7 @@ mod tests {
             events,
             zero(),
             RunOutcome::Converged,
+            None,
             None,
             MemoryRunMetrics::default(),
             pricing,

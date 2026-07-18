@@ -435,9 +435,10 @@ pub async fn run_task(
     }
 
     // docs/project-memory-design.md: registrado como hook audit-only,
-    // mismo patrón que `PromptBudgetAuditHook` arriba.
-    if let Some(hook) = project_memory_hook {
-        engine = engine.with_hook(hook);
+    // mismo patrón que `PromptBudgetAuditHook` arriba. Se conserva el
+    // handle para el flush post-turno (v8 K-8).
+    if let Some(hook) = &project_memory_hook {
+        engine = engine.with_hook(hook.clone());
     }
 
     let started = Instant::now();
@@ -455,6 +456,16 @@ pub async fn run_task(
         Err(_elapsed) => RunOutcome::TimedOut,
     };
     let wall_time = started.elapsed();
+
+    // v8 K-8: los saves de la memoria van a una task en background — la
+    // PRÓXIMA tarea construye un hook fresco que carga del store, así
+    // que hay que drenar los saves de esta antes de seguir, o la
+    // condición "memory" del bench leería estado desactualizado.
+    // Después de `wall_time`: el drenaje es bookkeeping del harness, no
+    // parte de la medición.
+    if let Some(hook) = &project_memory_hook {
+        hook.flush().await;
+    }
 
     let events = match store.load(&session).await {
         Ok(events) => events,
@@ -515,6 +526,17 @@ pub async fn run_task(
         )
     };
 
+    // v8 K-9: semantic grading — `cargo check` in the sandbox, after the
+    // run, only when the task declares it. Like `expected_files_found`
+    // above, this must happen before the sandbox's `Drop` removes the
+    // directory. The engine's own post-edit guardrail already ran cargo
+    // during the turn, so the target dir is warm and this is cheap.
+    let expected_cargo_check_passed = if task.expect_cargo_check {
+        Some(run_cargo_check_in_sandbox(sandbox.path()).await)
+    } else {
+        None
+    };
+
     Ok(compute_metrics(
         &display_name,
         task,
@@ -523,6 +545,7 @@ pub async fn run_task(
         wall_time,
         run_outcome,
         expected_files_found,
+        expected_cargo_check_passed,
         MemoryRunMetrics {
             memory_tokens: task_memory
                 .as_ref()
@@ -536,9 +559,80 @@ pub async fn run_task(
     ))
 }
 
+/// Ceiling for the post-run `cargo check` (v8 K-9). The sandbox projects
+/// are dependency-free single-file libs and the engine's post-edit
+/// guardrail already warmed the target dir during the turn, so a healthy
+/// check takes ~1s; two minutes means something is genuinely wedged.
+const CARGO_CHECK_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// `cargo check` in `dir`, `true` iff it exits 0 (v8 K-9's semantic
+/// grade). A missing `cargo` binary, an execution error, or a timeout
+/// all grade `false` with a stderr note — a declared `expect_cargo_check`
+/// must never silently pass because the checker itself couldn't run.
+async fn run_cargo_check_in_sandbox(dir: &std::path::Path) -> bool {
+    let check = tokio::time::timeout(
+        CARGO_CHECK_TIMEOUT,
+        tokio::process::Command::new("cargo")
+            .arg("check")
+            .arg("--quiet")
+            .current_dir(dir)
+            .output(),
+    )
+    .await;
+    match check {
+        Ok(Ok(output)) => output.status.success(),
+        Ok(Err(err)) => {
+            eprintln!("braze-bench: no se pudo ejecutar 'cargo check' de grading en {}: {err}", dir.display());
+            false
+        }
+        Err(_elapsed) => {
+            eprintln!(
+                "braze-bench: 'cargo check' de grading excedió {}s en {}",
+                CARGO_CHECK_TIMEOUT.as_secs(),
+                dir.display()
+            );
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// v8 K-9, end-to-end con cargo REAL: el grading semántico devuelve
+    /// `false` para el setup buggy de la suite memory-distillation
+    /// (E0382 use-of-moved-value) y `true` para su fix canónico — lo que
+    /// de paso prueba que el fixture de K-10 compila de verdad, no solo
+    /// que matchea needles.
+    #[tokio::test]
+    async fn cargo_check_grading_discriminates_buggy_from_fixed() {
+        const CARGO_TOML: &str = "[package]\nname = \"move_pilot\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n";
+        const BUGGY: &str = "pub struct Batch {\n    items: Vec<String>,\n}\n\nimpl Batch {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn total_chars(&self) -> usize {\n        self.items.iter().map(|s| s.len()).sum()\n    }\n\n    pub fn consume_and_count(self) -> (usize, usize) {\n        let total = self.total_chars();\n        let mut owned_items = self.items;\n        owned_items.sort();\n        (total, self.items.len())\n    }\n}\n";
+        const FIXED: &str = "pub struct Batch {\n    items: Vec<String>,\n}\n\nimpl Batch {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn total_chars(&self) -> usize {\n        self.items.iter().map(|s| s.len()).sum()\n    }\n\n    pub fn consume_and_count(self) -> (usize, usize) {\n        let total = self.total_chars();\n        let mut owned_items = self.items;\n        owned_items.sort();\n        (total, owned_items.len())\n    }\n}\n";
+
+        let dir = std::env::temp_dir().join(format!(
+            "braze-bench-cargo-grading-{}-{}",
+            std::process::id(),
+            SessionId::new()
+        ));
+        tokio::fs::create_dir_all(dir.join("src")).await.unwrap();
+        tokio::fs::write(dir.join("Cargo.toml"), CARGO_TOML).await.unwrap();
+
+        tokio::fs::write(dir.join("src/lib.rs"), BUGGY).await.unwrap();
+        assert!(
+            !run_cargo_check_in_sandbox(&dir).await,
+            "el setup buggy (E0382) debe graduar false"
+        );
+
+        tokio::fs::write(dir.join("src/lib.rs"), FIXED).await.unwrap();
+        assert!(
+            run_cargo_check_in_sandbox(&dir).await,
+            "el fix canónico debe graduar true"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
     use braze_events::AgentEvent;
     use braze_permissions::ActionDescriptor;
 

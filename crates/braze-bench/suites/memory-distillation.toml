@@ -9,6 +9,7 @@ id = "rust_borrow_fix_none"
 skill = "memory_transfer_b"
 prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
 expect_file_contains = { "src/lib.rs" = ["let first = self.items.first().cloned();", "self.items.push(value);"] }
+expect_cargo_check = true
 expect_max_rounds = 8
 expect_max_tokens = 12000
 
@@ -24,12 +25,137 @@ memory_condition = "human-playbook"
 memory_file = "../../../docs/playbooks/rust-compile-repair-human.playbook.json"
 memory_budget_tokens = 500
 expect_file_contains = { "src/lib.rs" = ["let first = self.items.first().cloned();", "self.items.push(value);"] }
+expect_cargo_check = true
 expect_max_rounds = 8
 expect_max_tokens = 12000
 
 [tasks.setup_files]
 "Cargo.toml" = "[package]\nname = \"memory_pilot\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n"
 "src/lib.rs" = "pub struct Store {\n    items: Vec<String>,\n}\n\nimpl Store {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn push_and_first(&mut self, value: String) -> Option<String> {\n        let first = self.items.first();\n        self.items.push(value);\n        first.cloned()\n    }\n}\n"
+
+# Harder B variant (2026-07-16, docs/decision-memory-distillation-pilot-2026-07-16.md):
+# the "none"/"human-playbook" pair above saturates at ~80% pass rate regardless of
+# memory (n=20, Fisher p=1.0) because the bug (borrow-then-mutate-then-return with a
+# clone) is the single most canonical borrow-checker idiom in Rust -- the model already
+# has it memorized. This pair uses a structurally different E0502 (mutate a Vec while
+# iterating it) whose minimal fix requires restructuring the loop (collect into a temp
+# Vec, then extend after), not just reordering one line -- same bug class the human
+# playbook targets (E0499/E0502/E0382), so it still tests transfer of the same
+# procedure, but should leave headroom below ceiling for success_rate to actually move.
+# Known grader limitation (same as the pair above): `self.words.clone()` iterated by
+# value is also a valid fix but would not match `expect_file_contains` below -- accepted
+# for now, see "Riesgos" in the decision doc.
+#
+# 2026-07-16 revision 1: the first version of this bug used `format!("{word}{suffix}")`
+# inside the loop body. A 3-rep smoke against gpt-oss:20b showed 2/3 "none" failures
+# were NOT reasoning misses but `model_backend_error`: the model's edit tool call held
+# unescaped `"` from that Rust string literal, breaking its own JSON arguments
+# (`invalid character '{' after object key:value pair`). That conflates two different
+# things this suite must keep isolated (harness anti-drift rule: no mezclar dos palancas
+# en la misma prueba) -- borrow-checker reasoning difficulty vs. tool-call JSON-escaping
+# robustness. Rewritten to build the suffixed string with `.push_str` instead of
+# `format!`, so the buggy/fixed code the model must quote in `old_string`/`new_string`
+# never contains an embedded `"`.
+#
+# 2026-07-16 revision 2: a diagnostic run with `BRAZE_BENCH_KEEP_SESSIONS=1` (n=2 x 2
+# conditions) found ALL FOUR final `src/lib.rs` compiled correctly, yet all four failed
+# `expect_file_contains` -- three used the exact intended collect-then-extend shape but
+# named the buffer `new_words` instead of `additions`, and the fourth used a different
+# valid restructuring (index loop over a captured `orig_len`, no temp Vec at all). Unlike
+# the sibling pair above (whose canonical fix is close to the ONLY natural fix), this bug
+# admits enough valid restructurings that literal-substring grading undercounts real
+# success substantially. Loosened both substrings to be naming-invariant (`Vec::new()` /
+# `self.words.extend` instead of the exact `additions` identifier) -- this recovers the
+# 3/4 canonical-shaped fixes seen in the diagnostic, but NOT the index-based fourth one;
+# still an approximation, not semantic grading.
+#
+# 2026-07-16 revision 3: the first loosened needle, `self.words.extend(` (with the open
+# paren), still failed a same-shaped fix in a follow-up diagnostic even though the
+# substring was literally present. Root cause: `expect_file_contains` matches via
+# `metrics::contains_as_a_bounded_token`, not plain `str::contains` -- it requires the
+# character immediately outside the match to be non-alphanumeric on BOTH ends (by design,
+# so a needle like `add` doesn't spuriously match inside `additional`). A needle ending
+# right before an identifier (`extend(` followed by `new_words`) fails that right-hand
+# boundary check, since `n` in `new_words` is alphanumeric. Dropping the trailing `(`
+# fixes it: `self.words.extend` now ends right before the literal `(` in the source,
+# which IS a non-alphanumeric boundary. Verified against the diagnostic's preserved
+# `src/lib.rs` with a standalone reimplementation of the bounded-token check before
+# re-running against Nitro. Before trusting a pass-rate number from this task at any real
+# n, either (a) spot-check a preserved-session sample the way this diagnostic did, or
+# (b) add a real semantic check (compile + a hidden unit test) -- substring matching was
+# already known-fragile for this pair; this revision narrows the gap, it does not close it.
+[[tasks]]
+id = "rust_borrow_fix_loop_none"
+skill = "memory_transfer_b_loop"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_file_contains = { "src/lib.rs" = ["Vec::new()", "self.words.extend"] }
+expect_cargo_check = true
+expect_max_rounds = 8
+expect_max_tokens = 12000
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"loop_pilot\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct WordBank {\n    words: Vec<String>,\n    suffix: String,\n}\n\nimpl WordBank {\n    pub fn new(words: Vec<String>, suffix: String) -> Self {\n        Self { words, suffix }\n    }\n\n    pub fn expand_short_words(&mut self, max_len: usize) {\n        for word in &self.words {\n            if word.len() <= max_len {\n                let mut expanded = word.clone();\n                expanded.push_str(&self.suffix);\n                self.words.push(expanded);\n            }\n        }\n    }\n}\n"
+
+[[tasks]]
+id = "rust_borrow_fix_loop_human_playbook"
+skill = "memory_transfer_b_loop"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+memory_condition = "human-playbook"
+memory_file = "../../../docs/playbooks/rust-compile-repair-human.playbook.json"
+memory_budget_tokens = 500
+expect_file_contains = { "src/lib.rs" = ["Vec::new()", "self.words.extend"] }
+expect_cargo_check = true
+expect_max_rounds = 8
+expect_max_tokens = 12000
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"loop_pilot\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct WordBank {\n    words: Vec<String>,\n    suffix: String,\n}\n\nimpl WordBank {\n    pub fn new(words: Vec<String>, suffix: String) -> Self {\n        Self { words, suffix }\n    }\n\n    pub fn expand_short_words(&mut self, max_len: usize) {\n        for word in &self.words {\n            if word.len() <= max_len {\n                let mut expanded = word.clone();\n                expanded.push_str(&self.suffix);\n                self.words.push(expanded);\n            }\n        }\n    }\n}\n"
+
+# Third B variant (2026-07-17, docs/paper2-memory-distillation-protocol-2026-07-16.md
+# § "Hallazgo del piloto M1"): the "none"/"human-playbook" pair saturates (ceiling,
+# memorized bug); the "loop" pair has headroom but the playbook showed no round
+# reduction there (net token cost went UP, not down). This third pair asks whether
+# that null result is the norm or the loop task was atypical -- same family
+# (rust_compile_repair), same generic human playbook, but a different error class
+# entirely: E0382 "use of moved value" (the playbook's own applies_when explicitly
+# lists E0499/E0502/E0382), not another E0502 variant.
+#
+# Two design lessons from the loop pair's debugging applied up front, not discovered
+# the hard way again: (1) zero string literals anywhere in setup_files/fix, so no
+# tool-call JSON-escaping trap is possible; (2) the minimal fix reuses the EXISTING
+# `owned_items` binding (swap `self.items.len()` -> `owned_items.len()`) instead of
+# introducing a new identifier, so there's no naming-diversity axis for
+# `expect_file_contains` to be brittle against the way `additions`/`new_words` was.
+[[tasks]]
+id = "rust_move_fix_none"
+skill = "memory_transfer_b_move"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_file_contains = { "src/lib.rs" = ["let mut owned_items = self.items;", "owned_items.len()"] }
+expect_cargo_check = true
+expect_max_rounds = 8
+expect_max_tokens = 12000
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"move_pilot\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Batch {\n    items: Vec<String>,\n}\n\nimpl Batch {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn total_chars(&self) -> usize {\n        self.items.iter().map(|s| s.len()).sum()\n    }\n\n    pub fn consume_and_count(self) -> (usize, usize) {\n        let total = self.total_chars();\n        let mut owned_items = self.items;\n        owned_items.sort();\n        (total, self.items.len())\n    }\n}\n"
+
+[[tasks]]
+id = "rust_move_fix_human_playbook"
+skill = "memory_transfer_b_move"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+memory_condition = "human-playbook"
+memory_file = "../../../docs/playbooks/rust-compile-repair-human.playbook.json"
+memory_budget_tokens = 500
+expect_file_contains = { "src/lib.rs" = ["let mut owned_items = self.items;", "owned_items.len()"] }
+expect_cargo_check = true
+expect_max_rounds = 8
+expect_max_tokens = 12000
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"move_pilot\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Batch {\n    items: Vec<String>,\n}\n\nimpl Batch {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn total_chars(&self) -> usize {\n        self.items.iter().map(|s| s.len()).sum()\n    }\n\n    pub fn consume_and_count(self) -> (usize, usize) {\n        let total = self.total_chars();\n        let mut owned_items = self.items;\n        owned_items.sort();\n        (total, self.items.len())\n    }\n}\n"
 
 [[tasks]]
 id = "rust_non_borrow_holdout_with_playbook"
@@ -39,6 +165,7 @@ memory_condition = "human-playbook"
 memory_file = "../../../docs/playbooks/rust-compile-repair-human.playbook.json"
 memory_budget_tokens = 500
 expect_file_contains = { "src/lib.rs" = ["pub fn double", "n * 2"] }
+expect_cargo_check = true
 expect_max_rounds = 6
 expect_max_tokens = 9000
 

@@ -89,17 +89,21 @@ impl TaskList {
     }
 
     /// `Err` con mensaje accionable (vuelve al modelo como tool result
-    /// de error) cuando el id no existe. `Ok(Some(description))` cuando
-    /// la llamada deja el estado en `Done` (sin importar el estado
-    /// previo — incluye Done→Done) — la señal que el caller usa para
-    /// emitir `AgentEvent::TaskCompleted` (braze-memory's
-    /// `ProjectMemoryHook` la consume). `Ok(None)` para pending/
-    /// in_progress: nada que reportar afuera.
+    /// de error) cuando el id no existe. `Ok(Some(description))` solo en
+    /// la TRANSICIÓN a `Done` desde otro estado — la señal que el caller
+    /// usa para emitir `AgentEvent::TaskCompleted` (braze-memory's
+    /// `ProjectMemoryHook` la consume). Done→Done repetido devuelve
+    /// `Ok(None)`: nada nuevo que reportar (v8 K-6 — un 3B re-marca
+    /// "done" con frecuencia, y cada duplicado emitido contaminaba
+    /// `completed_signals` expulsando señales legítimas del cap de 30).
+    /// `Ok(None)` también para pending/in_progress.
     pub(crate) fn update(&mut self, id: usize, status: TaskStatus) -> Result<Option<String>, String> {
         match self.entries.iter_mut().find(|entry| entry.id == id) {
             Some(entry) => {
+                let was_done = entry.status == TaskStatus::Done;
                 entry.status = status;
-                Ok((status == TaskStatus::Done).then(|| entry.description.clone()))
+                Ok((status == TaskStatus::Done && !was_done)
+                    .then(|| entry.description.clone()))
             }
             None => Err(format!(
                 "no task with id {id} — current ids: {}",
@@ -250,7 +254,13 @@ mod tests {
         assert_eq!(to_done, Some("leer el archivo".to_string()));
 
         let done_again = list.update(1, TaskStatus::Done).unwrap();
-        assert_eq!(done_again, Some("leer el archivo".to_string()));
+        assert_eq!(done_again, None, "Done→Done must not re-report (v8 K-6)");
+
+        // Regresar a in_progress y completar de nuevo SÍ es una nueva
+        // transición — el modelo reabrió la tarea y la volvió a cerrar.
+        list.update(1, TaskStatus::InProgress).unwrap();
+        let re_done = list.update(1, TaskStatus::Done).unwrap();
+        assert_eq!(re_done, Some("leer el archivo".to_string()));
     }
 
     /// The planner bridge: numbered lines seed tasks; prose lines don't.

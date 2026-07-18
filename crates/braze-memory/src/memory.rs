@@ -73,10 +73,13 @@ pub struct MemoryMeta {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectMemory {
     /// Identity — the canonicalized project root path (see
-    /// `crate::project_key`). `FileProjectMemoryStore::load` refuses to
-    /// return a memory whose `project_key` doesn't match what was asked
-    /// for, so a store accidentally pointed at the wrong directory fails
-    /// safe instead of returning another project's notes.
+    /// `crate::project_key`). `FileProjectMemoryStore::load` has no way
+    /// to check it (it doesn't receive an expected key); enforcement
+    /// lives in the consumer — `braze-engine`'s `ProjectMemoryHook::new`
+    /// discards a loaded memory whose `project_key` doesn't match the
+    /// project it was asked for (v8 K-7), so a store accidentally
+    /// pointed at the wrong file fails safe instead of injecting another
+    /// project's notes into the system prompt.
     pub project_key: String,
     pub objective: Option<String>,
     pub touched_files: Vec<TouchedFile>,
@@ -138,6 +141,14 @@ impl ProjectMemory {
     /// dropped (nothing meaningful to remember) rather than erroring —
     /// this is called from a hook's `on_event`, which must never fail a
     /// turn over a memory-bookkeeping edge case.
+    ///
+    /// Dedup by (description, source), keeping the latest occurrence
+    /// (same move-to-end shape as [`Self::record_touched_file`]): the
+    /// task list already suppresses Done→Done re-reports at the source
+    /// (v8 K-6, `braze-engine`'s `TaskList::update`), but this cap-guarded
+    /// list is the last line of defense — with `MAX_COMPLETED_SIGNALS`
+    /// evicting oldest-first, letting duplicates through would push a
+    /// *distinct* old signal out for every copy of a repeated one.
     pub fn record_completed_signal(
         &mut self,
         description: impl Into<String>,
@@ -148,6 +159,8 @@ impl ProjectMemory {
         if description.trim().is_empty() {
             return;
         }
+        self.completed_signals
+            .retain(|s| !(s.description == description && s.source == source));
         self.completed_signals.push(CompletedSignal {
             description,
             source,

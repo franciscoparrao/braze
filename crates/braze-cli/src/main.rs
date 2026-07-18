@@ -396,7 +396,18 @@ async fn build_engine(
     // E′ I.5: when `Some`, the `ask_user` tool is exposed (interactive
     // plain chat only) — `run`/the bench pass `None` (no human to ask).
     ask_user_prompt: Option<std::sync::Arc<dyn braze_permissions::QuestionPrompt>>,
-) -> Result<(braze_engine::Engine, String), CliError> {
+) -> Result<
+    (
+        braze_engine::Engine,
+        String,
+        // v8 K-8: el handle del ProjectMemoryHook vuelve al caller para
+        // poder `flush()` los saves en background antes de que el
+        // proceso salga (`braze run` one-shot). `None` cuando
+        // `enable_project_memory` está off.
+        Option<std::sync::Arc<braze_engine::ProjectMemoryHook>>,
+    ),
+    CliError,
+> {
     let mut model = build_model_backend(config, &config.default_backend, None)?;
 
     // Reactive lead/worker escalation (estilo Goose, ítem 6 del backlog
@@ -699,8 +710,8 @@ async fn build_engine(
     // (Paquete B′) — observa `AgentEvent`s y persiste a
     // `.braze/memory.json` sin influir el turno. `None` si
     // `config.enable_project_memory` es `false` (el caso común).
-    if let Some(hook) = project_memory_hook {
-        engine = engine.with_hook(hook);
+    if let Some(hook) = &project_memory_hook {
+        engine = engine.with_hook(hook.clone());
     }
 
     if let Some(budget) = ollama_budget {
@@ -711,7 +722,7 @@ async fn build_engine(
         engine = engine.with_planner(planner);
     }
 
-    Ok((engine, status_line))
+    Ok((engine, status_line, project_memory_hook))
 }
 
 /// E′ I.8: `braze permissions suggest` — reads every session log under
@@ -927,7 +938,7 @@ async fn run() -> Result<(), CliError> {
             None
         };
 
-    let (engine, status_line) = build_engine(
+    let (engine, status_line, project_memory_hook) = build_engine(
         &config,
         planner_spec.clone(),
         lead_spec.clone(),
@@ -1058,6 +1069,13 @@ async fn run() -> Result<(), CliError> {
                         None,
                     )
                     .await
+                    // El engine reconstruido registra su propio hook de
+                    // memoria; soltar este handle es seguro mid-sesión —
+                    // la task de saves drena sola mientras el runtime
+                    // viva (el flush de salida cubre solo el hook
+                    // original, suficiente: ambos escriben serializados
+                    // al mismo store).
+                    .map(|(engine, status_line, _memory_hook)| (engine, status_line))
                     .map_err(|err| err.to_string())
                 })
             });
@@ -1122,6 +1140,13 @@ async fn run() -> Result<(), CliError> {
         }
         // Dispatched and returned at the top of `run()`.
         Command::Permissions { .. } => unreachable!("handled by run_permissions"),
+    }
+
+    // v8 K-8: los saves de la memoria de proyecto corren en una task en
+    // background — drenarlos antes de retornar, o un `braze run`
+    // one-shot podría salir con el último save aún en cola.
+    if let Some(hook) = &project_memory_hook {
+        hook.flush().await;
     }
 
     Ok(())

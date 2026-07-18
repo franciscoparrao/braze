@@ -303,6 +303,7 @@ mod tests {
             expect_no_tool_call: false,
             expect_text_contains: expect_text_contains.map(str::to_string),
             expect_file_contains: HashMap::new(),
+            expect_cargo_check: false,
             skill: Some("no_tool".to_string()),
             expect_max_rounds: None,
             expect_max_tokens: None,

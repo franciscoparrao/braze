@@ -117,6 +117,9 @@ pub fn external_outcome_to_task_result(
             expected_tool_called: None,
             expected_text_found: None,
             expected_files_found,
+            // External harnesses run outside braze's sandbox — no
+            // post-run `cargo check` grading (v8 K-9) applies here.
+            expected_cargo_check_passed: None,
             // No `AgentEvent` log for a black-box external harness, so
             // neither rounds nor tokens are measured — any
             // `expect_max_rounds`/`expect_max_tokens` budget stays
@@ -189,6 +192,8 @@ pub fn external_outcome_to_task_result(
         expected_tool_called,
         expected_text_found,
         expected_files_found,
+        // Ver la nota del branch de error arriba (v8 K-9).
+        expected_cargo_check_passed: None,
         // No round/token counts are measured for a black-box external
         // harness, so any budget assertion stays `None` (not evaluated)
         // — matches the run-error branch above and the `None` semantics
@@ -270,6 +275,7 @@ mod tests {
             expect_no_tool_call,
             expect_text_contains: expect_text_contains.map(str::to_string),
             expect_file_contains: HashMap::new(),
+            expect_cargo_check: false,
             skill: Some("no_tool".to_string()),
             expect_max_rounds: None,
             expect_max_tokens: None,

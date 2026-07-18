@@ -62,6 +62,18 @@ pub struct TaskDef {
     /// the list form is the natural representation.
     #[serde(default)]
     pub expect_file_contains: HashMap<String, Vec<String>>,
+    /// If true, the task only passes if `cargo check` exits 0 in the
+    /// sandbox AFTER the run — semantic grading for Rust-fix tasks (v8
+    /// K-9, docs/AUDITORIA-2026-07-v8.md). Substring needles alone are
+    /// both gameable (a needle inside a comment or dead code passes
+    /// without compiling) and undercounting (the 2026-07-16 diagnostic
+    /// found 4/4 fixes that compiled and 4/4 grader FAILs); this makes
+    /// "the code actually compiles" — what the prompt literally asks
+    /// for — part of the verdict. Combined as AND with the needles:
+    /// needles measure the *shape* of the fix (the memory-transfer
+    /// question), this measures the *outcome*.
+    #[serde(default)]
+    pub expect_cargo_check: bool,
     /// Optional free-form label (e.g. `"single_tool"`, `"multi_step"`,
     /// `"error_recovery"`) grouping tasks by the kind of capability they
     /// probe, so a report can break results down by skill instead of only
@@ -164,6 +176,7 @@ mod tests {
             expect_max_rounds = 8
             expect_max_tokens = 4000
             expect_max_cost_usd = 0.05
+            expect_cargo_check = true
             memory_condition = "procedural"
             memory_file = "playbooks/rust-fix.json"
             memory_budget_tokens = 500
@@ -185,6 +198,7 @@ mod tests {
         assert_eq!(task.expect_max_rounds, Some(8));
         assert_eq!(task.expect_max_tokens, Some(4000));
         assert_eq!(task.expect_max_cost_usd, Some(0.05));
+        assert!(task.expect_cargo_check);
         assert_eq!(task.memory_condition.as_deref(), Some("procedural"));
         assert_eq!(
             task.memory_file.as_deref(),
@@ -223,6 +237,7 @@ mod tests {
         assert_eq!(task.expect_max_rounds, None);
         assert_eq!(task.expect_max_tokens, None);
         assert_eq!(task.expect_max_cost_usd, None);
+        assert!(!task.expect_cargo_check);
         assert_eq!(task.memory_condition, None);
         assert_eq!(task.memory_file, None);
         assert_eq!(task.memory_budget_tokens, None);
@@ -575,6 +590,74 @@ mod tests {
         );
     }
 
+    /// v8 K-10 (docs/AUDITORIA-2026-07-v8.md): la red de regresión que
+    /// las revisiones 1-3 del TOML no tenían. Cada needle de la suite
+    /// memory-distillation se fija contra un fixture del fix CANÓNICO,
+    /// graduado con la misma función real (`contains_as_a_bounded_token`,
+    /// no una reimplementación standalone como la que validó la revisión
+    /// 3). Además, cada tarea debe tener al menos un needle que NO
+    /// matchee el setup buggy — un needle ya presente en el bug (el caso
+    /// `let mut owned_items = self.items;` que encontró la auditoría)
+    /// tiene cero poder discriminante por sí solo.
+    #[test]
+    fn memory_distillation_needles_match_canonical_fixes_and_discriminate() {
+        const FIX_BORROW: &str = "pub struct Store {\n    items: Vec<String>,\n}\n\nimpl Store {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn push_and_first(&mut self, value: String) -> Option<String> {\n        let first = self.items.first().cloned();\n        self.items.push(value);\n        first\n    }\n}\n";
+        const FIX_LOOP: &str = "pub struct WordBank {\n    words: Vec<String>,\n    suffix: String,\n}\n\nimpl WordBank {\n    pub fn new(words: Vec<String>, suffix: String) -> Self {\n        Self { words, suffix }\n    }\n\n    pub fn expand_short_words(&mut self, max_len: usize) {\n        let mut new_words = Vec::new();\n        for word in &self.words {\n            if word.len() <= max_len {\n                let mut expanded = word.clone();\n                expanded.push_str(&self.suffix);\n                new_words.push(expanded);\n            }\n        }\n        self.words.extend(new_words);\n    }\n}\n";
+        const FIX_MOVE: &str = "pub struct Batch {\n    items: Vec<String>,\n}\n\nimpl Batch {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn total_chars(&self) -> usize {\n        self.items.iter().map(|s| s.len()).sum()\n    }\n\n    pub fn consume_and_count(self) -> (usize, usize) {\n        let total = self.total_chars();\n        let mut owned_items = self.items;\n        owned_items.sort();\n        (total, owned_items.len())\n    }\n}\n";
+        const FIX_HOLDOUT: &str = "pub fn triple(n: u32) -> u32 {\n    n * 3\n}\n\npub fn double(n: u32) -> u32 {\n    n * 2\n}\n";
+
+        let canonical_fix_by_skill: HashMap<&str, &str> = HashMap::from([
+            ("memory_transfer_b", FIX_BORROW),
+            ("memory_transfer_b_loop", FIX_LOOP),
+            ("memory_transfer_b_move", FIX_MOVE),
+            ("memory_holdout_h", FIX_HOLDOUT),
+        ]);
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("suites/memory-distillation.toml");
+        let tasks = load_suite(&path).expect("memory-distillation.toml must parse");
+
+        for task in &tasks {
+            let skill = task.skill.as_deref().unwrap_or_default();
+            let fix = canonical_fix_by_skill.get(skill).unwrap_or_else(|| {
+                panic!("task '{}' has skill '{skill}' without a canonical fixture — add one here", task.id)
+            });
+            let needles = task
+                .expect_file_contains
+                .get("src/lib.rs")
+                .unwrap_or_else(|| panic!("task '{}' must assert on src/lib.rs", task.id));
+            let buggy = task
+                .setup_files
+                .get("src/lib.rs")
+                .unwrap_or_else(|| panic!("task '{}' must set up src/lib.rs", task.id));
+
+            for needle in needles {
+                assert!(
+                    crate::metrics::contains_as_a_bounded_token(fix, needle),
+                    "task '{}': needle {needle:?} does not match its canonical fix as a \
+                     bounded token — the exact failure class of revision 3",
+                    task.id
+                );
+            }
+            assert!(
+                needles
+                    .iter()
+                    .any(|n| !crate::metrics::contains_as_a_bounded_token(buggy, n)),
+                "task '{}': every needle already matches the BUGGY setup — the assertion \
+                 set has zero discriminant power (v8 K-10)",
+                task.id
+            );
+            // v8 K-9: el grading semántico es parte del contrato de la
+            // suite — los needles miden la forma del fix, cargo check
+            // mide el resultado que el prompt literalmente pide.
+            assert!(
+                task.expect_cargo_check,
+                "task '{}' must declare expect_cargo_check = true",
+                task.id
+            );
+        }
+    }
+
     #[test]
     fn memory_distillation_suite_parses_and_resolves_playbook_paths() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -582,7 +665,7 @@ mod tests {
         let tasks = load_suite(&path)
             .expect("memory-distillation.toml must parse; check for TOML syntax issues");
 
-        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks.len(), 7);
         assert!(
             tasks.iter().any(|task| task.memory_file.is_none()),
             "pilot suite needs a no-memory baseline task"
@@ -592,7 +675,7 @@ mod tests {
             .iter()
             .filter(|task| task.memory_file.is_some())
             .collect();
-        assert_eq!(memory_tasks.len(), 2);
+        assert_eq!(memory_tasks.len(), 4);
         for task in memory_tasks {
             assert_eq!(task.memory_condition.as_deref(), Some("human-playbook"));
             assert_eq!(task.memory_budget_tokens, Some(500));
