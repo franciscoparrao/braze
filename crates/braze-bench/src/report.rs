@@ -78,6 +78,10 @@ struct BackendSummary {
     /// added here are deferred.
     pass_rate_ci_low_pct: f64,
     pass_rate_ci_high_pct: f64,
+    /// Serie pass^k (k, valor en [0,1]) para k=2..=min(5, repeticiones)
+    /// — ver [`pass_hat_k_series`]. Vacía con una sola repetición
+    /// (pass^1 ES el pass-rate de arriba).
+    pass_hat_k: Vec<(u32, f64)>,
 }
 
 /// 95% Wilson score interval for a binomial proportion — chosen over the
@@ -163,7 +167,58 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
         total_cost_usd: sum_optional_f64(counted.iter().map(|r| r.estimated_cost_usd)),
         pass_rate_ci_low_pct: ci_low * 100.0,
         pass_rate_ci_high_pct: ci_high * 100.0,
+        pass_hat_k: pass_hat_k_series(&counted),
     }
+}
+
+/// pass^k — la métrica de CONFIABILIDAD de tau-bench (Yao et al. 2024,
+/// § pass^k), v8 § 6.11: la probabilidad de que k intentos i.i.d. de la
+/// misma tarea pasen TODOS. Para un harness cuya tesis es confiabilidad
+/// de modelos chicos es la métrica de la tesis: un brazo 80% de
+/// pass-rate por moneda-al-aire y uno 80% por "resuelve el 80% de las
+/// tareas siempre" son indistinguibles en pass@1 y opuestos en pass^k.
+///
+/// Estimador insesgado por tarea con n repeticiones y c pases:
+/// C(c,k)/C(n,k) (la probabilidad de que k muestras sin reemplazo sean
+/// todas pases), promediado sobre las tareas. Serie para k=2..=min(5,
+/// reps máximas); k=1 es el pass-rate que la tabla ya reporta. Una
+/// tarea con menos de k repeticiones queda fuera del promedio de ese k
+/// (no hay estimador insesgado posible con n<k) — con repeticiones
+/// homogéneas, el caso normal de braze-bench, no se excluye nada.
+fn pass_hat_k_series(counted: &[&&TaskResult]) -> Vec<(u32, f64)> {
+    let mut by_task: std::collections::HashMap<&str, (u32, u32)> =
+        std::collections::HashMap::new();
+    for row in counted {
+        let entry = by_task.entry(row.task_id.as_str()).or_insert((0, 0));
+        entry.0 += 1;
+        if row.passed {
+            entry.1 += 1;
+        }
+    }
+    let max_reps = by_task.values().map(|(n, _)| *n).max().unwrap_or(0);
+
+    (2..=max_reps.min(5))
+        .filter_map(|k| {
+            let estimates: Vec<f64> = by_task
+                .values()
+                .filter(|(n, _)| *n >= k)
+                .map(|(n, c)| binomial(*c, k) / binomial(*n, k))
+                .collect();
+            if estimates.is_empty() {
+                return None;
+            }
+            Some((k, estimates.iter().sum::<f64>() / estimates.len() as f64))
+        })
+        .collect()
+}
+
+/// C(n, k) como f64 por producto incremental — exacto para los n chicos
+/// de un sweep (repeticiones ≤ ~20) sin riesgo de overflow entero.
+fn binomial(n: u32, k: u32) -> f64 {
+    if k > n {
+        return 0.0;
+    }
+    (0..k).map(|i| (n - i) as f64 / (k - i) as f64).product()
 }
 
 /// Sums optional per-row USD costs into an optional total — `None` only
@@ -257,6 +312,7 @@ pub fn print_table(results: &[TaskResult]) {
         "sumfall",
         "cost_usd"
     );
+    let mut summaries = Vec::new();
     for backend in backend_order {
         let rows: Vec<&TaskResult> = results.iter().filter(|r| r.backend == backend).collect();
         let summary = summarize(backend, &rows);
@@ -286,6 +342,25 @@ pub fn print_table(results: &[TaskResult]) {
             summary.summary_fallbacks,
             format_cost_cell(summary.total_cost_usd),
         );
+        summaries.push(summary);
+    }
+
+    // pass^k (tau-bench) — sección propia en vez de columnas: la tabla
+    // de arriba ya está al límite de ancho, y esta serie solo existe
+    // con repeticiones > 1. Ver `pass_hat_k_series` para el estimador.
+    if summaries.iter().any(|s| !s.pass_hat_k.is_empty()) {
+        println!("\n== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==");
+        for summary in &summaries {
+            if summary.pass_hat_k.is_empty() {
+                continue;
+            }
+            let cells: Vec<String> = summary
+                .pass_hat_k
+                .iter()
+                .map(|(k, value)| format!("k={k} {:.1}%", value * 100.0))
+                .collect();
+            println!("{:<24} {}", summary.backend, cells.join("  "));
+        }
     }
 
     // Per-skill breakdown (F8): a flat pass-rate can't show *where* a
@@ -447,6 +522,81 @@ mod tests {
         assert_eq!(parsed["results"][0]["task_id"], "t");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v8 § 6.11 — el estimador insesgado de tau-bench, fijado con los
+    /// valores exactos: una tarea 3/5 tiene pass^2 = C(3,2)/C(5,2) =
+    /// 3/10, y una tarea perfecta se queda en 1.0 para todo k.
+    #[test]
+    fn pass_hat_k_matches_the_unbiased_estimator_by_hand() {
+        // Tarea "t": 3 pases de 5 repeticiones.
+        let mut rows: Vec<TaskResult> = (0..5)
+            .map(|i| {
+                let mut r = result(i < 3, 10, 1, 1);
+                r.repetition = i as u32;
+                r
+            })
+            .collect();
+        // Tarea "perfecta": 5/5.
+        for i in 0..5 {
+            let mut r = result(true, 10, 1, 1);
+            r.task_id = "perfecta".to_string();
+            r.repetition = i as u32;
+            rows.push(r);
+        }
+        let refs: Vec<&TaskResult> = rows.iter().collect();
+        let refs2: Vec<&&TaskResult> = refs.iter().collect();
+        let series = pass_hat_k_series(&refs2);
+
+        let k2 = series.iter().find(|(k, _)| *k == 2).unwrap().1;
+        // Promedio de tareas: (3/10 + 1.0) / 2 = 0.65
+        assert!((k2 - 0.65).abs() < 1e-9, "got {k2}");
+        let k5 = series.iter().find(|(k, _)| *k == 5).unwrap().1;
+        // C(3,5)=0 para la tarea flaky; (0 + 1.0) / 2 = 0.5
+        assert!((k5 - 0.5).abs() < 1e-9, "got {k5}");
+    }
+
+    /// Con una sola repetición no hay serie (pass^1 ES el pass-rate), y
+    /// una tarea con menos repeticiones que k queda fuera del promedio
+    /// de ese k en vez de aportar un estimador imposible.
+    #[test]
+    fn pass_hat_k_is_empty_for_single_repetition_and_skips_short_tasks() {
+        let single = [result(true, 10, 1, 1)];
+        let refs: Vec<&TaskResult> = single.iter().collect();
+        let refs2: Vec<&&TaskResult> = refs.iter().collect();
+        assert!(pass_hat_k_series(&refs2).is_empty());
+
+        // "larga" con 3 reps (2 pases), "corta" con 2 reps (2 pases):
+        // en k=3 solo participa "larga" → C(2,3)/C(3,3) = 0.
+        let mut rows = Vec::new();
+        for i in 0..3 {
+            let mut r = result(i < 2, 10, 1, 1);
+            r.task_id = "larga".to_string();
+            r.repetition = i as u32;
+            rows.push(r);
+        }
+        for i in 0..2 {
+            let mut r = result(true, 10, 1, 1);
+            r.task_id = "corta".to_string();
+            r.repetition = i as u32;
+            rows.push(r);
+        }
+        let refs: Vec<&TaskResult> = rows.iter().collect();
+        let refs2: Vec<&&TaskResult> = refs.iter().collect();
+        let series = pass_hat_k_series(&refs2);
+        let k3 = series.iter().find(|(k, _)| *k == 3).unwrap().1;
+        assert!((k3 - 0.0).abs() < 1e-9, "solo 'larga' participa en k=3: {k3}");
+        // En k=2 participan ambas: (C(2,2)/C(3,2) + 1.0)/2 = (1/3 + 1)/2
+        let k2 = series.iter().find(|(k, _)| *k == 2).unwrap().1;
+        assert!((k2 - (1.0 / 3.0 + 1.0) / 2.0).abs() < 1e-9, "got {k2}");
+    }
+
+    #[test]
+    fn binomial_matches_pascal() {
+        assert_eq!(binomial(5, 2), 10.0);
+        assert_eq!(binomial(3, 3), 1.0);
+        assert_eq!(binomial(2, 3), 0.0);
+        assert_eq!(binomial(4, 0), 1.0);
     }
 
     fn result(
