@@ -453,7 +453,13 @@ impl BackendSpec {
                 // backend can offer toward N-34.
                 Ok(Box::new(
                     AnthropicBackend::new(api_key.expose_secret().to_string(), model)
-                        .with_temperature(sampling.temperature),
+                        .with_temperature(sampling.temperature)
+                        // Misma precedencia H-2 que el brazo OpenRouter:
+                        // la ablación explícita gana, si no manda config.
+                        .with_prompt_caching_enabled(
+                            config.enable_prompt_caching
+                                && !self.ablation().disable_prompt_caching,
+                        ),
                 ))
             }
             Provider::Ollama => {

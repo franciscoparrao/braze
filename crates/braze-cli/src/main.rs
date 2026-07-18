@@ -272,10 +272,15 @@ fn build_model_backend(
                             .to_string(),
                     )
                 })?;
-            Ok(Box::new(braze_model::AnthropicBackend::new(
-                api_key.expose_secret().to_string(),
-                model_name,
-            )))
+            Ok(Box::new(
+                braze_model::AnthropicBackend::new(
+                    api_key.expose_secret().to_string(),
+                    model_name,
+                )
+                // v8 § 5: mismo knob que el brazo OpenRouter de abajo —
+                // el caching directo de Anthropic existe desde hoy.
+                .with_prompt_caching_enabled(config.enable_prompt_caching),
+            ))
         }
         "ollama" => {
             let model_name = model_override

@@ -31,8 +31,8 @@ pub(crate) const ANTHROPIC_VERSION: &str = "2023-06-01";
 pub(crate) struct AnthropicRequest {
     pub model: String,
     pub max_tokens: u32,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub system: String,
+    #[serde(skip_serializing_if = "AnthropicSystem::is_empty")]
+    pub system: AnthropicSystem,
     pub messages: Vec<AnthropicMessage>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<AnthropicTool>,
@@ -50,6 +50,54 @@ pub(crate) struct AnthropicRequest {
     pub temperature: Option<f32>,
 }
 
+/// The top-level `system` field: the plain-string form when caching is
+/// off (byte-identical wire shape to before caching existed), or the
+/// block-array form Anthropic requires to carry a `cache_control`
+/// breakpoint on the system prompt (v8 § 5 — the direct-API caching
+/// port of `openrouter_wire::apply_cache_breakpoints`).
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub(crate) enum AnthropicSystem {
+    Text(String),
+    Blocks(Vec<AnthropicSystemBlock>),
+}
+
+impl AnthropicSystem {
+    fn is_empty(&self) -> bool {
+        match self {
+            AnthropicSystem::Text(text) => text.is_empty(),
+            AnthropicSystem::Blocks(blocks) => blocks.is_empty(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct AnthropicSystemBlock {
+    #[serde(rename = "type")]
+    pub block_type: &'static str,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
+}
+
+/// Anthropic's prompt-cache breakpoint marker — a deliberate local
+/// mirror of `openrouter_wire`'s homonym rather than a shared import:
+/// each wire file stays self-contained (same convention as the SSE/
+/// NDJSON helpers, which are also per-wire).
+#[derive(Debug, Serialize)]
+pub(crate) struct CacheControl {
+    #[serde(rename = "type")]
+    pub control_type: &'static str,
+}
+
+impl CacheControl {
+    fn ephemeral() -> Self {
+        Self {
+            control_type: "ephemeral",
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct AnthropicMessage {
     pub role: &'static str,
@@ -61,16 +109,22 @@ pub(crate) struct AnthropicMessage {
 pub(crate) enum AnthropicContentBlock {
     Text {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     ToolUse {
         id: String,
         name: String,
         input: Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     ToolResult {
         tool_use_id: String,
         content: String,
         is_error: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
 }
 
@@ -79,6 +133,8 @@ pub(crate) struct AnthropicTool {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
 }
 
 /// Builds the Anthropic request body from the provider-agnostic
@@ -87,15 +143,55 @@ pub(crate) fn build_request(
     req: &CompletionRequest,
     model: &str,
     temperature: Option<f32>,
+    enable_caching: bool,
 ) -> AnthropicRequest {
-    AnthropicRequest {
+    let mut request = AnthropicRequest {
         model: model.to_string(),
         max_tokens: req.max_tokens,
-        system: req.system_prompt.clone(),
+        system: AnthropicSystem::Text(req.system_prompt.clone()),
         messages: req.messages.iter().map(to_anthropic_message).collect(),
         tools: build_tools(&req.tool_stubs),
         stream: true,
         temperature,
+    };
+    if enable_caching {
+        apply_cache_breakpoints(&mut request);
+    }
+    request
+}
+
+/// Marks the 3 cache breakpoints in place — the same strategy (and
+/// almost the same code) as `openrouter_wire::apply_cache_breakpoints`:
+/// the last tool definition, the system prompt, and the last message's
+/// last content block, recomputed fresh on every call so the breakpoint
+/// always tracks "everything sent so far" as the conversation grows
+/// round to round. Unlike the OpenRouter side there is no per-model
+/// gate: every current Claude model on the direct API accepts
+/// `cache_control` (the OpenRouter gate exists because OTHER providers'
+/// models flow through that same wire). Cierra la brecha S de
+/// docs/AUDITORIA-2026-07-v8.md § 5 — `anthropic_wire` ya LEÍA los
+/// campos `cache_read/creation_input_tokens` (H-18) que sin esto eran
+/// siempre 0.
+fn apply_cache_breakpoints(request: &mut AnthropicRequest) {
+    if let Some(tool) = request.tools.last_mut() {
+        tool.cache_control = Some(CacheControl::ephemeral());
+    }
+    if let AnthropicSystem::Text(text) = &request.system
+        && !text.is_empty()
+    {
+        request.system = AnthropicSystem::Blocks(vec![AnthropicSystemBlock {
+            block_type: "text",
+            text: text.clone(),
+            cache_control: Some(CacheControl::ephemeral()),
+        }]);
+    }
+    if let Some(last_message) = request.messages.last_mut()
+        && let Some(block) = last_message.content.last_mut()
+    {
+        let (AnthropicContentBlock::Text { cache_control, .. }
+        | AnthropicContentBlock::ToolUse { cache_control, .. }
+        | AnthropicContentBlock::ToolResult { cache_control, .. }) = block;
+        *cache_control = Some(CacheControl::ephemeral());
     }
 }
 
@@ -118,11 +214,15 @@ fn to_anthropic_message(message: &Message) -> AnthropicMessage {
 
 fn to_anthropic_block(block: &ContentBlock) -> AnthropicContentBlock {
     match block {
-        ContentBlock::Text { text } => AnthropicContentBlock::Text { text: text.clone() },
+        ContentBlock::Text { text } => AnthropicContentBlock::Text {
+            text: text.clone(),
+            cache_control: None,
+        },
         ContentBlock::ToolUse { id, name, input } => AnthropicContentBlock::ToolUse {
             id: id.clone(),
             name: name.clone(),
             input: input.clone(),
+            cache_control: None,
         },
         ContentBlock::ToolResult {
             tool_use_id,
@@ -132,6 +232,7 @@ fn to_anthropic_block(block: &ContentBlock) -> AnthropicContentBlock {
             tool_use_id: tool_use_id.clone(),
             content: content.clone(),
             is_error: *is_error,
+            cache_control: None,
         },
     }
 }
@@ -163,6 +264,7 @@ fn build_tools(stubs: &[ToolStub]) -> Vec<AnthropicTool> {
                 .input_schema
                 .clone()
                 .unwrap_or_else(permissive_fallback_schema),
+            cache_control: None,
         })
         .collect()
 }
@@ -555,12 +657,82 @@ mod tests {
             system_prompt: "you are helpful".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "claude-opus-4-8", None);
-        assert_eq!(wire.system, "you are helpful");
+        let wire = build_request(&req, "claude-opus-4-8", None, false);
+        assert!(
+            matches!(&wire.system, AnthropicSystem::Text(text) if text == "you are helpful"),
+            "sin caching, system queda en la forma string plana: {:?}",
+            wire.system
+        );
         assert_eq!(wire.messages.len(), 1);
         assert_eq!(wire.messages[0].role, "user");
         assert!(wire.stream);
         assert_eq!(wire.temperature, None);
+    }
+
+    /// v8 § 5: con caching habilitado se marcan los 3 breakpoints — la
+    /// última tool, el system prompt (que pasa a la forma de bloques) y
+    /// el último bloque del último mensaje. Verificado sobre el JSON
+    /// serializado, que es lo que viaja por el wire.
+    #[test]
+    fn build_request_with_caching_marks_the_three_breakpoints() {
+        let req = CompletionRequest {
+            messages: vec![
+                Message::text(Role::User, "primero"),
+                Message::text(Role::User, "último"),
+            ],
+            tool_stubs: vec![
+                ToolStub {
+                    name: "a".to_string(),
+                    summary: "primera".to_string(),
+                    source: "local".to_string(),
+                    input_schema: None,
+                },
+                ToolStub {
+                    name: "b".to_string(),
+                    summary: "última".to_string(),
+                    source: "local".to_string(),
+                    input_schema: None,
+                },
+            ],
+            system_prompt: "you are helpful".to_string(),
+            max_tokens: 100,
+        };
+        let wire = build_request(&req, "claude-opus-4-8", None, true);
+        let json = serde_json::to_value(&wire).unwrap();
+
+        // System: forma de bloques con cache_control en el último.
+        assert_eq!(json["system"][0]["type"], "text");
+        assert_eq!(json["system"][0]["cache_control"]["type"], "ephemeral");
+        // Tools: solo la ÚLTIMA lleva el breakpoint.
+        assert!(json["tools"][0].get("cache_control").is_none());
+        assert_eq!(json["tools"][1]["cache_control"]["type"], "ephemeral");
+        // Mensajes: solo el último bloque del último mensaje.
+        assert!(json["messages"][0]["content"][0].get("cache_control").is_none());
+        assert_eq!(
+            json["messages"][1]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+    }
+
+    /// La forma sin caching es byte-idéntica a la previa a este feature:
+    /// ningún `cache_control` en el JSON y `system` como string plano.
+    #[test]
+    fn build_request_without_caching_emits_no_cache_control_anywhere() {
+        let req = CompletionRequest {
+            messages: vec![Message::text(Role::User, "hola")],
+            tool_stubs: vec![ToolStub {
+                name: "a".to_string(),
+                summary: "una tool".to_string(),
+                source: "local".to_string(),
+                input_schema: None,
+            }],
+            system_prompt: "base".to_string(),
+            max_tokens: 100,
+        };
+        let wire = build_request(&req, "claude-opus-4-8", None, false);
+        let json = serde_json::to_string(&wire).unwrap();
+        assert!(!json.contains("cache_control"), "got: {json}");
+        assert!(json.contains(r#""system":"base""#), "got: {json}");
     }
 
     #[test]
@@ -571,7 +743,7 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "claude-opus-4-8", Some(0.2));
+        let wire = build_request(&req, "claude-opus-4-8", Some(0.2), false);
         assert_eq!(wire.temperature, Some(0.2));
     }
 

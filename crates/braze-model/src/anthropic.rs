@@ -34,6 +34,9 @@ pub struct AnthropicBackend {
     /// failures. Defaults to [`crate::retry::DEFAULT_MAX_RETRIES`]; see
     /// [`AnthropicBackend::with_max_retries`].
     max_retries: u32,
+    /// See [`AnthropicBackend::with_prompt_caching_enabled`]. Default
+    /// `true` — same posture as `OpenRouterBackend`.
+    prompt_caching_enabled: bool,
 }
 
 impl AnthropicBackend {
@@ -45,6 +48,7 @@ impl AnthropicBackend {
             base_url: ANTHROPIC_API_URL.to_string(),
             temperature: None,
             max_retries: crate::retry::DEFAULT_MAX_RETRIES,
+            prompt_caching_enabled: true,
         }
     }
 
@@ -59,7 +63,18 @@ impl AnthropicBackend {
             base_url,
             temperature: None,
             max_retries: crate::retry::DEFAULT_MAX_RETRIES,
+            prompt_caching_enabled: true,
         }
+    }
+
+    /// Enables/disables the `cache_control` breakpoints on the request
+    /// (`anthropic_wire::apply_cache_breakpoints` — v8 § 5): the direct
+    /// API twin of [`crate::OpenRouterBackend::with_prompt_caching_enabled`],
+    /// honoring `Config::enable_prompt_caching` and the bench's
+    /// `+ablate:no-caching` row. Default `true`. Chainable.
+    pub fn with_prompt_caching_enabled(mut self, enabled: bool) -> Self {
+        self.prompt_caching_enabled = enabled;
+        self
     }
 
     /// Overrides the sampling temperature sent to Anthropic — e.g. so
@@ -97,7 +112,12 @@ impl ModelBackend for AnthropicBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let body = build_request(&req, &self.model, self.temperature);
+        let body = build_request(
+            &req,
+            &self.model,
+            self.temperature,
+            self.prompt_caching_enabled,
+        );
         tracing::info!(
             tool_count = body.tools.len(),
             "starting anthropic completion turn"
