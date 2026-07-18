@@ -1,8 +1,9 @@
-//! Reparación de historia y presupuesto de contexto — P1.1 paso 2 del
-//! split de `engine.rs` (docs/AUDITORIA-2026-07-v8.md § 3). Extraído
-//! VERBATIM de `engine/mod.rs` (2026-07-18): funciones libres, cero
-//! `&self` — los métodos de carga (`load_messages`/`load_and_repair`)
-//! siguen en `mod.rs` y migran aquí cuando el split toque los `impl`.
+//! Reparación de historia y presupuesto de contexto — P1.1 pasos 2 y 4
+//! del split de `engine.rs` (docs/AUDITORIA-2026-07-v8.md § 3).
+//! Extraído VERBATIM de `engine/mod.rs` (2026-07-18): las funciones
+//! libres (paso 2) y los métodos de carga/reparación
+//! (`load_and_repair`/`load_messages`/`repair_orphaned_tool_calls`,
+//! paso 4 — el bloque `impl Engine` del final del archivo).
 //!
 //! Dos familias:
 //! - **Reparación de huérfanos**: un `AssistantToolCall` sin su
@@ -431,4 +432,226 @@ pub(crate) fn estimate_message_tokens(messages: &[Message]) -> u32 {
         })
         .sum();
     (chars / 4) as u32
+}
+
+// P1.1 paso 4: los métodos de carga/reparación prometidos por el module
+// doc de arriba — extraídos verbatim de `engine/mod.rs`.
+use super::*;
+
+impl Engine {
+    /// Loads the full event log and repairs any orphaned tool_use left by
+    /// a crashed/killed/power-lost previous run (see
+    /// [`Engine::repair_orphaned_tool_calls`]). Called directly from
+    /// `run_turn` *before* the turn's `UserMessage` is appended (N-4,
+    /// docs/AUDITORIA-2026-07-v2.md) — the returned events also seed
+    /// `run_turn`'s `known_tool_call_ids` (N-14, via
+    /// [`Engine::existing_tool_call_ids`]) — and from
+    /// [`Engine::load_messages`] (which still needs the repair for any
+    /// other caller, and is idempotent if `run_turn` already ran it this
+    /// turn).
+    pub(super) async fn load_and_repair(
+        &self,
+        session: &SessionId,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<Vec<AgentEvent>, EngineError> {
+        let mut events = match self.store.load(session).await {
+            Ok(events) => events,
+            Err(SessionError::NotFound(_)) => Vec::new(),
+            Err(err) => return Err(err.into()),
+        };
+
+        self.repair_orphaned_tool_calls(session, &mut events, observer)
+            .await?;
+
+        Ok(events)
+    }
+
+    /// Collects the id of every `AssistantToolCall` already in `events` —
+    /// used to seed `run_turn`'s `known_tool_call_ids` so a
+    /// freshly-generated id (whether from the model or a backend's
+    /// synthetic-id fallback) that happens to collide with one already in
+    /// the session's history gets renamed instead of silently entering the
+    /// append-only log twice (N-14, docs/AUDITORIA-2026-07-v2.md).
+    pub(super) fn existing_tool_call_ids(events: &[AgentEvent]) -> HashSet<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::AssistantToolCall { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Loads the full event log, splits it into durable/tactical via the
+    /// compactor, and — if the tactical window has grown past
+    /// `tactical_compaction_threshold` **or** the estimated prompt size has
+    /// grown past `context_budget_tokens` (whichever is configured; see
+    /// that field's doc comment) — folds *all* of it into a fresh
+    /// `CompactionOccurred` summary (persisted; see
+    /// [`SimpleContextCompactor`](braze_session::SimpleContextCompactor)'s
+    /// `last_compaction_index` logic for why folding the complete backlog,
+    /// not a partial prefix, is what keeps repeated compaction
+    /// differential instead of re-summarizing overlapping content every
+    /// round) and builds messages from durable summary + that fresh
+    /// summary, **plus the last [`KEEP_RAW_TAIL`] tactical events kept
+    /// verbatim** — never the empty slice. Discarding the raw tail
+    /// entirely would drop the user's just-appended message for the
+    /// current turn (and any tool result from the round in progress) from
+    /// the very request meant to act on it. Otherwise (below both
+    /// thresholds) builds messages from durable summary + the full raw
+    /// tactical window, unchanged.
+    ///
+    /// The event-count threshold alone is a poor proxy for prompt size —
+    /// a single `read_file` of a large file counts the same as a
+    /// two-word "ok" — so a caller targeting a small, fixed context
+    /// window (e.g. Ollama's `num_ctx`) should also set
+    /// `context_budget_tokens` via [`Engine::with_context_budget`].
+    pub(super) async fn load_messages(
+        &self,
+        session: &SessionId,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<Vec<Message>, EngineError> {
+        let events = self.load_and_repair(session, observer).await?;
+
+        let (durable, tactical) = self.compactor.split(&events);
+
+        // `+ablate:no-prune` (opencode ítem 2, docs/AUDITORIA-2026-07-v6.md):
+        // with the collapse disabled, every observation renders full —
+        // expressed as unbounded caps rather than a separate render path,
+        // so the (well-tested) render pipeline stays identical and only
+        // its limits move.
+        let (full_observations_budget, effective_full_observations) =
+            if self.observation_collapse_enabled {
+                (
+                    full_observations_byte_budget(self.context_budget_tokens),
+                    effective_tactical_full_observations(
+                        self.tactical_full_observations,
+                        self.context_budget_tokens,
+                    ),
+                )
+            } else {
+                (usize::MAX, usize::MAX)
+            };
+        let effective_compaction_threshold = effective_tactical_compaction_threshold(
+            self.tactical_compaction_threshold,
+            self.context_budget_tokens,
+        );
+        let over_event_count_threshold = tactical.len() > effective_compaction_threshold;
+        let over_token_budget = self.context_budget_tokens.is_some_and(|budget| {
+            estimate_prompt_tokens(
+                &durable,
+                &tactical,
+                effective_full_observations,
+                full_observations_budget,
+            ) > budget
+        });
+        // N-6 (docs/AUDITORIA-2026-07-v2.md): compacting only ever folds
+        // `tactical` — it can't shrink `durable.summary` or
+        // `durable_events`. If `tactical` is already down to (or below)
+        // the raw tail every compaction keeps verbatim anyway, running
+        // `compact_tactical` again can't reduce the estimate at all: it
+        // would just append another near-empty `CompactionOccurred` and
+        // re-trigger on every subsequent `load_messages` forever — the
+        // exact "modo compactación permanente" pathology A2/C2 already
+        // fixed for the event-count trigger, reintroduced here via the
+        // token-budget one.
+        let compaction_would_help = tactical.len() > KEEP_RAW_TAIL;
+
+        if (over_event_count_threshold || over_token_budget)
+            && compaction_would_help
+            // `+ablate:no-compaction` (E1): gates BOTH triggers (event
+            // count and token budget) — a long turn can then genuinely
+            // blow the model's real context, which is the point of the
+            // ablation: measuring what compaction is worth requires
+            // letting its absence hurt.
+            && self.compaction_enabled
+        {
+            // A9 (docs/AUDITORIA-2026-07.md): previously this branch had
+            // no log statement at all — the only trace of a compaction
+            // having happened was the resulting `AgentEvent::CompactionOccurred`
+            // itself, silently, in the rollout log. `tactical_len` is the
+            // number that actually tripped this (whichever threshold),
+            // making a repeated/thrashing compaction pattern visible with
+            // `RUST_LOG=debug` instead of only inferable after the fact.
+            tracing::warn!(
+                tactical_len = tactical.len(),
+                tactical_compaction_threshold = effective_compaction_threshold,
+                over_event_count_threshold,
+                over_token_budget,
+                "context compaction triggered"
+            );
+
+            let summary = self.compactor.compact_tactical(&tactical)?;
+            // Bajo (docs/AUDITORIA-2026-07-v2.md, "dropped_tokens_estimate
+            // cuenta como perdido el tail que se conserva"): `start` must
+            // be known *before* estimating what got dropped — only
+            // `tactical[..start]` is actually folded into the summary;
+            // `tactical[start..]` (the live tail) survives verbatim into
+            // this same request. Estimating over the whole `tactical`
+            // slice counted retained events as if they were gone.
+            let start = pair_aware_tail_start(&tactical, KEEP_RAW_TAIL);
+            let dropped_tokens_estimate = estimate_dropped_tokens(&tactical[..start]);
+
+            self.append_and_notify(
+                session,
+                &AgentEvent::CompactionOccurred {
+                    summary: summary.clone(),
+                    dropped_tokens_estimate,
+                },
+                observer,
+            )
+            .await?;
+
+            let effective_durable = merge_summary(durable, summary);
+            let live_tail = &tactical[start..];
+            Ok(build_messages_with_full_observations(
+                &effective_durable,
+                live_tail,
+                effective_full_observations,
+                full_observations_budget,
+            ))
+        } else {
+            Ok(build_messages_with_full_observations(
+                &durable,
+                &tactical,
+                effective_full_observations,
+                full_observations_budget,
+            ))
+        }
+    }
+
+    /// Repairs `AssistantToolCall`s left without a matching
+    /// `ToolCallCompleted` (correlated by id) anywhere in the log — the
+    /// process crashed, was killed, or lost power between `run_turn`
+    /// persisting the tool_use (`dispatch_tool_calls` appends it *before*
+    /// dispatch) and receiving the tool's result. Left unrepaired, every
+    /// future request against this session is rejected by Anthropic with
+    /// a permanent 400 (a `tool_use` block with no matching
+    /// `tool_result`) — the session becomes permanently unresumable.
+    ///
+    /// Synthesizes and persists an error `ToolCallCompleted` for each
+    /// orphan found, and also appends it to `events` in place so this same
+    /// `load_messages` call already reflects the repair without a second
+    /// round-trip to the store. Idempotent and append-only: a session with
+    /// no orphans is a no-op, and a session already repaired has none left
+    /// to find on a later call.
+    pub(super) async fn repair_orphaned_tool_calls(
+        &self,
+        session: &SessionId,
+        events: &mut Vec<AgentEvent>,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<(), EngineError> {
+        for id in orphaned_tool_call_ids(events) {
+            tracing::warn!(
+                tool_call_id = %id,
+                "repairing an orphaned tool_use with no matching result \
+                 (likely an interrupted process); synthesizing an error ToolCallCompleted"
+            );
+            let repair = build_orphan_repair(id);
+            self.append_and_notify(session, &repair, observer).await?;
+            events.push(repair);
+        }
+
+        Ok(())
+    }
 }
