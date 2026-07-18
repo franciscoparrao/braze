@@ -544,6 +544,16 @@ pub fn compute_metrics(
                     FailureCause::TurnBudgetExhausted
                 }
                 braze_engine::EngineError::IncompleteStream => FailureCause::IncompleteStream,
+                // AUDITORIA-2026-07-v8 K-1d: a tripped circuit breaker
+                // is infrastructure state ("we didn't even ask the
+                // model"), not model capability — route it to the
+                // HarnessError bucket `report.rs` already excludes from
+                // the pass-rate denominator (N-37), instead of
+                // mass-charging an outage's fast-failing tail to the
+                // model under test.
+                braze_engine::EngineError::Model(braze_model::ModelError::CircuitOpen(_)) => {
+                    FailureCause::HarnessError
+                }
                 braze_engine::EngineError::Model(_) => FailureCause::ModelBackendError,
                 braze_engine::EngineError::Session(_) => FailureCause::SessionError,
                 braze_engine::EngineError::Tool(_) => FailureCause::ToolRegistryError,

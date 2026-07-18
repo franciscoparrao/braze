@@ -105,8 +105,23 @@ impl ModelBackend for AnthropicBackend {
 
         // H-19: transient 429/5xx/send blips on the initial request are
         // retried with backoff inside the wire — the engine never sees
-        // them unless they persist past the retries.
-        let response = crate::retry::send_with_retry(
+        // them unless they persist past the retries. Wrapped in a
+        // circuit breaker keyed by destination+model (2026-07-17,
+        // recalibrated per AUDITORIA-2026-07-v8 K-1): once enough
+        // consecutive calls to this same destination have failed at the
+        // transport level, later calls fail fast without a network
+        // round-trip at all, instead of every one separately paying the
+        // retry cost to rediscover a sustained outage. Deterministic
+        // 4xx don't count (`circuit_breaker::classify`), and success is
+        // only reported once the stream terminates cleanly — the guard
+        // travels into `StreamCtx` for that.
+        let breaker_key = format!(
+            "anthropic:{}:{}",
+            self.base_url.trim_end_matches('/'),
+            self.model
+        );
+        let guard = crate::circuit_breaker::acquire(&breaker_key)?;
+        let send_result = crate::retry::send_with_retry(
             "anthropic",
             self.max_retries,
             || {
@@ -118,7 +133,14 @@ impl ModelBackend for AnthropicBackend {
                     .json(&body)
             },
         )
-        .await?;
+        .await;
+        let response = match send_result {
+            Ok(response) => response,
+            Err(err) => {
+                guard.observe_err(&err);
+                return Err(err);
+            }
+        };
 
         // Convert to `Vec<u8>` at the boundary rather than naming
         // `bytes::Bytes` in a type signature — `bytes` is only a transitive
@@ -132,6 +154,7 @@ impl ModelBackend for AnthropicBackend {
             state: AnthropicStreamState::new(),
             pending: VecDeque::new(),
             finished: false,
+            breaker: Some(guard),
         };
 
         let event_stream = stream::unfold(ctx, drive_stream);
@@ -145,6 +168,10 @@ struct StreamCtx {
     state: AnthropicStreamState,
     pending: VecDeque<CompletionEvent>,
     finished: bool,
+    /// Circuit-breaker reporting handle: `take()`n exactly once at the
+    /// stream's terminal point (clean end → `observe_ok`, error →
+    /// `observe_err`). See `circuit_breaker.rs`'s module docs.
+    breaker: Option<crate::circuit_breaker::Guard>,
 }
 
 async fn drive_stream(
@@ -155,6 +182,14 @@ async fn drive_stream(
             return Some((Ok(event), ctx));
         }
         if ctx.finished {
+            // Clean termination (message_stop seen, pending drained):
+            // report end-to-end success to the circuit breaker. Error
+            // terminations already took the guard below.
+            if ctx.state.done
+                && let Some(guard) = ctx.breaker.take()
+            {
+                guard.observe_ok();
+            }
             return None;
         }
 
@@ -170,7 +205,11 @@ async fn drive_stream(
                     // `handle_event` produced for it.
                     if let Some(message) = ctx.state.stream_error.take() {
                         ctx.finished = true;
-                        return Some((Err(ModelError::StreamError(message)), ctx));
+                        let err = ModelError::StreamError(message);
+                        if let Some(guard) = ctx.breaker.take() {
+                            guard.observe_err(&err);
+                        }
+                        return Some((Err(err), ctx));
                     }
                     if ctx.state.done {
                         ctx.finished = true;
@@ -183,12 +222,13 @@ async fn drive_stream(
                         "anthropic stream: invalid JSON in SSE data, terminating stream"
                     );
                     ctx.finished = true;
-                    return Some((
-                        Err(ModelError::Decode(format!(
-                            "anthropic stream: invalid JSON in SSE data: {err}"
-                        ))),
-                        ctx,
+                    let err = ModelError::Decode(format!(
+                        "anthropic stream: invalid JSON in SSE data: {err}"
                     ));
+                    if let Some(guard) = ctx.breaker.take() {
+                        guard.observe_err(&err);
+                    }
+                    return Some((Err(err), ctx));
                 }
             },
             None => match ctx.byte_stream.next().await {
@@ -198,28 +238,33 @@ async fn drive_stream(
                 Some(Err(err)) => {
                     tracing::error!(error = %err, "anthropic stream: transport error, terminating stream");
                     ctx.finished = true;
-                    return Some((
-                        Err(ModelError::StreamError(format!("transport error: {err}"))),
-                        ctx,
-                    ));
+                    let err = ModelError::StreamError(format!("transport error: {err}"));
+                    if let Some(guard) = ctx.breaker.take() {
+                        guard.observe_err(&err);
+                    }
+                    return Some((Err(err), ctx));
                 }
                 None => {
                     ctx.finished = true;
                     if ctx.state.done {
                         // Connection closed cleanly right after a proper
                         // message_stop — nothing more to yield.
+                        if let Some(guard) = ctx.breaker.take() {
+                            guard.observe_ok();
+                        }
                         return None;
                     }
                     // Connection closed before a terminal event ever
                     // arrived: an incomplete stream must not be treated
                     // as a successful completion (see
                     // `ModelError::StreamError`'s doc comment).
-                    return Some((
-                        Err(ModelError::StreamError(
-                            "connection closed before a terminal event was received".to_string(),
-                        )),
-                        ctx,
-                    ));
+                    let err = ModelError::StreamError(
+                        "connection closed before a terminal event was received".to_string(),
+                    );
+                    if let Some(guard) = ctx.breaker.take() {
+                        guard.observe_err(&err);
+                    }
+                    return Some((Err(err), ctx));
                 }
             },
         }

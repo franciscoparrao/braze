@@ -23,4 +23,14 @@ pub enum ModelError {
     /// complete, converged response.
     #[error("model backend's completion stream failed: {0}")]
     StreamError(String),
+
+    /// A per-destination circuit breaker (`circuit_breaker.rs`) rejected
+    /// this call without touching the network — enough recent calls to
+    /// this same provider+URL failed that the breaker tripped, and its
+    /// cooldown hasn't elapsed. Distinct from `Request`/`RateLimited`
+    /// (which both mean "a real HTTP round-trip happened and failed")
+    /// so a caller/log line can tell "the network said no" apart from
+    /// "we didn't even ask, because it's been saying no repeatedly".
+    #[error("{0}")]
+    CircuitOpen(String),
 }

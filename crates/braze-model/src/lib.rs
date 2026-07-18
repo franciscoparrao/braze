@@ -10,6 +10,7 @@ mod anthropic;
 mod anthropic_wire;
 mod args_repair;
 mod backend;
+mod circuit_breaker;
 mod error;
 mod escalation;
 mod http_client;

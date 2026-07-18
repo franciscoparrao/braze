@@ -219,18 +219,47 @@ impl ModelBackend for OllamaBackend {
 
         let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
 
-        let response = self
-            .client
-            .post(url)
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ModelError::Request(format!("ollama request failed: {e}")))?;
+        // Circuit breaker keyed by destination+model (2026-07-17,
+        // recalibrated per AUDITORIA-2026-07-v8 K-1) — see
+        // `AnthropicBackend::complete`'s identical comment. Ollama gets
+        // no per-call retry (H-19's own dictamen: hammering a saturated
+        // local backend doesn't help), but tracking cross-call failure
+        // state is still useful — a sweep against an unreachable Nitro
+        // shouldn't pay a fresh connect-timeout on every subsequent
+        // task once the outage is established. The guard travels into
+        // `StreamCtx`: success is only recorded once the stream
+        // terminates cleanly, so a mid-generation death (the documented
+        // ~2% Nitro failure mode) counts as a failure too.
+        let breaker_key = format!(
+            "ollama:{}:{}",
+            self.base_url.trim_end_matches('/'),
+            self.model
+        );
+        let guard = crate::circuit_breaker::acquire(&breaker_key)?;
 
-        if !response.status().is_success() {
-            return Err(http_error_to_model_error(response, "ollama").await);
+        let send_result = async {
+            let response = self
+                .client
+                .post(url)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| ModelError::Request(format!("ollama request failed: {e}")))?;
+
+            if !response.status().is_success() {
+                return Err(http_error_to_model_error(response, "ollama").await);
+            }
+            Ok(response)
         }
+        .await;
+        let response = match send_result {
+            Ok(response) => response,
+            Err(err) => {
+                guard.observe_err(&err);
+                return Err(err);
+            }
+        };
 
         let byte_stream = response
             .bytes_stream()
@@ -241,6 +270,7 @@ impl ModelBackend for OllamaBackend {
             state: OllamaStreamState::new(self.num_ctx),
             pending: VecDeque::new(),
             finished: false,
+            breaker: Some(guard),
         };
 
         let event_stream = stream::unfold(ctx, drive_stream);
@@ -254,6 +284,11 @@ struct StreamCtx {
     state: OllamaStreamState,
     pending: VecDeque<CompletionEvent>,
     finished: bool,
+    /// Circuit-breaker reporting handle: `take()`n exactly once at the
+    /// stream's terminal point (clean end → `observe_ok`, error →
+    /// `observe_err`). `None` after reporting — or from the start when
+    /// the breaker is disabled-by-env, which the `Guard` handles itself.
+    breaker: Option<crate::circuit_breaker::Guard>,
 }
 
 async fn drive_stream(
@@ -264,6 +299,16 @@ async fn drive_stream(
             return Some((Ok(event), ctx));
         }
         if ctx.finished {
+            // Clean termination (done seen, pending drained): this is
+            // the point where the call is *known* to have succeeded
+            // end-to-end — report it to the circuit breaker. Error
+            // terminations already took the guard below, so `take()`
+            // is a no-op for them.
+            if ctx.state.done
+                && let Some(guard) = ctx.breaker.take()
+            {
+                guard.observe_ok();
+            }
             return None;
         }
 
@@ -277,7 +322,11 @@ async fn drive_stream(
                     // surfaced to the caller, not swallowed.
                     if let Some(message) = ctx.state.stream_error.take() {
                         ctx.finished = true;
-                        return Some((Err(ModelError::StreamError(message)), ctx));
+                        let err = ModelError::StreamError(message);
+                        if let Some(guard) = ctx.breaker.take() {
+                            guard.observe_err(&err);
+                        }
+                        return Some((Err(err), ctx));
                     }
                     if ctx.state.done {
                         ctx.finished = true;
@@ -289,12 +338,13 @@ async fn drive_stream(
                         "ollama stream: invalid JSON in NDJSON line, terminating stream"
                     );
                     ctx.finished = true;
-                    return Some((
-                        Err(ModelError::Decode(format!(
-                            "ollama stream: invalid JSON in NDJSON line: {err}"
-                        ))),
-                        ctx,
+                    let err = ModelError::Decode(format!(
+                        "ollama stream: invalid JSON in NDJSON line: {err}"
                     ));
+                    if let Some(guard) = ctx.breaker.take() {
+                        guard.observe_err(&err);
+                    }
+                    return Some((Err(err), ctx));
                 }
             },
             None => match ctx.byte_stream.next().await {
@@ -304,22 +354,27 @@ async fn drive_stream(
                 Some(Err(err)) => {
                     tracing::error!(error = %err, "ollama stream: transport error, terminating stream");
                     ctx.finished = true;
-                    return Some((
-                        Err(ModelError::StreamError(format!("transport error: {err}"))),
-                        ctx,
-                    ));
+                    let err = ModelError::StreamError(format!("transport error: {err}"));
+                    if let Some(guard) = ctx.breaker.take() {
+                        guard.observe_err(&err);
+                    }
+                    return Some((Err(err), ctx));
                 }
                 None => {
                     ctx.finished = true;
                     if ctx.state.done {
+                        if let Some(guard) = ctx.breaker.take() {
+                            guard.observe_ok();
+                        }
                         return None;
                     }
-                    return Some((
-                        Err(ModelError::StreamError(
-                            "connection closed before a terminal event was received".to_string(),
-                        )),
-                        ctx,
-                    ));
+                    let err = ModelError::StreamError(
+                        "connection closed before a terminal event was received".to_string(),
+                    );
+                    if let Some(guard) = ctx.breaker.take() {
+                        guard.observe_err(&err);
+                    }
+                    return Some((Err(err), ctx));
                 }
             },
         }
