@@ -358,7 +358,7 @@ async fn run() -> Result<(), BenchError> {
         // isn't just tidiness.
         if !cli.no_ollama_stop {
             for model in spec.ollama_models(&config) {
-                stop_ollama_model(&model).await;
+                stop_ollama_model(&config.ollama_base_url, &model).await;
             }
         }
     }
@@ -455,7 +455,7 @@ async fn run() -> Result<(), BenchError> {
 
         if !cli.no_ollama_stop {
             for model in spec.ollama_models(&config) {
-                stop_ollama_model(&model).await;
+                stop_ollama_model(&config.ollama_base_url, &model).await;
             }
         }
     }
@@ -511,15 +511,20 @@ async fn run() -> Result<(), BenchError> {
     Ok(())
 }
 
-/// Unloads `model` from the local Ollama daemon (`ollama stop <model>`) so
-/// the next backend in the sweep starts from a clean memory baseline
-/// instead of contending with whatever this one left resident. Best
-/// effort: `ollama` missing or the daemon being down is logged, not fatal
-/// — the sweep already treats a hung/slow backend as a timed-out task, not
-/// a harness failure.
-async fn stop_ollama_model(model: &str) {
+/// Unloads `model` from the Ollama daemon at `base_url` (`ollama stop
+/// <model>`) so the next backend in the sweep starts from a clean memory
+/// baseline instead of contending with whatever this one left resident.
+/// `OLLAMA_HOST` must be set explicitly (AUDITORIA-2026-07-v8 K-11): the
+/// `ollama` CLI defaults to localhost, so without it a sweep against a
+/// remote node (Nitro via `BRAZE_OLLAMA_BASE_URL`) silently no-ops the
+/// stop and the memory hygiene this function promises never happens on
+/// the machine that actually needs it. Best effort: `ollama` missing or
+/// the daemon being down is logged, not fatal — the sweep already treats
+/// a hung/slow backend as a timed-out task, not a harness failure.
+async fn stop_ollama_model(base_url: &str, model: &str) {
     match tokio::process::Command::new("ollama")
         .args(["stop", model])
+        .env("OLLAMA_HOST", base_url)
         .output()
         .await
     {
