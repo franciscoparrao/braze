@@ -17,6 +17,19 @@ use crate::task::TaskDef;
 /// these into one bit, which hides exactly the information needed to
 /// tell a genuine model-capability gap apart from a harness bug or a slow
 /// backend. See docs/AUDITORIA-2026-07.md hallazgo F5.
+/// FNV-1a de 64 bits en hex — huella ESTABLE entre versiones de Rust
+/// (a diferencia de `DefaultHasher`, cuyo output puede cambiar con el
+/// toolchain — la lección K-18). Usada para `outcome_fingerprint`;
+/// implementación propia de 5 líneas antes que una dependencia nueva.
+pub(crate) fn fnv1a_hex(bytes: &[u8]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureCause {
@@ -163,6 +176,24 @@ pub struct TaskResult {
     pub expected_tool_called: Option<bool>,
     pub expected_text_found: Option<bool>,
     pub expected_files_found: Option<bool>,
+    /// v8 § 6.15 (TTC local): huella FNV-1a estable del ARTEFACTO del
+    /// rollout — el contenido de los archivos de `expect_file_contains`
+    /// (ordenados por path; archivo faltante deja marca), o el texto
+    /// final del turno si la tarea no asserta archivos. Base del voto de
+    /// auto-consistencia del selector TTC (`runner::select_ttc_winner`):
+    /// compara RESULTADOS entre rollouts sin mirar jamás el veredicto.
+    /// FNV fija, no `DefaultHasher` — K-18: se serializa al JSON y debe
+    /// ser estable entre versiones del toolchain.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_fingerprint: Option<String>,
+    /// v8 § 6.15: `Some(n)` cuando esta fila es el GANADOR seleccionado
+    /// entre `n` rollouts TTC (`+ablate:ttc=N`) — sus campos de costo
+    /// (`input_tokens`/`output_tokens`/`wall_time_ms`/
+    /// `estimated_cost_usd`) son la SUMA de los n rollouts, el costo
+    /// real de la técnica; los diagnósticos (rounds, tool_calls, causa
+    /// de fallo, assertions) son los del ganador. `None` = fila normal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttc_rollouts: Option<u32>,
     /// v8 K-9: whether `cargo check` exited 0 in the sandbox after the
     /// run. `None` — `expect_cargo_check` not declared on the `TaskDef`;
     /// `Some(true)`/`Some(false)` — declared and passed/failed. Same
@@ -327,6 +358,8 @@ pub fn harness_error_result(
         expected_text_found: None,
         expected_files_found: None,
         expected_cargo_check_passed: None,
+        outcome_fingerprint: None,
+        ttc_rollouts: None,
         // Nothing ran, so no budget assertion was evaluated either —
         // `None` (not asserted) rather than `Some(false)` (budget blown).
         // Same "not reported" semantics as the cache fields below.
@@ -401,6 +434,7 @@ pub fn compute_metrics(
     run_outcome: RunOutcome,
     expected_files_found: Option<bool>,
     expected_cargo_check_passed: Option<bool>,
+    file_outcome_fingerprint: Option<String>,
     memory: MemoryRunMetrics,
     pricing: Option<crate::backend_spec::PricingRates>,
 ) -> TaskResult {
@@ -644,6 +678,14 @@ pub fn compute_metrics(
 
     let passed = converged && assertions_passed;
 
+    // v8 § 6.15: la huella del artefacto — la de archivos si el runner
+    // la computó (tareas con expect_file_contains), la del texto final
+    // si no. Ver el doc del campo `outcome_fingerprint`.
+    let outcome_fingerprint = file_outcome_fingerprint.or_else(|| {
+        let trimmed = final_text.trim();
+        (!trimmed.is_empty()).then(|| fnv1a_hex(trimmed.as_bytes()))
+    });
+
     // Only meaningful once we know the turn otherwise converged — a
     // failed run already has a cause (Timeout/MaxIterationsExhausted/...)
     // that takes priority over which specific assertion would also have
@@ -697,6 +739,8 @@ pub fn compute_metrics(
         expected_text_found,
         expected_files_found,
         expected_cargo_check_passed,
+        outcome_fingerprint,
+        ttc_rollouts: None,
         expected_rounds_within_budget,
         expected_tokens_within_budget,
         expected_cost_within_budget,
@@ -781,6 +825,7 @@ mod tests {
             events,
             zero(),
             run_outcome,
+            None,
             None,
             None,
             MemoryRunMetrics::default(),
@@ -1432,6 +1477,7 @@ mod tests {
             RunOutcome::Converged,
             Some(false),
             None,
+            None,
             MemoryRunMetrics::default(),
             None,
         );
@@ -1453,6 +1499,7 @@ mod tests {
             zero(),
             RunOutcome::Converged,
             Some(true),
+            None,
             None,
             MemoryRunMetrics::default(),
             None,
@@ -1601,6 +1648,7 @@ mod tests {
             events,
             zero(),
             RunOutcome::Converged,
+            None,
             None,
             None,
             MemoryRunMetrics::default(),

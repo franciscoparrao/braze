@@ -628,6 +628,8 @@ mod tests {
             expected_text_found: None,
             expected_files_found: None,
             expected_cargo_check_passed: None,
+            outcome_fingerprint: None,
+            ttc_rollouts: None,
             // No budget asserted on this synthetic helper — same `None`
             // (not evaluated) semantics `TaskResult::expected_rounds_
             // within_budget`'s doc comment pins.

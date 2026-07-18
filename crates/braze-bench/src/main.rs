@@ -321,17 +321,36 @@ async fn run() -> Result<(), BenchError> {
                     top_k: cli.top_k,
                     repeat_penalty: cli.repeat_penalty,
                 };
-                match runner::run_task(
-                    spec,
-                    &config,
-                    task,
-                    repetition,
-                    task_timeout,
-                    sampling,
-                    preserve_root.as_deref(),
-                )
-                .await
-                {
+                // v8 § 6.15: con `+ablate:ttc=N` (N>1) la unidad de
+                // medición pasa a ser "N rollouts + selección" — una
+                // fila por repetición igual que siempre, con el costo
+                // agregado de los N adentro.
+                let ttc_rollouts = spec.ablation().ttc_rollouts.unwrap_or(1);
+                let run = if ttc_rollouts > 1 {
+                    runner::run_task_ttc(
+                        spec,
+                        &config,
+                        task,
+                        repetition,
+                        task_timeout,
+                        sampling,
+                        preserve_root.as_deref(),
+                        ttc_rollouts,
+                    )
+                    .await
+                } else {
+                    runner::run_task(
+                        spec,
+                        &config,
+                        task,
+                        repetition,
+                        task_timeout,
+                        sampling,
+                        preserve_root.as_deref(),
+                    )
+                    .await
+                };
+                match run {
                     Ok(result) => results.push(result),
                     Err(err) => {
                         // A harness-level failure (sandbox setup, reading

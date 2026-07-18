@@ -547,6 +547,27 @@ pub async fn run_task(
         None
     };
 
+    // v8 § 6.15 (TTC): huella del artefacto de archivos — contenido de
+    // los paths de expect_file_contains en orden estable, con marca para
+    // archivos faltantes. También antes del Drop del sandbox.
+    let file_outcome_fingerprint = if task.expect_file_contains.is_empty() {
+        None
+    } else {
+        let mut paths: Vec<&String> = task.expect_file_contains.keys().collect();
+        paths.sort();
+        let mut buffer = Vec::new();
+        for path in paths {
+            buffer.extend_from_slice(path.as_bytes());
+            buffer.push(0);
+            match std::fs::read(sandbox.path().join(path)) {
+                Ok(bytes) => buffer.extend_from_slice(&bytes),
+                Err(_) => buffer.extend_from_slice(b"<missing>"),
+            }
+            buffer.push(0);
+        }
+        Some(crate::metrics::fnv1a_hex(&buffer))
+    };
+
     Ok(compute_metrics(
         &display_name,
         task,
@@ -556,6 +577,7 @@ pub async fn run_task(
         run_outcome,
         expected_files_found,
         expected_cargo_check_passed,
+        file_outcome_fingerprint,
         MemoryRunMetrics {
             memory_tokens: task_memory
                 .as_ref()
@@ -567,6 +589,125 @@ pub async fn run_task(
         // estimate rather than a guessed one.
         spec.resolve_pricing(config),
     ))
+}
+
+/// v8 § 6.15 — TTC local (`+ablate:ttc=N`): corre `rollouts` rollouts
+/// COMPLETOS e independientes de la tarea (sandbox y sesión frescos
+/// cada uno, seeds decorrelacionados) y devuelve UNA fila: el ganador
+/// de [`select_ttc_winner`], con los campos de costo sumados sobre
+/// todos los rollouts. Secuencial a propósito: el nodo de inferencia
+/// del proyecto (Nitro) es una sola máquina CPU — paralelizar rollouts
+/// ahí contamina la latencia por contención, el modo de falla
+/// documentado en CLAUDE.md.
+///
+/// Un rollout que falla a nivel harness no mata la unidad TTC (los
+/// demás siguen); solo si TODOS fallan se propaga el último error.
+#[allow(clippy::too_many_arguments)] // espejo de `run_task` (ya en el límite) + rollouts
+pub async fn run_task_ttc(
+    spec: &BackendSpec,
+    config: &Config,
+    task: &TaskDef,
+    repetition: u32,
+    timeout: Duration,
+    sampling: SamplingSpec,
+    preserve_root: Option<&Path>,
+    rollouts: u32,
+) -> Result<TaskResult, BenchError> {
+    let mut candidates = Vec::new();
+    let mut last_error = None;
+    for rollout in 0..rollouts {
+        // Auto-consistencia REQUIERE variación entre rollouts: mismo
+        // seed daría n copias idénticas y el voto sería un no-op. El
+        // offset primo grande no colisiona con el offset por repetición
+        // (+1 por rep) en ningún sweep realista.
+        let mut rollout_sampling = sampling;
+        rollout_sampling.seed = sampling
+            .seed
+            .map(|s| s.wrapping_add(u64::from(rollout).wrapping_mul(1_000_003)));
+        match run_task(spec, config, task, repetition, timeout, rollout_sampling, preserve_root)
+            .await
+        {
+            Ok(result) => candidates.push(result),
+            Err(err) => {
+                eprintln!(
+                    "braze-bench: rollout TTC {}/{rollouts} de '{}' falló a nivel harness: {err}",
+                    rollout + 1,
+                    task.id
+                );
+                last_error = Some(err);
+            }
+        }
+    }
+    match (candidates.is_empty(), last_error) {
+        (true, Some(err)) => Err(err),
+        (true, None) => unreachable!("rollouts >= 1 garantiza candidato o error"),
+        (false, _) => Ok(select_ttc_winner(candidates, rollouts)),
+    }
+}
+
+/// La selección TTC — auto-consistencia sobre el ARTEFACTO, jamás sobre
+/// el veredicto: el selector solo lee `converged`, la huella del
+/// resultado (`outcome_fingerprint`), los fallos de ejecución y el
+/// costo. Orden: (1) convergió; (2) su huella tiene la mayoría entre
+/// los convergidos (self-consistency: si 2 de 3 rollouts produjeron el
+/// mismo archivo final, ese resultado gana); (3) menos
+/// `tool_execution_failures`; (4) menos tokens; (5) el más temprano.
+/// El ganador sale con `ttc_rollouts = Some(n)` y el costo agregado de
+/// TODOS los rollouts — la fila nunca esconde lo que costó la técnica.
+fn select_ttc_winner(mut candidates: Vec<TaskResult>, rollouts: u32) -> TaskResult {
+    let mut fingerprint_votes: std::collections::HashMap<String, u32> =
+        std::collections::HashMap::new();
+    for candidate in candidates.iter().filter(|c| c.converged) {
+        if let Some(fingerprint) = &candidate.outcome_fingerprint {
+            *fingerprint_votes.entry(fingerprint.clone()).or_insert(0) += 1;
+        }
+    }
+
+    let mut best_index = 0;
+    let mut best_key = (false, 0u32, i64::MIN, i64::MIN);
+    for (index, candidate) in candidates.iter().enumerate() {
+        let votes = candidate
+            .outcome_fingerprint
+            .as_ref()
+            .filter(|_| candidate.converged)
+            .and_then(|f| fingerprint_votes.get(f))
+            .copied()
+            .unwrap_or(0);
+        let key = (
+            candidate.converged,
+            votes,
+            -i64::from(candidate.tool_execution_failures),
+            -(i64::from(candidate.input_tokens) + i64::from(candidate.output_tokens)),
+        );
+        // Estrictamente mayor: en empate total gana el más temprano.
+        if key > best_key {
+            best_key = key;
+            best_index = index;
+        }
+    }
+
+    let total_wall: u128 = candidates.iter().map(|c| c.wall_time_ms).sum();
+    let total_input = candidates
+        .iter()
+        .fold(0u32, |acc, c| acc.saturating_add(c.input_tokens));
+    let total_output = candidates
+        .iter()
+        .fold(0u32, |acc, c| acc.saturating_add(c.output_tokens));
+    let total_cost = {
+        let costs: Vec<f64> = candidates
+            .iter()
+            .filter_map(|c| c.estimated_cost_usd)
+            .collect();
+        (!costs.is_empty()).then(|| costs.iter().sum())
+    };
+
+    let mut winner = candidates.swap_remove(best_index);
+    winner.ttc_rollouts = Some(rollouts);
+    winner.wall_time_ms = total_wall;
+    winner.input_tokens = total_input;
+    winner.output_tokens = total_output;
+    winner.estimated_cost_usd = total_cost;
+    winner
 }
 
 /// Ceiling for the post-run `cargo check` (v8 K-9). The sandbox projects
@@ -609,6 +750,71 @@ async fn run_cargo_check_in_sandbox(dir: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// v8 § 6.15 — el selector TTC: auto-consistencia sobre el artefacto.
+    /// La mayoría de huella entre convergidos gana aunque el solitario
+    /// tenga menos tokens; el costo del ganador es la SUMA de todos.
+    #[test]
+    fn ttc_winner_is_the_fingerprint_majority_with_summed_costs() {
+        fn candidate(fingerprint: &str, converged: bool, tokens: u32) -> crate::metrics::TaskResult {
+            let mut r = crate::metrics::harness_error_result(
+                "ollama:x",
+                &crate::task::TaskDef {
+                    id: "t".to_string(),
+                    prompt: "p".to_string(),
+                    setup_files: Default::default(),
+                    expect_tool_call: None,
+                    expect_no_tool_call: false,
+                    expect_text_contains: None,
+                    expect_file_contains: Default::default(),
+                    expect_cargo_check: false,
+                    skill: None,
+                    expect_max_rounds: None,
+                    expect_max_tokens: None,
+                    expect_max_cost_usd: None,
+                    noise_tools: 0,
+                    memory_condition: None,
+                    memory_file: None,
+                    memory_budget_tokens: None,
+                },
+                0,
+                &crate::error::BenchError::Startup("plantilla".to_string()),
+            );
+            r.failure_cause = None;
+            r.converged = converged;
+            r.outcome_fingerprint = Some(fingerprint.to_string());
+            r.input_tokens = tokens;
+            r.output_tokens = 0;
+            r.wall_time_ms = 100;
+            r.estimated_cost_usd = Some(0.01);
+            r
+        }
+
+        // Dos rollouts coinciden en el artefacto "aaa"; el tercero
+        // produjo "bbb" más barato. Gana la mayoría.
+        let winner = select_ttc_winner(
+            vec![
+                candidate("aaa", true, 500),
+                candidate("bbb", true, 10),
+                candidate("aaa", true, 600),
+            ],
+            3,
+        );
+        assert_eq!(winner.outcome_fingerprint.as_deref(), Some("aaa"));
+        assert_eq!(winner.ttc_rollouts, Some(3));
+        assert_eq!(winner.input_tokens, 1110, "tokens sumados sobre los 3");
+        assert_eq!(winner.wall_time_ms, 300, "walltime sumado");
+        assert!((winner.estimated_cost_usd.unwrap() - 0.03).abs() < 1e-9);
+
+        // Un no-convergido jamás le gana a un convergido, tenga la
+        // huella que tenga.
+        let winner = select_ttc_winner(
+            vec![candidate("ccc", false, 10), candidate("ddd", true, 900)],
+            2,
+        );
+        assert_eq!(winner.outcome_fingerprint.as_deref(), Some("ddd"));
+        assert!(winner.converged);
+    }
 
     /// v8 K-9, end-to-end con cargo REAL: el grading semántico devuelve
     /// `false` para el setup buggy de la suite memory-distillation

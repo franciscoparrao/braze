@@ -686,6 +686,15 @@ pub struct AblationOverrides {
     /// tiene efecto en filas que además llevan `+lead:` — sin lead no
     /// hay summarizer que construir y la fila corre como siempre.
     pub enable_lead_summary: bool,
+    /// `+ablate:ttc=N` — test-time compute local (v8 § 6.15): cada
+    /// "repetición" de la fila corre N rollouts completos e
+    /// independientes de la tarea y reporta UNA fila — el ganador por
+    /// auto-consistencia sobre el artefacto (`runner::select_ttc_winner`),
+    /// con tokens/walltime/costo SUMADOS sobre los N. La pregunta que
+    /// responde su A/B: ¿n rollouts de un modelo chico compran pass rate
+    /// a n× el costo? — la palanca más natural cuando la inferencia es
+    /// local y los tokens casi gratis. `None`/`Some(1)` = fila normal.
+    pub ttc_rollouts: Option<u32>,
 }
 
 impl AblationOverrides {
@@ -698,7 +707,7 @@ impl AblationOverrides {
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
-         task-list, prompt-tools, constrained-tools, project-memory, lead-summary, best-of-n=N, \
+         task-list, prompt-tools, constrained-tools, project-memory, lead-summary, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
          tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N";
 
@@ -724,6 +733,15 @@ impl AblationOverrides {
                 "no-compaction" => out.disable_compaction = true,
                 "no-harness-notes" => out.disable_harness_notes = true,
                 "best-of-n" => out.best_of_n = Some(Self::parse_usize(key, value)?),
+                "ttc" => {
+                    let n = Self::parse_usize(key, value)? as u32;
+                    if n == 0 {
+                        return Err(BenchError::Startup(
+                            "ttc=N requiere N >= 1 (N=1 es una fila normal)".to_string(),
+                        ));
+                    }
+                    out.ttc_rollouts = Some(n);
+                }
                 "tactical-window" => out.tactical_window = Some(Self::parse_usize(key, value)?),
                 "tactical-threshold" => {
                     out.tactical_compaction_threshold = Some(Self::parse_usize(key, value)?)
@@ -835,6 +853,9 @@ impl AblationOverrides {
         }
         if self.enable_lead_summary {
             parts.push("lead-summary".to_string());
+        }
+        if let Some(n) = self.ttc_rollouts {
+            parts.push(format!("ttc={n}"));
         }
         if let Some(n) = self.tool_search_threshold {
             parts.push(format!("tool-search-threshold={n}"));

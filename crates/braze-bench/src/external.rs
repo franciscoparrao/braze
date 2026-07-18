@@ -120,6 +120,8 @@ pub fn external_outcome_to_task_result(
             // External harnesses run outside braze's sandbox — no
             // post-run `cargo check` grading (v8 K-9) applies here.
             expected_cargo_check_passed: None,
+            outcome_fingerprint: None,
+            ttc_rollouts: None,
             // No `AgentEvent` log for a black-box external harness, so
             // neither rounds nor tokens are measured — any
             // `expect_max_rounds`/`expect_max_tokens` budget stays
@@ -194,6 +196,8 @@ pub fn external_outcome_to_task_result(
         expected_files_found,
         // Ver la nota del branch de error arriba (v8 K-9).
         expected_cargo_check_passed: None,
+        outcome_fingerprint: None,
+        ttc_rollouts: None,
         // No round/token counts are measured for a black-box external
         // harness, so any budget assertion stays `None` (not evaluated)
         // — matches the run-error branch above and the `None` semantics
