@@ -581,7 +581,6 @@ impl Engine {
                 "context compaction triggered"
             );
 
-            let summary = self.compactor.compact_tactical(&tactical)?;
             // Bajo (docs/AUDITORIA-2026-07-v2.md, "dropped_tokens_estimate
             // cuenta como perdido el tail que se conserva"): `start` must
             // be known *before* estimating what got dropped — only
@@ -591,6 +590,16 @@ impl Engine {
             // slice counted retained events as if they were gone.
             let start = pair_aware_tail_start(&tactical, KEEP_RAW_TAIL);
             let dropped_tokens_estimate = estimate_dropped_tokens(&tactical[..start]);
+
+            // v8 § 6 — summary-por-lead: con summarizer configurado, el
+            // summary lo escribe el modelo fuerte sobre los eventos que
+            // realmente se dropean; ante cualquier fallo cae al digest
+            // extractivo de siempre (el path sin summarizer es
+            // byte-idéntico al previo).
+            let summary = match self.attempt_lead_summary(&tactical[..start]).await {
+                Some(lead_summary) => lead_summary,
+                None => self.compactor.compact_tactical(&tactical)?,
+            };
 
             self.append_and_notify(
                 session,
@@ -635,6 +644,104 @@ impl Engine {
     /// round-trip to the store. Idempotent and append-only: a session with
     /// no orphans is a no-op, and a session already repaired has none left
     /// to find on a later call.
+    /// v8 § 6 — la llamada del summary-por-lead: una request tools-free
+    /// al `summarizer` con el transcript de los eventos dropeados,
+    /// acotada por [`LEAD_SUMMARY_MAX_TOKENS`] y
+    /// [`LEAD_SUMMARY_TIMEOUT`]. `None` en TODO camino de fallo (sin
+    /// summarizer, dropped vacío, error de request/stream, timeout,
+    /// texto vacío, stream sin `Done`) — el caller cae al digest
+    /// extractivo, así que esta palanca nunca puede dejar la compactación
+    /// peor que sin ella.
+    ///
+    /// Caveat de contabilidad (documentado, no accidental): el Usage de
+    /// esta llamada NO se persiste como evento — `TaskResult::rounds`
+    /// cuenta eventos Usage (uno por ronda, contrato K-33) y un Usage
+    /// extra inflaría las rondas del turno. El costo queda visible vía
+    /// tracing; si la palanca se promueve, su A/B debe anotar este
+    /// costo fuera de `input_tokens` (misma clase de caveat que
+    /// J-14/J-34 para planner/fallback fuera de hooks y breaker).
+    async fn attempt_lead_summary(&self, dropped: &[AgentEvent]) -> Option<String> {
+        let summarizer = self.summarizer.as_ref()?;
+        if dropped.is_empty() {
+            return None;
+        }
+
+        let request = CompletionRequest {
+            messages: vec![Message::text(
+                Role::User,
+                render_events_for_lead_summary(dropped),
+            )],
+            tool_stubs: vec![],
+            system_prompt: LEAD_SUMMARY_SYSTEM_PROMPT.to_string(),
+            max_tokens: LEAD_SUMMARY_MAX_TOKENS,
+        };
+
+        let outcome = tokio::time::timeout(LEAD_SUMMARY_TIMEOUT, async {
+            let mut stream = match summarizer.complete(request).await {
+                Ok(stream) => stream,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "lead summarizer request failed; falling back to the deterministic digest"
+                    );
+                    return None;
+                }
+            };
+            let mut text = String::new();
+            let mut saw_done = false;
+            let mut usage_tokens = (0u32, 0u32);
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(CompletionEvent::TextDelta(delta)) => text.push_str(&delta),
+                    Ok(CompletionEvent::Usage {
+                        input_tokens,
+                        output_tokens,
+                        ..
+                    }) => usage_tokens = (input_tokens, output_tokens),
+                    Ok(CompletionEvent::Done) => saw_done = true,
+                    // Un summarizer que intenta llamar tools está fuera de
+                    // contrato — se ignora la call y se sigue leyendo texto.
+                    Ok(CompletionEvent::ToolCallRequested { .. }) => {}
+                    Err(err) => {
+                        tracing::warn!(
+                            error = %err,
+                            "lead summarizer stream failed; falling back to the deterministic digest"
+                        );
+                        return None;
+                    }
+                }
+            }
+            let text = text.trim();
+            if saw_done && !text.is_empty() {
+                tracing::info!(
+                    summary_chars = text.len(),
+                    input_tokens = usage_tokens.0,
+                    output_tokens = usage_tokens.1,
+                    "compaction summary produced by the lead summarizer"
+                );
+                Some(text.to_string())
+            } else {
+                tracing::warn!(
+                    saw_done,
+                    "lead summarizer produced no usable text; falling back to the deterministic digest"
+                );
+                None
+            }
+        })
+        .await;
+
+        match outcome {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                tracing::warn!(
+                    timeout_s = LEAD_SUMMARY_TIMEOUT.as_secs(),
+                    "lead summarizer timed out; falling back to the deterministic digest"
+                );
+                None
+            }
+        }
+    }
+
     pub(super) async fn repair_orphaned_tool_calls(
         &self,
         session: &SessionId,
@@ -653,5 +760,137 @@ impl Engine {
         }
 
         Ok(())
+    }
+}
+
+/// Cap de salida para el summary del lead — un summary de compactación
+/// útil son ~10 líneas; más que esto ya no es compresión.
+const LEAD_SUMMARY_MAX_TOKENS: u32 = 400;
+
+/// Techo de espera por el summarizer: la compactación corre en medio de
+/// un turno, y un lead colgado no puede convertir la palanca en un
+/// stall. 90s cubre un lead cloud (segundos) y uno local razonable;
+/// más allá, digest y seguir.
+const LEAD_SUMMARY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Cap del transcript de entrada (~6k tokens a 4 chars/token): los
+/// eventos dropeados pueden ser arbitrariamente grandes y el summarizer
+/// no necesita cada byte de cada observación para preservar decisiones.
+const LEAD_SUMMARY_INPUT_CAP_CHARS: usize = 24_000;
+
+/// Por-ítem: una observación de tool puede ser un archivo entero; para
+/// el summary bastan sus primeras líneas.
+const LEAD_SUMMARY_ITEM_CAP_CHARS: usize = 400;
+
+const LEAD_SUMMARY_SYSTEM_PROMPT: &str = "You are compacting the earlier part of an \
+agent session. Write a short summary (at most ~10 lines of plain prose, no headers, \
+no tool-call syntax) that preserves exactly: what the user asked for, decisions made \
+and why, files/paths touched and the outcome, errors hit and how they were resolved, \
+and any unfinished work. Omit pleasantries and step-by-step narration. The summary \
+replaces these events permanently — anything you drop is gone.";
+
+/// El transcript compacto que ve el summarizer: una línea (capada) por
+/// evento relevante, más nuevo al final. Si excede
+/// [`LEAD_SUMMARY_INPUT_CAP_CHARS`] se conservan los eventos MÁS NUEVOS
+/// y se antepone un marcador con cuántos se omitieron — nunca un corte
+/// silencioso ("no silent caps").
+fn render_events_for_lead_summary(events: &[AgentEvent]) -> String {
+    fn cap(text: &str) -> String {
+        if text.len() <= LEAD_SUMMARY_ITEM_CAP_CHARS {
+            return text.to_string();
+        }
+        let mut end = LEAD_SUMMARY_ITEM_CAP_CHARS;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}[...]", &text[..end])
+    }
+
+    let lines: Vec<String> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::UserMessage { text } => Some(format!("user: {}", cap(text))),
+            AgentEvent::AssistantText { text } => Some(format!("assistant: {}", cap(text))),
+            AgentEvent::AssistantToolCall { name, arguments, .. } => {
+                Some(format!("tool call: {name}({})", cap(&arguments.to_string())))
+            }
+            AgentEvent::ToolCallCompleted { result, .. } => Some(format!(
+                "tool result{}: {}",
+                if result.is_error { " (ERROR)" } else { "" },
+                cap(&result.content)
+            )),
+            AgentEvent::PlanCreated { plan } => Some(format!("plan: {}", cap(plan))),
+            AgentEvent::CompactionOccurred { summary, .. } => {
+                Some(format!("earlier summary: {}", cap(summary)))
+            }
+            _ => None,
+        })
+        .collect();
+
+    let mut total = 0usize;
+    let mut keep_from = lines.len();
+    for (i, line) in lines.iter().enumerate().rev() {
+        if total + line.len() + 1 > LEAD_SUMMARY_INPUT_CAP_CHARS {
+            break;
+        }
+        total += line.len() + 1;
+        keep_from = i;
+    }
+
+    let mut out = String::new();
+    if keep_from > 0 {
+        out.push_str(&format!(
+            "[{keep_from} earlier events omitted for length]\n"
+        ));
+    }
+    out.push_str(&lines[keep_from..].join("\n"));
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use braze_types::ToolResult;
+
+    /// El transcript capea cada ítem con marcador visible, nunca corta
+    /// mid-char, y ante exceso total conserva los eventos MÁS NUEVOS
+    /// anteponiendo cuántos omitió ("no silent caps").
+    #[test]
+    fn lead_summary_transcript_caps_items_and_drops_oldest_with_a_marker() {
+        let long = "x".repeat(LEAD_SUMMARY_ITEM_CAP_CHARS * 2);
+        let events = vec![
+            AgentEvent::UserMessage { text: "corto".to_string() },
+            AgentEvent::ToolCallCompleted {
+                id: "c1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "c1".to_string(),
+                    content: long.clone(),
+                    is_error: false,
+                },
+            },
+        ];
+        let transcript = render_events_for_lead_summary(&events);
+        assert!(transcript.contains("user: corto"));
+        assert!(transcript.contains("[...]"), "ítem largo debe caparse con marcador");
+        assert!(transcript.len() < long.len(), "el cap por ítem debe aplicar");
+
+        // Muchos eventos → los más viejos se omiten con conteo explícito.
+        let many: Vec<AgentEvent> = (0..200)
+            .map(|i| AgentEvent::AssistantText {
+                text: format!("evento {i}: {}", "y".repeat(300)),
+            })
+            .collect();
+        let transcript = render_events_for_lead_summary(&many);
+        assert!(transcript.len() <= LEAD_SUMMARY_INPUT_CAP_CHARS + 64);
+        assert!(
+            transcript.starts_with('['),
+            "debe abrir con el marcador de omitidos: {}",
+            &transcript[..60]
+        );
+        assert!(
+            transcript.contains("evento 199"),
+            "se conservan los MÁS NUEVOS"
+        );
+        assert!(!transcript.contains("evento 0:"), "los más viejos se omiten");
     }
 }

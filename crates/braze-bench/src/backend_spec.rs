@@ -678,6 +678,14 @@ pub struct AblationOverrides {
     /// doc's own § "mejor opción" flags as needing a multi-turn suite
     /// this bench doesn't have yet.
     pub enable_project_memory: bool,
+    /// `+ablate:lead-summary` — ENABLES summary-por-lead (v8 § 6): la
+    /// compactación le pide el summary de los eventos dropeados al
+    /// backend del `+lead:` de esta misma fila (segunda instancia), con
+    /// fallback al digest extractivo ante cualquier fallo. Same
+    /// documented enabling-key exception as `enable_task_list`. Solo
+    /// tiene efecto en filas que además llevan `+lead:` — sin lead no
+    /// hay summarizer que construir y la fila corre como siempre.
+    pub enable_lead_summary: bool,
 }
 
 impl AblationOverrides {
@@ -690,7 +698,7 @@ impl AblationOverrides {
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
-         task-list, prompt-tools, constrained-tools, project-memory, best-of-n=N, \
+         task-list, prompt-tools, constrained-tools, project-memory, lead-summary, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
          tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N";
 
@@ -731,6 +739,7 @@ impl AblationOverrides {
                 "prompt-tools" => out.enable_prompt_tools = true,
                 "constrained-tools" => out.enable_constrained_tools = true,
                 "project-memory" => out.enable_project_memory = true,
+                "lead-summary" => out.enable_lead_summary = true,
                 "tool-search-threshold" => {
                     out.tool_search_threshold = Some(Self::parse_usize(key, value)?)
                 }
@@ -823,6 +832,9 @@ impl AblationOverrides {
         }
         if self.enable_project_memory {
             parts.push("project-memory".to_string());
+        }
+        if self.enable_lead_summary {
+            parts.push("lead-summary".to_string());
         }
         if let Some(n) = self.tool_search_threshold {
             parts.push(format!("tool-search-threshold={n}"));

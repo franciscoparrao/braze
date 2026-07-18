@@ -288,6 +288,14 @@ pub struct Engine {
     /// `None` (the default) means zero behavior change — see
     /// [`Engine::with_planner`] and [`Engine::attempt_planning_round`].
     planner: Option<Box<dyn ModelBackend>>,
+    /// v8 § 6 — summary-por-lead: cuando está presente, la compactación
+    /// le pide a ESTE backend (típicamente una segunda instancia del
+    /// modelo del `--lead`) el summary de los eventos dropeados, con
+    /// fallback al digest extractivo del compactor ante cualquier fallo.
+    /// `None` (el default) = comportamiento byte-idéntico al previo. Ver
+    /// [`Engine::with_compaction_summarizer`] y
+    /// `Engine::attempt_lead_summary` (engine/context.rs).
+    summarizer: Option<Box<dyn ModelBackend>>,
 }
 
 
@@ -343,6 +351,7 @@ impl Engine {
             textual_rescue_enabled: true,
             envelope_parsing_enabled: false,
             planner: None,
+            summarizer: None,
         }
     }
 
@@ -547,6 +556,17 @@ impl Engine {
     /// existed. Chainable, same shape as [`Engine::with_context_budget`].
     pub fn with_planner(mut self, planner: Box<dyn ModelBackend>) -> Self {
         self.planner = Some(planner);
+        self
+    }
+
+    /// v8 § 6 — summary-por-lead: la compactación le pide el summary de
+    /// los eventos dropeados a `summarizer` (una llamada tools-free con
+    /// cap de tokens y timeout) en vez de usar solo el digest extractivo;
+    /// ante cualquier fallo cae al digest — nunca peor que sin esto.
+    /// Purely additive, mismo contrato que [`Engine::with_planner`].
+    /// Chainable.
+    pub fn with_compaction_summarizer(mut self, summarizer: Box<dyn ModelBackend>) -> Self {
+        self.summarizer = Some(summarizer);
         self
     }
 
@@ -2326,6 +2346,120 @@ mod tests {
             "load_messages must never hand back a request with an orphaned \
              tool_result, regardless of where the tactical tail happens to \
              be cut",
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// v8 § 6 — summary-por-lead: con summarizer configurado, el summary
+    /// persistido en `CompactionOccurred` es el texto que escribió el
+    /// lead, no el digest extractivo.
+    #[tokio::test]
+    async fn compaction_uses_the_lead_summarizer_when_configured() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        store
+            .append(&session, &AgentEvent::UserMessage { text: "hola".to_string() })
+            .await
+            .expect("seed event");
+        // Suficientes eventos para superar el umbral (3) Y dejar algo
+        // que dropear más allá de la cola cruda (KEEP_RAW_TAIL = 6).
+        for i in 0..10 {
+            store
+                .append(&session, &AgentEvent::AssistantText { text: format!("texto {i}") })
+                .await
+                .expect("seed event");
+        }
+        let store = Arc::new(store);
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::clone(&store) as Arc<dyn braze_session::SessionStore>,
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tactical_compaction_threshold(3)
+        .with_compaction_summarizer(Box::new(ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("resumen escrito por el lead".to_string()),
+            CompletionEvent::Done,
+        ]])));
+
+        engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let events = store.load(&session).await.expect("load events");
+        let summary = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::CompactionOccurred { summary, .. } => Some(summary.clone()),
+                _ => None,
+            })
+            .expect("compaction must have occurred");
+        assert_eq!(summary, "resumen escrito por el lead");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// v8 § 6 — el contrato "nunca peor que sin la palanca": un
+    /// summarizer cuyo stream muere sin `Done` (respuesta truncada) no
+    /// aporta summary y la compactación cae al digest extractivo de
+    /// siempre, sin error.
+    #[tokio::test]
+    async fn a_truncated_summarizer_falls_back_to_the_deterministic_digest() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        store
+            .append(&session, &AgentEvent::UserMessage { text: "hola".to_string() })
+            .await
+            .expect("seed event");
+        // Suficientes eventos para superar el umbral (3) Y dejar algo
+        // que dropear más allá de la cola cruda (KEEP_RAW_TAIL = 6).
+        for i in 0..10 {
+            store
+                .append(&session, &AgentEvent::AssistantText { text: format!("texto {i}") })
+                .await
+                .expect("seed event");
+        }
+        let store = Arc::new(store);
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::clone(&store) as Arc<dyn braze_session::SessionStore>,
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tactical_compaction_threshold(3)
+        // Stream que termina sin `Done`: la clase de truncamiento que un
+        // lead real puede producir (conexión cortada mid-respuesta).
+        .with_compaction_summarizer(Box::new(ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("truncado".to_string()),
+        ]])));
+
+        engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let events = store.load(&session).await.expect("load events");
+        let summary = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::CompactionOccurred { summary, .. } => Some(summary.clone()),
+                _ => None,
+            })
+            .expect("compaction must have occurred");
+        assert_ne!(summary, "truncado", "el texto truncado no debe usarse");
+        assert!(
+            !summary.is_empty(),
+            "el fallback debe producir el digest extractivo de siempre"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

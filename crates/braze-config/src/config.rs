@@ -512,6 +512,17 @@ pub struct Config {
     /// valida, no por asunción.
     #[serde(default)]
     pub enable_project_memory: bool,
+    /// v8 § 6 (docs/AUDITORIA-2026-07-v8.md): summary-por-lead — cuando
+    /// hay `--lead` configurado, la compactación le pide el summary de
+    /// los eventos dropeados al modelo del lead (una llamada tools-free
+    /// con cap de tokens) en vez de usar solo el digest extractivo
+    /// determinístico; ante cualquier fallo (error, timeout, texto
+    /// vacío) cae al digest — nunca peor que hoy. OFF por default —
+    /// mismo posicionamiento que `enable_task_list`: la palanca entra
+    /// apagada y se promueve solo si su propia fila del bench
+    /// (`+ablate:lead-summary`) la valida.
+    #[serde(default)]
+    pub enable_lead_summary: bool,
     /// D′ — skills locales explicit-only; ver [`SkillsConfig`]. Solo
     /// desde el config file (estructurado, como `references`).
     #[serde(default)]
@@ -598,6 +609,7 @@ impl Default for Config {
             enable_task_list: false,
             environment_block: false,
             enable_project_memory: false,
+            enable_lead_summary: false,
             skills: SkillsConfig::default(),
         }
     }

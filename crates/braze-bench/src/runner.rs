@@ -434,6 +434,16 @@ pub async fn run_task(
         engine = engine.with_planner(planner);
     }
 
+    // v8 § 6 — summary-por-lead: segunda instancia del backend del
+    // `+lead:` de esta fila como summarizer de compactación. Enabling
+    // key (`+ablate:lead-summary`); sin `+lead:` en la fila,
+    // `build_lead` es None y la key no tiene efecto.
+    if ablation.enable_lead_summary
+        && let Some(summarizer) = spec.build_lead(config, sampling)?
+    {
+        engine = engine.with_compaction_summarizer(summarizer);
+    }
+
     // docs/project-memory-design.md: registrado como hook audit-only,
     // mismo patrón que `PromptBudgetAuditHook` arriba. Se conserva el
     // handle para el flush post-turno (v8 K-8).

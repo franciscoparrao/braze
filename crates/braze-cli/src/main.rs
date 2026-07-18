@@ -444,6 +444,20 @@ async fn build_engine(
         })
         .transpose()?;
 
+    // v8 § 6 — summary-por-lead: una SEGUNDA instancia del backend del
+    // `--lead` (el EscalatingBackend de arriba ya consumió la primera)
+    // para que la compactación le pida el summary. Solo con la palanca
+    // encendida Y un lead configurado; sin lead no hay modelo fuerte al
+    // que preguntarle y el digest extractivo sigue solo.
+    let summarizer = match (&lead_spec, config.enable_lead_summary) {
+        (Some((backend, model_override)), true) => Some(build_model_backend(
+            config,
+            backend,
+            model_override.as_deref(),
+        )?),
+        _ => None,
+    };
+
     let session = *live_session
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -725,6 +739,10 @@ async fn build_engine(
 
     if let Some(planner) = planner {
         engine = engine.with_planner(planner);
+    }
+
+    if let Some(summarizer) = summarizer {
+        engine = engine.with_compaction_summarizer(summarizer);
     }
 
     Ok((engine, status_line, project_memory_hook))
