@@ -1,39 +1,46 @@
-% main.tex — esqueleto del manuscrito (ángulo A: la curva harness-vs-escala).
+% main.tex — manuscrito para Empirical Software Engineering (Springer),
+% ángulo A: la curva harness-vs-escala.
 %
-% Venue aún por decidir (candidatos: TMLR, EMSE — ver discusión 2026-07-10);
-% article genérico portable: migrar al template del venue al decidir.
+% Venue decidido 2026-07-12: EMSE (ver ~/vault/journals/_matches/
+% 2026-07-12_14-20_braze-harness-paper.md — requisito de IF JCR descarta
+% TMLR; EMSE por fit sobre JAIR). Template oficial: SVJour3 (EMSE NO usa
+% el sn-jnl más nuevo de Springer Nature — confirmado vía FAQ/submission
+% guidelines 2026-07-12; svjour3.cls/svglov3.clo descargados del zip
+% oficial de Springer, spbasic.bst — el estilo autor-año de Springer para
+% "engineering and computer science" — de la distribución estándar).
 % Compilar: make  (o pdflatex main && bibtex main && pdflatex ×2)
 %
 % Estado: ESQUELETO con contenido real — números, figuras y claims salen de
 % los docs de análisis commiteados (citados en % comentarios por sección).
 % Los TODO marcan prosa por escribir o datos por verificar.
 
-\documentclass[11pt]{article}
+\documentclass[smallcondensed,natbib]{svjour3}
+\journalname{Empirical Software Engineering}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage[margin=1in]{geometry}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{amsmath}
 \usepackage[colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue]{hyperref}
-\usepackage[round]{natbib}
 \usepackage{xcolor}
 
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\braze}{\textsc{braze}}
 
-\title{The Harness Compensates the Model: A Pre-Registered Study of
-Agentic Scaffolding Across Small-Model Scales%
-\thanks{\todo{título candidato 1; alternativas: ``Not All Scaffolding
-Helps: ...'' (enfatiza el resultado negativo), ``A 1B Agent That Beats
-Its 7B Baseline: ...'' (enfatiza el dato estrella)}}}
+\title{Not All Scaffolding Helps: A Lever-by-Lever Study of Agentic
+Harnesses at Small-Model Scales, with Pre-Registered Adoption Criteria
+for Key Levers}
 
-\author{Francisco Parra\\
-\todo{afiliación} \\
-\texttt{\todo{email}}}
+\author{Francisco Parra}
 
-\date{}
+\institute{F. Parra \at
+  Departamento de Ingeniería Informática, Universidad de Santiago de
+  Chile, Santiago, Chile \\
+  \email{francisco.parra.o@usach.cl}
+}
+
+\date{Received: date / Accepted: date}
 
 \begin{document}
 \maketitle
@@ -42,57 +49,166 @@ Its 7B Baseline: ...'' (enfatiza el dato estrella)}}}
 \begin{abstract}
 % Fuente: docs/sweep-curva-multiescala-2026-07-10.md,
 % docs/sweep-planner-ab-2026-07-11.md, docs/sweep-lead-3brazos-2026-07-10.md
-Agentic coding harnesses are designed for frontier models; whether --- and
-which --- scaffolding transfers to small, local models (1--8B) is largely
-unmeasured. We present \braze{}, an open-source agentic harness built to
-make that question measurable: every reliability lever is independently
-switchable per benchmark row, every run is reproducible from a commit
-hash and suite fingerprint, and design decisions were pre-registered
-before their evaluations ran. Across 1{,}520 runs spanning four executor
-scales and four harness configurations we find that a single capability
-lever --- a small lead model that proactively opens each turn --- yields
-+70\,pp pass rate at 1B, decaying monotonically to zero at the scale
-ceiling; a 1B executor with this lever (89\%) outperforms 3B (68\%) and
-7B (80\%) baselines. In contrast, a context lever (a prose plan injected
-into the prompt) \emph{harms} at both extremes of the scale through a
-single degeneration mode (empty responses). A pre-registered iteration
-localizes the failure to the plan's \emph{delivery} --- rendered as the
-assistant's own text --- and repairs it: re-rendered as user context it
-gains +10\,pp on the strongest executor, and delivered as a typed task
-list it gains +12\,pp on the smallest. We further isolate the lead's
+Agentic coding harnesses are designed for frontier models; whether ---
+and which --- scaffolding transfers to small, local models (1--8B) is
+largely unmeasured. We present \braze{}, an open-source harness built
+to make that question measurable: every reliability lever is
+independently switchable per benchmark row, every run is reproducible
+from a commit hash and suite fingerprint, and design decisions were
+pre-registered before their evaluations ran. Across 1{,}520 runs
+spanning four executor scales and four harness configurations, a small
+lead model that proactively opens each turn pins the composite system
+at the lead's \emph{own} ceiling regardless of executor scale: a 1B
+executor rises from 19\% to 89\% pass rate, outperforming unassisted
+3B (68\%) and 7B (80\%) baselines (scale and model family are not
+fully separated here: the 1B is Llama, the larger executors Qwen).
+Pre-registered controls temper that headline: the lead alone reaches
+91\% on the same suite ($n{=}285$), statistically indistinguishable
+from the composite (no equivalence margin was pre-declared), and a
+from-scratch lead+executor loop with none of \braze{}'s other levers
+lands in the same band --- the gain is routing to a capable model, not
+emergent capability of the composition or of the harness's
+engineering. A context lever (a prose plan injected into the prompt)
+\emph{harms} at both extremes of scale through a single degeneration
+mode (turns yielding no usable output); a pre-registered iteration
+localizes the failure to the plan's \emph{delivery} format and repairs
+the harm at both scales --- though no delivery clears the
+pre-registered adoption bar (the largest movement, +12\,pp on a 3B
+executor via a typed task list, has an interval marginally crossing
+zero). We further isolate the lead's
 mechanism experimentally (proactive opening, not reactive escalation)
 and show that two-level tool deferral cuts prompt tokens $5$--$6\times$
-at a real, scale-dependent correctness cost whose mechanism ---
-diagnosed via transcript probes --- is compositional brittleness of the
-small model, not tool findability. \todo{cerrar con 1 frase de takeaway
-para practitioners.}
+at a real, scale-dependent correctness cost whose diagnosed mechanism
+is compositional brittleness of the small model, not tool findability.
+For practitioners the takeaway is that not all scaffolding helps by
+default: which lever helps, and in which delivery format, is itself
+scale-dependent and must be measured per deployment rather than
+assumed from what works at the frontier.
+\keywords{agentic software engineering \and LLM agents \and small
+language models \and tool calling \and benchmark \and ablation study \and
+pre-registration}
 \end{abstract}
 
 % =====================================================================
 \section{Introduction}\label{sec:intro}
 % Fuente: CLAUDE.md (tesis), PLAN.md, docs/SOTA-2026-07.md
 
-\todo{párrafo 1 — el contexto: coding agents (Claude Code, Codex,
-OpenCode, Goose) construidos alrededor de modelos frontier; el costo/
-privacidad/latencia empujan hacia modelos locales chicos; la pregunta
-abierta: ¿cuánto del harness transfiere?}
+Coding agents --- Claude Code, Codex, OpenCode, Goose --- are, in their
+default configuration, built around and evaluated against frontier
+models: tens to hundreds of billions of parameters, served over an API.
+The scaffolding around the model --- how tools are presented, how
+context is managed across turns, how a stalled turn is recovered ---
+is designed and tuned against that regime. At the same time, cost,
+data-privacy, and latency constraints push a growing share of
+deployments toward small, local models in the 1--8B range: models cheap
+enough to run on commodity hardware, private enough to keep code
+on-premises, and fast enough for an interactive loop without a network
+round trip. Whether the scaffolding built for frontier models continues
+to help at that scale, which of its components still pull their weight,
+and which start actively hurting once the model itself is the
+bottleneck rather than the interface, is a question none of the
+production harnesses above answer: their design choices are not
+published as independently switchable, measured levers, and their
+target model class is a moving frontier, not the small end of it.
 
-\todo{párrafo 2 — la tesis: el harness como variable que compensa la
-escala del modelo. Antecedente directo: SWE-agent/ACI
-\citep{yang2024sweagent} mostró que la interfaz agente-computadora mueve
-el resultado tanto como el modelo; nosotros lo sistematizamos a través
-de ESCALAS y con palancas conmutables una a una.}
+Our thesis is that the harness is a variable that can compensate for
+model scale, not merely a wrapper around it. The direct antecedent is
+SWE-agent's Agent-Computer Interface work \citep{yang2024sweagent},
+which showed --- via a controlled ablation on GPT-4 Turbo --- that the
+interface between an agent and its computer moves SWE-bench Lite
+\citep{jimenez2024swebench} resolve rate by amounts comparable to
+switching the underlying model:
+removing the edit command's linting guardrail alone costs 3.0 points,
+removing the constrained file viewer costs up to 5.3, and an
+unconstrained iterative search command costs more than not offering
+search at all (Table~\ref{tab:aci}, reproduced from their Table~3). That
+result was demonstrated at one operating point, a single frontier
+model. We ask the question orthogonally: across a range of small,
+locally-deployable executor scales, does each harness lever still help,
+by how much, and does the answer change sign as the model gets smaller
+or larger. Small models are exactly where a harness's design choices are
+least tested and most consequential --- prior work on small-model
+tool-calling (\S\ref{sec:related}) documents brittleness to prompt
+format, in-context example count, and reasoning length that a frontier
+model simply absorbs.
 
-\todo{párrafo 3 — por qué esto requiere infraestructura y no solo un
-benchmark: ablations por fila, atribución causal, pre-registro.}
+\begin{table}[t]
+\centering\small
+\caption{SWE-agent's ACI ablation (GPT-4 Turbo, SWE-bench Lite,
+full-system resolve rate 18.0\%) \citep{yang2024sweagent} --- the
+antecedent this paper systematizes across scale instead of holding the
+model fixed.}
+\label{tab:aci}
+\begin{tabular}{lr}
+\toprule
+Ablation & $\Delta$ resolve rate (pp) \\
+\midrule
+Remove edit command's lint guardrail & $-3.0$ \\
+Remove edit command entirely & $-7.7$ \\
+Iterative search (vs.\ the default, summarized search) & $-6.0$ \\
+No search command at all & $-2.3$ \\
+File viewer: 100 $\to$ 30 lines & $-3.7$ \\
+File viewer: 100 lines $\to$ full file & $-5.3$ \\
+Full observation history (vs.\ collapsed) & $-3.0$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Although our benchmark tasks are deliberately small, the question they
+instrument is a software-engineering one. Coding agents are entering
+the everyday development toolchain, and a harness's design decisions
+--- how tools are surfaced to the model, how context is compacted
+across turns, when a stronger model intervenes --- are software design
+decisions whose consequences are today argued from intuition rather
+than measured: exactly the gap between practice and evidence that
+empirical software engineering exists to close. The suite's five
+skills are the primitives agentic coding workflows compose ---
+locating and reading the right file, editing it, chaining dependent
+steps, recovering from a failed action, and rejecting
+plausible-but-wrong alternatives --- chosen to isolate failure modes
+rather than to reproduce end-to-end tasks like issue resolution
+(\S\ref{sec:threats} discusses what this choice does and does not
+license). The harness and bench are themselves infrastructure for
+empirical study --- every design lever doubles as an ablation flag ---
+in the tradition of benchmark-and-tooling contributions to empirical
+software engineering research.
+
+Answering that question rigorously requires more than one more
+benchmark suite: it requires a harness whose reliability levers are
+independently switchable per benchmark row, so that a claim about lever
+$X$ at scale $Y$ is an ablation and not a confound with every other
+design choice; a bench whose runs are reproducible from a commit hash
+and a suite fingerprint, so that a result can be re-run rather than
+merely re-read; and, because several of the levers we evaluate have
+plausible arguments on both sides before the data comes in, a discipline
+of writing down the adoption criterion \emph{before} running the sweep
+that decides it. We built \braze{}, an open-source agentic harness, to
+make this infrastructure the artifact rather than a one-off script
+around the actual contribution.
 
 \paragraph{Contributions.}
 \begin{enumerate}
   \item \textbf{The harness-vs-scale curve} (Fig.~\ref{fig:curva}):
     4 harness configurations $\times$ 4 executor scales, $n{=}95$ per
-    cell, one binary. The capability lever decays monotonically
-    (+70\,pp at 1B $\to$ $-4$\,pp at the ceiling); the context lever
-    harms at both extremes via one degeneration mode.
+    cell, one binary. A pre-registered solo baseline of the lead model
+    shows the capability lever pins the composite at the lead's own
+    unassisted ceiling at every scale we tested --- so the lever's
+    apparent gain (+70\,pp at 1B $\to$ $-4$\,pp at the ceiling) decays
+    as the corollary of a rising baseline under a roughly constant
+    composite, not as capability transfer between the models; the
+    context lever harms at both extremes via one degeneration mode
+    (\S\ref{sec:curve}).
+  \item \textbf{A first external comparison point}: a lead+executor
+    loop implemented from scratch, with none of \braze{}'s other
+    levers, lands within noise of both \braze{}'s full 1B+lead
+    composite and \texttt{gemma4:e4b} alone --- three independent
+    measurements in one 87--91\% band, replicated at $n{=}285$ per arm
+    (pooled across two sweeps each) with the null holding at tighter
+    confidence intervals, suggesting the
+    headline gain at 1B is attributable to the lead/executor
+    composition pattern and the helper model's own capability, not to
+    \braze{}'s additional engineering specifically, at least at a scale
+    this sample size can detect (\S\ref{sec:external}).
   \item \textbf{Causal isolation of the dominant lever}: a three-arm
     experiment separating proactive opening from reactive escalation
     shows the entire gain comes from the former; the reactive trigger
@@ -101,14 +217,22 @@ benchmark: ablations por fila, atribución causal, pre-registro.}
   \item \textbf{A negative result diagnosed and repaired under
     pre-registration} (Fig.~\ref{fig:rescate}): the planner's collapse
     (both extremes at 49\%) was a delivery bug, not a property of
-    planning; the pre-registered iteration turns it into a
-    scale-dependent gain (+10 to +12\,pp).
+    planning; the pre-registered iteration eliminates the harm at both
+    scales, yet the committed criterion, applied literally, still
+    declines to adopt any delivery (the largest movement, +12\,pp at
+    3B via a typed task list, marginally crosses zero) --- a verdict
+    we report with a dated deviation note (\S\ref{sec:planner}).
   \item \textbf{Cost-side levers quantified, honestly}: two-level tool
     deferral ($5$--$6\times$ fewer prompt tokens at a $-13$/$-24$\,pp
     correctness cost, whose diagnosed mechanism is compositional
     brittleness rather than findability or distraction,
-    Fig.~\ref{fig:searchtools}); \todo{¿incluir colapso ACI/ablations
-    acá o dejarlo en resultados secundarios?}
+    Fig.~\ref{fig:searchtools}); a pre-registered investigation of
+    decoder-level constrained decoding as an alternative to harness-side
+    textual rescue, whose single permitted iteration --- tightening the
+    forced schema from generic to per-tool --- verifies the mechanism
+    cleanly (schema failures $99\to0$) while making pass rate
+    \emph{worse}, closing the comparison decisively in the harness's
+    favor (\S\ref{sec:constrained});
   \item \textbf{\braze{} itself}: an open-source Rust harness where
     every lever is a per-row benchmark ablation
     (\texttt{+ablate:\{no-rescue, no-prune, no-lead, task-list, ...\}}),
@@ -121,56 +245,183 @@ benchmark: ablations por fila, atribución causal, pre-registro.}
 % Fuente: docs/SOTA-2026-07.md; docs/opencode-a-braze.md;
 % docs/harness-engineering-hooks-skills-2026-07-10.md
 
-\paragraph{Agent-computer interfaces.} \todo{SWE-agent/ACI
-\citep{yang2024sweagent}: la evidencia de que la interfaz importa; su
-colapso de observaciones (+3pp SWE-bench Lite) es el antecedente del
-colapso táctico de \braze{}. Nosotros: la dimensión escala.}
+\paragraph{Agent-computer interfaces.} SWE-agent's ACI work
+\citep{yang2024sweagent} is the founding evidence that the interface
+between an agent and its environment is a first-class performance
+variable, not implementation detail (Table~\ref{tab:aci},
+\S\ref{sec:intro}). Among its ablations, collapsing old tool
+observations to a single line while keeping the most recent ones in
+full costs 3.0 points relative to sending the full, uncollapsed history
+--- the direct antecedent of \braze{}'s own tactical observation
+collapse (\S\ref{sec:harness}). Their study holds the model fixed (GPT-4
+Turbo) and varies the interface; we hold the interface's \emph{levers}
+fixed as a menu and vary the model's scale, asking whether the same
+levers that helped a frontier model still help, by how much, and in
+which direction, once the model itself becomes the bottleneck.
 
-\paragraph{Small language models as agents.} \todo{Qwen3-Coder TR
-\citep{qwen3coder}: overfitting al tool-template nativo — motiva los
-hints proactivos por familia y el rescate textual. Survey de SLMs
-\citep{todoSLMsurvey}: ICL débil y no-monotónico en modelos chicos —
-motiva prompts cortos. arXiv 2604.02155 \citep{todoReasoningDegrades}:
-razonamiento largo degrada tool-calling en modelos chicos.}
+\paragraph{Small language models as agents.} Three findings from the
+small-model literature motivate specific design choices in \braze{}
+rather than being merely background. The Qwen3-Coder-Next technical
+report \citep{qwen3coder} documents that transfer between agent
+scaffolds is limited: models trained on one scaffold's tool-call
+trajectories do not transfer cleanly to another, and, on the report's
+own template-following benchmark across five IDE/CLI scaffolds, one
+frontier model's format-following accuracy swings from 84.0 to 14.0
+depending on which scaffold serves it (Table 2 of that report) ---
+evidence that a model's tool-call template is a trained-in property a
+harness cannot assume away, not a report that this effect scales with
+model size specifically. This motivates \braze{}'s per-model-family
+textual rescue (\S\ref{sec:harness}): recovering a tool call the model
+emitted in its own native template --- tagged, bare-JSON, or pythonic
+--- rather than penalizing a syntactically well-formed but
+differently-shaped response. Lu et al.'s survey of small language
+models
+\citep{lu2024smalllm} reports that in-context learning is weak and
+non-monotonic at small scale: five-shot prompting adds only 2.1 points
+on average across their 70-model survey, and some models degrade with
+more shots rather than improving. This is an argument against padding
+the executor's prompt with worked tool-call examples, and in favor of
+\braze{}'s alternative --- an explicit, structured plan or task list
+(\S\ref{sec:planner}) --- as the vehicle for guidance instead. Qi's
+finding that longer chain-of-thought budgets are non-monotonic for
+function-calling accuracy \citep{qi2026briefbetter}, with brief
+reasoning acting as a "function-routing" step that overzealous
+elaboration erodes, is the literature counterpart of a failure mode we
+observe directly in \S\ref{sec:planner}: a prose plan rendered as the
+executor's own text degenerates into empty responses at both ends of
+our scale range, which we read as the executor over-committing to
+narrating rather than acting.
 
-\paragraph{Multi-model orchestration.} \todo{Goose (lead/worker
-reactivo) — nuestro A/B de 3 brazos muestra que la variante PROACTIVA
-es la que paga; Aider architect/editor (+3-4pp) — calibra la ganancia
-esperable del split planner/executor; best-of-n para tool-calling
-\citep{corradini2025}.}
+\paragraph{Multi-model orchestration.} Two production systems pair a
+stronger and a weaker model within a single agentic loop, and both
+inform our own lead/executor design (\S\ref{sec:harness}) without fully
+anticipating it. Goose's \texttt{GOOSE\_LEAD\_MODEL} \citep{goose} is
+purely \emph{reactive}: a lead model opens the first few turns by
+default, then hands off to the worker, and only re-escalates back to the
+lead when a failure detector counts consecutive tool-call failures. No
+quantitative evaluation of this mechanism is published. Aider's
+architect/editor split \citep{aider} is closer to a controlled result:
+routing a strong model's plan through a --- possibly identical, possibly
+cheaper --- editor model for the mechanical edit gains 3--4 points over
+a single-pass strong model doing both, which the Aider team attributes
+to freeing the planning role from edit-format constraints rather than to
+using two models per se. Our three-arm mechanism isolation
+(\S\ref{sec:mechanism}) is, to our knowledge, the first controlled
+comparison between the \emph{proactive}-opening and \emph{reactive}-escalation
+variants of this pattern in the same harness: we find the entire
+measured gain attributable to proactive opening, with the reactive
+trigger structurally blind to the semantic failure modes that dominate
+our suite. Separately, Corradini et al.'s systematic review of small
+language models \citep{corradini2025} reports test-time voting across
+repeated attempts as a cheap capability lever at small scale --- the
+most striking such data point being a 1B-parameter model that overtakes
+a 405B model on math problems under compute-optimal test-time scaling
+\citep{liu2025tts}. \braze{}'s
+best-of-$n$ voting over independently generated tool-call candidates
+(Table~\ref{tab:levers}) applies the same test-time-scaling idea to the
+tool-calling decision itself.
 
-\paragraph{Agentic harnesses.} \todo{Claude Code / Codex / OpenCode /
-Gemini CLI: principios de diseño (carga diferida, compactación
-diferencial, permisos en capas) — no publicados como resultados
-medibles; nuestra contribución es hacerlos conmutables y medirlos.}
+\paragraph{Agentic harnesses.} Claude Code, Codex, OpenCode, and Gemini
+CLI embody design principles --- deferred tool loading so only names
+(not full schemas) occupy the prompt by default, differential context
+compaction that separates durable state from a tactical window, and
+layered permission models that auto-approve low-risk actions while
+gating higher-risk ones --- that inform \braze{}'s own architecture
+(\S\ref{sec:harness}) but that none of these systems publishes as
+independently measured, ablatable results: the principles are
+documented, not benchmarked. The OpenHands Software Agent SDK
+\citep{wang2026openhands} is closer to an exception: its append-only
+event stream with resume-by-replay is reported to substantially reduce
+system-attributable failures with negligible event-sourcing overhead,
+which we read as external validation of \braze{}'s own event-log design
+(\S\ref{sec:harness}) --- though, again, not decomposed into
+independently switchable levers the way our ablation suffixes are.
+\braze{}'s contribution relative to all of the above is not a new
+harness principle but making an existing menu of principles
+\emph{switchable and measured}: every lever in Table~\ref{tab:levers}
+ships as a per-row benchmark ablation
+(\texttt{+ablate:\{no-rescue,\allowbreak no-prune,\allowbreak
+no-lead,\allowbreak task-list,\allowbreak\ldots\}}), so a claim like
+"the lead model helps" is a number with a confidence interval and a
+commit hash behind it, not a design note.
+
+\paragraph{Breadth versus depth.} A complementary empirical tradition
+studies agent frameworks by mining many of them at once. Hasan et al.'s
+study of testing practices across open-source AI agent frameworks and
+agentic applications \citep{hasan2026testing} is this paper's closest
+peer along that axis: where we hold one harness's lever menu fixed and
+vary model scale under a pre-registered ablation design, that line of
+work samples broadly across independently built frameworks to
+characterize practices as they exist in the wild, trading the causal
+leverage of an ablation (this lever, this scale, this confidence
+interval) for coverage of how the ecosystem actually builds and tests
+these systems outside any single research harness. Neither approach
+subsumes the other: a corpus study can report what fraction of real
+agent frameworks test tool-call recovery at all, a question this
+paper's single-harness design cannot answer; this paper can report
+that a specific recovery lever moves pass rate by a specific, confidence-
+bounded amount at a specific scale, a question a corpus study surveying
+practice rather than intervening on it cannot answer either. We see the
+two as complementary evidence a future synthesis should combine rather
+than as competing methodologies, and note explicitly that the breadth
+this paper deliberately does not attempt is exactly what that line of
+work provides.
 
 % =====================================================================
 \section{The \braze{} Harness}\label{sec:harness}
 % Fuente: PLAN.md (arquitectura), CLAUDE.md (palancas)
 
-\todo{descripción compacta: workspace Rust de 14 crates, tres traits
-congelados (ToolProvider / ModelBackend / SessionStore+Compactor);
-énfasis en que TODO lo demás es palanca conmutable.}
+\braze{} is a Rust workspace of 14 crates built as an agentic
+coding-CLI harness in the style of Claude Code and Codex, but designed
+from the outset for the experiment this paper reports rather than as a
+product. Three traits form a frozen contract that every other design
+decision is built against and never bypasses: \texttt{ToolProvider}
+(local built-in tools and MCP servers implement the same
+\texttt{list\_stubs}/\texttt{resolve\_schema}/\texttt{invoke} interface,
+so a tool's origin is invisible to the engine), \texttt{ModelBackend}
+(Anthropic, Ollama, and OpenRouter implement the same streaming
+completion interface, so a benchmark row's provider is a configuration
+value, not a code path), and \texttt{SessionStore} paired with a
+\texttt{ContextCompactor} (every turn is an append-only event log; the
+compactor decides what a model sees on replay without ever mutating the
+log itself). Everything else --- how tools are advertised, how failed
+tool calls are recovered, whether a second model opens a turn, how
+context is trimmed under budget --- is a lever behind one of these
+traits, switchable independently and by default matching what a real
+\texttt{braze} invocation would run. Table~\ref{tab:levers} lists the
+levers this paper evaluates, their mechanism, the \texttt{+ablate:}
+suffix \texttt{braze-bench} accepts to toggle them for one benchmark
+row, their production default, and where in this paper each is
+measured; several of the mechanically simplest levers (post-edit
+compiler feedback, best-of-$n$ voting, harness notes, the unablated
+observation collapse) are implemented and shipped but not isolated by
+a dedicated ablation sweep in this paper, which we mark honestly rather
+than report as measured.
 
 \begin{table}[t]
 \centering\small
-\caption{Reliability levers and their per-row benchmark ablations.
-\todo{completar columna de default y sección de resultados donde se
-mide cada una.}}
+\caption{Reliability levers this paper evaluates and their per-row
+benchmark ablations. ``Default'' is the behavior a plain \texttt{braze}
+invocation runs without any \texttt{+ablate:} suffix.}
 \label{tab:levers}
 \begin{tabular}{llll}
 \toprule
 Lever & Mechanism & Ablation key & Measured in \\
 \midrule
 Lead model & proactive turn opening & \texttt{no-lead}, \texttt{lead-turns=N} & \S\ref{sec:curve},~\S\ref{sec:mechanism} \\
+& (default: off; opt-in via \texttt{+lead:}) & & \\
 Planner & plan pre-round (3 deliveries) & \texttt{no-planner}, \texttt{task-list} & \S\ref{sec:planner} \\
+& (default: off; opt-in via \texttt{+plan:}) & & \\
 Tool deferral & \texttt{search\_tools} meta-tool & \texttt{tool-search-threshold=N} & \S\ref{sec:searchtools} \\
-Observation collapse & old tool outputs $\to$ 1 line & \texttt{no-prune}, \texttt{full-observations=N} & \todo{ablation sweep} \\
-Textual rescue & per-family tool-call parsers & \texttt{no-rescue} & \todo{GLM vía OpenRouter} \\
-Post-edit check & compiler feedback in-result & \texttt{no-post-edit-check} & \todo{ablation sweep} \\
-Best-of-$n$ & vote among candidates & \texttt{best-of-n=N} & \todo{g10 sweep} \\
-Harness notes & budget/deadline warnings & \texttt{no-harness-notes} & \todo{pendiente} \\
+& (default: on above a stub-count threshold) & & \\
+Observation collapse & old tool outputs $\to$ 1 line & \texttt{no-prune}, \texttt{full-observations=N} & not swept (default: on) \\
+Textual rescue & per-family tool-call parsers & \texttt{no-rescue} & \S\ref{sec:ablations} (observed rate; \\
+& (default: on) & & not independently ablated) \\
+Post-edit check & compiler feedback in-result & \texttt{no-post-edit-check} & not swept (default: on) \\
+Best-of-$n$ & vote among candidates & \texttt{best-of-n=N} & not swept (default: $n{=}1$) \\
+Harness notes & budget/deadline warnings & \texttt{no-harness-notes} & not swept (default: on) \\
 Typed task list & plan as state, compact re-injection & \texttt{task-list} & \S\ref{sec:planner} \\
+& (default: off, opt-in) & & \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -179,19 +430,208 @@ Typed task list & plan as state, compact re-injection & \texttt{task-list} & \S\
 \section{Experimental Setup}\label{sec:setup}
 % Fuente: braze-bench (diseño), docs de sweeps (metadata)
 
-\todo{suite (19 tareas, 5 skills: single\_tool / no\_tool / multi\_step /
-error\_recovery / distractor\_selection), sandbox por corrida, timeout,
-5 repeticiones, temp 0.2; modelos (llama3.2:1b, qwen2.5:3b/7b,
-qwen3.5-coder; gemma4:e4b como lead/planner fijo); nodo de inferencia
-dedicado (regla un-sweep-a-la-vez tras medir contaminación).}
+Every run in this paper is produced by \texttt{braze-bench}, a harness
+comparison CLI shipped in the same repository: it drives one or more
+\texttt{ModelBackend}/lever configurations (``arms'') against a shared
+task suite inside a per-task sandbox, and reports per-arm pass rate,
+round count, latency, and token/cost estimates. Our suite
+(\texttt{crates/braze-bench/suites/default.toml}) has 19 tasks spanning
+five skills: \texttt{single\_tool} (7 tasks --- read/grep/glob/write/
+edit/shell, one call each), \texttt{no\_tool} (3 --- a question the
+model should answer directly, with no tool call expected), \texttt{
+multi\_step} (3 --- a short chain of dependent tool calls), \texttt{
+error\_recovery} (3 --- a first call fails on a wrong filename or
+extension and the model must recover), and \texttt{distractor\_selection}
+(3 --- multiple plausible files are present and only one is correct).
+Each task runs in a freshly seeded sandbox directory populated with its
+own fixture files, under a 180-second per-attempt timeout, with sampling
+temperature fixed at 0.2 uniformly across every backend and provider in
+a sweep (Ollama, Anthropic, and OpenRouter alike) so that a comparison
+across providers is a comparison of models, not of sampling regimes.
+Every (task, arm) cell in the results below is 5 repetitions ($n{=}95$
+per arm across the full suite; $n{=}15$ when a table reports one of the
+3-task skills, $n{=}35$ for \texttt{single\_tool}, which has 7 tasks),
+aggregated with 95\% Wilson confidence intervals --- following standard
+guidance on repeated runs and interval reporting for randomized
+algorithms in software engineering
+\citep{wohlin2012experimentation,arcuri2011practical}.
+
+\paragraph{Executors and fixed roles.} The executor scale range spans
+llama3.2:1b (a generic instruction-tuned model with native tool-calling
+support but no function-calling specialization), qwen2.5:3b and
+qwen2.5:7b (function-calling-tuned), and qwen3.5-coder (the strongest
+locally-served model available to us, used as the scale ceiling rather
+than a frontier anchor). Where a lead or planner role is composed with
+an executor, gemma4:e4b serves that role uniformly across every arm
+that uses one, so that a scale-curve result is attributable to the
+\emph{executor's} scale and not to a confounded choice of helper model
+per row. Table~\ref{tab:models} lists every model with its parameter
+count, quantization as served, and role. Two of its rows matter for
+interpreting the curve honestly: the executor axis mixes family,
+tuning, and one quantization level (the 1B is Q8\_0, the rest
+Q4\_K\_M), so ``scale'' should be read as a deployment-tier ladder
+rather than a controlled parameter sweep (\S\ref{sec:threats}); and
+the lead model is not small relative to its executors --- 8.0B total
+parameters ($\approx$4B active per token, MoE), comparable in total
+size to the 7B executor. All Ollama-served arms explicitly request
+\texttt{options.num\_ctx}${}={}$8192 (the harness default,
+deliberately above Ollama's 2048--4096 Modelfile defaults, whose
+silent front-truncation an agentic prompt exceeds within a few
+rounds); the engine additionally enforces its own context budget below
+that limit via compaction, so the full-inventory prompts of
+\S\ref{sec:searchtools} ($\sim$7.5K tokens per request for the
+206-tool catalog) fit the served window rather than being silently
+truncated --- the 1{,}500-tool extrapolation there is precisely the
+point where they no longer would.
+
+\begin{table}[t]
+\centering\small
+\caption{Every model in this paper, as served by Ollama on the
+inference node (parameter counts and quantization from the server's
+own model metadata; digests embedded in each sweep JSON). All arms
+request \texttt{num\_ctx}${}={}$8192.}
+\label{tab:models}
+\begin{tabular}{lllll}
+\toprule
+Model & Role & Params & Quant. & Tuning \\
+\midrule
+llama3.2:1b & executor & 1.2B & Q8\_0 & generic instruct \\
+qwen2.5:3b & executor & 3.1B & Q4\_K\_M & function-calling \\
+qwen2.5:7b & executor & 7.6B & Q4\_K\_M & function-calling \\
+qwen3.5-coder & executor (ceiling) & 9.7B & Q4\_K\_M & coder, reasoning \\
+gemma4:e4b & lead / planner & 8.0B ($\approx$4B act.) & Q4\_K\_M & instruct, MoE \\
+gemma4:e2b & \S\ref{sec:constrained} arm & 5.1B & Q4\_K\_M & instruct, MoE \\
+gemma3:1b & \S\ref{sec:constrained} arm & 1.0B & Q4\_K\_M & generic instruct \\
+\bottomrule
+\end{tabular}
+\end{table} All local models are served by a single Ollama instance on a
+dedicated LAN inference node (\S\ref{sec:setup} keeps this deliberately
+separate from the machine running \texttt{braze-bench} itself, after an
+early sweep showed contention from concurrent local builds/tests
+measurably changing pass rates on the same configuration). Sweeps run
+one at a time against that node; a prior direct measurement found
+running two sweeps concurrently on the working machine dropped an
+otherwise-stable configuration from 2/6 to 0/6 successful tasks purely
+from resource contention, which is the reason for the one-sweep-at-a-time
+discipline throughout.
 
 \paragraph{Reproducibility.} Every sweep JSON embeds the harness git
 commit, a suite fingerprint, and per-model digests; confidence
-intervals are 95\% Wilson ($n{=}95$ per cell unless noted); deltas
-across sweeps are never compared as levels, only within-sweep
-(Newcombe/MOVER intervals for differences). \todo{párrafo sobre
-pre-registro: criterios del planner y del explorador escritos antes de
-sus sweeps, citables por commit.}
+intervals are 95\% Wilson ($n{=}95$ per cell unless noted), with
+Newcombe/MOVER intervals for differences between arms --- Wilson score
+bounds \emph{without} continuity correction, applied uniformly (where
+an earlier analysis document computed an interval with continuity
+correction, this paper re-reports the uncorrected value and flags any
+comparison whose reading is sensitive to that choice). Two disciplines
+govern comparisons. First, levels measured in different sweeps are
+never compared directly; a delta is only computed between arms
+collected under the same conditions --- either arms of one multi-arm
+sweep, or single-arm sweeps run as a same-day batch on the same commit,
+node, and sampling configuration (the solo-baseline and power sweeps of
+\S\ref{sec:curve}--\ref{sec:external} are the latter case; where an arm
+pools a slice from an older commit, we report a slice-homogeneity check
+and a same-commit sensitivity estimate alongside the pooled number).
+Second, because $n{=}95$ is 19 tasks $\times$ 5 repetitions rather than
+95 independent draws, runs cluster by task; Wilson intervals quantify
+sampling noise for the estimand ``pass rate on this fixed suite,''
+while generalization to a broader task population is wider. For the
+headline claims we therefore also report task-level cluster bootstrap
+intervals (19 tasks resampled with replacement, $B{=}20{,}000$, tasks
+resampled jointly across the arms of a delta), and we flag which
+conclusions survive them. Throughout, ``statistically
+indistinguishable'' means the 95\% interval on the within-comparison
+delta crosses zero; no equivalence margin was pre-declared, so such
+statements are failures to detect an effect at the stated interval
+width, not demonstrations of equivalence. Finally, this paper reports
+on the order of twenty between-arm interval comparisons in total and
+applies no family-wise correction across them: adopt/reject decisions
+are governed by the pre-registered criteria below, but any individual
+uncorrected interval should be read with that multiplicity in mind
+(flagged again as a conclusion-validity threat in
+\S\ref{sec:threats}).
+
+\paragraph{Grader validation.} Pass/fail is decided by scripted
+assertions (tool-call identity, substring checks on the final response,
+substring checks on written files), and \S\ref{sec:threats} already
+discloses one historical assertion bug (an earlier text-match check
+that accepted a model's pre-tool-call narration as satisfying a content
+check). To validate the current grader independently of that
+disclosure, we added opt-in transcript preservation to
+\texttt{braze-bench} (\texttt{BRAZE\_BENCH\_KEEP\_SESSIONS}, previously
+an uncommitted local patch) and hand-graded 62 preserved runs --- the
+two arms most central to \S\ref{sec:curve}'s headline number
+(\texttt{llama3.2:1b} baseline and \texttt{+lead}, 19 tasks each) and
+the two arms most central to \S\ref{sec:searchtools}'s (\texttt{
+qwen2.5:3b} deferred and full-inventory, 6 tasks $\times$ 2 repetitions
+each) --- against the automated verdict. Agreement was 62/62 (100\%);
+one run's transcript additionally shows the assertion design working as
+intended rather than merely agreeing by luck: a \texttt{
+noisy\_multi\_step} run wrote the literal string \texttt{"int\_a +
+int\_b"} to its output file while its final response text claimed "the
+sum...is 30", a confabulation a text-only check would have missed
+(the substring "30" appears in that sentence) but the paired
+file-content check catches. Full methodology and the two additional
+qualitative findings (strict tool-identity assertions failing a
+task solved via a different-but-effective tool; the historical bug's
+absence from this sample) are in
+\texttt{docs/grader-validation-2026-07-13.md}. The hand-grading was
+performed by the author; there is no independent second rater, a
+limitation the 62/62 agreement figure inherits.
+
+\paragraph{Pre-registration.} Two of this paper's results were governed
+by an adoption/rejection criterion written down, and committed to the
+repository, before the sweep that decided it ran: the planner's
+delivery-format iteration (\S\ref{sec:planner}) and the tool-deferral
+correctness-cost investigation (\S\ref{sec:searchtools}) both name their
+criteria in a design document at a specific commit ahead of the
+evaluation, rather than being justified after seeing the numbers. We
+follow the same discipline in this paper's newest ablation, the
+constrained-decoding investigation of \S\ref{sec:constrained}: its
+criterion, including the exact iteration this section reports it
+triggering, was committed before the sweep ran. We view pre-registration
+here not as a formality borrowed from clinical trials but as an
+engineering safeguard specific to iterating on a harness against a
+small, noisy benchmark: without a criterion fixed in advance, a
+harness developer optimizing their own lever is exactly the setting
+where post-hoc rationalization of a marginal result is easiest and least
+visible to a reader. We are equally explicit about \emph{coverage}:
+committed criteria govern the planner iteration, the
+constrained-decoding investigation, and the two solo/external baseline
+measurements added during revision; the scale-curve matrix
+(\S\ref{sec:curve}) and the mechanism-isolation A/B
+(\S\ref{sec:mechanism}) were exploratory sweeps with no criterion
+committed in advance. The title's ``pre-registered'' refers to the
+adoption criteria that gate this paper's design decisions, not to
+every reported comparison.
+
+\paragraph{Registry mechanism: git-only, then git+OSF.} The three
+criteria transcribed in Appendix~\ref{app:prereg} --- the planner
+(\S\ref{sec:planner}), the isolated-explorer lever (not itself reported
+in this paper's results), and constrained decoding
+(\S\ref{sec:constrained}) --- are self-hosted: a commit to this paper's
+own repository, timestamped and ordered ahead of the sweep it governs,
+but recorded nowhere outside the author's control. We consider this
+weaker evidence than an independent registry and disclose it as such
+rather than implying otherwise. Starting with the two solo-baseline
+measurements added during revision (\texttt{gemma4:e4b} alone,
+\S\ref{sec:curve}; the bare lead+executor loop,
+\S\ref{sec:external}), we additionally prepared OSF Registrations
+(\texttt{osf.io/registries}) carrying the same hypothesis, design, and
+analysis-plan text as the corresponding design document
+(\texttt{docs/gemma4-e4b-solo-baseline-design.md},
+\texttt{docs/external-harness-baseline-design.md}, \S~``Registro
+externo (OSF)'' in each). \todo{OSF registration IDs: paste both links
+here once created at osf.io/registries --- the text is already
+prepared in the two design documents above, this is a manual step
+pending at submission.} Both sweeps ran on the git-committed criterion
+without waiting for the external registration to close, for the same
+reason noted in each design document: neither measurement adopts an
+irreversible harness change or carries an iteration clause, so we judged
+the self-hosted commit sufficient to proceed and treated the OSF entry
+as a parallel strengthening step rather than a gate. We report this
+mechanism honestly rather than let the presence of an OSF link on two
+results imply a registry discipline the paper's earlier criteria did
+not have.
 
 % =====================================================================
 \section{Results}\label{sec:results}
@@ -206,24 +646,279 @@ sus sweeps, citables por commit.}
   \label{fig:curva}
 \end{figure}
 
-\todo{prosa de los 6 hallazgos del doc de la curva: (1) decaimiento
-monótono del lead +70/+24/+15/-4pp y el dato estrella 1B+lead 89\% >
-7B baseline 80\%; (2) el planner-prosa colapsa ambos extremos por
-respuestas vacías (37 y 35 de las fallas); (3) la composición hereda el
-gradiente; (4) la excepción informativa del 7B; (5) en el techo +lead
-es MÁS RÁPIDO que baseline (19.8 vs 23.7s); (6) replicaciones del 3b en
-la banda 67-72\% a través de 4 sweeps.}
+Figure~\ref{fig:curva} plots pass rate for four executor scales ---
+llama3.2:1b, qwen2.5:3b, qwen2.5:7b, qwen3.5-coder --- under four
+harness configurations, $n{=}95$ per cell, 1{,}520 runs total. The
+capability lever (a lead model that proactively opens each turn) and
+the context lever (a plan pre-round whose output enters the prompt as
+prose) move pass rate in opposite directions, and their effect sizes
+tell two different stories about what a small local model needs from
+its harness.
+
+\paragraph{The composite sits at the lead's own ceiling; the lead's
+\emph{gain} decays with scale as a corollary.} Relative to each
+executor's own baseline, the proactive lead adds $+70$\,pp at 1B
+(19\%~$\to$~89\%), $+24$\,pp at 3B (68\%~$\to$~92\%), $+15$\,pp at 7B
+(80\%~$\to$~95\%), and $-4$\,pp at the scale ceiling (98\%~$\to$~94\%,
+within noise but with the expected sign: a lead weaker than its own
+executor can only get in the way). The simplest model consistent with
+all four rows --- established directly by the solo baseline of the
+next paragraph --- is that the \texttt{+lead} arm sits at the lead
+model's \emph{own} ceiling on this suite ($\approx$90--95\%)
+regardless of the executor behind it. On that reading the monotonic
+decay of the lead's gain is arithmetic, not a capability-transfer
+phenomenon: a roughly constant composite minus a baseline that rises
+with executor scale. What remains true and practically useful at the
+low end is the within-executor effect: with the lead attached, a 1B
+executor (89\%) outperforms the unassisted 3B (68\%) and 7B (80\%)
+baselines --- though, as \S\ref{sec:discussion} quantifies, the
+composite is \emph{not} cheaper per run than the lead alone or the 7B
+baseline, so this is a statement about what a weak executor's
+deployment can reach, not a cost argument.
+
+\paragraph{A pre-registered solo baseline of the lead complicates the
+headline, honestly.} Every lead/planner role in this paper is filled by
+the same model, \texttt{gemma4:e4b} (\S\ref{sec:threats}), but no arm
+in the original scale-curve sweep measures what \texttt{gemma4:e4b}
+itself scores on this suite with no executor attached at all. We
+closed that gap under the same pre-registration discipline as the
+rest of this paper (design and criterion committed before the sweep
+ran, \texttt{docs/gemma4-e4b-solo-baseline-design.md}): \texttt{
+gemma4:e4b} alone reaches 87/95 = 92\% [84, 96]\% (Wilson 95\%),
+\emph{statistically indistinguishable} from the 1B+lead composite
+(85/95 = 89\% [82, 94]\%; Newcombe 95\% CI on the delta,
+$-2$\,pp~[$-11$,~$+7$], crosses zero, with the point estimate if
+anything favoring the lead alone). A pre-declared follow-up
+(\texttt{docs/power-increase-2026-07-13.md}) added 10 more repetitions
+to both arms to tighten this estimate: pooled at $n{=}285$, \texttt{
+gemma4:e4b} alone reaches 260/285 = 91\% [87, 94]\%, the composite
+253/285 = 89\% [85, 92]\%, delta $-2.5$\,pp~[$-7.5$,~$+2.5$] --- the
+same null, now at roughly half the confidence interval width, ruling
+out an effect larger than about 8\,pp rather than the wider band the
+first pass left open. Because the pooled composite arm merges its original
+95-run slice (commit \texttt{e9b841e}) with 190 power runs on the
+post-hardening binary (\texttt{ec61f5e}) --- the only pooled arm in
+this paper to cross that boundary --- we checked slice homogeneity for
+all three pooled arms (composite 89.5\% vs.\ 88.4\%, Fisher exact
+$p{=}0.85$; solo $p{=}1.00$; bare $p{=}0.85$;
+\texttt{docs/emse-r2-analysis-2026-07-17.md}) and recomputed the delta
+on same-commit slices only ($-2.8$\,pp [$-8.8$, $+2.6$]): the point
+estimate moves by 0.3\,pp and no conclusion changes. This delta is
+also the comparison in the paper most robust to task-level clustering
+(\S\ref{sec:setup}): its cluster bootstrap interval, $-2.5$\,pp
+[$-7.4$, $+2.1$], is essentially the Newcombe interval, because both
+arms share their per-task failure pattern. The pre-registered criterion is
+unambiguous here: this is exactly the pattern that triggers a framing
+revision, not the pattern that would have let the original claim
+stand. Figure~\ref{fig:curva}'s shaded band makes the same point
+visually --- the \texttt{+lead} line sits inside \texttt{gemma4:e4b}'s
+own confidence band at every executor scale we tested, never clearly
+above it --- with one qualification the band inherits from
+\S\ref{sec:setup}'s comparison discipline: the solo baseline was
+measured in the 2026-07-13 same-day batch alongside the 1B arms, so
+only the 1B comparison is a within-discipline delta; at 3B, 7B, and
+the ceiling, the juxtaposition spans sweeps three days and one harness
+commit apart, and is offered as visual context rather than as a tested
+contrast. The 1B-executor-beats-7B-baseline comparison is therefore
+better read as evidence that the harness \emph{routes} work to a
+capable model efficiently than as evidence that the composite
+manufactures capability beyond what that one model already has on its
+own; we did not, in this sweep, isolate a synergy between the lead's
+opening and the small executor's later turns that exceeds the lead's
+own solo ceiling. What survives unrevised is the within-executor
+result: the 1B's own baseline still moves from 19\% to 89\% when the
+lead is attached, a real and large effect on that executor's usability
+--- the part of the claim this paper can no longer defend is that the
+resulting system's capability is attributable to the harness's
+engineering beyond what routing to \texttt{gemma4:e4b} already buys on
+its own. We carry this revision through the rest of the paper
+(abstract, \S\ref{sec:discussion}, \S\ref{sec:threats}) rather than
+soften it only here.
+
+\paragraph{The prose plan harms at both extremes of the scale, through
+the same failure mode.} Unlike the lead, the planner's prose plan is
+not merely less helpful at the extremes: it is actively harmful there,
+and by the same mechanism at both ends. At 1B, no task survives (0/95);
+37 of its 95 failures are empty responses --- the model, handed its own
+plan as assistant-role text, produces nothing at all on the following
+round. At the scale ceiling, qwen3.5-coder collapses from 98\% to 49\%,
+and 35 of its 48 failures are the identical empty-response signature.
+A thinking model handed "its own" plan back as conversational text
+stops yielding usable output in exactly the way the smallest model
+does; scale does not protect against this failure mode, which is
+consistent with a \emph{delivery-format} failure rather than a
+capability one (\S\ref{sec:planner} probes this signature at the token
+level and bounds what it can and cannot establish). (7B is the informative
+exception --- see below.) We diagnose and repair this degeneration under
+pre-registration in \S\ref{sec:planner}.
+
+\paragraph{Composing lead and planner inherits the gradient.} When both
+levers are active, the lead's ability to rescue the planner's damage
+itself scales with the executor: at 1B the composition (61\%) still
+trails the lead alone (89\%) by $-28$\,pp --- the damage persists even
+with a capable model opening the turn --- while at 3B the gap nearly
+closes (88\% vs.\ 92\%), and by 7B and the ceiling the two arms are
+statistically indistinguishable (95\%~=~95\%; 92\% vs.\ 94\%). The lead
+is a recovery mechanism with finite capacity: it cannot fully repair an
+executor degenerating badly enough, but it recovers what there is to
+recover once the executor is strong enough not to need full recovery.
+
+\paragraph{The 7B exception is informative, not noise.} 7B is the only
+scale where the (undamaged, pre-iteration) prose plan helps: baseline
+\texttt{error\_recovery} is 0/15, entirely semantic failures
+(\texttt{assertion\_text}/\texttt{assertion\_files}, not malformed tool
+calls), and the plan corrects 12 of them. This suggests a narrow
+capability window --- large enough to follow a plan without degenerating
+into silence, not yet large enough to not need one --- rather than a
+counterexample to the scale-harm pattern above; at 7B the lead alone
+already reaches the same 95\% without the planner's added risk
+elsewhere in the curve.
+
+\paragraph{At the ceiling, the lead is also the faster arm.} For
+qwen3.5-coder, \texttt{+lead} averages 19.8s per run against the
+baseline's 23.7s: gemma4:e4b opening the first rounds is cheaper than
+having the reasoning-heavy coder model think through them itself. We did
+not design for this and do not treat it as a general result, but it is
+a striking secondary reading of the same lever --- a light lead can act
+as an accelerant for a heavy executor, not only a capability patch for a
+weak one.
+
+\paragraph{Replication.} The 3B baseline (68\% here) sits in a
+67--72\% band across four independent sweeps in this paper (71.6\% in
+the mechanism-isolation ablation of \S\ref{sec:mechanism}'s underlying
+matrix, 67.4\% in the three-arm A/B of \S\ref{sec:mechanism}, 70.5\% in
+an earlier A/B not reported here in detail), and its \texttt{+lead} arm
+similarly clusters at 92--92.6\% across three sweeps; \texttt{
+error\_recovery} baseline stays at the floor (0--3/15) throughout the
+qwen2.5 series. We read this as evidence that the curve's qualitative
+shape, not just its point estimates, is stable to re-measurement.
+
+\subsection{An external comparison point: composition versus
+engineering}\label{sec:external}
+% Fuente: docs/external-harness-baseline-design.md,
+% docs/sweep-external-bare-lead-2026-07-13.json
+
+Every comparison so far is \braze{} against itself under different lever
+configurations. To close that gap, we built, under the same
+pre-registration discipline as the rest of this paper
+(\texttt{docs/external-harness-baseline-design.md}, criterion committed
+before this section's sweep ran), a lead+executor tool-calling loop
+implemented entirely from scratch --- not \braze{}'s
+\texttt{EscalatingBackend} decorator, not \texttt{braze\_engine::Engine}
+--- with none of Table~\ref{tab:levers}'s other levers: no textual
+rescue, no observation collapse, no tool deferral, no post-edit check,
+a four-sentence generic system prompt instead of \braze{}'s own. It
+keeps only what a minimal lead+executor composition requires: the same
+proactive-opening split (\texttt{lead\_turns=3}), the same six local
+tools executed directly, and the same sandbox/permission-denial posture
+every other row in this paper uses, so a difference in outcome is
+attributable to the orchestration loop, not to different tools or a
+more permissive safety boundary.
+
+On the 1B row --- the scale \S\ref{sec:curve} identifies as most
+informative --- this bare loop reaches 84/95 = 88.4\% [80.4, 93.4]\%,
+statistically indistinguishable from both \braze{}'s full 1B+lead
+composite (89.5\% [81.7, 94.2]\%; delta $+1.1$\,pp, Newcombe 95\% CI
+[$-8.2$, $+10.3$]) and from \texttt{gemma4:e4b} on its own
+(91.6\%; delta $-3.2$\,pp, Newcombe 95\% CI [$-12.1$, $+5.7$]). Three
+independent measurements --- the helper model alone, \braze{}'s fully
+engineered composite, and a from-scratch reimplementation of just the
+composition pattern --- land in the same 88--92\% band, mutually
+indistinguishable at $n{=}95$. A pre-declared power-increase pass
+(\texttt{docs/power-increase-2026-07-13.md}) added 10 more repetitions
+to all three arms: pooled at $n{=}285$ each, the bare loop settles at
+249/285 = 87.4\% [83.0, 90.7]\%, the composite at 253/285 = 88.8\%
+[84.6, 91.9]\%, and \texttt{gemma4:e4b} alone at 260/285 = 91.2\%
+[87.4, 94.0]\% --- the same three-way null, at roughly half the
+confidence-interval width (delta composite$-$bare $+1.4$\,pp
+[$-4.0$,$+6.8$]; bare$-$solo $-3.9$\,pp [$-9.0$,$+1.3$]; composite$-$solo
+$-2.5$\,pp [$-7.5$,$+2.5$]), with all three point estimates within
+1\,pp of where the first pass put them. Nothing in this data separates "the
+composite achieves something beyond \texttt{gemma4:e4b}'s own ceiling"
+from "neither the lead/executor pattern itself nor \braze{}'s
+additional engineering adds a measurable gain over that ceiling, on
+this suite, at this scale" --- the confidence
+intervals, now tighter, are still compatible with a true difference of up
+to roughly 5--9\,pp in either direction, so this remains a failure to detect
+an effect, not evidence the effect is exactly zero; the replication's
+main contribution is ruling out a \emph{larger} hidden effect, not
+resolving the sign. One qualification the task-level cluster bootstrap
+of \S\ref{sec:setup} adds: because the bare loop's failures concentrate
+in specific tasks (the multi-step/distractor tail) rather than
+spreading across the suite, deltas involving the bare arm are far less
+precise under task resampling than their Newcombe intervals suggest
+(bare$-$solo [$-17.5$, $+11.2$]\,pp; composite$-$bare [$-13.3$,
+$+15.8$]\,pp) --- the ``rules out a larger effect'' reading survives
+clustering only for the composite$-$solo comparison ([$-7.4$,
+$+2.1$]\,pp, \S\ref{sec:curve}); for the bare loop the honest statement
+is directional agreement at the point estimate with wide task-level
+uncertainty. What the bare loop
+does establish is that the lead/executor pattern itself is robust
+without any of \braze{}'s scaffolding: in the original $n{=}95$ pass it
+solves every \texttt{single\_tool} and \texttt{no\_tool} task (35/35,
+15/15) and degrades only on the multi-step/distractor skills where the
+1B executor is already weak on its own, with zero schema failures
+across all 95 runs.
+
+\S\ref{sec:threats} discusses what this arm's implementation still
+shares with \braze{} (the underlying \texttt{braze\_model} HTTP client
+and \texttt{braze\_tools\_local} tool implementations, not the
+orchestration logic under test) and what a fully independent comparison
+--- e.g.\ against a third-party harness like Pi \citep{pi-dev}, which we
+identified as a candidate during this work but did not implement ---
+would additionally require.
 
 \subsection{Isolating the mechanism: proactive opening, not reactive
 escalation}\label{sec:mechanism}
 % Fuente: docs/sweep-lead-3brazos-2026-07-10.md
 
-\todo{el A/B de 3 brazos: proactivo 92.6\% [85.6,96.4] vs reactivo puro
-75.8\% [66.3,83.3] vs baseline 67.4\%; las 13 fallas de error\_recovery
-del brazo reactivo con CERO escalaciones — el trigger (tool failures
-consecutivas) es estructuralmente ciego a ``ejecutar con éxito la
-acción equivocada''; cuando dispara, 7/7 pasan. Lección: mecanismo
-válido, cobertura estrecha.}
+The lead lever in \S\ref{sec:curve} bundles two mechanisms Goose's
+reactive lead/worker pattern \citep{goose} leaves conflated
+(\S\ref{sec:related}): the lead \emph{proactively} opens the first
+\texttt{lead\_turns} rounds of every turn by default, and can
+separately \emph{reactively} re-escalate back to the lead after
+consecutive tool-call failures. Reactive escalation is armed but rarely
+fires when proactive opening is also active, so the curve's numbers
+cannot by themselves attribute the gain to one mechanism or the other.
+We isolate them with a three-arm A/B on qwen2.5:3b against the same
+lead (gemma4:e4b), 285 runs, $n{=}95$ per arm: a baseline with no lead,
+proactive opening (the default), and \emph{purely reactive} escalation
+(\texttt{+ablate:lead-turns=0}, which disables proactive opening while
+keeping the reactive trigger armed).
+
+Proactive opening reaches 92.6\% [85.6, 96.4]; purely reactive
+escalation reaches 75.8\% [66.3, 83.3]; baseline is 67.4\% [57.4, 76.0].
+The proactive and reactive intervals do not overlap --- the entire gain
+the curve attributes to "the lead" is attributable to proactive
+opening, not reactive escalation. Reactive escalation's own gain over
+baseline ($+8.4$\,pp) has confidence intervals that overlap substantially
+with baseline's; at $n{=}95$ per arm, that improvement alone is not
+distinguishable from noise.
+
+The reason is structural, not incidental. \texttt{error\_recovery} is
+the skill where proactive opening helps most (0/15~$\to$~14/15) and
+where reactive escalation helps least (0/15~$\to$~2/15): all 13 of the
+reactive arm's failures on this skill occurred with \emph{zero}
+escalations triggered. The reactive trigger counts consecutive
+\emph{failed} tool observations, but the dominant failure mode on this
+skill is executing successfully on the wrong target --- reading an
+error message and answering incorrectly, or editing the wrong file
+without any tool call itself failing. No mechanical signal accumulates,
+so the lead never takes over, and the task fails regardless. When the
+reactive trigger \emph{does} fire, it works: all 7 runs with at least
+one escalation in this sweep passed. This is not evidence of a broken
+mechanism but of a narrow one --- reactive escalation only sees the band
+of failures that manifest as consecutive rejected or erroneous tool
+calls, and pays roughly $2\times$ the baseline latency (11.0s vs.\ 5.5s)
+for an unreliable $+8$\,pp when it does trigger, against proactive
+opening's $5.9\times$ latency cost (32.2s) for a robust $+25$\,pp.
+Proactive opening also eliminates a failure class the reactive trigger
+cannot see at all: turns that abort with an empty response before any
+tool call is even attempted accumulate no failed observations to
+trigger on, and occur only in the arms where the small executor opens
+the turn itself (5 of 95 baseline runs, 7 of 95 reactive --- an eighth
+reactive run-error is a timeout, not an empty response --- and 0 of 95
+proactive).
 
 \subsection{A negative result, diagnosed and repaired}\label{sec:planner}
 % Fuente: docs/sweep-planner-ab-2026-07-11.md; docs/sweep-matriz-4brazos-2026-07-10.md
@@ -235,14 +930,121 @@ válido, cobertura estrecha.}
   \label{fig:rescate}
 \end{figure}
 
-\todo{la secuencia completa como narrativa de método: (1) A/B original
-negativo $\to$ queda opt-in con iteración pre-registrada; (2) la matriz
-lo vuelve decisivo (-22pp, degeneración diagnosticada); (3) la curva
-muestra el mismo modo en ambos extremos; (4) la iteración (render
-user-role + descarte single-step + entrega como task list) rescata:
-prosa-user +10pp en coder, task-list +12pp en 3b; (5) el criterio
-pre-registrado impidió tanto el falso rechazo como el rescate ad-hoc.
-Nota del brazo contaminado y su re-run (transparencia).}
+The planner's history in this project is a case study in what
+pre-registration buys, told against ourselves. An initial A/B measuring
+the planner (plan rendered as the executor's own assistant-role text)
+against a pre-registered adoption criterion came back negative but not
+decisively so, and the criterion --- written before that sweep ran ---
+kept it opt-in with a named iteration path rather than either removing
+it outright or rationalizing a marginal result into a keep. A follow-up
+four-arm matrix made the picture decisive: the planner alone was not
+neutral but actively harmful, $-22$\,pp against baseline, and the
+failure mode was degeneration --- empty responses --- not disobedience of
+the plan's content. The scale curve of \S\ref{sec:curve} then showed the
+same degeneration signature at \emph{both} ends of the executor scale
+(1B: 0/95, 37 empty responses; the ceiling: 98\%~$\to$~49\%, 35 of 48
+failures empty), converting a scale-specific curiosity into a mechanism
+claim: handing a model its own plan back as conversational text
+reliably yields turns with no usable output, independent of how
+capable the model is. A token-level probe of the already-collected
+runs sharpens what that signature is and is not: the ``empty''
+responses are not literally silent --- the serving layer reports
+44--619 generated tokens (median 74 on the ceiling model, 272 on the
+1B) for turns whose surfaced text and tool calls are empty. Because
+the 1B executor has no separate reasoning channel, reasoning-budget
+exhaustion in a thinking-tuned model cannot explain both ends of the
+scale; but the probe does shift the honest description from ``the
+model goes silent'' to ``the turn's generation surfaces in no usable
+channel,'' and a serving- or template-layer contribution --- the stack
+mishandling an injected assistant-role message --- is not excluded by
+our data, since the repair below (re-rendering as user-role context)
+is exactly what would also fix such an artifact. We therefore state
+the delivery-format mechanism as \emph{consistent with} the evidence
+rather than established, and name the discriminating experiment (raw
+response logging separating reasoning-channel consumption from truly
+empty completions) as future work.
+
+The pre-registered iteration (commit \texttt{e8c7d3f}) changed exactly
+two things: the plan is now delivered as \emph{user}-role context
+instead of assistant-role text, and single-step plans (which carry no
+real structure to follow) are discarded rather than injected. Measured
+against the two damaged reference points --- qwen2.5:3b and
+qwen3.5-coder, both at 49\% under the old delivery --- the iteration
+recovers both, but by different deliveries at different scales
+(Figure~\ref{fig:rescate}). For the capable executor, re-rendering the
+same prose plan as user-role context eliminates the collapse: 95.8\%
+raw against an 86.3\% same-sweep baseline. That raw $+10$\,pp delta,
+however, does not survive a closer look at the baseline arm: the same
+transient network event that contaminated this sweep's 3B task-list
+arm (below) also cost the coder \emph{baseline} 10 of its 13 failures
+--- requests that never reached the model or streams that failed
+mid-flight (wall-clock ${<}1$\,s or explicit transport errors;
+\texttt{docs/emse-r2-analysis-2026-07-17.md}). Excluding runs lost to
+transport from both numerator and denominator on every arm of this
+sweep --- the same treatment the interrupted scale-curve slice already
+receives (\S\ref{sec:threats}) --- the coder baseline is 82/85
+(96.5\%), the user-role arm 91/93 (97.8\%), and the delta $+1.4$\,pp
+[$-4.5$, $+7.9$]: the fixed delivery restores the ceiling executor to
+its baseline, with the empty-response signature nearly gone (1
+occurrence) and \texttt{error\_recovery} 13/15~$\to$~15/15 (a skill
+untouched by the transport failures on either side; directional at
+$n{=}15$) --- but it does not demonstrably \emph{beat} that baseline.
+This also resolves what would otherwise look like an unexplained
+12\,pp swing in the coder's baseline across sweeps (97.9\% in the
+scale curve vs.\ 86.3\% here): net of transport failures the two
+sweeps agree (97.9\% vs.\ 96.5\%). For the small executor, whose arms
+in this sweep show no transport failures, prose alone is not enough ---
+user-role rendering alone reaches only 63\%, marginally under its
+67\% baseline --- but delivering the plan as \braze{}'s typed task list
+(\S\ref{sec:harness}), re-injected as a compact summary each round
+rather than left as text to re-interpret, reaches 79\%
+($+11.6$\,pp, Newcombe 95\% [$-1.0$, $+23.7$] --- the largest movement
+in the sweep, its interval marginally crossing zero), with
+\texttt{error\_recovery} 3/15~$\to$~10/15. The pattern is scale-
+dependent in a specific and interpretable way: a capable model needs
+its plan rendered in a role it will not mistake for its own voice; a
+small model needs the plan as re-injected structured state it does not
+have to re-parse from prose at all.
+
+Applied to the letter, the pre-registered criterion adopts
+\emph{none} of the deliveries, and we report that literal verdict
+together with a dated deviation note rather than reframe it. The
+criterion (Appendix~\ref{app:prereg}, text~(1)) requires the target
+pair --- \texttt{multi\_step} plus \texttt{error\_recovery} --- to
+move outside
+the baseline's Wilson interval without degrading the other three
+skills, and counts the planner's token cost toward the verdict. On the
+3B executor, the task-list delivery moves the target pair from 12/30
+to 17/30 --- an improvement, but \emph{inside} the baseline's Wilson
+interval [24.6, 57.7]\% (56.7\% against a 57.7\% upper bound); the
+aggregate delta marginally crosses zero ($+11.6$\,pp [$-1.0$,
+$+23.7$]); \texttt{multi\_step} itself regresses (9/15~$\to$~7/15)
+while \texttt{error\_recovery} improves (3/15~$\to$~10/15); the three
+guardrail skills do not degrade; and the delivery costs roughly
+$2\times$ the baseline's input tokens (5{,}352 vs.\ 2{,}635 per run)
+and $4\times$ its output tokens --- a cost the criterion explicitly
+counts. The user-role delivery at 3B fails more clearly (target pair
+10/30, below baseline), and the two ceiling deliveries recover the
+collapse without measurably exceeding their baseline ($+1.4$ and
+$+2.4$\,pp, both intervals crossing zero). \emph{Deviation note
+(2026-07-17)}: the criterion's rejection clause prescribes removing
+the lever; we keep it implemented and opt-in --- never default ---
+because the iteration's diagnostic finding is this section's actual
+contribution, and deleting the lever would delete the apparatus that
+measured it. What this section establishes is therefore narrower than
+an adoption: planning's \emph{harm} was an artifact of delivery
+format, repairable and repaired at both scales; planning's
+\emph{benefit}, at the scales and sample sizes measured here, does not
+clear the bar this project committed to before the data came in. One
+arm of this sweep (3B, task-list delivery) was re-run after its
+original attempt reported 35\%: 58 of its 62 failures on that attempt
+were transient Nitro network errors concentrated entirely in that arm,
+not a property of the task-list delivery; the clean re-run is the 79\%
+reported above. The same network event's lighter footprint on the
+coder arms (10, 2, and 8 transport failures on baseline, user-role,
+and task-list respectively) is what the exclusion above corrects; we
+disclose both the contaminated attempt and the correction rather than
+silently substitute either.
 
 \subsection{Tool deferral: cheaper, not free}\label{sec:searchtools}
 % Fuente: docs/sweep-search-tools-ab-n15-2026-07-12.md (n=90/brazo,
@@ -257,98 +1059,641 @@ Nota del brazo contaminado y su re-run (transparencia).}
   \label{fig:searchtools}
 \end{figure}
 
-\todo{la narrativa de esta sección (fuente:
-docs/sweep-search-tools-ab-n15-2026-07-12.md): (1) el ahorro es sólido y
-replicado 3×: 5-6× tokens, ~2× wall; a escala gateway (1500+, ~30K
-tokens de inventario) es habilitación, no optimización. (2) el costo de
-correctness es real a n=90 (-24pp 3b / -13pp 7b, ICs disjuntos) — y su
-mecanismo NO es findability (gate de llamadas directas: 0 disparos en
-360 corridas) ni distracción (distractor 15/15 en TODOS los brazos — la
-plausibilidad distrae, la cantidad no), sino FRAGILIDAD COMPOSICIONAL:
-las sondas con transcripts muestran al mismo modelo, mismos seeds,
-computando 10+20 bien con 206 stubs inertes de relleno y escribiendo
-los sumandos sin sumar sin ellos; y 7×8 pasando 5/15 con el stub de
-search, 11/15 a pelo, 15/15 con el relleno. (3) implicación de config:
-deferral por default solo cuando el inventario no cabe; para ≤7B con
-inventario que cabe, no. (4) conexión con la tesis: los efectos del
-harness sobre modelos chicos son no-monótonos — se miden, no se
-asumen.}
+\braze{}'s two-level tool deferral (\S\ref{sec:harness}) hides a
+provider's tools behind a single \texttt{search\_tools} meta-tool once
+the registry exceeds a stub-count threshold, so the prompt carries only
+names and one-line summaries instead of every tool's full schema. We
+evaluate it on a companion six-task suite
+(\texttt{crates/braze-bench/suites/tool-search.toml}) mirroring the
+base suite's skills --- \texttt{noisy\_read\_file},
+\texttt{noisy\_grep}, \texttt{noisy\_write\_file} (single-tool),
+\texttt{noisy\_no\_tool}, \texttt{noisy\_multi\_step}, and
+\texttt{noisy\_distractor} --- whose registry carries the six real
+local tools plus 200 synthetic noise tools standing in for an
+MCP-gateway-scale catalog, comparing deferral on (search-based, the
+noise catalog hidden) against off (all 206 tools listed), on
+qwen2.5:3b and qwen2.5:7b, $n{=}90$ per arm (6 tasks $\times$ 15
+repetitions) after three successive sweeps at increasing repetition
+count converged on a harness-hardened binary.
+
+The token savings replicate cleanly across all three sweeps and are not
+in question: deferral cuts input tokens $5.4\times$ (3B) to $6.1\times$
+(7B), with roughly $2\times$ less wall-clock. At the scale of a real
+tool gateway --- 1,500+ tools, on the order of 30K tokens of inventory
+--- this is not an optimization but an enabling condition: the
+full-inventory arm would not fit an 8K local context window at all.
+
+The correctness question is where this section's history matters. An
+earlier pass at $n{=}30$ with a looser text-match assertion reported
+statistically indistinguishable pass rates between the two arms --- "the
+deferral is free." Repeating the sweep at $n{=}90$ against a hardened
+harness (a stricter assertion that no longer accepts a model's
+intermediate narration as a final answer, a context-budget fix that
+measures the prompt the model actually sees post-deferral rather than
+the full pre-deferral catalog, and a warm-up pass eliminating a
+first-task cold-start confound) does not replicate that null result:
+deferral costs $-24$\,pp on the 3B (58.9\% [49,68] vs.\ 83.3\% [74,90])
+and $-13$\,pp on the 7B (83.3\% [74,90] vs.\ 96.7\% [91,99]), with
+confidence intervals that no longer overlap. The "no correctness cost"
+claim was an artifact of the smaller sample and the looser assertion, not
+a property of the mechanism.
+
+Having a real cost, the natural first hypothesis is that the deferred
+arm sometimes needs a hidden tool and fails to find it. It is not: the
+gate instrumenting direct calls to a still-hidden tool by name fired
+zero times across all 360 runs in this sweep, the third consecutive
+sweep to report this. Nor is it distraction by catalog size ---
+\texttt{noisy\_distractor} passes 15/15 in \emph{every} arm regardless
+of whether 6 or 206 tools are listed, replicating this paper's earlier
+finding that plausibility, not volume, is what distracts a small model.
+The cost falls instead on tasks with no tool-search component at all:
+\texttt{noisy\_no\_tool} (a pure arithmetic question, zero tool calls
+expected) drops from 15/15 to 5/15 on the 3B under deferral, and
+\texttt{noisy\_multi\_step} (read two files, sum, write the result)
+drops from 12/15 to 0/15 on the 7B.
+
+We probed both anomalies directly with preserved-session transcripts
+before accepting either as a finding. For \texttt{noisy\_no\_tool}
+("what is $7\times8$?"), three matched-seed conditions isolate the
+cause: with only the six real local tools and no search stub, the 3B
+gets the arithmetic right 11/15 times (this task is already marginal
+for this model in a clean prompt); adding the \texttt{search\_tools}
+stub --- whose summary text mentions "raster clip," "send email," and
+similar unrelated content sitting next to an arithmetic question ---
+drops it to 5/15, with one failing transcript answering literally
+"5.5"; adding the full 206 inert noise tools back \emph{restores} 15/15.
+For \texttt{noisy\_multi\_step} on the 7B, transcripts under deferral
+show the model writing the literal string \texttt{"10\textbackslash n20"}
+to the output file in 4 of 5 sampled runs (a manually-inspected sample,
+not the arm's full $n{=}15$, so this is illustrative of a mechanism, not
+a measured rate of it) --- it read both numbers correctly and wrote them
+correctly, but never computed their sum, and its final answer describes
+"the numbers 10 and 20" rather than their total; the same seeds under
+the full-catalog arm compute 30 correctly. Neither probe shows a
+findability problem (both models locate and read/write the right files)
+or a distraction-by-volume problem (more noise tools \emph{helps} in the
+first probe, the opposite of a dilution account). The stronger of the
+two probes --- \texttt{noisy\_no\_tool}'s three matched-seed conditions,
+45 controlled runs in total --- directly isolates the mechanism we call
+\emph{compositional brittleness}: whether a small model correctly
+composes a multi-step arithmetic result depends on content elsewhere in
+the prompt that is semantically irrelevant to the task, in a direction
+ordinary intuition does not predict. The \texttt{noisy\_multi\_step}
+transcripts are consistent with the same account but, on their own
+5-transcript sample, corroborate it rather than independently
+establish it.
+
+The practical implication is narrower than either "deferral is free" or
+"deferral costs correctness" as a blanket rule: it remains the only
+option once an inventory does not fit context, but for models at 7B and
+below with an inventory that \emph{does} fit, this data argues against
+enabling it by default --- consistent with \braze{}'s existing
+conservative threshold. For this paper's thesis, the more general
+reading is the one we take forward to \S\ref{sec:discussion}: harness
+effects on small models are non-monotonic in ways that are not
+predictable from mechanism-level reasoning about what a lever
+\emph{should} do, and must be measured rather than assumed.
 
 \subsection{Secondary levers and ablations}\label{sec:ablations}
-\todo{qué entra acá: rescued\_tool\_calls=0 en 665 corridas con Qwen
-(el rescate no dispara donde no hay leak — honestidad sobre una palanca
-estrella que no se activó en este régimen; SÍ se activa con GLM vía
-OpenRouter, citar evidencia U-15/U-16); ¿correr ablation sweep de
-no-prune/post-edit-check para esta sección o declararlo future work?}
+
+Not every lever this paper implements is a headline result, and
+reporting only the ones that moved the number would misrepresent how
+often each actually fires. The per-model-family textual rescue
+(\S\ref{sec:harness}, motivated by the Qwen3-Coder-Next findings of
+\S\ref{sec:related}) recovers zero tool calls across every sweep against
+the Qwen executors in this suite --- 570+ runs across two independent
+sweeps report \texttt{rescued\_tool\_calls = 0}: these models' failures
+in our suite are schema or semantic failures, not native-template leaks
+the rescue ladder would catch. We report this as a finding about
+\emph{when} the lever activates, not as evidence against it: in
+separate, less formal usability testing against \texttt{z-ai/glm-5.2}
+served via OpenRouter, the same model leaked its own tag-based tool-call
+grammar (\texttt{<tool\_call>name<arg\_key>...</arg\_key>...}) uncaught
+by the rescue ladder's three existing grammars, both in the main
+completion round and, via a second, independent code path, in the
+tools-free summary fallback that runs after an empty response --- the
+lever's coverage is real but was, at the time, incomplete for a fourth
+template family, and the two gaps were closed once identified. The
+lesson generalizes the pattern documented in
+\S\ref{sec:mechanism}'s reactive-escalation trigger: several of this
+harness's levers have narrow, template- or trigger-specific coverage
+that a single benchmark suite against a handful of model families can
+easily fail to exercise, which argues for treating a lever's
+\emph{observed activation rate} as a first-class quantity to report,
+not an implementation detail.
+
+The remaining levers in Table~\ref{tab:levers} --- the unablated
+observation collapse, the post-edit compiler-feedback guardrail,
+best-of-$n$ voting, and the mid-turn harness notes --- are implemented,
+covered by unit tests, and shipped as \texttt{braze}'s default behavior,
+but this paper does not isolate any of them with a dedicated ablation
+sweep; we report this honestly as a gap rather than imply coverage we do
+not have (\S\ref{sec:threats}).
+
+% =====================================================================
+\subsection{Constrained decoding: syntax-level control versus
+harness-level rescue}\label{sec:constrained}
+
+This paper's newest lever is a second, largely independent research
+question from the levers above: instead of recovering a malformed tool
+call after the fact (the textual rescue ladder), can the decoder be
+constrained so a malformed call is syntactically impossible in the
+first place? We report it under its own pre-registration
+(\S\ref{sec:setup}). \texttt{OllamaBackend} can advertise tools either
+natively (\texttt{tools} field) or via a prompt-rendered addendum
+instructing the model to answer with a JSON \emph{envelope}
+(\texttt{\{"action": "tool\_call"\textbar"final\_answer", ...\}}), and,
+in the latter mode, additionally \emph{constrain} the decoder to that
+envelope's JSON schema via Ollama's structured-output support --- making
+a malformed tool-call syntactically impossible rather than repairing it
+after the fact, the opposite end of the inference-vs-harness spectrum
+from the textual rescue ladder above. Against the pre-registered
+criterion (adopt if constrained decoding beats the native baseline by
+$\ge$10\,pp, outside noise, on at least one weak executor, \emph{and}
+beats the unconstrained prompt-rendering arm by any margin, with the
+rescue-ladder mechanism check near zero), neither of the two weak
+executors we test (llama3.2:1b, gemma4:e2b) cleared the bar on the
+first pass: llama3.2:1b's raw gain over native ($+12.6$\,pp) is only
+marginally outside noise --- 95\% Newcombe [$+0.4$, $+24.4$]
+uncorrected, a lower bound close enough to zero that the same interval
+computed with continuity correction lands on the other side of it
+([$-0.3$, $+25.1$]); we report the uncorrected value for consistency
+with the rest of the paper (\S\ref{sec:setup}) and treat the
+comparison as marginal rather than lean on either side --- and
+gemma4:e2b's constrained arm trailed its
+native baseline outright ($-10.5$\,pp). Decisively, the mechanism
+check --- the criterion's least method-sensitive clause --- did
+not verify on this first pass --- while the envelope parser never
+counts as a rescue (by design), argument-level schema failures remained
+substantial, because the envelope's \texttt{arguments} field was left
+generically typed rather than constrained per-tool.
+
+That gap was exactly the single pre-declared iteration candidate, so we
+ran it: replacing the generic \texttt{arguments} schema with a
+\texttt{oneOf} over one variant per tool, each pinning \texttt{name} to
+that tool and \texttt{arguments} to its real input schema. The
+mechanism now verifies cleanly --- argument-level schema failures drop
+from 99 to 0 on llama3.2:1b under the same sample --- but pass rate does
+not recover; it drops further, on every executor we re-measured
+(llama3.2:1b: $-13.7$\,pp relative to the pre-iteration constrained arm,
+95\% Newcombe [$-25.3$, $-1.6$]; gemma4:e2b: $-17.9$\,pp [$-30.7$,
+$-4.1$]; the qwen2.5:3b control: $-17.9$\,pp [$-30.4$, $-4.5$], on top of
+an already-negative format tax). Task-level detail on llama3.2:1b makes
+the mechanism concrete: \texttt{glob\_basic} and \texttt{grep\_basic}
+passed 100\% of the time under the loose schema and 0\% under the
+tightened one, with the losses landing as tool-execution failures, not
+schema failures --- committing the decoder to the exact shape of one
+specific tool's real arguments in a single constrained pass produces
+syntactically perfect but behaviorally worse calls. Eliminating the
+syntactic failure mode did not recover the correctness it was diagnosed
+against; if anything, the stricter constraint made outcomes worse. The
+pre-registered criterion's single permitted iteration is now spent, and
+the verdict is unambiguous: \textbf{reject}. Syntax-level decoder
+control does not pay off for these executors at either schema looseness
+we tested --- the harness-side rescue ladder remains the tradeoff that
+does not require decoder access, and having decoder access, even used
+more precisely, did not settle the comparison in its favor.
 
 % =====================================================================
 \section{Discussion}\label{sec:discussion}
 
-\todo{(1) Not all scaffolding helps: palancas de CAPACIDAD en rounds
-tempranos suman; palancas de CONTEXTO restan salvo entrega correcta —
-y la entrega correcta depende de la escala (prosa para capaces, estado
-tipado para chicos). (2) El harness le debe avisos al modelo chico
-(deadline anunciado vs corte silencioso). (3) Pre-registro como
-disciplina de ingeniería, no solo de ciencia: dos veces evitó
-decisiones equivocadas. (4) Implicación práctica: un 1B con lead barato
-como configuración edge viable.}
+\paragraph{Not all scaffolding helps, and the sign depends on what kind
+of lever it is.} Across every result in \S\ref{sec:results}, levers
+that add \emph{capability} early in a turn --- a stronger model opening
+the first rounds, decoder-level syntax control for the weakest
+executor --- either help or are neutral; levers that add \emph{context}
+--- a plan, a tool inventory --- stop harming, and at some scales
+help, only when delivered in a format the executor will not misread as
+something else, and that correct format is itself scale-dependent. A capable model needs its own plan
+rendered in a role distinct from its voice; a small model needs the
+same guidance as re-injected structured state, not prose to
+re-interpret each round. Naively, one might expect "more context helps
+more capable models less" as a smooth function of scale; what we
+observe instead is closer to a delivery-format threshold that a model
+either clears or does not, with catastrophic failure --- not diminishing
+returns --- on the wrong side of it. This is why the harness-vs-scale
+curve of \S\ref{sec:curve} is not one curve but two, moving in opposite
+directions from the same design intention.
 
-\section{Threats to Validity}\label{sec:threats}
-\todo{(1) suite propia de 19 tareas — mitigación pendiente: anclar con
-benchmark externo (BFCL subset) o suite ampliada; (2) un solo
-lead/planner (gemma4:e4b); (3) n=15 por celda de skill (solo extremos
-concluyentes); (4) modelos de una familia dominante (Qwen) + 1
-Llama; (5) fallos transitorios de infraestructura documentados y
-excluidos/re-corridos con transparencia (listar los 3 casos).}
-% --- Caveats de la auditoría v7 (docs/AUDITORIA-2026-07-v7.md) que esta
-% sección debe declarar sobre los sweeps YA corridos (los fixes están en
-% el código, pero los JSON citados son pre-fix):
-% J-10/J-21: tokens y rondas de filas Timeout son cota inferior (la
-%   ronda en vuelo se pierde al cortar) — las comparaciones de costo
-%   entre brazos con distinta tasa de timeout favorecen al brazo que más
-%   falla. Declarar, o comparar solo sobre filas convergidas.
-% J-17: el brazo con deferral (Fig. 3) corrió con un budget de contexto
-%   calculado sobre el catálogo COMPLETO pre-deferral — sesgo CONTRA el
-%   brazo search_tools (compactaba antes de lo necesario): el 5.6× es
-%   conservador, no inflado.
-% J-6: los sweeps pre-fix no tenían warm-up por brazo — posible sesgo de
-%   wall-time a favor de brazos tardíos bajo --no-ollama-stop; no afecta
-%   pass rates salvo timeouts en la primera tarea del primer brazo.
-% J-2: RESUELTO CON RE-RUN (docs/sweep-planlead-taskslead-postfix-2026-07-11.md):
-%   en el sweep original el resumen de la task list reseteaba la racha de
-%   fallos del EscalatingBackend (escalación reactiva muerta en el brazo
-%   tasks+lead). El re-run controlado post-fix (190 corridas, ancla
-%   incluida) muestra 9 escalaciones reactivas reales y el MISMO
-%   veredicto: tasks+lead 83.2% vs lead solo 92.6% (ancla en su banda
-%   92-92.6% por 5ª vez). "Tasks+lead resta" es interferencia real de
-%   andamiajes, no el artefacto — citar el re-run como control.
-% J-7: expect_text_contains evaluaba TODO el texto del turno (narración
-%   pre-tool-call incluida) — posibles falsos PASS direccionales hacia
-%   modelos verbosos; las celdas apretadas deberían re-verificarse con
-%   el fix si se citan a nivel de skill.
+\paragraph{A harness for small models needs to make its constraints
+legible, not just enforce them.} \S\ref{sec:mechanism}'s reactive
+escalation trigger and \S\ref{sec:ablations}'s per-family textual
+rescue both fail the same way: not by being wrong, but by having
+narrower coverage than the failure surface actually observed, silently,
+until someone looks. A harness note announcing an approaching turn
+budget or iteration cap converts an abrupt, silent cutoff into an
+acknowledged deadline the model can react to before running out of
+room --- we ship this lever (Table~\ref{tab:levers}) on the same
+reasoning, though we have not yet isolated its own contribution with a
+dedicated ablation. The general principle these findings point to is
+that a small model benefits from a harness that tells it what regime it
+is in --- a budget, a role, a structured plan --- rather than one that
+assumes it will infer that regime correctly from context alone; the
+inference itself is where small models are least reliable.
 
-\section{Conclusion}\label{sec:conclusion}
-\todo{1 párrafo: la curva existe, tiene mecanismo, y sus excepciones
-tienen diagnóstico. El harness compensa escala — pero solo el andamiaje
-correcto, entregado en el formato correcto para la escala.}
+\paragraph{Pre-registration functioned as an engineering safeguard, not
+a formality.} Twice in this paper's own history, a criterion committed
+before a sweep ran changed what we did with a marginal result: the
+planner's initial negative-but-inconclusive A/B (\S\ref{sec:planner})
+stayed opt-in with a named iteration path rather than being discarded or
+rationalized into a keep, and the constrained-decoding investigation
+(\S\ref{sec:constrained}) reported an iteration-eligible negative result
+rather than either stretching a positive-but-noisy point estimate into
+an adoption or force-fitting it into the rejection bucket its own
+criterion did not literally describe. In both cases the discipline cost
+us the ability to claim a cleaner story than the data supported --- and
+that is exactly the failure mode it exists to prevent when the person
+writing the criterion is also the person who built the lever it judges.
+
+\paragraph{Practical implication.} For a practitioner deploying a
+small, local model under cost, privacy, or latency constraints, the
+honest reading of \S\ref{sec:curve}--\ref{sec:external} is simpler
+than a composition recipe: \emph{run the most capable small model you
+can serve, alone}. The composite buys no correctness beyond the lead's
+own ceiling, and --- measured head-to-head on the three same-commit,
+same-day power sweeps --- it does not buy cost either: the 1B+lead
+composite averages 2{,}779 input tokens, 342 output tokens, and 23.9\,s
+per run against the solo lead's 2{,}910 / 371 / 25.2\,s
+($\times$0.92--0.95, i.e.\ within a few percent;
+\texttt{docs/emse-r2-analysis-2026-07-17.md}). Nor is the composite
+cheap relative to the mid-scale baselines it outperforms: against the
+7B baseline it spends roughly $1.2\times$ the input tokens, $5\times$
+the output tokens, and $2.5\times$ the wall-clock per run
+(cross-sweep, so read as magnitudes). An earlier draft of this paper
+claimed the 1B+lead composite wins ``at a fraction of the 7B's
+inference cost''; the measured token and latency data do not support
+that claim and we withdraw it. Composing a lead with a smaller
+executor is left as the right tool for regimes this paper did not
+measure --- a lead that cannot serve whole turns (context length,
+per-token pricing asymmetry, a lead shared across many executors), or
+memory budgets that fit 1B+4B but not a single larger model. The
+context-side levers we measured are the opposite of low-risk without
+matching their delivery to the executor's scale, and the deferral and
+constrained-decoding levers of
+\S\ref{sec:searchtools}--\ref{sec:constrained} are genuinely conditional:
+worth adopting only once an inventory does not fit context, or only for
+the specific weak-executor regime where their measured effect, however
+noisy, points in the helpful direction.
 
 % =====================================================================
-\paragraph{Artifact availability.} \todo{repo + DOI Zenodo del código y
-los 8 sweep JSONs (~4.400 corridas totales citadas); instrucciones de
-reproducción por sweep están en cada docs/sweep-*.md.}
+\section{Threats to Validity}\label{sec:threats}
 
-\bibliographystyle{plainnat}
+\paragraph{Suite coverage (external and construct validity).} All results are measured on one 19-task
+suite we authored, spanning five skills chosen to separate common
+agentic failure modes (tool selection, multi-step composition, error
+recovery, distractor rejection) rather than to match any published
+benchmark's task distribution. We do not know how these findings
+transfer to a broader or externally validated suite (e.g.\ a
+Berkeley Function-Calling Leaderboard subset \citep{bfcl}), and
+anchoring against one is future work rather than something this paper
+does. A sharper version of this threat is circularity: the same 19
+tasks served as the development-time regression target for the harness
+whose levers this paper evaluates --- several hardening passes tuned
+assertions and defaults against failures on exactly this suite --- so
+levers may be fit to the suite in ways an external task set would
+expose. Relatedly, the suite leaves little headroom at the top of the
+scale range: with the solo lead at 91\% and the ceiling baseline at
+98\%, a composite has at most a few points of room in which to
+demonstrate a gain over the lead alone, so the three-way null of
+\S\ref{sec:external} is partially built into the instrument --- tasks
+this saturated cannot, by construction, exhibit large composition
+gains; a harder suite could.
+
+\paragraph{The external comparison point is independent in orchestration
+logic only, not in underlying infrastructure (construct validity).} \S\ref{sec:external}'s
+bare lead+executor loop was planned as a scale-curve anchor early in
+this project and, unlike that early stub, was implemented and run: it
+reimplements the turn loop, the lead/executor split, and the tool-call
+handling from scratch rather than reusing \texttt{braze\_engine::Engine}
+or \texttt{EscalatingBackend}. It still calls Ollama through
+\texttt{braze\_model}'s HTTP client and executes tools through
+\texttt{braze\_tools\_local}'s implementations --- the same
+infrastructure every other row in this paper uses --- so it isolates
+\braze{}'s \emph{orchestration engineering} (the levers in
+Table~\ref{tab:levers}) from the composition pattern, not from every
+line of code in the workspace. A comparison against a fully independent
+third-party harness (candidate identified but not implemented,
+\citep{pi-dev}) remains the stronger version of this test. Separately,
+this arm was run at one executor scale (1B) rather than across the
+full curve, for the same compute-budget reasons \S\ref{sec:setup}
+already documents for other secondary levers.
+
+\paragraph{Single fixed helper model (external validity).} Every lead and planner role in
+every sweep is filled by the same model, gemma4:e4b. We closed part of
+this threat under pre-registration (\texttt{
+docs/gemma4-e4b-solo-baseline-design.md}): gemma4:e4b's own solo pass
+rate on this suite (91\% pooled at $n{=}285$, \S\ref{sec:curve}) is
+statistically indistinguishable from the 1B+lead composite it anchors, which
+resolves \emph{whether} the curve's headline number is sensitive to
+this choice --- it is, in the specific sense that the composite's
+capability ceiling is largely gemma4:e4b's own ceiling, not an emergent
+property of the composition. What remains open is whether a
+\emph{different} lead model, at a different capability level relative
+to its executor, would reproduce the same qualitative pattern (gain
+decaying to zero as the executor approaches the lead's own capability)
+or would instead reveal genuine executor-side synergy that gemma4:e4b's
+specific capability happened to mask; an earlier, narrower comparison
+(not reported in detail here) found a qualitatively similar
+cost/latency tradeoff between two candidate lead models at roughly
+$2\times$ latency difference, consistent with the choice of gemma4:e4b
+not being arbitrary, but this is not a systematic sensitivity analysis
+across lead-model capability levels.
+
+\paragraph{Sample size at the skill level (conclusion validity).} Aggregate pass rates use
+$n{=}95$ per cell (19 tasks $\times$ 5 repetitions), but per-skill
+breakdowns are $n{=}15$: enough to distinguish the extremes we report
+(0/15 vs.\ 14/15) but not enough to resolve the smaller differences we
+also report (e.g.\ 13 vs.\ 14 vs.\ 14 on \texttt{distractor\_selection}
+in \S\ref{sec:mechanism}) from noise; we flag these as directional
+where we cite them, not as independently significant.
+
+\paragraph{Model family coverage (external validity).} The executor scale range is
+dominated by one model family (qwen2.5:3b/7b and qwen3.5-coder are all
+Qwen) plus one non-function-calling-tuned generic model
+(llama3.2:1b); the constrained-decoding investigation adds gemma4:e2b
+and gemma3:1b, but no result in this paper spans more than two model
+families at once. Effects attributed to "scale" may be partially
+confounded with Qwen-specific training choices --- particularly the
+tool-template overfitting effects \S\ref{sec:related} documents in the
+literature for this family specifically.
+
+\paragraph{Measurement artifacts in already-run sweeps, disclosed (internal validity).} A
+harness-hardening pass after several of this paper's sweeps had already
+run fixed measurement issues that could otherwise bias the numbers we
+report; where a fix postdates a cited sweep, we disclose the direction
+of the bias rather than silently re-run everything. A timed-out run's
+token and round counts are a lower bound, not an exact count --- the
+in-flight round is lost when the attempt is cut off --- so a cost
+comparison between arms with different timeout rates favors whichever
+arm times out more, an effect relevant to \S\ref{sec:searchtools}'s
+latency numbers if not to its pass rates. The tool-deferral arm's
+context budget (\S\ref{sec:searchtools}) was computed against the
+\emph{full} pre-deferral tool catalog rather than the smaller,
+already-deferred prompt the model actually saw, which made that arm
+compact more eagerly than necessary --- a bias against the deferral
+arm, meaning the reported $5$--$6\times$ token savings are conservative,
+not inflated. Sweeps that predate a later warm-up fix could pay a
+model's cold-load time on the first task of the first arm under
+\texttt{--no-ollama-stop}, which risks an inflated wall-time (and, on
+CPU, a spurious timeout) concentrated on that one cell; this does not
+affect the pass rates we report except through that timeout channel.
+One result was fully re-verified rather than merely disclosed: an
+earlier measurement of the composed planner-and-lead arm
+(\S\ref{sec:discussion}) turned out to have a task-list summary that
+silently reset the lead's reactive-escalation failure streak, making
+reactive escalation structurally unable to fire in that arm; a
+controlled re-run with the fix in place (190 runs, including an anchor
+cell) reproduced the same qualitative verdict with the mechanism now
+firing for real (9 genuine escalations), which we report as a
+confirmation, not merely an assumption the original result still holds.
+Finally, one text-match assertion used across earlier sweeps accepted a
+model's pre-tool-call narration anywhere in a turn's text as satisfying
+a content check, which plausibly favored more verbose models in cells
+we do not re-cite at the skill level in this paper; \S\ref{sec:searchtools}'s
+headline numbers use the corrected, stricter assertion specifically
+because this issue was live when its first, retracted null result was
+measured.
+
+\paragraph{Infrastructure failures, disclosed rather than silently
+excluded (internal validity).} Two sweeps in this paper encountered transient Nitro
+infrastructure failures during data collection. One arm of the planner
+A/B (\S\ref{sec:planner}, the 3B task-list delivery) had 58 of 62
+failures on its first attempt be transient network errors concentrated
+entirely in that arm; we re-ran it cleanly and report the clean re-run,
+disclosing the contaminated attempt rather than silently substituting
+it. A later audit prompted by this paper's second pre-submission
+review found the same event also reached that sweep's coder arms
+asymmetrically (10 transport failures on the baseline, 2 on the
+user-role arm, 8 on the task-list arm), depressing the coder baseline
+and inflating the apparent gain of the fixed deliveries;
+\S\ref{sec:planner} now reports those arms net of transport failures,
+under an explicit criterion (a \texttt{model\_backend\_error} whose
+request never reached the model --- wall-clock under one second --- or
+whose stream failed in flight; genuine empty responses do not qualify)
+applied uniformly to every arm of that sweep, with raw and corrected
+numbers both given in
+\texttt{docs/emse-r2-analysis-2026-07-17.md}. The scale-curve sweep (\S\ref{sec:curve}) was collected in two
+slices roughly eight hours apart after Nitro became unreachable
+mid-sweep; the interrupted slice's 1{,}140 dead rows were excluded from
+analysis, and the two valid slices are treated as coming from the same
+binary and configuration but not necessarily the same thermal/load
+session on the inference node, so cross-slice latency comparisons are
+read as orders of magnitude rather than precise deltas.
+
+\paragraph{Multiplicity (conclusion validity).} This paper reports on
+the order of twenty between-arm interval comparisons with no
+family-wise correction (\S\ref{sec:setup}). The pre-registered
+criteria bound researcher degrees of freedom on the adopt/reject
+decisions they govern, but any individual interval cited outside those
+criteria --- including the per-skill contrasts --- should be read as
+uncorrected.
+
+\paragraph{Mechanism claims (construct validity).} Two mechanism
+claims rest on probes of a single harness-and-serving stack. The
+delivery-format account of the planner's empty-response degeneration
+(\S\ref{sec:planner}) is stated as consistent-with rather than
+established: a token-level probe shows the failing turns are not
+literal silence (44--619 generated tokens surfacing in no usable
+channel), and a serving- or template-layer contribution cannot be
+excluded on our data. Compositional brittleness
+(\S\ref{sec:searchtools}) rests on one 45-run matched-seed probe on
+one model, corroborated --- not independently established --- by a
+5-transcript sample.
+
+\section{Conclusion}\label{sec:conclusion}
+
+The harness-vs-scale curve this paper set out to measure exists, has
+mechanisms with identified --- and explicitly bounded --- candidates,
+and its exceptions have diagnoses rather than asterisks: a capability
+lever lifts the smallest executor we tested by 70 percentage points by
+pinning the composite at the lead model's own ceiling, so its apparent
+gain decays as executor baselines rise toward that ceiling; a context
+lever that
+looked like a settled negative result under one delivery format turned
+out, once its delivery rather than its content was fixed under
+pre-registration, to be a repaired harm at both scale extremes ---
+though its committed adoption criterion, applied literally, remains
+unmet; and a cost-saving lever with an
+apparently free correctness trade-off turned out, at a larger sample
+and a hardened harness, to have a real and mechanistically diagnosed
+price. A pre-registered solo baseline of the dominant lever's own
+helper model tempers the strongest reading of the first result: the
+1B-executor-beats-7B-baseline headline is largely attributable to the
+lead model's own capability, routed efficiently, rather than to an
+emergent property of the composition itself (\S\ref{sec:curve}) --- a
+finding we report because our own pre-registered criterion, applied to
+our own paper's headline number, told us to. A from-scratch external
+comparison point reinforces the same revision from a different angle
+(\S\ref{sec:external}): a bare lead+executor loop with none of
+\braze{}'s engineering lands within noise of both the full composite and
+the helper model alone, the paper's first result measured against
+something other than \braze{} itself. The throughline across this
+paper's results survives that revision in a narrower but still
+substantive form: the harness decides \emph{which} capability in its
+ensemble
+reaches the task and in what format, and getting that routing right,
+measured rather than assumed, is what moves pass rate --- at the sample
+sizes this paper measures, we find no evidence that \braze{}'s specific
+engineering manufactures capability beyond what its most capable
+component and the lead/executor pattern already buy on their own, and
+we report that as a finding rather than understate it.
+
+% =====================================================================
+\paragraph{Artifact availability.} \braze{} is open-source
+(\todo{repo URL at submission}), dual-licensed MIT/Apache-2.0. Every
+sweep this paper cites is reproducible from its raw JSON results file,
+committed to the repository alongside a reproduction command; commit
+hashes, suite fingerprints, and per-model digests embedded in each JSON
+are listed in Table~\ref{tab:sweeps}. \todo{Zenodo DOI for a versioned
+release of the code and the 14 sweep JSON files (\S\ref{app:sweeps})
+pending packaging at submission (\texttt{/zenodo}).}
+
+\paragraph{Funding.} This work received no external funding.
+
+\paragraph{Conflicts of interest.} The author declares no competing
+interests.
+
+\bibliographystyle{spbasic}
 \bibliography{refs}
 
 \appendix
 \section{Sweep inventory}\label{app:sweeps}
-\todo{tabla: cada sweep citado, su commit, n, fecha, archivo JSON — la
-fuente es el encabezado de cada docs/sweep-*.md.}
+
+Table~\ref{tab:sweeps} lists every sweep cited in this paper, in the
+order they appear: 5{,}102 total runs across 14 sweep files (a
+fifteenth entry, the 3B task-list re-run of \S\ref{sec:planner}, is a
+partial re-run of 95 further runs replacing a contaminated arm, not a
+new sweep). Each
+row's commit is the \texttt{braze\_git\_commit} embedded in that
+sweep's own JSON metadata at the time it was written, not necessarily
+the HEAD commit at time of writing this paper; where a later
+harness-hardening fix postdates a row, \S\ref{sec:threats} discloses
+the direction of the resulting bias rather than silently re-running the
+sweep.
+
+\begin{table}[t]
+\centering\small
+\caption{Every sweep cited in this paper. $n$ is total runs in that
+sweep's JSON; ``§'' is where it is cited.}
+\label{tab:sweeps}
+\begin{tabular}{lllll}
+\toprule
+Sweep & Date & Commit & $n$ & \S \\
+\midrule
+curva-multiescala & 2026-07-10/11 & \texttt{e9b841e}/\texttt{e4bcc8b} & 1{,}520 & \ref{sec:curve} \\
+lead-3brazos & 2026-07-10 & \texttt{8b720f1} & 285 & \ref{sec:mechanism} \\
+matriz-4brazos & 2026-07-10 & \texttt{e16143e} & 380 & \ref{sec:planner} \\
+planner-ab (+ re-run) & 2026-07-11 & \texttt{28f7a53} & 570 (+95) & \ref{sec:planner} \\
+search-tools-ab & 2026-07-11 & \texttt{bb07363} & 120 & \ref{sec:searchtools} \\
+search-tools-ab-n15 & 2026-07-12 & \texttt{57db13f} & 360 & \ref{sec:searchtools} \\
+constrained-decoding & 2026-07-12 & \texttt{acce118} & 1{,}045 & \ref{sec:constrained} \\
+gemma4-e4b-solo & 2026-07-13 & \texttt{ec61f5e} & 95 & \ref{sec:curve} \\
+audit-transcripts-scale-curve & 2026-07-13 & \texttt{ec61f5e} & 38 & \ref{sec:setup} \\
+audit-transcripts-tool-deferral & 2026-07-13 & \texttt{ec61f5e} & 24 & \ref{sec:setup} \\
+external-bare-lead & 2026-07-13 & \texttt{ec61f5e} & 95 & \ref{sec:external} \\
+gemma4-e4b-solo-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:curve} \\
+braze-composite-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:curve} \\
+external-bare-lead-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:external} \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \section{Pre-registration texts}\label{app:prereg}
-\todo{transcribir los dos pre-registros con su commit: el criterio del
-planner (PLAN.md, previo al A/B) y el diseño del explorador
-(docs/explorador-aislado-ab-design.md) como ejemplo de la disciplina
-aplicada a futuro.}
+
+This paper's discipline of writing an adoption/rejection criterion
+before the sweep that decides it is not merely described in
+\S\ref{sec:setup} but auditable: each criterion is a committed document
+predating its sweep's raw results file. The three texts below are
+transcribed verbatim (original language, Spanish, as actually
+committed) from the project's internal design log, each with the git
+commit that introduced it; an English gloss follows each quote for the
+non-Spanish-reading reviewer. All three commits are resolvable in the
+project's public history (\S\ref{sec:setup}, ``Artifact availability'').
+
+\paragraph{(1) The planner's adoption/rejection criterion.} Committed
+\texttt{dc65e10} (2026-07-06), \emph{PLAN.md} \S~``Split
+planificador/ejecutor'', ahead of the \texttt{28f7a53} sweep
+\S\ref{sec:planner} reports on:
+
+\begin{quote}\itshape\small
+Criterio (pre-comprometido): con \texttt{--seed}/\texttt{--temperature}
+fijos y $\geq$5 repeticiones, la variante planificada debe mejorar el
+pass rate de \texttt{multi\_step} + \texttt{error\_recovery} fuera del
+intervalo de Wilson del baseline (no dentro del ruido de $\pm$5pp), sin
+degradar \texttt{no\_tool}/\texttt{single\_tool}/\texttt{distractor\_%
+selection}. El costo extra de tokens del planner queda registrado por
+las sumas de \texttt{Usage} y entra al veredicto. Si no cumple: técnica
+rechazada, se documenta y se remueve.
+\end{quote}
+
+\noindent\emph{Gloss}: with seed/temperature fixed and $\geq$5 reps,
+the planned variant must move \texttt{multi\_step}+\texttt{error\_%
+recovery} pass rate outside the baseline's Wilson interval (not within
+$\pm$5pp noise), without degrading the other three skills; the
+planner's own token cost is logged and counts toward the verdict;
+failing the bar means rejection and removal.
+
+\paragraph{(2) The isolated-explorer lever (I.7) — reported here only
+as a worked example of the same discipline applied to a lever this
+paper does not itself report results on.} Committed \texttt{4517b6d},
+\emph{docs/explorador-aislado-ab-design.md} \S~``Criterio
+pre-registrado'':
+
+\begin{quote}\itshape\small
+Adoptar (promover a implementación completa + considerar en Fase 2) si
+\texttt{+explore} mejora pass rate en $\geq$8pp agregado sobre baseline
+en 3b (fuera del ruido con n=30/brazo en las 5 tareas no-control), O si
+iguala pass rate con $\geq$30\% menos tokens de turno principal (medido
+por \texttt{expect\_max\_tokens}/tokens totales incluyendo al hijo).
+Rechazar (cerrar I.7, no implementar isolation en Fase 2 por esta vía)
+si \texttt{+explore} no mueve ninguna de las dos métricas, o si el
+control negativo (tarea 6) muestra delegación compulsiva ($>$2/5 reps
+delegando lo que estaba en el prompt). Iterar UNA vez (misma regla que
+el planner) solo si el modo de falla dominante es identificable y
+atacable (p.ej. el hijo converge pero el padre ignora su respuesta
+$\to$ problema de render del tool result, no de la palanca).
+Pre-registrado ahora para no re-litigar después.
+\end{quote}
+
+\noindent\emph{Gloss}: adopt if the isolated-child lever beats baseline
+by $\geq$8pp aggregate on the 3B executor, or matches pass rate at
+$\geq$30\% fewer main-turn tokens; reject if neither metric moves, or
+if the negative control shows compulsive delegation; one permitted
+iteration if the dominant failure mode is a fixable rendering bug
+rather than the lever itself.
+
+\paragraph{(3) The constrained-decoding criterion.} Committed
+\texttt{a279495}, \emph{docs/constrained-decoding-ab-design.md}
+\S~``Criterio pre-registrado'' — this is the same adopt/reject/iterate
+language paraphrased against the numbers in \S\ref{sec:constrained}:
+
+\begin{quote}\itshape\small
+Adoptar (promover \texttt{constrained-tools} a knob de config
+documentado para modelos débiles, sección en el paper) si, en al menos
+un executor débil (llama3.2:1b o gemma4:e2b): C $-$ A $\geq$ +10pp
+agregado, fuera del ruido (Newcombe 95\% sobre el delta within-sweep),
+Y C $-$ B $>$ 0 (la ganancia es del constraint, no del cambio de
+modalidad), Y el mecanismo verifica: \texttt{schema\_fail + rescues} de
+C $\approx$ 0. Rechazar (documentar como negativo en la discusión del
+paper: la capa de harness es el tradeoff correcto incluso con decoder
+controlable) si C $\leq$ A en ambos débiles, o si C $>$ A pero C
+$\leq$ B (la mejora era la modalidad prompt, no el constraint --- adoptar
+B sería otra decisión, anotarla). Iterar UNA vez (misma regla que el
+planner) solo si el modo de falla dominante es identificable y
+atacable. Candidata única pre-declarada: el
+\texttt{arguments: \{"type": "object"\}} genérico deja pasar args mal
+formados por tool $\to$ la iteración es el envelope con \texttt{oneOf}
+por tool usando su \texttt{input\_schema} real. Nada más se itera.
+\end{quote}
+
+\noindent\emph{Gloss}: adopt constrained decoding if it beats both the
+native-tools baseline (A) by $\geq$10pp on a weak executor \emph{and}
+beats the prompted-schema arm (B) --- isolating the gain to the
+decoder-level constraint itself, not to the prompt reformulation the
+constrained condition also happens to carry --- with near-zero residual
+schema failures; reject if it does not clear baseline, or clears it
+only by matching B's gain; one permitted iteration, pre-declared to a
+single named failure mode (a generic \texttt{object} schema letting
+malformed per-tool arguments through).
 
 \end{document}

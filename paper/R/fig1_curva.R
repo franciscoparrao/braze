@@ -8,6 +8,12 @@
 #     (slice válido de llama3.2:1b; sus filas qwen muertas se excluyen)
 # Análisis de referencia: docs/sweep-curva-multiescala-2026-07-10.md
 #
+# Línea de referencia horizontal `gemma4:e4b` solo (2026-07-13,
+# docs/gemma4-e4b-solo-baseline-design.md): 87/95, criterio
+# pre-registrado disparó "revisar framing" — el compuesto 1B+lead no es
+# distinguible de lo que el propio lead saca sin ningún executor de 1B
+# adjunto. Fuente: docs/sweep-gemma4-e4b-solo-2026-07-13.json.
+#
 # Correr desde la raíz del repo:  Rscript paper/R/fig1_curva.R
 
 suppressPackageStartupMessages({
@@ -73,6 +79,19 @@ datos <- curva |>
 
 stopifnot(nrow(datos) == 16, all(datos$n == 95))
 
+# `gemma4:e4b` solo — referencia horizontal, no forma parte del eje de
+# escala de executors (no es una fila de la curva, es el techo del
+# propio modelo lead). Pooled n=285: sweep original (95, ec61f5e) +
+# power sweep pre-declarado (190, ec61f5e; homogeneidad Fisher p=1.00,
+# docs/emse-r2-analysis-2026-07-17.md).
+gemma_solo <- bind_rows(
+  leer_sweep("docs/sweep-gemma4-e4b-solo-2026-07-13.json"),
+  leer_sweep("docs/sweep-gemma4-e4b-solo-power-2026-07-13.json")
+) |>
+  summarise(pases = sum(passed), n = n()) |>
+  mutate(pass_rate = 100 * pases / n, wilson(pases, n))
+stopifnot(nrow(gemma_solo) == 1, gemma_solo$n == 285)
+
 # ---- Figura ---------------------------------------------------------------
 
 # Semántica de color (Wong, colorblind-safe): baseline negro (referencia),
@@ -89,6 +108,18 @@ dodge <- position_dodge(width = 0.18)
 
 p <- ggplot(datos, aes(x = executor, y = pass_rate,
                        color = brazo, group = brazo)) +
+  # Referencia: gemma4:e4b solo (el propio lead, sin ningún executor de
+  # 1B adjunto) — banda del IC 95% Wilson + línea punteada al punto
+  # estimado. Dibujada primero para quedar detrás de las series de datos.
+  annotate("rect", xmin = -Inf, xmax = Inf,
+           ymin = gemma_solo$lo, ymax = gemma_solo$hi,
+           fill = "grey50", alpha = 0.12) +
+  geom_hline(yintercept = gemma_solo$pass_rate,
+             linetype = "22", linewidth = 0.4, color = "grey35") +
+  annotate("text", x = 0.8, y = gemma_solo$pass_rate + 2.6,
+           label = "gemma4:e4b solo (lead alone)",
+           family = fontfam, size = 2.35, fontface = "italic",
+           color = "grey35", hjust = 0) +
   geom_errorbar(aes(ymin = lo, ymax = hi),
                 width = 0.12, linewidth = 0.35, position = dodge) +
   geom_line(linewidth = 0.55, position = dodge) +

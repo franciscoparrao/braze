@@ -15,6 +15,16 @@
 #     (la corrida original se contaminó con 58 fallos transitorios de red;
 #     ver docs/sweep-planner-ab-2026-07-11.md § nota)
 #
+# Exclusión de fallos de transporte (2026-07-17, R2 EMSE): el mismo
+# evento de red que contaminó el brazo 3B task-list también alcanzó los
+# brazos coder del sweep AB (10/2/8 fallos en baseline/user/task-list).
+# Para TODOS los brazos de ese sweep (y del re-run) se excluyen del
+# numerador y denominador las corridas perdidas por transporte
+# (model_backend_error con wall<1s, o stream/request fallido); los
+# empty-response genuinos NO se excluyen. El sweep de la curva se deja
+# crudo (sin evento documentado). Detalle y números raw vs corregidos:
+# docs/emse-r2-analysis-2026-07-17.md § 4.
+#
 # IC 95% del delta: Newcombe/MOVER sobre intervalos de Wilson
 # (proporciones independientes — corridas distintas, no pareadas).
 #
@@ -31,10 +41,18 @@ fontfam <- setup_paper_theme(journal = "elsevier")
 
 # ---- Datos ----------------------------------------------------------------
 
-conteo <- function(path, backend_exacto) {
+conteo <- function(path, backend_exacto, excluir_transporte = FALSE) {
   r <- fromJSON(path)$results
   filas <- r[r$backend == backend_exacto, ]
   stopifnot(nrow(filas) == 95)
+  if (excluir_transporte) {
+    err <- ifelse(is.na(filas$run_error), "", as.character(filas$run_error))
+    transporte <- !is.na(filas$failure_cause) &
+      filas$failure_cause == "model_backend_error" &
+      (filas$wall_time_ms < 1000 |
+         grepl("stream|request to model backend failed", err))
+    filas <- filas[!transporte, ]
+  }
   c(pases = sum(filas$passed), n = nrow(filas))
 }
 
@@ -67,8 +85,12 @@ wilson_lohi <- function(x, n, z = 1.96) {
 datos <- celdas |>
   rowwise() |>
   mutate(
-    var_c = list(conteo(archivo, backend)),
-    base_c = list(conteo(archivo_base, backend_base)),
+    # Exclusión de transporte solo en el sweep AB y su re-run (evento de
+    # red documentado); la curva se deja cruda.
+    var_c = list(conteo(archivo, backend,
+                        excluir_transporte = archivo %in% c(AB, RERUN))),
+    base_c = list(conteo(archivo_base, backend_base,
+                         excluir_transporte = archivo_base %in% c(AB, RERUN))),
     p_var = var_c[["pases"]] / var_c[["n"]],
     p_base = base_c[["pases"]] / base_c[["n"]],
     delta = 100 * (p_var - p_base),
@@ -98,7 +120,12 @@ stopifnot(nrow(datos) == 6)
 
 # ---- Figura ---------------------------------------------------------------
 
-pal_exec <- c("Qwen 2.5 3B" = "#E69F00", "Qwen 3.5 Coder" = "#0072B2")
+# Semántica de color (Wong, colorblind-safe): esta figura colorea por
+# IDENTIDAD DE MODELO, no por configuración de harness (fig1/fig3 colorean
+# por brazo/config) -- eje semántico distinto, así que se evita a propósito
+# reutilizar #0072B2 (azul = "+lead" en fig1, "deferred (search_tools)" en
+# fig3) para no implicar que este azul significa lo mismo aquí.
+pal_exec <- c("Qwen 2.5 3B" = "#E69F00", "Qwen 3.5 Coder" = "#009E73")
 dodge <- position_dodge(width = 0.45)
 
 p <- ggplot(datos, aes(x = delta, y = variante, color = executor)) +

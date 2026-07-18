@@ -5,7 +5,10 @@ require only the six local tools but whose registry carries 200
 synthetic noise tools (an MCP-gateway stand-in), hiding the noise
 catalog behind a single \texttt{search\_tools} meta-tool (blue) versus
 listing all 206 tools (grey). \textbf{(a)}~Input tokens per run
-(points: individual runs, $n{=}90$ per arm; black bar: median).
+(points: individual runs, $n{=}90$ per arm --- 6 tasks $\times$ 15
+repetitions; black bar: median). The ${\sim}$48K outliers are
+full-inventory 3B runs that looped for six rounds with repeated
+compaction, re-paying the 206-tool inventory each round.
 \textbf{(b)}~Pass rate (95\% Wilson CIs): the deferred arm loses
 24\,pp (3B) and 13\,pp (7B), CIs disjoint. The mechanism is not tool
 findability — the deferred arm never needed nor attempted a hidden
@@ -13,7 +16,7 @@ tool (the direct-call gate fired zero times in 360 runs) — but
 \emph{compositional brittleness}: transcript probes show the same
 model, at the same seeds, computing $10{+}20$ correctly with 206 inert
 stubs padding the prompt and writing the unsummed inputs without them
-(§ ablations). Distraction, by contrast, does not materialize: the
+(Section~\ref{sec:searchtools}). Distraction, by contrast, does not materialize: the
 distractor-selection task passes 15/15 in every arm — plausibility,
 not volume, is what distracts. At the scale of real tool gateways
 (1{,}500+ tools, $\sim$30K tokens of inventory) the full-inventory arm

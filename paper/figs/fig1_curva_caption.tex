@@ -5,9 +5,19 @@ confidence intervals) for four executor models of increasing scale,
 under four harness configurations: no scaffolding (baseline), a
 planning pre-round whose prose plan enters the context (+planner), a
 capable lead model that proactively opens each turn (+lead,
-gemma4:e4b), and their composition. The lead's gain decays
-monotonically with executor scale (+70pp at 1B, $-4$pp at the
-ceiling), while the prose plan \emph{harms} at both extremes of the
-scale through the same empty-response degeneration mode (see
-Section~X). A 1B executor with a lead (89\%) outperforms the 3B (68\%)
-and 7B (80\%) baselines.}
+gemma4:e4b), and their composition. The shaded band and dashed line
+mark \texttt{gemma4:e4b}'s own solo pass rate (91.2\% [87.4, 94.0]\%,
+pooled $n{=}285$, pre-registered baseline): the \texttt{+lead} line
+sits inside that band at every executor scale, never distinguishably
+above it (a same-batch, within-discipline comparison at 1B; at the
+other three scales a cross-sweep juxtaposition offered as visual
+context --- see Section~\ref{sec:curve}), so the lead's apparent gain
+($+70$\,pp at 1B, $-4$\,pp at
+the ceiling) is a roughly constant composite --- the lead's own
+ceiling --- minus a baseline that rises with scale, and a 1B executor
+with a lead (89\%) outperforming the 3B (68\%) and 7B (80\%) baselines
+is better read as the lead's capability routed efficiently than as an
+emergent property of the composition
+(Section~\ref{sec:curve}). The prose plan \emph{harms} at both
+extremes of the scale through the same empty-response degeneration
+mode, diagnosed and repaired in Section~\ref{sec:planner}.}

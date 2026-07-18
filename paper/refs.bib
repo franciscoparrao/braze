@@ -1,7 +1,18 @@
-% refs.bib — esqueleto. TODOS los campos marcados TODO-VERIFY deben
-% pasarse por /verify-refs antes del submit (existencia, autores
-% exactos, venue) — varios se citan acá desde las notas del proyecto
-% (docs/SOTA-2026-07.md), no desde los PDFs originales.
+% refs.bib — verificado con /verify-refs (nivel 1: existencia/DOI vía
+% OpenAlex/CrossRef; nivel 2: sin retracciones; nivel 3: soporte de
+% claims de mayor carga contra el texto primario) el 2026-07-13; ver
+% docs/verify-refs-2026-07-13.md. Los campos `note` con anotaciones
+% internas de verificación se movieron a ese doc el 2026-07-17 (spbasic
+% tipea `note` en la lista de referencias publicada). Entradas nuevas
+% del 2026-07-17 (liu2025tts, jimenez2024swebench, bfcl,
+% wohlin2012experimentation, arcuri2011practical): verificadas
+% 2026-07-18 — wohlin/arcuri vía CrossRef+OpenAlex (sin retracciones;
+% 4304/969 citas); liu2025tts y jimenez2024swebench vía DataCite
+% (título y autores exactos contra el .bib) + OpenAlex is_retracted
+% false; bfcl es recurso web (URL responde 200, no indexable —
+% esperado). Nota: el registro OpenAlex del DOI de SWE-bench
+% (W4387561453) tiene el título corrupto EN OPENALEX (DOI/autores/año
+% correctos) — error de su lado, no del .bib.
 
 @inproceedings{yang2024sweagent,
   title     = {{SWE-agent}: Agent-Computer Interfaces Enable Automated
@@ -11,38 +22,76 @@
                and Press, Ofir},
   booktitle = {Advances in Neural Information Processing Systems},
   year      = {2024},
-  note      = {arXiv:2405.15793. TODO-VERIFY: venue/páginas exactos}
+  doi       = {10.48550/arxiv.2405.15793},
+  note      = {arXiv:2405.15793}
 }
 
 @misc{qwen3coder,
-  title  = {Qwen3-Coder Technical Report},
-  author = {{Qwen Team}},
+  title  = {Qwen3-Coder-Next Technical Report},
+  author = {Cao, Ruisheng and Chen, Mouxiang and Chen, Jiawei and Cui,
+            Zeyu and Feng, Yunlong and Hui, Binyuan and Jing, Yuheng
+            and Li, Kaixin and Li, Mingze and Lin, Junyang and Ma,
+            Zeyao and Shum, Kashun and Wang, Xuwu and Wei, Jinxi and
+            Yang, Jiaxi and Zhang, Jiajun and Zhang, Lei and Zhang,
+            Zongmeng and Zhao, Wenting and Zhou, Fan},
   year   = {2026},
-  note   = {TODO-VERIFY: cita exacta del TR referenciado en
-            docs/SOTA-2026-07.md (versión Qwen3-Coder-Next)}
+  doi    = {10.48550/arxiv.2603.00729},
+  note   = {arXiv:2603.00729}
 }
 
 @article{corradini2025,
-  title   = {TODO-VERIFY: título exacto (best-of-n / test-time voting
-             para tool-calling en modelos chicos)},
-  author  = {Corradini, TODO-VERIFY},
+  title   = {State of the Art and Future Directions of Small Language
+             Models: A Systematic Review},
+  author  = {Corradini, Flavio and Leonesi, Michela and Piangerelli,
+             Marco},
   journal = {Big Data and Cognitive Computing},
+  volume  = {9},
+  number  = {7},
+  pages   = {189},
   year    = {2025},
-  note    = {Citado en docs/AUDITORIA-2026-07.md § técnica 10 (G10)}
+  doi     = {10.3390/bdcc9070189}
 }
 
-@misc{todoReasoningDegrades,
-  title = {TODO-VERIFY: arXiv:2604.02155 — longer reasoning degrades
-           tool-calling accuracy in small models},
-  year  = {2026},
-  note  = {Citado en el system prompt rationale de braze
-           (crates/braze-config/src/prompt.rs)}
+@misc{liu2025tts,
+  title  = {Can {1B} {LLM} Surpass {405B} {LLM}? Rethinking
+            Compute-Optimal Test-Time Scaling},
+  author = {Liu, Runze and Gao, Junqi and Zhao, Jian and Zhang, Kaiyan
+            and Li, Xiu and Qi, Biqing and Ouyang, Wanli and Zhou,
+            Bowen},
+  year   = {2025},
+  doi    = {10.48550/arxiv.2502.06703},
+  note   = {arXiv:2502.06703}
 }
 
-@misc{todoSLMsurvey,
-  title = {TODO-VERIFY: survey de Small Language Models citado en
-           docs/SOTA-2026-07.md (adenda: ICL débil/no-monotónico)},
-  year  = {2025}
+@misc{qi2026briefbetter,
+  title  = {Brief Is Better: Non-Monotonic Chain-of-Thought Budget
+            Effects in Function-Calling Language Agents},
+  author = {Qi, Xuan},
+  year   = {2026},
+  note   = {arXiv:2604.02155}
+}
+
+@article{lu2024smalllm,
+  title   = {Small Language Models: Survey, Measurements, and Insights},
+  author  = {Lu, Zhenyan and Li, Xiang and Cai, Dongqi and Yi, Rongjie
+             and Liu, Fangming and Zhang, Xiwen and Lane, Nicholas D.
+             and Xu, Mengwei},
+  year    = {2024},
+  journal = {arXiv preprint arXiv:2409.15790},
+  doi     = {10.48550/arxiv.2409.15790}
+}
+
+@inproceedings{wang2026openhands,
+  title     = {The {OpenHands} Software Agent {SDK}: A Composable and
+               Extensible Foundation for Production Agents},
+  author    = {Wang, Xingyao and Rosenberg, Simon and Michelini, Juan
+               and Smith, Calvin and Tran, Hoang and Nyst, Engel and
+               Malhotra, Rohit and Zhou, Xuhui and Chen, Valerie and
+               Brennan, Robert and Neubig, Graham},
+  booktitle = {Proceedings of Machine Learning and Systems (MLSys)},
+  year      = {2026},
+  doi       = {10.48550/arxiv.2511.03690},
+  note      = {arXiv:2511.03690}
 }
 
 @misc{goose,
@@ -50,13 +99,82 @@
   author       = {{Block, Inc.}},
   howpublished = {\url{https://github.com/block/goose}},
   year         = {2025},
-  note         = {TODO-VERIFY: forma de cita para el patrón lead/worker}
+  note         = {\texttt{GOOSE\_LEAD\_MODEL} reactive lead/worker
+                  mechanism, documented at
+                  \url{https://block.github.io/goose/}}
 }
 
 @misc{aider,
-  title        = {Aider: AI pair programming in your terminal
-                  (architect/editor mode benchmarks)},
-  howpublished = {\url{https://aider.chat}},
+  title        = {Aider: AI pair programming in your terminal ---
+                  code editing and architect/editor leaderboards},
+  author       = {{Aider-AI}},
+  howpublished = {\url{https://aider.chat/docs/leaderboards/}},
   year         = {2025},
-  note         = {TODO-VERIFY: fuente exacta del +3-4pp architect/editor}
+  note         = {Architect/editor mode results from the leaderboard's
+                  public data}
+}
+
+@misc{pi-dev,
+  title        = {Pi: a minimal agent harness},
+  author       = {{Earendil Inc.}},
+  howpublished = {\url{https://pi.dev/}},
+  year         = {2026},
+  note         = {Supports Ollama; scriptable print/JSON/RPC modes}
+}
+
+@article{hasan2026testing,
+  title   = {An empirical study of testing practices in open source
+             {AI} agent frameworks and agentic applications},
+  author  = {Hasan, Mohammed Mehedi and Li, Hao and Fallahzadeh, Emad
+             and Rajbahadur, Gopi Krishnan and Adams, Bram and Hassan,
+             Ahmed E.},
+  journal = {Empirical Software Engineering},
+  volume  = {31},
+  number  = {5},
+  pages   = {124},
+  year    = {2026},
+  doi     = {10.1007/s10664-026-10857-9}
+}
+
+@inproceedings{jimenez2024swebench,
+  title     = {{SWE-bench}: Can Language Models Resolve Real-World
+               {GitHub} Issues?},
+  author    = {Jimenez, Carlos E. and Yang, John and Wettig, Alexander
+               and Yao, Shunyu and Pei, Kexin and Press, Ofir and
+               Narasimhan, Karthik},
+  booktitle = {International Conference on Learning Representations
+               (ICLR)},
+  year      = {2024},
+  doi       = {10.48550/arxiv.2310.06770},
+  note      = {arXiv:2310.06770}
+}
+
+@misc{bfcl,
+  title        = {Berkeley Function Calling Leaderboard},
+  author       = {Yan, Fanjia and Mao, Huanzhi and Ji, Charlie
+                  Cheng-Jie and Zhang, Tianjun and Patil, Shishir G.
+                  and Stoica, Ion and Gonzalez, Joseph E.},
+  year         = {2024},
+  howpublished = {\url{https://gorilla.cs.berkeley.edu/leaderboard.html}}
+}
+
+@book{wohlin2012experimentation,
+  title     = {Experimentation in Software Engineering},
+  author    = {Wohlin, Claes and Runeson, Per and H{\"o}st, Martin and
+               Ohlsson, Magnus C. and Regnell, Bj{\"o}rn and
+               Wessl{\'e}n, Anders},
+  publisher = {Springer},
+  year      = {2012},
+  doi       = {10.1007/978-3-642-29044-2}
+}
+
+@inproceedings{arcuri2011practical,
+  title     = {A practical guide for using statistical tests to assess
+               randomized algorithms in software engineering},
+  author    = {Arcuri, Andrea and Briand, Lionel},
+  booktitle = {Proceedings of the 33rd International Conference on
+               Software Engineering (ICSE)},
+  pages     = {1--10},
+  year      = {2011},
+  doi       = {10.1145/1985793.1985795}
 }
