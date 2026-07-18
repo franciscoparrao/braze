@@ -16,8 +16,50 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use braze_events::{ChannelTaskNotifier, TextDeltaObserver};
+use braze_events::{AgentEvent, ChannelTaskNotifier, TextDeltaObserver, TurnObserver};
 use braze_types::SessionId;
+
+/// `braze run --output-format json`'s observer: accumulates exactly the
+/// text content `TextDeltaObserver` would have streamed to stdout (same
+/// deltas, same order), plus every `Usage` event's tokens/stop_reason,
+/// instead of printing anything until the turn finishes — a CI/scripting
+/// caller gets one parseable object instead of a raw stream mixed with a
+/// human-readable `session: <id>` line.
+#[derive(Default)]
+struct JsonSummaryObserver {
+    text: String,
+    input_tokens: u64,
+    output_tokens: u64,
+    rounds: u32,
+    stop_reason: Option<String>,
+}
+
+impl TurnObserver for JsonSummaryObserver {
+    fn on_text_delta(&mut self, delta: &str) {
+        self.text.push_str(delta);
+    }
+
+    fn on_event(&mut self, event: &AgentEvent) {
+        if let AgentEvent::Usage {
+            input_tokens,
+            output_tokens,
+            stop_reason,
+            ..
+        } = event
+        {
+            self.input_tokens += u64::from(*input_tokens);
+            self.output_tokens += u64::from(*output_tokens);
+            self.rounds += 1;
+            // Last-reported wins, same convention `braze-bench` uses when
+            // summarizing a multi-round turn: the final round's stop
+            // reason is the one that describes how the turn actually
+            // ended, not how an earlier round happened to end.
+            if stop_reason.is_some() {
+                self.stop_reason = stop_reason.clone();
+            }
+        }
+    }
+}
 use cli_args::{Cli, Command, PermissionsAction};
 use error::CliError;
 use terminal_prompt::TerminalConfirmationPrompt;
@@ -900,23 +942,44 @@ async fn run() -> Result<(), CliError> {
     .await?;
 
     match cli.command {
-        Command::Run { prompt, .. } => {
-            println!("session: {session}");
+        Command::Run {
+            prompt,
+            output_format,
+            ..
+        } => match output_format {
+            cli_args::OutputFormat::Plain => {
+                println!("session: {session}");
 
-            let mut stdout = std::io::stdout();
-            engine
-                .run_turn(
-                    &session,
-                    &prompt,
-                    &mut TextDeltaObserver(|text: &str| {
-                        use std::io::Write;
-                        print!("{text}");
-                        let _ = stdout.flush();
-                    }),
-                )
-                .await?;
-            println!();
-        }
+                let mut stdout = std::io::stdout();
+                engine
+                    .run_turn(
+                        &session,
+                        &prompt,
+                        &mut TextDeltaObserver(|text: &str| {
+                            use std::io::Write;
+                            print!("{text}");
+                            let _ = stdout.flush();
+                        }),
+                    )
+                    .await?;
+                println!();
+            }
+            cli_args::OutputFormat::Json => {
+                let mut summary = JsonSummaryObserver::default();
+                engine.run_turn(&session, &prompt, &mut summary).await?;
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "text": summary.text,
+                        "session_id": session.to_string(),
+                        "input_tokens": summary.input_tokens,
+                        "output_tokens": summary.output_tokens,
+                        "rounds": summary.rounds,
+                        "stop_reason": summary.stop_reason,
+                    })
+                );
+            }
+        },
         Command::Chat { tui: true, .. } => {
             // Candidates for the `/model` picker: every backend the
             // current config could actually build (credentials + model
@@ -1099,5 +1162,63 @@ mod tests {
         assert_eq!(&date[7..8], "-");
         let year: u32 = date[..4].parse().unwrap();
         assert!((2026..2100).contains(&year), "got: {date}");
+    }
+
+    /// `--output-format json`'s observer must collect exactly the text a
+    /// plain-mode `TextDeltaObserver` would have streamed, plus summed
+    /// usage across every round — the multi-round case is what a
+    /// tool-calling turn (not just a one-shot text reply) actually looks
+    /// like.
+    #[test]
+    fn json_summary_observer_accumulates_text_and_usage_across_rounds() {
+        let mut observer = JsonSummaryObserver::default();
+
+        observer.on_text_delta("hola ");
+        observer.on_text_delta("mundo");
+        observer.on_event(&AgentEvent::Usage {
+            input_tokens: 100,
+            output_tokens: 20,
+            stop_reason: Some("tool_use".to_string()),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        });
+        observer.on_event(&AgentEvent::ToolCallCompleted {
+            id: "1".to_string(),
+            result: braze_types::ToolResult {
+                tool_call_id: "1".to_string(),
+                content: "ok".to_string(),
+                is_error: false,
+            },
+        });
+        observer.on_event(&AgentEvent::Usage {
+            input_tokens: 150,
+            output_tokens: 5,
+            stop_reason: Some("end_turn".to_string()),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        });
+
+        assert_eq!(observer.text, "hola mundo");
+        assert_eq!(observer.input_tokens, 250);
+        assert_eq!(observer.output_tokens, 25);
+        assert_eq!(observer.rounds, 2);
+        // Last round's stop_reason wins, not the first's.
+        assert_eq!(observer.stop_reason.as_deref(), Some("end_turn"));
+        // A non-Usage event mirrored in between must not disturb the
+        // accumulated usage — this is what proves `on_event` filters by
+        // variant instead of just counting every call.
+    }
+
+    /// A turn with no tool calls at all (no `Usage` event ever reported —
+    /// theoretically possible if a backend never emits one) must not
+    /// panic or fabricate a stop reason; the JSON output should show
+    /// `null`, not a guessed value.
+    #[test]
+    fn json_summary_observer_defaults_are_empty_not_fabricated() {
+        let observer = JsonSummaryObserver::default();
+        assert_eq!(observer.text, "");
+        assert_eq!(observer.input_tokens, 0);
+        assert_eq!(observer.rounds, 0);
+        assert_eq!(observer.stop_reason, None);
     }
 }

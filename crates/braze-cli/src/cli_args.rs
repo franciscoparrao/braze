@@ -11,7 +11,21 @@
 //! crate never reimplements config loading, it only adds the final,
 //! highest-priority layer.
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+
+/// `braze run`'s output contract — `Plain` (default) streams text deltas
+/// to stdout exactly as before this flag existed (zero behavior change
+/// for existing scripts); `Json` suppresses streaming and instead prints
+/// one JSON object after the turn completes, for CI/scripting callers
+/// that want a single parseable result (final text, session id, summed
+/// token usage, stop reason) rather than a raw text stream mixed with a
+/// human-readable `session: <id>` line.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    #[default]
+    Plain,
+    Json,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -110,6 +124,10 @@ pub enum Command {
         /// semantics as `chat --supervised`.
         #[arg(long)]
         supervised: bool,
+        /// `plain` (default) streams text as before; `json` prints one
+        /// JSON object after the turn instead, for CI/scripting callers.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Plain)]
+        output_format: OutputFormat,
     },
     /// Inspect and reason about permission decisions across past sessions
     /// (E′ I.8, docs/harness-engineering-hooks-skills-2026-07-10.md).
