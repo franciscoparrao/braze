@@ -16,6 +16,7 @@ mod error;
 mod history;
 #[cfg(test)]
 mod protocol_check;
+mod rescue;
 
 pub use engine::{DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine, synthesize_orphan_repairs};
 pub use hooks::{EngineHook, PromptBudgetAuditHook};
