@@ -123,7 +123,10 @@ def main():
         sess = Path(args.sessions) / path_component(r['backend']) / path_component(tid) / f'rep{r["repetition"]}' / 'session'
         call = first_tool_call(sess) if sess.is_dir() else None
         if spec['category'] == 'irrelevance':
-            offline_pass, reason = (call is None), ('ok' if call is None else f'called:{call["name"]}')
+            if not sess.is_dir():
+                offline_pass, reason = False, 'session_missing'
+            else:
+                offline_pass, reason = (call is None), ('ok' if call is None else f'called:{call["name"]}')
         else:
             if not sess.is_dir():
                 offline_pass, reason = False, 'session_missing'
