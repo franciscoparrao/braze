@@ -1,11 +1,12 @@
 % Caption sugerido (el título va acá, nunca dentro de la figura):
 \caption{Harness-versus-scale curve. Pass rate on the 19-task suite
-(5 repetitions, $n{=}95$ per cell; error bars are 95\% Wilson
-confidence intervals) for four executor models of increasing scale,
-under four harness configurations: no scaffolding (baseline), a
-planning pre-round whose prose plan enters the context (+planner), a
-capable lead model that proactively opens each turn (+lead,
-gemma4:e4b), and their composition. The shaded band and dashed line
+(5 repetitions, $n{=}95$ per cell except the composed arm at 1B, see
+below; error bars are 95\% Wilson confidence intervals) for four
+executor models of increasing scale, under four harness
+configurations: no scaffolding (baseline), a planning pre-round whose
+prose plan enters the context (+planner), a capable lead model that
+proactively opens each turn (+lead, gemma4:e4b), and their
+composition. The shaded band and dashed line
 mark \texttt{gemma4:e4b}'s own solo pass rate (91.2\% [87.4, 94.0]\%,
 pooled $n{=}285$, pre-registered baseline): the \texttt{+lead} line
 sits inside that band at every executor scale, never distinguishably
@@ -20,4 +21,11 @@ is better read as the lead's capability routed efficiently than as an
 emergent property of the composition
 (Section~\ref{sec:curve}). The prose plan \emph{harms} at both
 extremes of the scale through the same empty-response degeneration
-mode, diagnosed and repaired in Section~\ref{sec:planner}.}
+mode, diagnosed in Section~\ref{sec:planner} --- yet the
+\texttt{+planner+lead} line tracks \texttt{+lead} at every scale, so
+the lead absorbs that damage entirely once it opens the turn. That
+composed cell at 1B is plotted over the 65 of its 95 runs that reached
+the inference server; the other 30 were lost to transport failures and
+scored 0/30, and plotting them would place the point at 61.1\%
+(Section~\ref{sec:curve} reports the correction and the pre-registered
+re-run that will supersede it).}

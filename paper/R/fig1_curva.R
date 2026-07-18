@@ -35,9 +35,37 @@ leer_sweep <- function(path) {
     select(backend, passed)
 }
 
+# Runs perdidos por TRANSPORTE (el request nunca llegó al servidor, o el
+# stream murió en vuelo): mismo criterio de docs/emse-r2-analysis-
+# 2026-07-17.md § 4, aplicado acá tras docs/curve-transport-audit-
+# 2026-07-18.md. Son filas MUERTAS, no corridas degradadas: el brazo
+# 1B+plan+lead perdió 30/95 así (las 30 puntúan 0/30) y sin excluirlas
+# la celda marca 61.1% en vez de 89.2%, invirtiendo la lectura. Los
+# empty-response genuinos NO califican.
+#
+# Se excluye SOLO en esa celda, la única con contaminación estructural:
+# las otras cuatro del sweep tienen 1-4 runs de transporte y su magnitud
+# se disclosa en § Threats (máx +3.0pp, dentro de sus propios Wilson) —
+# excluir 1-4 corridas de celdas con intervalos de ~10pp es contabilidad,
+# no corrección.
+CELDA_CONTAMINADA <-
+  "ollama:llama3.2:1b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b"
+
+leer_sweep_limpio <- function(path, solo_brazo) {
+  r <- fromJSON(path)$results |> as_tibble()
+  err <- ifelse(is.na(r$run_error), "", as.character(r$run_error))
+  transporte <- !is.na(r$failure_cause) &
+    r$failure_cause == "model_backend_error" &
+    (r$wall_time_ms < 1000 |
+       grepl("request to model backend failed|stream failed", err)) &
+    r$backend %in% solo_brazo
+  r[!transporte, ] |> select(backend, passed)
+}
+
 curva <- bind_rows(
   leer_sweep("docs/sweep-curva-multiescala-2026-07-10.qwen.json"),
-  leer_sweep("docs/sweep-curva-multiescala-2026-07-10.partial-1b.json") |>
+  leer_sweep_limpio("docs/sweep-curva-multiescala-2026-07-10.partial-1b.json",
+                    solo_brazo = CELDA_CONTAMINADA) |>
     filter(startsWith(backend, "ollama:llama3.2:1b"))
 )
 
@@ -77,7 +105,9 @@ datos <- curva |>
                    labels = c("baseline", "+planner", "+lead", "+planner+lead"))
   )
 
-stopifnot(nrow(datos) == 16, all(datos$n == 95))
+# 15 celdas intactas a n=95; la contaminada queda en 65 tras excluir sus
+# 30 filas muertas por transporte (ver comentario de CELDA_CONTAMINADA).
+stopifnot(nrow(datos) == 16, sum(datos$n == 95) == 15, sum(datos$n == 65) == 1)
 
 # `gemma4:e4b` solo — referencia horizontal, no forma parte del eje de
 # escala de executors (no es una fila de la curva, es el techo del
