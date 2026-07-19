@@ -1051,6 +1051,21 @@ async fn run() -> Result<(), CliError> {
                 }
             }
 
+            // `/skills` picker: the same discovery the engine's registry
+            // ran inside `build_engine`, repeated here for the picker's
+            // candidate list (discovery is cheap — frontmatter only, no
+            // bodies) — the TUI crate takes plain data, not a
+            // `SkillRegistry` (it doesn't depend on braze-skills).
+            let skill_candidates: Vec<braze_tui::SkillCandidate> =
+                braze_skills::SkillRegistry::discover(&config.skills.paths)
+                    .stubs()
+                    .iter()
+                    .map(|stub| braze_tui::SkillCandidate {
+                        name: stub.name.clone(),
+                        description: stub.description.clone(),
+                    })
+                    .collect();
+
             // The `/model` factory: same `build_engine` composition as
             // startup, over a per-call clone of the resolved config with
             // the requested `backend[:modelo]` layered on top — split on
@@ -1126,6 +1141,7 @@ async fn run() -> Result<(), CliError> {
                 tui_theme,
                 engine_factory,
                 model_candidates,
+                skill_candidates,
             )
             .await?;
         }

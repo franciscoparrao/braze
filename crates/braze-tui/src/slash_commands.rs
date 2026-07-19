@@ -20,6 +20,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "cambiar de backend/modelo (picker, o /model backend[:modelo])",
     },
     SlashCommand {
+        name: "skills",
+        description: "listar las skills disponibles e insertar una mención $skill",
+    },
+    SlashCommand {
         name: "quit",
         description: "salir de braze",
     },

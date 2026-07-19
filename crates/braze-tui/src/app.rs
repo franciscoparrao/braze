@@ -24,8 +24,8 @@ use ratatui_textarea::{CursorMove, TextArea};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::EngineFactory;
 use crate::approval::ApprovalRequest;
+use crate::{EngineFactory, SkillCandidate};
 use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len};
 use crate::error::TuiError;
 use crate::history_cell::{
@@ -94,6 +94,7 @@ pub async fn run(
     theme: Theme,
     engine_factory: EngineFactory,
     model_candidates: Vec<String>,
+    skill_candidates: Vec<SkillCandidate>,
 ) -> Result<(), TuiError> {
     App::new(
         Arc::new(engine),
@@ -105,6 +106,7 @@ pub async fn run(
         theme,
         engine_factory,
         model_candidates,
+        skill_candidates,
     )
     .run(terminal)
     .await
@@ -163,6 +165,16 @@ enum ComposerPopup {
     /// old messages) the tail of the list is no less relevant than the
     /// head, so capping at open time would hide arbitrary models.
     Model { specs: Vec<String>, selected: usize },
+    /// `/skills`: the discovered skills to pick from (see
+    /// `App::skill_candidates`) — accepting inserts the `$name` mention
+    /// into the composer for the *next* message, it never loads
+    /// anything by itself (loading stays the engine's explicit-mention
+    /// trigger, D′). Windows over the full list, same reasoning as
+    /// `Model`.
+    Skills {
+        candidates: Vec<SkillCandidate>,
+        selected: usize,
+    },
 }
 
 struct App {
@@ -233,6 +245,12 @@ struct App {
     /// — same accepted staleness as `mentionable_files`; `/model <spec>`
     /// reaches anything not (or no longer) on this list.
     model_candidates: Vec<String>,
+    /// The skills the `/skills` picker offers — discovered once at
+    /// startup by `braze-cli` from the same `[skills].paths` the
+    /// engine's registry was built from. Same accepted staleness as
+    /// `model_candidates`; typing a `$mention` by hand reaches a skill
+    /// added mid-session.
+    skill_candidates: Vec<SkillCandidate>,
     /// A `/model` switch is in flight (the factory is rebuilding the
     /// engine in a background task) — gates submissions and further
     /// switches the same way `turn_running` gates submissions, since a
@@ -284,6 +302,7 @@ impl App {
         theme: Theme,
         engine_factory: EngineFactory,
         model_candidates: Vec<String>,
+        skill_candidates: Vec<SkillCandidate>,
     ) -> Self {
         let (update_tx, update_rx) = mpsc::unbounded_channel();
         let (switch_tx, switch_rx) = mpsc::unbounded_channel();
@@ -322,6 +341,7 @@ impl App {
             current_turn: None,
             engine_factory,
             model_candidates,
+            skill_candidates,
             switching_model: false,
             switch_tx,
             switch_rx,
@@ -532,7 +552,9 @@ impl App {
             // "accept this selection" and discarding it.
             let is_queryless = matches!(
                 popup,
-                ComposerPopup::Backtrack { .. } | ComposerPopup::Model { .. }
+                ComposerPopup::Backtrack { .. }
+                    | ComposerPopup::Model { .. }
+                    | ComposerPopup::Skills { .. }
             );
             match key.code {
                 KeyCode::Up => {
@@ -652,8 +674,8 @@ impl App {
             self.popup = None;
             return;
         }
-        // A `Backtrack`/`Model` popup isn't driven by a `/`/`@` cursor
-        // trigger at all (they open from `handle_idle_escape` /
+        // A `Backtrack`/`Model`/`Skills` popup isn't driven by a `/`/`@`
+        // cursor trigger at all (they open from `handle_idle_escape` /
         // `run_slash_command`, with an empty composer) — re-deriving
         // from cursor state on every key would immediately close it
         // again the moment `on_key` calls this at the end of the very
@@ -661,7 +683,9 @@ impl App {
         // `accept_popup_selection`/an explicit Esc close them.
         if matches!(
             self.popup,
-            Some(ComposerPopup::Backtrack { .. }) | Some(ComposerPopup::Model { .. })
+            Some(ComposerPopup::Backtrack { .. })
+                | Some(ComposerPopup::Model { .. })
+                | Some(ComposerPopup::Skills { .. })
         ) {
             return;
         }
@@ -728,6 +752,7 @@ impl App {
             ComposerPopup::Mention { matches, .. } => matches.len(),
             ComposerPopup::Backtrack { messages, .. } => messages.len(),
             ComposerPopup::Model { specs, .. } => specs.len(),
+            ComposerPopup::Skills { candidates, .. } => candidates.len(),
         };
         if len == 0 {
             return;
@@ -736,7 +761,8 @@ impl App {
             ComposerPopup::Slash { selected, .. }
             | ComposerPopup::Mention { selected, .. }
             | ComposerPopup::Backtrack { selected, .. }
-            | ComposerPopup::Model { selected, .. } => selected,
+            | ComposerPopup::Model { selected, .. }
+            | ComposerPopup::Skills { selected, .. } => selected,
         };
         *selected = (*selected as isize + delta).rem_euclid(len as isize) as usize;
     }
@@ -788,6 +814,20 @@ impl App {
                     return Ok(());
                 };
                 self.start_model_switch(spec, terminal)
+            }
+            ComposerPopup::Skills {
+                candidates,
+                selected,
+            } => {
+                if let Some(candidate) = candidates.into_iter().nth(selected) {
+                    // Autocomplete only, same contract as `Slash`/
+                    // `Mention`: the `$mention` lands in the composer for
+                    // the user to build their message around — a separate
+                    // Enter submits it, and only then does the engine's
+                    // explicit-mention trigger actually load the skill.
+                    self.composer.insert_str(format!("${} ", candidate.name));
+                }
+                Ok(())
             }
         }
     }
@@ -1000,12 +1040,35 @@ impl App {
                 Some(spec) => self.start_model_switch(spec.to_string(), terminal),
                 None => self.open_model_picker(terminal),
             },
+            "skills" => self.open_skills_picker(terminal),
             "quit" | "exit" => {
                 self.should_quit = true;
                 Ok(())
             }
             _ => Ok(()),
         }
+    }
+
+    /// Opens the `/skills` picker over `skill_candidates` — a
+    /// `NoticeCell` pointing at the config knob instead when discovery
+    /// found nothing (no `[skills].paths` configured, or the paths hold
+    /// no readable `SKILL.md`).
+    fn open_skills_picker(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        if self.skill_candidates.is_empty() {
+            return self.commit_cell(
+                &NoticeCell {
+                    message: "no hay skills descubiertas — configura [skills].paths en config.toml"
+                        .to_string(),
+                    theme: self.theme,
+                },
+                terminal,
+            );
+        }
+        self.popup = Some(ComposerPopup::Skills {
+            candidates: self.skill_candidates.clone(),
+            selected: 0,
+        });
+        Ok(())
     }
 
     /// Opens the `/model` picker over `model_candidates` — a
@@ -1747,6 +1810,38 @@ fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
                     // there's more above/below the 3 visible rows.
                     Line::from(Span::styled(
                         format!("⇄ {spec}  ({}/{})", i + 1, specs.len()),
+                        style,
+                    ))
+                })
+                .collect()
+        }
+        ComposerPopup::Skills {
+            candidates,
+            selected,
+        } => {
+            // Same windowing as `Model` — the skill list has no query
+            // to narrow it, and its tail is no less relevant than its
+            // head.
+            let start = popup_window_start(*selected, candidates.len(), POPUP_MAX_VISIBLE);
+            candidates
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(POPUP_MAX_VISIBLE)
+                .map(|(i, candidate)| {
+                    let style = if i == *selected {
+                        selected_style
+                    } else {
+                        Style::default()
+                    };
+                    Line::from(Span::styled(
+                        format!(
+                            "${}  {}  ({}/{})",
+                            candidate.name,
+                            candidate.description,
+                            i + 1,
+                            candidates.len()
+                        ),
                         style,
                     ))
                 })

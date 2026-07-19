@@ -1,9 +1,10 @@
 ---
 source: crates/braze-tui/src/history_cell.rs
+assertion_line: 823
 expression: "render_to_buffer(&HelpCell, 50)"
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 50, height: 19 },
+    area: Rect { x: 0, y: 0, width: 50, height: 23 },
     content: [
         "Atajos                                            ",
         "Enter enviar · Ctrl+J salto de línea              ",
@@ -19,18 +20,22 @@ Buffer {
         "/help  este mensaje                               ",
         "/model  cambiar de backend/modelo (picker; /model ",
         "backend[:modelo] directo)                         ",
+        "/skills  listar las skills disponibles e insertar ",
+        "una mención $skill                                ",
         "/quit, /exit  salir de braze                      ",
         "                                                  ",
         "Menciones                                         ",
         "@ seguido de parte de un nombre de archivo abre un",
         "buscador                                          ",
+        "$ seguido del nombre de una skill la carga para   ",
+        "ese mensaje                                       ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 8, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 9, y: 16, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 9, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

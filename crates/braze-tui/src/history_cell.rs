@@ -367,10 +367,12 @@ impl HistoryCell for HelpCell {
             Line::from(
                 "/model  cambiar de backend/modelo (picker; /model backend[:modelo] directo)",
             ),
+            Line::from("/skills  listar las skills disponibles e insertar una mención $skill"),
             Line::from("/quit, /exit  salir de braze"),
             Line::from(""),
             Line::from(Span::styled("Menciones", heading_style)),
             Line::from("@ seguido de parte de un nombre de archivo abre un buscador"),
+            Line::from("$ seguido del nombre de una skill la carga para ese mensaje"),
         ])
     }
 }

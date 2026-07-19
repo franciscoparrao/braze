@@ -27,6 +27,17 @@ mod theme;
 
 pub use approval::{ApprovalRequest, ChannelConfirmationPrompt};
 pub use question::{ChannelQuestionPrompt, QuestionRequest};
+
+/// One entry the `/skills` picker offers: the normalized skill name (as
+/// `$name` mentions resolve it) and its frontmatter description. Plain
+/// data — this crate deliberately doesn't depend on `braze-skills`;
+/// `braze-cli` maps the discovered `SkillStub`s into these at startup,
+/// the same way `model_candidates` are computed once and passed in.
+#[derive(Debug, Clone)]
+pub struct SkillCandidate {
+    pub name: String,
+    pub description: String,
+}
 pub use error::TuiError;
 pub use theme::Theme;
 
@@ -86,6 +97,7 @@ pub async fn run(
     theme: Theme,
     engine_factory: EngineFactory,
     model_candidates: Vec<String>,
+    skill_candidates: Vec<SkillCandidate>,
 ) -> Result<(), TuiError> {
     print_banner(&theme, &status_line);
     let mut guard = terminal::setup()?;
@@ -100,6 +112,7 @@ pub async fn run(
         theme,
         engine_factory,
         model_candidates,
+        skill_candidates,
     )
     .await
 }
