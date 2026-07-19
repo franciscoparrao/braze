@@ -2619,10 +2619,17 @@ tokens 2768↑/29↓` visible a 160 y (post-fit_right) a 100 columnas,
 tipear `/comando` lo consume el popup de sugerencias como
 autocompletado — cerrar con Esc antes de Enter (o Enter doble).
 
-**Pendiente de esta fase**: verificación en vivo del overlay `ask_user`
-con un modelo que efectivamente llame la tool (los unit tests cubren
-canal y flujo; el overlay se verificó solo por render de código), y las
-celdas de compactación (siguen siendo diferido explícito).
+**Pendiente de esta fase**: ~~verificación en vivo del overlay
+`ask_user`~~ (CERRADO 2026-07-19: pty contra Nitro `gpt-oss:20b`, el
+modelo llamó la tool real en dos turnos — overlay con opciones
+numeradas, respuesta por tecla directa `2` llegó al modelo como "The
+user chose:", Esc llegó como "did not answer"; verificado sobre el
+stream crudo del pty Y el rollout log, 10/10 checks. Nota de harness:
+con el takeover el viewport ancla al fondo y `insert_before` scrollea
+por región — pyte no reproduce ese scroll, así que los asserts de
+contenido commiteado van sobre los bytes crudos del pty o el rollout
+log, no sobre la pantalla reconstruida). Queda solo: celdas de
+compactación (diferido explícito).
 
 ### Rediseño visual (2026-07-19, mismo día)
 
