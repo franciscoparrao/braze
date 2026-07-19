@@ -121,6 +121,12 @@ pub struct TaskDef {
     /// comportamiento ni de fingerprint.
     #[serde(default)]
     pub noise_tools: usize,
+    /// Tools sintéticas OBJETIVO declaradas por la tarea — el fixture del
+    /// ancla externa BFCL (ver `synthetic.rs` y
+    /// docs/bfcl-anchor-design-2026-07-18.md). Vacío (el default) no
+    /// agrega nada: las suites existentes no cambian.
+    #[serde(default)]
+    pub synthetic_tools: Vec<crate::synthetic::SyntheticToolDef>,
     /// Experimental Paper 2 memory condition. When `memory_file` is set,
     /// this labels what is being injected (`"procedural"`, `"summary"`,
     /// `"episodic"`, `"human-playbook"`, ...). It is serialized into

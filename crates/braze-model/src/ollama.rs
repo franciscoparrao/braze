@@ -18,6 +18,32 @@ use crate::ollama_wire::{
 
 const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 
+/// Env var del retry opt-in de transporte: número de REINTENTOS (no de
+/// intentos totales) tras un fallo del `send()`. Ausente, vacía o
+/// no-numérica ⇒ 0 (off) — el default histórico, sin cambio de
+/// comportamiento para nadie que no lo pida.
+const TRANSPORT_RETRIES_ENV: &str = "BRAZE_OLLAMA_TRANSPORT_RETRIES";
+
+fn transport_retries_from_env() -> u32 {
+    std::env::var(TRANSPORT_RETRIES_ENV)
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(0)
+        .min(10)
+}
+
+/// Backoff del retry de transporte: 1s, 4s, luego 15s plano — pensado
+/// para ráfagas de red degradada (segundos a decenas de segundos), no
+/// para outages largos; con el cap de 10 reintentos el peor caso por
+/// request es ~2.5 min, bien por debajo del timeout de tarea del bench.
+fn transport_retry_backoff(attempt: u32) -> std::time::Duration {
+    match attempt {
+        1 => std::time::Duration::from_secs(1),
+        2 => std::time::Duration::from_secs(4),
+        _ => std::time::Duration::from_secs(15),
+    }
+}
+
 /// Default context window requested via `options.num_ctx`. Deliberately
 /// well above Ollama's own Modelfile default (commonly 2048-4096) — an
 /// agentic turn (system prompt + tool stubs + growing history) can exceed
@@ -222,14 +248,14 @@ impl ModelBackend for OllamaBackend {
         // Circuit breaker keyed by destination+model (2026-07-17,
         // recalibrated per AUDITORIA-2026-07-v8 K-1) — see
         // `AnthropicBackend::complete`'s identical comment. Ollama gets
-        // no per-call retry (H-19's own dictamen: hammering a saturated
-        // local backend doesn't help), but tracking cross-call failure
-        // state is still useful — a sweep against an unreachable Nitro
-        // shouldn't pay a fresh connect-timeout on every subsequent
-        // task once the outage is established. The guard travels into
-        // `StreamCtx`: success is only recorded once the stream
-        // terminates cleanly, so a mid-generation death (the documented
-        // ~2% Nitro failure mode) counts as a failure too.
+        // no per-call HTTP-status retry (H-19's own dictamen: hammering
+        // a saturated local backend doesn't help), but tracking
+        // cross-call failure state is still useful — a sweep against an
+        // unreachable Nitro shouldn't pay a fresh connect-timeout on
+        // every subsequent task once the outage is established. The
+        // guard travels into `StreamCtx`: success is only recorded once
+        // the stream terminates cleanly, so a mid-generation death (the
+        // documented ~2% Nitro failure mode) counts as a failure too.
         let breaker_key = format!(
             "ollama:{}:{}",
             self.base_url.trim_end_matches('/'),
@@ -237,15 +263,48 @@ impl ModelBackend for OllamaBackend {
         );
         let guard = crate::circuit_breaker::acquire(&breaker_key)?;
 
+        // Retry opt-in de TRANSPORTE (materializado tras el incidente
+        // del ancla BFCL 2026-07-18: dos sweeps contaminados por ráfagas
+        // de "error sending request" con la LAN degradada a RTT ~100ms).
+        // Solo reintenta el fallo del `send()` — la fase donde CERO
+        // bytes del stream se han consumido, así que reintentar es
+        // semánticamente inocuo. Un HTTP de error o un corte a mitad de
+        // stream NUNCA se reintenta acá. Off por default:
+        // `BRAZE_OLLAMA_TRANSPORT_RETRIES` (0 = off). Composición con el
+        // breaker (merge 2026-07-19): el retry corre POR DEBAJO del
+        // guard, igual que `send_with_retry` en Anthropic/OpenRouter —
+        // el breaker observa el desenlace FINAL de la llamada, no cada
+        // intento transitorio.
         let send_result = async {
-            let response = self
-                .client
-                .post(url)
-                .header("content-type", "application/json")
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| ModelError::Request(format!("ollama request failed: {e}")))?;
+            let max_attempts = 1 + transport_retries_from_env();
+            let mut attempt = 0u32;
+            let response = loop {
+                attempt += 1;
+                let sent = self
+                    .client
+                    .post(url.clone())
+                    .header("content-type", "application/json")
+                    .json(&body)
+                    .send()
+                    .await;
+                match sent {
+                    Ok(r) => break r,
+                    Err(e) if attempt < max_attempts => {
+                        let delay = transport_retry_backoff(attempt);
+                        tracing::warn!(
+                            attempt,
+                            max_attempts,
+                            delay_ms = delay.as_millis() as u64,
+                            error = %e,
+                            "ollama transport error on request send; retrying"
+                        );
+                        tokio::time::sleep(delay).await;
+                    }
+                    Err(e) => {
+                        return Err(ModelError::Request(format!("ollama request failed: {e}")));
+                    }
+                }
+            };
 
             if !response.status().is_success() {
                 return Err(http_error_to_model_error(response, "ollama").await);
@@ -813,5 +872,34 @@ mod tests {
             matches!(err, ModelError::Request(_)),
             "expected Request, got {err:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod transport_retry_tests {
+    use super::*;
+
+    #[test]
+    fn backoff_escalates_then_plateaus() {
+        assert_eq!(transport_retry_backoff(1).as_secs(), 1);
+        assert_eq!(transport_retry_backoff(2).as_secs(), 4);
+        assert_eq!(transport_retry_backoff(3).as_secs(), 15);
+        assert_eq!(transport_retry_backoff(9).as_secs(), 15);
+    }
+
+    #[test]
+    fn env_absent_or_garbage_means_off_and_values_are_capped() {
+        // Sin tocar el env global del proceso de tests: se valida la
+        // cadena parse/cap con la misma lógica sobre valores simulados.
+        let parse = |v: Option<&str>| -> u32 {
+            v.and_then(|s| s.trim().parse::<u32>().ok())
+                .unwrap_or(0)
+                .min(10)
+        };
+        assert_eq!(parse(None), 0);
+        assert_eq!(parse(Some("")), 0);
+        assert_eq!(parse(Some("abc")), 0);
+        assert_eq!(parse(Some("4")), 4);
+        assert_eq!(parse(Some("99")), 10);
     }
 }

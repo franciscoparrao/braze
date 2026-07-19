@@ -309,6 +309,7 @@ mod tests {
             expect_max_tokens: None,
             expect_max_cost_usd: None,
             noise_tools: 0,
+            synthetic_tools: Vec::new(),
             memory_condition: None,
             memory_file: None,
             memory_budget_tokens: None,

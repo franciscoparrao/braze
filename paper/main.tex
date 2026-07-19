@@ -75,7 +75,11 @@ localizes the failure to the plan's \emph{delivery} format and repairs
 the harm at both scales --- though no delivery clears the
 pre-registered adoption bar (the largest movement, +12\,pp on a 3B
 executor via a typed task list, has an interval marginally crossing
-zero). We further isolate the lead's
+zero). Inspecting the served chat templates locates that failure
+outside the models entirely: a plan injected in the assistant role is
+rendered as a turn to continue rather than a question to answer, which
+is why the damage is scale-independent and why changing the role
+repairs it. We further isolate the lead's
 mechanism experimentally (proactive opening, not reactive escalation)
 and show that two-level tool deferral cuts prompt tokens $5$--$6\times$
 at a real, scale-dependent correctness cost whose diagnosed mechanism
@@ -217,7 +221,10 @@ around the actual contribution.
   \item \textbf{A negative result diagnosed and repaired under
     pre-registration} (Fig.~\ref{fig:rescate}): the planner's collapse
     (both extremes at 49\%) was a delivery bug, not a property of
-    planning; the pre-registered iteration eliminates the harm at both
+    planning --- and the served chat templates locate the bug
+    precisely, in the prefill convention that turns an assistant-role
+    injection into a continuation rather than a question. The
+    pre-registered iteration eliminates the harm at both
     scales, yet the committed criterion, applied literally, still
     declines to adopt any delivery (the largest movement, +12\,pp at
     3B via a typed task list, marginally crosses zero) --- a verdict
@@ -745,23 +752,48 @@ round. At the scale ceiling, qwen3.5-coder collapses from 98\% to 49\%,
 and 35 of its 48 failures are the identical empty-response signature.
 A thinking model handed "its own" plan back as conversational text
 stops yielding usable output in exactly the way the smallest model
-does; scale does not protect against this failure mode, which is
-consistent with a \emph{delivery-format} failure rather than a
-capability one (\S\ref{sec:planner} probes this signature at the token
-level and bounds what it can and cannot establish). (7B is the informative
+does. Scale does not protect against this failure mode because the
+failure is not the executor's: the chat templates these models are
+served under treat a trailing assistant message as a \emph{prefill} to
+continue rather than a turn to answer, so neither model was asked for
+a fresh response at all (\S\ref{sec:planner} shows this in the
+templates themselves). (7B is the informative
 exception --- see below.) We diagnose and repair this degeneration under
 pre-registration in \S\ref{sec:planner}.
 
-\paragraph{Composing lead and planner inherits the gradient.} When both
-levers are active, the lead's ability to rescue the planner's damage
-itself scales with the executor: at 1B the composition (61\%) still
-trails the lead alone (89\%) by $-28$\,pp --- the damage persists even
-with a capable model opening the turn --- while at 3B the gap nearly
-closes (88\% vs.\ 92\%), and by 7B and the ceiling the two arms are
-statistically indistinguishable (95\%~=~95\%; 92\% vs.\ 94\%). The lead
-is a recovery mechanism with finite capacity: it cannot fully repair an
-executor degenerating badly enough, but it recovers what there is to
-recover once the executor is strong enough not to need full recovery.
+\paragraph{The lead absorbs the planner's damage at every scale.} When
+both levers are active, the composition is statistically
+indistinguishable from the lead alone at all four executor scales:
+$-0.2$\,pp at 1B (89.2\% vs.\ 89.5\%), $-3.2$\,pp at 3B (88\% vs.\
+92\%), $0.0$\,pp at 7B (95\%~=~95\%), and $-2.1$\,pp at the ceiling
+(92\% vs.\ 94\%) --- every Newcombe interval crosses zero. A lever that
+costs an executor its entire pass rate on its own (0/95 at 1B) costs
+nothing measurable once a capable model opens the turn. This is the
+pinned-ceiling reading again from a different angle: with the lead
+attached the system sits at the lead's own ceiling, and what the
+executor is doing --- including following a plan delivered in a format
+that destroys it unassisted --- stops being the binding constraint.
+
+The 1B cell in that comparison corrects an earlier version of this
+analysis, and we report the correction rather than only its result. The
+value originally computed for the composed arm at 1B was 61.1\%
+(58/95), which supported the opposite reading: that the lead only
+partially repairs the damage at the smallest scale. An audit of the
+sweep's own logs (\texttt{docs/curve-transport-audit-2026-07-18.md})
+found that 30 of that cell's 95 runs died of transport failures --- the
+engine logged ``planner call failed; proceeding without a plan'' with a
+connection error in 30 distinct sessions, and those 30 runs scored
+0/30, making them dead rows rather than degraded ones. The 65 runs that
+reached the server score 58/65 = 89.2\% [79.4, 94.7]\%. The exclusion
+criterion is the one already defined for a different sweep
+(\S\ref{sec:threats}), applied here unchanged rather than tailored to
+this cell; the other fifteen cells of this sweep carry at most four such
+runs each and would move by at most 3.0\,pp, well inside their own
+intervals (\S\ref{sec:threats}). A clean re-run of this cell alongside
+an anchor cell is pre-registered
+(\texttt{docs/rerun-contaminated-cells-design-2026-07-18.md}) and
+pending inference-node availability; until it runs we report the
+transport-corrected number together with this provenance.
 
 \paragraph{The 7B exception is informative, not noise.} 7B is the only
 scale where the (undamaged, pre-iteration) prose plan helps: baseline
@@ -946,23 +978,62 @@ same degeneration signature at \emph{both} ends of the executor scale
 failures empty), converting a scale-specific curiosity into a mechanism
 claim: handing a model its own plan back as conversational text
 reliably yields turns with no usable output, independent of how
-capable the model is. A token-level probe of the already-collected
-runs sharpens what that signature is and is not: the ``empty''
-responses are not literally silent --- the serving layer reports
-44--619 generated tokens (median 74 on the ceiling model, 272 on the
-1B) for turns whose surfaced text and tool calls are empty. Because
-the 1B executor has no separate reasoning channel, reasoning-budget
-exhaustion in a thinking-tuned model cannot explain both ends of the
-scale; but the probe does shift the honest description from ``the
-model goes silent'' to ``the turn's generation surfaces in no usable
-channel,'' and a serving- or template-layer contribution --- the stack
-mishandling an injected assistant-role message --- is not excluded by
-our data, since the repair below (re-rendering as user-role context)
-is exactly what would also fix such an artifact. We therefore state
-the delivery-format mechanism as \emph{consistent with} the evidence
-rather than established, and name the discriminating experiment (raw
-response logging separating reasoning-channel consumption from truly
-empty completions) as future work.
+capable the model is.
+
+\paragraph{The mechanism is the chat template's prefill convention, not
+the model's disposition.} An earlier version of this paper attributed
+that signature to the executor --- a small model ``going silent'' when
+handed its own plan. Two checks against material we already had, run
+after a reviewer asked us to exclude cheaper explanations, relocate the
+mechanism from the model to the interface between the harness and the
+serving layer.
+
+The first rules out the obvious alternative. The engine emits a warning
+whenever a completion stops because it exhausted its token budget
+(\texttt{stop\_reason} of \texttt{length} or \texttt{max\_tokens}); that
+warning fires three times in the whole 1B slice and never in the qwen
+slice, while the empty-response turns generated 47--594 and 44--619
+tokens respectively against a budget of 4{,}096. Budget exhaustion ---
+including the reasoning-channel variant plausible for a thinking-tuned
+model --- is therefore not what produced these turns
+(\texttt{docs/curve-transport-audit-2026-07-18.md}).
+
+The second identifies what did. In the original design a planned turn
+renders as \texttt{[user: task, assistant: plan]}, so the last message
+before generation carries the assistant role --- and chat templates
+treat that case as a \emph{prefill}. Inspecting the templates the
+serving layer actually applies (\texttt{ollama show --template};
+\texttt{docs/empty-response-template-probe-partA-2026-07-18.md}) makes
+this explicit rather than inferred. Llama~3.2's template emits its
+end-of-turn token only when the assistant message is \emph{not} last
+(\texttt{\{\{ if not \$last \}\}<|eot\_id|>\{\{ end \}\}}), and
+Qwen~2.5's states the same rule from the other side: the generation
+header is emitted \texttt{\{\{ if and (ne .Role "assistant") \$last
+\}\}} --- if and only if the last message is not the assistant's. Under
+the original delivery, then, neither model was asked to answer. Each
+was asked to \emph{continue} a plan that was already complete, inside a
+turn the template deliberately left open. The user-role delivery of the
+repair below closes that turn and opens a fresh one, which is why it
+works, and why it works at both ends of the scale.
+
+This reframes the finding rather than weakening it. What
+\S\ref{sec:curve} measures as a scale-independent collapse is not a
+claim about what small models do with plans; it is a claim about what
+happens when a harness injects context in the assistant role against a
+template family whose prefill convention is close to universal. That is
+both more actionable --- any harness can check its own templates with
+one command --- and more portable, since it predicts the same failure
+for models we never tested. Two limits are worth stating. The templates
+of \texttt{qwen3.5-coder} and \texttt{gemma4:e4b} are rendered by
+built-in Ollama renderers rather than inspectable Go templates, so the
+documentary evidence covers two of the three executors that exhibited
+the collapse, and we do not extrapolate to the ceiling model. And while
+prefill explains why the model was not asked for a fresh answer, it
+does not by itself account for where those 44--619 generated tokens
+went; a behavioural probe of matched assistant-last and user-last
+requests is pre-registered
+(\texttt{docs/empty-response-template-probe-design-2026-07-18.md}) and
+pending.
 
 The pre-registered iteration (commit \texttt{e8c7d3f}) changed exactly
 two things: the plan is now delivered as \emph{user}-role context
@@ -1263,17 +1334,22 @@ that add \emph{capability} early in a turn --- a stronger model opening
 the first rounds, decoder-level syntax control for the weakest
 executor --- either help or are neutral; levers that add \emph{context}
 --- a plan, a tool inventory --- stop harming, and at some scales
-help, only when delivered in a format the executor will not misread as
-something else, and that correct format is itself scale-dependent. A capable model needs its own plan
-rendered in a role distinct from its voice; a small model needs the
-same guidance as re-injected structured state, not prose to
-re-interpret each round. Naively, one might expect "more context helps
-more capable models less" as a smooth function of scale; what we
-observe instead is closer to a delivery-format threshold that a model
-either clears or does not, with catastrophic failure --- not diminishing
-returns --- on the wrong side of it. This is why the harness-vs-scale
-curve of \S\ref{sec:curve} is not one curve but two, moving in opposite
-directions from the same design intention.
+help, only when delivered in a format that survives the trip through
+the serving layer, and the failure when it does not is
+scale-independent. A plan injected in the assistant role is not read
+as guidance by any executor we tested, small or large, because the
+chat template renders it as a turn to continue rather than a question
+to answer (\S\ref{sec:planner}); re-delivered as user-role context, or
+as re-injected structured state, the same content stops doing damage.
+Naively, one might expect "more context helps more capable models
+less" as a smooth function of scale; what we observe instead is a
+delivery-format cliff that has nothing to do with scale on one side of
+it and ordinary diminishing returns on the other. This is why the
+harness-vs-scale curve of \S\ref{sec:curve} is not one curve but two,
+moving in opposite directions from the same design intention --- and
+why the more useful lesson for a harness author is to check what the
+serving layer does with each role before attributing a failure to the
+model.
 
 \paragraph{A harness for small models needs to make its constraints
 legible, not just enforce them.} \S\ref{sec:mechanism}'s reactive
@@ -1480,6 +1556,33 @@ binary and configuration but not necessarily the same thermal/load
 session on the inference node, so cross-slice latency comparisons are
 read as orders of magnitude rather than precise deltas.
 
+A third audit --- this one prompted by an unrelated infrastructure
+incident months after collection, and applying the criterion above
+unchanged to a sweep it was not designed for --- found that the same
+failure mode had reached the scale-curve sweep itself, concentrated in
+one cell (\texttt{docs/curve-transport-audit-2026-07-18.md}). The
+composed planner-and-lead arm at 1B lost 30 of 95 runs to transport
+failures, which moved that cell from 89.2\% to a reported 61.1\% and,
+with it, the interpretation of the composition at the smallest scale
+(\S\ref{sec:curve} reports the correction, its provenance, and the
+pre-registered re-run that will supersede it). The remaining fifteen
+cells of that sweep carry between zero and four such runs: applying the
+same exclusion would move \texttt{qwen2.5:3b}'s baseline by
+$+3.0$\,pp, \texttt{qwen3.5-coder}'s by $+2.1$\,pp,
+\texttt{qwen2.5:7b}'s by $+0.9$\,pp and \texttt{qwen3.5-coder+lead}'s
+by $+1.0$\,pp, each well inside its own Wilson interval and changing no
+comparison in this paper; the other eleven cells are unaffected. We
+report those magnitudes rather than restate the cells, because
+excluding one to four runs from cells whose intervals span ten points
+is bookkeeping, while excluding a third of a cell that scored zero on
+the excluded portion is not. Both readings are recoverable from the
+committed raw data either way. The broader lesson we take from three
+separate audits finding the same failure mode is that a transport
+error and a model failure are easy to conflate at analysis time unless
+the harness distinguishes them at collection time; the retry and
+logging path added afterwards
+(\texttt{BRAZE\_OLLAMA\_TRANSPORT\_RETRIES}) exists for that reason.
+
 \paragraph{Multiplicity (conclusion validity).} This paper reports on
 the order of twenty between-arm interval comparisons with no
 family-wise correction (\S\ref{sec:setup}). The pre-registered
@@ -1490,12 +1593,16 @@ uncorrected.
 
 \paragraph{Mechanism claims (construct validity).} Two mechanism
 claims rest on probes of a single harness-and-serving stack. The
-delivery-format account of the planner's empty-response degeneration
-(\S\ref{sec:planner}) is stated as consistent-with rather than
-established: a token-level probe shows the failing turns are not
-literal silence (44--619 generated tokens surfacing in no usable
-channel), and a serving- or template-layer contribution cannot be
-excluded on our data. Compositional brittleness
+prefill account of the planner's empty-response degeneration
+(\S\ref{sec:planner}) rests on documentary evidence --- the served
+chat templates of two of the three affected executors state the rule
+outright --- plus the exclusion of budget exhaustion from the engine's
+own truncation warnings. It remains incomplete in two respects: the
+templates of the ceiling model and of the helper model are rendered by
+built-in renderers we cannot inspect the same way, and the account
+does not yet explain where the 44--619 generated tokens of a failing
+turn go, which a pre-registered behavioural probe is meant to settle.
+Compositional brittleness
 (\S\ref{sec:searchtools}) rests on one 45-run matched-seed probe on
 one model, corroborated --- not independently established --- by a
 5-transcript sample.

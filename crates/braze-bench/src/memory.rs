@@ -165,6 +165,7 @@ mod tests {
             expect_max_tokens: None,
             expect_max_cost_usd: None,
             noise_tools: 0,
+            synthetic_tools: Vec::new(),
             memory_condition: Some("procedural".to_string()),
             memory_file: Some(memory_file),
             memory_budget_tokens: Some(500),

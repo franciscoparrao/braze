@@ -1,0 +1,992 @@
+# Suite del ancla externa BFCL (docs/bfcl-anchor-design-2026-07-18.md).
+#
+# Origen: Berkeley Function Calling Leaderboard v4 (repo gorilla,
+# bfcl_eval/data/, commit de main al 2026-07-18), categorías
+# simple_python, multiple e irrelevance — las tres que mapean limpio a
+# los skills single_tool / distractor_selection / no_tool del suite
+# default. Muestreo determinista: random.Random(42).sample(entries, 20)
+# por categoría, en este orden de archivo. Los schemas BFCL (type:
+# dict/float/tuple) van mapeados a JSON Schema estándar; el schema viaja
+# como parameters_json (string) para fidelidad byte a byte.
+#
+# Calificación en dos capas (pre-registrada en el design doc):
+#  - online (braze-bench): identidad de la tool (expect_tool_call) o
+#    ausencia de llamada (expect_no_tool_call, irrelevance).
+#  - offline (Python sobre BRAZE_BENCH_KEEP_SESSIONS): argumentos contra
+#    possible_answer con la semántica AST de BFCL — el pass rate que se
+#    compara contra el leaderboard es el offline; el online es el que
+#    ordena brazos dentro del bench.
+#
+# IDs originales BFCL preservados en el sufijo del task id.
+
+[[tasks]]
+id = "bfcl_simple_python_327"
+prompt = "Give me the schedule of Manchester United for the next 6 games in Premier League."
+expect_tool_call = "sports_team_get_schedule"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "sports_team_get_schedule"
+description = "Fetches the schedule of the specified sports team for the specified number of games in the given league."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"team_name\": {\"type\": \"string\", \"description\": \"The name of the sports team.\"}, \"num_of_games\": {\"type\": \"integer\", \"description\": \"Number of games for which to fetch the schedule.\"}, \"league\": {\"type\": \"string\", \"description\": \"The name of the sports league. If not provided, the function will fetch the schedule for all games, regardless of the league.\"}, \"location\": {\"type\": \"string\", \"description\": \"Optional. The city or venue where games are to be held. If not provided, default that all venues will be considered.\"}}, \"required\": [\"team_name\", \"num_of_games\", \"league\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_57"
+prompt = "Calculate the cell density in a sample with an optical density of 0.6, where the experiment dilution is 5 times."
+expect_tool_call = "calculate_cell_density"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "calculate_cell_density"
+description = "Calculate the cell density of a biological sample based on its optical density and the experiment dilution."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"optical_density\": {\"type\": \"number\", \"description\": \"The optical density of the sample, usually obtained from a spectrophotometer reading.\"}, \"dilution\": {\"type\": \"integer\", \"description\": \"The dilution factor applied during the experiment.\"}, \"calibration_factor\": {\"type\": \"number\", \"description\": \"The calibration factor to adjust the density, default value is 1e9 assuming cell density is in CFU/mL.\"}}, \"required\": [\"optical_density\", \"dilution\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_12"
+prompt = "Calculate the circumference of a circle with radius 3"
+expect_tool_call = "geometry_circumference"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "geometry_circumference"
+description = "Calculate the circumference of a circle given the radius."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"radius\": {\"type\": \"integer\", \"description\": \"The radius of the circle.\"}, \"units\": {\"type\": \"string\", \"description\": \"Units for the output circumference measurement. Default is 'cm'.\"}}, \"required\": [\"radius\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_379"
+prompt = "What's the current time in Sydney, Australia?"
+expect_tool_call = "get_current_time"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "get_current_time"
+description = "Retrieve the current time in a specific time zone."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"location\": {\"type\": \"string\", \"description\": \"The name of the city.\"}, \"country\": {\"type\": \"string\", \"description\": \"The name of the country.\"}, \"timezone\": {\"type\": \"string\", \"description\": \"The optional timezone to get current time. Default \"}}, \"required\": [\"location\", \"country\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_140"
+prompt = "Calculate the Compound Annual Growth Rate (CAGR) for an initial investment of $2000, final value of $3000 in a period of 4 years."
+expect_tool_call = "calculate_cagr"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "calculate_cagr"
+description = "Calculate the Compound Annual Growth Rate (CAGR) given an initial investment value, a final investment value, and the number of years."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"initial_value\": {\"type\": \"integer\", \"description\": \"The initial investment value.\"}, \"final_value\": {\"type\": \"integer\", \"description\": \"The final investment value.\"}, \"period_in_years\": {\"type\": \"integer\", \"description\": \"The period of the investment in years.\"}}, \"required\": [\"initial_value\", \"final_value\", \"period_in_years\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_125"
+prompt = "Predict house price in San Francisco based on its area of 2500 square feet, number of rooms as 5 and year of construction is 1990."
+expect_tool_call = "predict_house_price"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "predict_house_price"
+description = "Predict house price based on area, number of rooms and year of construction."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"area\": {\"type\": \"integer\", \"description\": \"Area of the house in square feet.\"}, \"rooms\": {\"type\": \"integer\", \"description\": \"Number of rooms in the house.\"}, \"year\": {\"type\": \"integer\", \"description\": \"Year when the house was constructed.\"}, \"location\": {\"type\": \"string\", \"description\": \"The location or city of the house.\"}}, \"required\": [\"area\", \"rooms\", \"year\", \"location\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_114"
+prompt = "Find the probability of getting exactly 5 heads in 10 fair coin tosses."
+expect_tool_call = "prob_dist_binomial"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "prob_dist_binomial"
+description = "Compute the probability of having 'success' outcome from binomial distribution."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"trials\": {\"type\": \"integer\", \"description\": \"The number of independent experiments.\"}, \"successes\": {\"type\": \"integer\", \"description\": \"The number of success events.\"}, \"p\": {\"type\": \"number\", \"description\": \"The probability of success on any given trial, defaults to 0.5\"}}, \"required\": [\"trials\", \"successes\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_71"
+prompt = "Generate a DNA sequence with 100 bases including more G (Guanine) and C (Cytosine)."
+expect_tool_call = "generate_DNA_sequence"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "generate_DNA_sequence"
+description = "Generate a random DNA sequence with a specific length and nucleotide preference."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"length\": {\"type\": \"integer\", \"description\": \"The length of the DNA sequence to be generated.\"}, \"preferences\": {\"type\": \"array\", \"items\": {\"type\": \"string\", \"enum\": [\"A\", \"T\", \"C\", \"G\"]}, \"description\": \"Preferred nucleotides to include more frequently in the DNA sequence.\"}}, \"required\": [\"length\", \"preferences\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_377"
+prompt = "What is the current time in Sydney, Australia?"
+expect_tool_call = "get_current_time"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "get_current_time"
+description = "Retrieve the current time for a specified city and country."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\", \"description\": \"The city for which the current time is to be retrieved.\"}, \"country\": {\"type\": \"string\", \"description\": \"The country where the city is located.\"}, \"format\": {\"type\": \"string\", \"description\": \"The format in which the time is to be displayed, optional (defaults to 'HH:MM:SS').\"}}, \"required\": [\"city\", \"country\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_52"
+prompt = "Calculate the heat capacity at constant pressure for air, given its temperature is 298K and volume is 10 m^3."
+expect_tool_call = "calc_heat_capacity"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "calc_heat_capacity"
+description = "Calculate the heat capacity at constant pressure of air using its temperature and volume."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"temp\": {\"type\": \"integer\", \"description\": \"The temperature of the gas in Kelvin.\"}, \"volume\": {\"type\": \"integer\", \"description\": \"The volume of the gas in m^3.\"}, \"gas\": {\"type\": \"string\", \"description\": \"Type of gas, with 'air' as default.\"}}, \"required\": [\"temp\", \"volume\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_346"
+prompt = "Get all collectable items from the game 'Animal Crossing: New Horizons' during the Spring season."
+expect_tool_call = "get_collectables_in_season"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "get_collectables_in_season"
+description = "Retrieve a list of collectable items in a specific game during a specified season."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"game_name\": {\"type\": \"string\", \"description\": \"Name of the game.\"}, \"season\": {\"type\": \"string\", \"description\": \"The season for which to retrieve the collectable items.\"}, \"item_type\": {\"type\": \"string\", \"description\": \"The type of item to search for. Default is 'all'. Possible values: 'all', 'bug', 'fish', 'sea creatures', etc.\"}}, \"required\": [\"game_name\", \"season\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_279"
+prompt = "What's the retail price of a Fender American Professional II Stratocaster in Rosewood Finish?"
+expect_tool_call = "instrument_price_get"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "instrument_price_get"
+description = "Retrieve the current retail price of a specific musical instrument."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"brand\": {\"type\": \"string\", \"description\": \"The brand of the instrument.\"}, \"model\": {\"type\": \"string\", \"description\": \"The specific model of the instrument.\"}, \"finish\": {\"type\": \"string\", \"description\": \"The color or type of finish on the instrument.\"}}, \"required\": [\"brand\", \"model\", \"finish\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_44"
+prompt = "Calculate the electric field strength 4 meters away from a charge of 0.01 Coulombs."
+expect_tool_call = "calculate_electric_field_strength"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "calculate_electric_field_strength"
+description = "Calculate the electric field strength at a certain distance from a point charge."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"charge\": {\"type\": \"number\", \"description\": \"The charge in Coulombs.\"}, \"distance\": {\"type\": \"integer\", \"description\": \"The distance from the charge in meters.\"}, \"medium\": {\"type\": \"string\", \"description\": \"The medium in which the charge and the point of calculation is located. Default is 'vacuum'.\"}}, \"required\": [\"charge\", \"distance\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_302"
+prompt = "Calculate the batting average for a baseball player who has 180 hits and 600 at-bats. Round to 3 decimals."
+expect_tool_call = "calculate_batting_average"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "calculate_batting_average"
+description = "Calculate the batting average for a baseball player based on their number of hits and at-bats."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"hits\": {\"type\": \"integer\", \"description\": \"The number of hits.\"}, \"at_bats\": {\"type\": \"integer\", \"description\": \"The number of at-bats.\"}, \"decimal_places\": {\"type\": \"integer\", \"description\": \"The number of decimal places to return in the batting average. Default is 3.\"}}, \"required\": [\"hits\", \"at_bats\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_216"
+prompt = "Analyze the sentiment of a customer review 'I love the food here! It's always fresh and delicious.'."
+expect_tool_call = "sentiment_analysis"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "sentiment_analysis"
+description = "Perform sentiment analysis on a given piece of text."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"description\": \"The text on which to perform sentiment analysis.\"}, \"language\": {\"type\": \"string\", \"description\": \"The language in which the text is written.\"}}, \"required\": [\"text\", \"language\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_16"
+prompt = "Calculate the derivative of the function 2x^2 at x = 1."
+expect_tool_call = "calculus_derivative"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "calculus_derivative"
+description = "Compute the derivative of a function at a specific value."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"function\": {\"type\": \"string\", \"description\": \"The function to calculate the derivative of.\"}, \"value\": {\"type\": \"integer\", \"description\": \"The value where the derivative needs to be calculated at.\"}, \"function_variable\": {\"type\": \"string\", \"description\": \"The variable present in the function, for instance x or y, etc. Default is 'x'.\"}}, \"required\": [\"function\", \"value\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_15"
+prompt = "Calculate the area under the curve from x = -2 to x = 3 for the function y = x^3 using simpson method."
+expect_tool_call = "integrate"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "integrate"
+description = "Calculate the area under a curve for a specified function between two x values."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"function\": {\"type\": \"string\", \"description\": \"The function to integrate, represented as a string. For example, 'x^3'\"}, \"start_x\": {\"type\": \"integer\", \"description\": \"The starting x-value to integrate over.\"}, \"end_x\": {\"type\": \"integer\", \"description\": \"The ending x-value to integrate over.\"}, \"method\": {\"type\": \"string\", \"description\": \"The method of numerical integration to use. Choices are 'trapezoid' or 'simpson'. Default is 'trapezoid'.\"}}, \"required\": [\"function\", \"start_x\", \"end_x\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_47"
+prompt = "Find the boiling point and melting point of water under the sea level of 5000m."
+expect_tool_call = "get_boiling_melting_points"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "get_boiling_melting_points"
+description = "Retrieve the boiling point and melting point of a substance based on its name and the sea level."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"substance\": {\"type\": \"string\", \"description\": \"The name of the substance.\"}, \"sea_level\": {\"type\": \"integer\", \"description\": \"The sea level in meters.\"}}, \"required\": [\"substance\", \"sea_level\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_111"
+prompt = "Generate a random number from a normal distribution with mean 0 and standard deviation 1."
+expect_tool_call = "random_normalvariate"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "random_normalvariate"
+description = "Generates a random number from a normal distribution given the mean and standard deviation."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"mu\": {\"type\": \"integer\", \"description\": \"Mean of the normal distribution.\"}, \"sigma\": {\"type\": \"integer\", \"description\": \"Standard deviation of the normal distribution.\"}}, \"required\": [\"mu\", \"sigma\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_simple_python_119"
+prompt = "Perform a hypothesis test for two independent samples with scores of Sample1: [22,33,42,12,34] and Sample2: [23,45,44,14,38] at a significance level of 0.05."
+expect_tool_call = "hypothesis_testing_ttest_ind"
+skill = "bfcl_simple"
+
+[[tasks.synthetic_tools]]
+name = "hypothesis_testing_ttest_ind"
+description = "Conducts a hypothesis test for two independent samples."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"sample1\": {\"type\": \"array\", \"items\": {\"type\": \"integer\"}, \"description\": \"First set of observations (array of numbers).\"}, \"sample2\": {\"type\": \"array\", \"items\": {\"type\": \"integer\"}, \"description\": \"Second set of observations (array of numbers).\"}, \"significance_level\": {\"type\": \"number\", \"description\": \"Significance level of the test (default: 0.05)\"}}, \"required\": [\"sample1\", \"sample2\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_129"
+prompt = "Find the compound interest for an investment of $10000 with an annual interest rate of 5% compounded monthly for 5 years."
+expect_tool_call = "compound_interest"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "lawsuits_search"
+description = "Search for lawsuits against a specific company within a specific time and location."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"company_name\": {\"type\": \"string\", \"description\": \"The name of the company.\"}, \"location\": {\"type\": \"string\", \"description\": \"The location where the lawsuit was filed.\"}, \"year\": {\"type\": \"integer\", \"description\": \"The year when the lawsuit was filed.\"}, \"case_type\": {\"type\": \"string\", \"description\": \"The type of the case. Options include: 'civil', 'criminal', 'small_claims', etc. If not specified, search for all types. Default is 'all'\"}}, \"required\": [\"company_name\", \"location\", \"year\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "compound_interest"
+description = "Calculate compound interest for a certain time period."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"principal\": {\"type\": \"integer\", \"description\": \"The initial amount of money that was invested or loaned out.\"}, \"annual_rate\": {\"type\": \"number\", \"description\": \"The interest rate for a year as a percentage.\"}, \"compounding_freq\": {\"type\": \"string\", \"enum\": [\"monthly\", \"quarterly\", \"annually\"], \"description\": \"The number of times that interest is compounded per unit period.\"}, \"time_in_years\": {\"type\": \"integer\", \"description\": \"The time the money is invested for in years.\"}}, \"required\": [\"principal\", \"annual_rate\", \"compounding_freq\", \"time_in_years\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_154"
+prompt = "Who was the full name of the president of the United States in 1861?"
+expect_tool_call = "US_president_in_year"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "US_president_in_year"
+description = "Retrieve the name of the U.S. president in a given year."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"year\": {\"type\": \"integer\", \"description\": \"The year in question.\"}, \"full_name\": {\"type\": \"boolean\", \"default\": true, \"description\": \"Option to return full name with middle initial, if applicable.\"}}, \"required\": [\"year\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "find_card_in_deck"
+description = "Locate a particular card in a deck based on rank and suit."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"rank\": {\"type\": \"string\", \"description\": \"Rank of the card (e.g. Ace, Two, King).\"}, \"suit\": {\"type\": \"string\", \"description\": \"Suit of the card (e.g. Hearts, Spades, Diamonds, Clubs).\"}, \"deck\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"rank\": {\"type\": \"string\"}, \"suit\": {\"type\": \"string\"}}}, \"description\": \"Deck of cards. If not provided, the deck will be a standard 52 card deck by default\"}}, \"required\": [\"rank\", \"suit\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "soccer_get_last_match"
+description = "Retrieve the details of the last match played by a specified soccer club."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"team_name\": {\"type\": \"string\", \"description\": \"The name of the soccer club.\"}, \"include_stats\": {\"type\": \"boolean\", \"description\": \"If true, include match statistics like possession, shots on target etc. Default is false.\"}}, \"required\": [\"team_name\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "update_user_info"
+description = "Update user information in the database."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"user_id\": {\"type\": \"integer\", \"description\": \"The user ID of the customer.\"}, \"update_info\": {\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"description\": \"The customer's updated name.\"}, \"email\": {\"type\": \"string\", \"description\": \"The customer's updated email.\"}}, \"description\": \"The new information to update.\"}, \"database\": {\"type\": \"string\", \"description\": \"The database where the user's information is stored.\", \"default\": \"CustomerInfo\"}}, \"required\": [\"user_id\", \"update_info\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_6"
+prompt = "Calculate the capacitance of a parallel plate capacitor where the area of the plate is 10 square meters, the distance between plates is 0.01 meters and the dielectric constant K is 1.0."
+expect_tool_call = "capacitance_calculator_calculate"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "resistance_calculator_calculate"
+description = "Calculate the resistance of an electrical circuit based on current and voltage."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"I\": {\"type\": \"number\", \"description\": \"The electric current flowing in Amperes.\"}, \"V\": {\"type\": \"number\", \"description\": \"The voltage difference in Volts.\"}}, \"required\": [\"I\", \"V\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "capacitance_calculator_calculate"
+description = "Calculate the capacitance of a parallel plate capacitor based on the area, distance and dielectric constant using the equation C = ε₀KA/d."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"A\": {\"type\": \"integer\", \"description\": \"The area of one plate of the capacitor in square meters.\"}, \"d\": {\"type\": \"number\", \"description\": \"The distance between the two plates in meters.\"}, \"K\": {\"type\": \"number\", \"description\": \"The dielectric constant (default is 1.0 for free space, optional).\"}}, \"required\": [\"A\", \"d\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "magnetic_field_calculate"
+description = "Calculate the magnetic field based on the current flowing and the radial distance."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"I\": {\"type\": \"number\", \"description\": \"The electric current flowing in Amperes.\"}, \"r\": {\"type\": \"number\", \"description\": \"The radial distance from the line of current in meters.\"}}, \"required\": [\"I\", \"r\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_143"
+prompt = "Calculate the slope gradient in degree between two points on a landscape with coordinates (40.7128, -74.0060) and (34.0522, -118.2437)."
+expect_tool_call = "calculate_slope_gradient"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "create_player_profile"
+description = "Create a new player profile with character name, class and starting level."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"player_name\": {\"type\": \"string\", \"description\": \"The desired name of the player.\"}, \"_class\": {\"type\": \"string\", \"description\": \"The character class for the player\"}, \"starting_level\": {\"type\": \"integer\", \"description\": \"The starting level for the player\", \"default\": 1}}, \"required\": [\"player_name\", \"_class\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "poker_probability_full_house"
+description = "Calculate the probability of getting a full house in a poker game."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"deck_size\": {\"type\": \"integer\", \"description\": \"The size of the deck. Default is 52.\"}, \"hand_size\": {\"type\": \"integer\", \"description\": \"The size of the hand. Default is 5.\"}}, \"required\": [\"deck_size\", \"hand_size\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "concert_find_nearby"
+description = "Locate nearby concerts based on specific criteria like genre."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"location\": {\"type\": \"string\", \"description\": \"The city and state, e.g. Seattle, WA\"}, \"genre\": {\"type\": \"string\", \"description\": \"Genre of music to be played at the concert.\"}}, \"required\": [\"location\", \"genre\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "calculate_slope_gradient"
+description = "Calculate the slope gradient between two geographical coordinates."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"point1\": {\"type\": \"array\", \"items\": {\"type\": \"number\"}, \"description\": \"The geographic coordinates for the first point [Latitude, Longitude].\"}, \"point2\": {\"type\": \"array\", \"items\": {\"type\": \"number\"}, \"description\": \"The geographic coordinates for the second point [Latitude, Longitude].\"}, \"unit\": {\"type\": \"string\", \"enum\": [\"degree\", \"percent\", \"ratio\"], \"description\": \"The unit for the slope gradient. Default is 'degree'.\"}}, \"required\": [\"point1\", \"point2\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_50"
+prompt = "Predict the house prices for the next month in New York."
+expect_tool_call = "house_price_forecast"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "house_price_forecast"
+description = "Predict the house prices for a specific location and time frame."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"location\": {\"type\": \"string\", \"description\": \"The city that you want to get the house price prediction for.\"}, \"months\": {\"type\": \"integer\", \"description\": \"Number of future months for the prediction.\"}, \"features\": {\"type\": \"array\", \"items\": {\"type\": \"string\", \"enum\": [\"SqFt\", \"Bedrooms\", \"Bathrooms\", \"Location\"]}, \"description\": \"Additional features considered for prediction. Not required. Default empty array\", \"optional\": true}}, \"required\": [\"location\", \"months\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "weather_forecast"
+description = "Retrieve a weather forecast for a specific location and time frame."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"location\": {\"type\": \"string\", \"description\": \"The city that you want to get the weather for.\"}, \"days\": {\"type\": \"integer\", \"description\": \"Number of days for the forecast.\"}}, \"required\": [\"location\", \"days\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "stock_market_forecast"
+description = "Predict the stock prices for a specific company and time frame."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"company\": {\"type\": \"string\", \"description\": \"The company that you want to get the stock price prediction for.\"}, \"days\": {\"type\": \"integer\", \"description\": \"Number of future days for the prediction.\"}}, \"required\": [\"company\", \"days\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_183"
+prompt = "How many calories in the Beef Lasagna Recipe from Foodnetwork.com?"
+expect_tool_call = "recipe_info_get_calories"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "get_stock_price"
+description = "Retrieves the current stock price of the specified companies"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"company_names\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"The list of companies for which to retrieve the stock price.\"}}, \"required\": [\"company_names\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "get_team_ranking"
+description = "Retrieve the FIFA ranking of a specific soccer team for a certain year."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"team_name\": {\"type\": \"string\", \"description\": \"The name of the soccer team.\"}, \"year\": {\"type\": \"integer\", \"description\": \"The year for which the ranking is to be retrieved.\"}, \"gender\": {\"type\": \"string\", \"description\": \"The gender of the team. It can be either 'men' or 'women'. Default is 'men'.\"}}, \"required\": [\"team_name\", \"year\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "recipe_info_get_calories"
+description = "Retrieve the amount of calories from a specific recipe in a food website."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"website\": {\"type\": \"string\", \"description\": \"The food website that has the recipe.\"}, \"recipe\": {\"type\": \"string\", \"description\": \"Name of the recipe.\"}, \"optional_meal_time\": {\"type\": \"string\", \"description\": \"Specific meal time of the day for the recipe (optional, could be 'Breakfast', 'Lunch', 'Dinner') Default is ''\"}}, \"required\": [\"website\", \"recipe\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_166"
+prompt = "Find me a classical concert this weekend in Los Angeles with cheap tickets."
+expect_tool_call = "concert_search"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "religion_history_info"
+description = "Provides comprehensive historical details about a specified religion till a specified century."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"religion\": {\"type\": \"string\", \"description\": \"The name of the religion for which historical details are needed.\"}, \"till_century\": {\"type\": \"integer\", \"description\": \"The century till which historical details are needed.\"}, \"include_people\": {\"type\": \"boolean\", \"description\": \"To include influential people related to the religion during that time period, default is False\"}}, \"required\": [\"religion\", \"till_century\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "team_score_get_latest"
+description = "Retrieve the score of the most recent game for a specified sports team."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"team\": {\"type\": \"string\", \"description\": \"Name of the sports team.\"}, \"include_opponent\": {\"type\": \"boolean\", \"description\": \"Include the name of the opponent team in the return.\", \"default\": \"false\"}}, \"required\": [\"team\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "concert_search"
+description = "Locate a concert based on specific criteria like genre, location, and date."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"genre\": {\"type\": \"string\", \"description\": \"Genre of the concert.\"}, \"location\": {\"type\": \"string\", \"description\": \"City of the concert.\"}, \"date\": {\"type\": \"string\", \"description\": \"Date of the concert, e.g. this weekend, today, tomorrow, or date string.\"}, \"price_range\": {\"type\": \"string\", \"enum\": [\"free\", \"cheap\", \"moderate\", \"expensive\", \"any\"], \"description\": \"Expected price range of the concert tickets. Default is 'any'\"}}, \"required\": [\"genre\", \"location\", \"date\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_179"
+prompt = "What is the probability of getting a full house in poker?"
+expect_tool_call = "poker_probability_full_house"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "poker_probability_full_house"
+description = "Calculate the probability of getting a full house in a poker game."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"deck_size\": {\"type\": \"integer\", \"description\": \"The size of the deck. Default is 52.\"}, \"hand_size\": {\"type\": \"integer\", \"description\": \"The size of the hand. Default is 5.\"}}, \"required\": [\"deck_size\", \"hand_size\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "hospital_locate"
+description = "Locate nearby hospitals based on location and radius. Options to include specific departments are available."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"location\": {\"type\": \"string\", \"description\": \"The city and state, e.g. Denver, CO\"}, \"radius\": {\"type\": \"integer\", \"description\": \"The radius within which you want to find the hospital in kms.\"}, \"department\": {\"type\": \"string\", \"description\": \"Specific department within the hospital. Default is ''.\", \"enum\": [\"General Medicine\", \"Emergency\", \"Pediatrics\", \"Cardiology\", \"Orthopedics\"]}}, \"required\": [\"location\", \"radius\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "find_recipe"
+description = "Find a recipe based on the dietary restrictions, recipe type, and time constraints."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"dietary_restrictions\": {\"type\": \"string\", \"description\": \"Dietary restrictions e.g. vegan, vegetarian, gluten free, dairy free.\"}, \"recipe_type\": {\"type\": \"string\", \"description\": \"Type of the recipe. E.g. dessert, main course, breakfast.\"}, \"time\": {\"type\": \"integer\", \"description\": \"Time limit in minutes to prep the meal.\"}}, \"required\": [\"dietary_restrictions\", \"recipe_type\", \"time\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_139"
+prompt = "Find details of patent lawsuits involving the company 'Apple Inc.' from the year 2010."
+expect_tool_call = "lawsuit_details_find"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "get_collectables_in_season"
+description = "Retrieve a list of collectable items in a specific game during a specified season."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"game_name\": {\"type\": \"string\", \"description\": \"Name of the game.\"}, \"season\": {\"type\": \"string\", \"description\": \"The season for which to retrieve the collectable items.\"}, \"item_type\": {\"type\": \"string\", \"description\": \"The type of item to search for. Default is 'all'. Possible values: 'all', 'bug', 'fish', 'sea creatures', etc.\"}}, \"required\": [\"game_name\", \"season\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "game_score_highest"
+description = "Retrieve the highest score achieved by any player in a specific game."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"game\": {\"type\": \"string\", \"description\": \"The name of the online game.\"}, \"platform\": {\"type\": \"string\", \"description\": \"The platform where the game is played, e.g. PC, Xbox, Playstation\"}, \"region\": {\"type\": \"string\", \"description\": \"The geographic region of the player. Defaults to 'Global'\"}}, \"required\": [\"game\", \"platform\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "lawsuit_details_find"
+description = "Find details of lawsuits involving a specific company from a given year."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"company_name\": {\"type\": \"string\", \"description\": \"Name of the company.\"}, \"year\": {\"type\": \"integer\", \"description\": \"Year of the lawsuit.\"}, \"case_type\": {\"type\": \"string\", \"description\": \"Type of the lawsuit, e.g., 'IPR', 'Patent', 'Commercial', etc. This is an optional parameter. Default is 'all'.\"}}, \"required\": [\"company_name\", \"year\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "calculate_binomial_probability"
+description = "Calculates the binomial probability given the number of trials, successes and the probability of success on an individual trial."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"number_of_trials\": {\"type\": \"integer\", \"description\": \"The total number of trials.\"}, \"number_of_successes\": {\"type\": \"integer\", \"description\": \"The desired number of successful outcomes.\"}, \"probability_of_success\": {\"type\": \"number\", \"description\": \"The probability of a successful outcome on any given trial.\", \"default\": 0.5}}, \"required\": [\"number_of_trials\", \"number_of_successes\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_107"
+prompt = "What is the density of a substance with a mass of 45 kg and a volume of 15 m³?"
+expect_tool_call = "calculate_density"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "mix_paint_color"
+description = "Combine two primary paint colors and adjust the resulting color's lightness level."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"color1\": {\"type\": \"string\", \"description\": \"The first primary color to be mixed.\"}, \"color2\": {\"type\": \"string\", \"description\": \"The second primary color to be mixed.\"}, \"lightness\": {\"type\": \"integer\", \"description\": \"The desired lightness level of the resulting color in percentage. The default level is set to 50%.\"}}, \"required\": [\"color1\", \"color2\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "calculate_density"
+description = "Calculate the density of a substance based on its mass and volume."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"mass\": {\"type\": \"integer\", \"description\": \"The mass of the substance in kilograms.\"}, \"volume\": {\"type\": \"integer\", \"description\": \"The volume of the substance in cubic meters.\"}, \"unit\": {\"type\": \"string\", \"description\": \"The unit of density. Default is kg/m³\"}}, \"required\": [\"mass\", \"volume\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_56"
+prompt = "Find the average closing price of Apple stock in the past 60 days"
+expect_tool_call = "avg_closing_price"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "volume_traded"
+description = "Calculate the total volume of stocks traded over a certain period of time"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"company\": {\"type\": \"string\", \"description\": \"Name of the company to get data for\"}, \"days\": {\"type\": \"integer\", \"description\": \"Number of past days to calculate volume traded for\"}, \"data_source\": {\"type\": \"string\", \"description\": \"Source to fetch the financial data. default is 'yahoo finance'\"}}, \"required\": [\"company\", \"days\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "total_revenue"
+description = "Calculate the total revenue of a company over a specific period of time"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"company\": {\"type\": \"string\", \"description\": \"Name of the company to get data for\"}, \"days\": {\"type\": \"integer\", \"description\": \"Number of past days to calculate total revenue for\"}, \"data_source\": {\"type\": \"string\", \"description\": \"Source to fetch the financial data. default is 'google finance'\"}}, \"required\": [\"company\", \"days\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "avg_closing_price"
+description = "Calculate the average closing price of a specific company over a given period of time"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"company\": {\"type\": \"string\", \"description\": \"Name of the company to get data for\"}, \"days\": {\"type\": \"integer\", \"description\": \"Number of past days to calculate average closing price for\"}, \"data_source\": {\"type\": \"string\", \"description\": \"Source to fetch the stock data. default is 'yahoo finance'\"}}, \"required\": [\"company\", \"days\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_114"
+prompt = "Get me the predictions of the evolutionary rate for Homo Sapiens for next 50 years using Darwin model"
+expect_tool_call = "prediction_evolution"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "modify_painting"
+description = "Modify an existing painting's attributes such as size, medium, and color."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"size\": {\"type\": \"string\", \"description\": \"The size of the painting in inches, width by height.\"}, \"medium\": {\"type\": \"string\", \"description\": \"The medium of the painting, such as oil, acrylic, etc.\"}, \"dominant_color\": {\"type\": \"string\", \"description\": \"The dominant color of the painting. Default ''\"}}, \"required\": [\"size\", \"medium\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "prediction_evolution"
+description = "Predict the evolutionary rate for a specific species for a given timeframe."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"species\": {\"type\": \"string\", \"description\": \"The species that the evolution rate will be predicted for.\"}, \"years\": {\"type\": \"integer\", \"description\": \"Number of years for the prediction.\"}, \"model\": {\"type\": \"string\", \"description\": \"The model used to make the prediction, options: 'Darwin', 'Lamarck', default is 'Darwin'.\"}}, \"required\": [\"species\", \"years\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "calculate_probability"
+description = "Calculate the probability of an event."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"total_outcomes\": {\"type\": \"integer\", \"description\": \"Total number of possible outcomes.\"}, \"favorable_outcomes\": {\"type\": \"integer\", \"description\": \"Number of outcomes considered as 'successful'.\"}, \"round_to\": {\"type\": \"integer\", \"description\": \"Number of decimal places to round the result to.\", \"default\": 2}}, \"required\": [\"total_outcomes\", \"favorable_outcomes\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_150"
+prompt = "Calculate the neuronal activity based on synaptic input rate of 200 and weight 0.5 and decay rate of 0.1."
+expect_tool_call = "calculate_neuronal_activity"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "calculate_electrostatic_potential"
+description = "Calculate the electrostatic potential between two charged bodies using the principle of Coulomb's Law."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"charge1\": {\"type\": \"number\", \"description\": \"The quantity of charge on the first body.\"}, \"charge2\": {\"type\": \"number\", \"description\": \"The quantity of charge on the second body.\"}, \"distance\": {\"type\": \"number\", \"description\": \"The distance between the two bodies.\"}, \"constant\": {\"type\": \"number\", \"description\": \"The value of the electrostatic constant. Default is 898755178.73\"}}, \"required\": [\"charge1\", \"charge2\", \"distance\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "calculate_neuronal_activity"
+description = "Calculate the neuronal activity (rate of firing) based on a given input synaptic rate, weight of inputs, and decay rate. Higher input or weight increases firing rate and higher decay rate decreases it."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"input_synaptic_rate\": {\"type\": \"integer\", \"description\": \"The synaptic input rate, usually represented as number of inputs per second.\"}, \"weight\": {\"type\": \"number\", \"description\": \"The weight of the input, denoting its influence on the neuron's state. Default is 1.0.\"}, \"decay_rate\": {\"type\": \"number\", \"description\": \"The rate at which the neuron's potential decays in the absence of inputs.\"}}, \"required\": [\"input_synaptic_rate\", \"decay_rate\"], \"optional\": [\"weight\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "calculate_displacement"
+description = "Calculates the displacement of an object in motion given initial velocity, time, and acceleration."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"initial_velocity\": {\"type\": \"number\", \"description\": \"The initial velocity of the object in m/s.\"}, \"time\": {\"type\": \"integer\", \"description\": \"The time in seconds that the object has been in motion.\"}, \"acceleration\": {\"type\": \"number\", \"description\": \"The acceleration of the object in m/s^2.\", \"default\": 0}}, \"required\": [\"initial_velocity\", \"time\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "grocery_store_find_best"
+description = "Find the closest high-rated grocery stores based on certain product availability."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"my_location\": {\"type\": \"string\", \"description\": \"The current location of the user.\"}, \"rating\": {\"type\": \"number\", \"description\": \"The minimum required store rating. Default is 0.0.\"}, \"products\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Required products in a list.\"}}, \"required\": [\"my_location\", \"products\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_71"
+prompt = "How many veterans were there in the United States in the year 1954?"
+expect_tool_call = "get_population"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "get_bureau_statistics"
+description = "Retrieve statistical data for a specific year and statistical category"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"year\": {\"type\": \"integer\", \"description\": \"The year for which to retrieve the statistical data\"}, \"category\": {\"type\": \"string\", \"description\": \"The statistical category (e.g., employment, crime, health)\"}}, \"required\": [\"year\", \"category\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "get_population"
+description = "Retrieve population data for a specific year and population category"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"year\": {\"type\": \"integer\", \"description\": \"The year for which to retrieve the population data\"}, \"category\": {\"type\": \"string\", \"description\": \"The population category (e.g., total, veterans, women)\"}}, \"required\": [\"year\", \"category\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "get_demographics"
+description = "Retrieve demographic data for a specific year and demographic category"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"year\": {\"type\": \"integer\", \"description\": \"The year for which to retrieve the demographic data\"}, \"category\": {\"type\": \"string\", \"description\": \"The demographic category (e.g., gender, race, age)\"}}, \"required\": [\"year\", \"category\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_1"
+prompt = "Calculate the area of a triangle, given the lengths of its three sides: 3, 4, and 5."
+expect_tool_call = "math_triangle_area_heron"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "math_triangle_area_heron"
+description = "Calculates the area of a triangle using Heron's formula, given the lengths of its three sides."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"side1\": {\"type\": \"integer\", \"description\": \"Length of the first side of the triangle.\"}, \"side2\": {\"type\": \"integer\", \"description\": \"Length of the second side of the triangle.\"}, \"side3\": {\"type\": \"integer\", \"description\": \"Length of the third side of the triangle.\"}}, \"required\": [\"side1\", \"side2\", \"side3\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "math_circle_area"
+description = "Calculates the area of a circle given its radius."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"radius\": {\"type\": \"number\", \"description\": \"The radius of the circle.\"}}, \"required\": [\"radius\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "math_triangle_area_base_height"
+description = "Calculates the area of a triangle using the formula (1/2)base*height."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"base\": {\"type\": \"number\", \"description\": \"The base length of the triangle.\"}, \"height\": {\"type\": \"number\", \"description\": \"The height of the triangle.\"}}, \"required\": [\"base\", \"height\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_194"
+prompt = "What are the opening hours of the Metropolitan Museum of Art on Saturday?"
+expect_tool_call = "get_museum_hours"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "discoverer_get"
+description = "Retrieve the name of the discoverer of an element based on its name."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"element_name\": {\"type\": \"string\", \"description\": \"The name of the element.\"}, \"year\": {\"type\": \"integer\", \"description\": \"Optional parameter that refers to the year of discovery. It could be helpful in case an element was discovered more than once. Default is 0.\"}, \"first\": {\"type\": \"boolean\", \"default\": true, \"description\": \"Optional parameter indicating if the first discoverer's name should be retrieved.\"}}, \"required\": [\"element_name\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "lawsuit_check_case"
+description = "Verify the details of a lawsuit case and check its status using case ID."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"case_id\": {\"type\": \"integer\", \"description\": \"The identification number of the lawsuit case.\"}, \"closed_status\": {\"type\": \"boolean\", \"description\": \"The status of the lawsuit case to be verified.\"}}, \"required\": [\"case_id\", \"closed_status\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "get_museum_hours"
+description = "Retrieve opening hours of a specified museum for the specified day."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"museum_name\": {\"type\": \"string\", \"description\": \"The name of the museum.\"}, \"day\": {\"type\": \"string\", \"description\": \"Day of the week.\", \"enum\": [\"Monday\", \"Tuesday\", \"Wednesday\", \"Thursday\", \"Friday\", \"Saturday\", \"Sunday\"]}}, \"required\": [\"museum_name\", \"day\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "monopoly_odds_calculator"
+description = "Calculates the probability of rolling a certain sum with two dice, commonly used in board game like Monopoly."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"number\": {\"type\": \"integer\", \"description\": \"The number for which the odds are calculated.\"}, \"dice_number\": {\"type\": \"integer\", \"description\": \"The number of dice involved in the roll.\"}, \"dice_faces\": {\"type\": \"integer\", \"description\": \"The number of faces on a single die. Default is 6 for standard six-faced die.\"}}, \"required\": [\"number\", \"dice_number\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_40"
+prompt = "Calculate the strength of magnetic field given distance is 8 meters and current is 12 Amperes?"
+expect_tool_call = "electromagnetism_biot_savart_law"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "electromagnetism_ampere_law"
+description = "Calculate magnetic field strength using Ampere's Circuital Law. Input the current enclosed by a circular path and the distance from the center of the circle. Can be applied to a cylindrical or spherical symmetry of consistent magnetic field. "
+parameters_json = "{\"type\": \"object\", \"properties\": {\"enclosed_current\": {\"type\": \"number\", \"description\": \"The total current enclosed by the loop. In Amperes.\"}, \"radius\": {\"type\": \"number\", \"description\": \"The radius of the circle or the distance from the center of the circular path. In meters.\"}, \"mu0\": {\"type\": \"number\", \"description\": \"Permeability of free space. Its value is default approximated to be 0.000001256 H/m. Optional\"}}, \"required\": [\"enclosed_current\", \"radius\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "electromagnetism_biot_savart_law"
+description = "Calculate magnetic field strength using Biot-Savart law. Input the current in Ampere and the distance in meters."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"current\": {\"type\": \"integer\", \"description\": \"The current in the conductor, in Amperes.\"}, \"distance\": {\"type\": \"integer\", \"description\": \"Distance from the current carrying conductor, in meters.\"}, \"mu0\": {\"type\": \"number\", \"description\": \"Permeability of free space. Its value is default approximated to be 0.000001256 H/m. Optional\"}}, \"required\": [\"current\", \"distance\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_178"
+prompt = "Find a Card of rank 'Queen' and suit 'Hearts' in the deck."
+expect_tool_call = "find_card_in_deck"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "currency_exchange_convert"
+description = "Convert an amount from a base currency to a target currency based on the current exchange rate."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"base_currency\": {\"type\": \"string\", \"description\": \"The currency to convert from.\"}, \"target_currency\": {\"type\": \"string\", \"description\": \"The currency to convert to.\"}, \"amount\": {\"type\": \"number\", \"description\": \"The amount in base currency to convert\"}}, \"required\": [\"base_currency\", \"target_currency\", \"amount\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "local_nursery_find"
+description = "Locate local nurseries based on location and plant types availability."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"location\": {\"type\": \"string\", \"description\": \"The city or locality where the nursery needs to be located.\"}, \"plant_types\": {\"type\": \"array\", \"items\": {\"type\": \"string\", \"enum\": [\"Annual\", \"Perennial\", \"Shrub\", \"Tree\", \"Herbs\", \"Fruits\"]}, \"description\": \"Type of plants the nursery should provide.\"}}, \"required\": [\"location\", \"plant_types\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "find_card_in_deck"
+description = "Locate a particular card in a deck based on rank and suit."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"rank\": {\"type\": \"string\", \"description\": \"Rank of the card (e.g. Ace, Two, King).\"}, \"suit\": {\"type\": \"string\", \"description\": \"Suit of the card (e.g. Hearts, Spades, Diamonds, Clubs).\"}, \"deck\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"rank\": {\"type\": \"string\"}, \"suit\": {\"type\": \"string\"}}}, \"description\": \"Deck of cards. If not provided, the deck will be a standard 52 card deck by default\"}}, \"required\": [\"rank\", \"suit\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "recipe_unit_conversion"
+description = "Convert a value from one kitchen unit to another for cooking purposes."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"value\": {\"type\": \"number\", \"description\": \"The value to be converted.\"}, \"from_unit\": {\"type\": \"string\", \"description\": \"The unit to convert from. Supports 'teaspoon', 'tablespoon', 'cup', etc.\"}, \"to_unit\": {\"type\": \"string\", \"description\": \"The unit to convert to. Supports 'teaspoon', 'tablespoon', 'cup', etc.\"}, \"precision\": {\"type\": \"integer\", \"description\": \"The precision to round the output to, in case of a non-integer result. Optional, default is 0.\"}}, \"required\": [\"value\", \"from_unit\", \"to_unit\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_108"
+prompt = "Calculate the heat capacity at constant pressure for air, given its temperature is 298K and volume is 10 m^3."
+expect_tool_call = "calc_heat_capacity"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "calc_heat_capacity"
+description = "Calculate the heat capacity at constant pressure of air using its temperature and volume."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"temp\": {\"type\": \"integer\", \"description\": \"The temperature of the gas in Kelvin.\"}, \"volume\": {\"type\": \"integer\", \"description\": \"The volume of the gas in m^3.\"}, \"gas\": {\"type\": \"string\", \"description\": \"Type of gas, with air as default.\"}}, \"required\": [\"temp\", \"volume\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "calculate_discounted_cash_flow"
+description = "Calculate the discounted cash flow of a bond for a given annual coupon payment, time frame and discount rate."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"coupon_payment\": {\"type\": \"number\", \"description\": \"The annual coupon payment.\"}, \"period\": {\"type\": \"integer\", \"description\": \"The time frame in years for which coupon payment is made.\"}, \"discount_rate\": {\"type\": \"number\", \"description\": \"The discount rate.\"}, \"face_value\": {\"type\": \"integer\", \"description\": \"The face value of the bond, default is $1000.\"}}, \"required\": [\"coupon_payment\", \"period\", \"discount_rate\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_multiple_87"
+prompt = "Find the latest update or patch for the game 'Cyberpunk 2077' on Xbox platform."
+expect_tool_call = "games_update_find"
+skill = "bfcl_multiple"
+
+[[tasks.synthetic_tools]]
+name = "games_reviews_find"
+description = "Find reviews for a specific game."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"game\": {\"type\": \"string\", \"description\": \"The name of the game.\"}, \"region\": {\"type\": \"string\", \"description\": \"The region where the reviews are coming from (optional, default is 'global')\"}}, \"required\": [\"game\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "games_update_find"
+description = "Find the latest updates or patches for a specific game on a specified gaming platform."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"game\": {\"type\": \"string\", \"description\": \"The name of the game.\"}, \"platform\": {\"type\": \"string\", \"description\": \"The gaming platform, e.g. Xbox, Playstation, PC.\"}, \"region\": {\"type\": \"string\", \"description\": \"The region of the update (optional, default is 'global')\"}}, \"required\": [\"game\", \"platform\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks.synthetic_tools]]
+name = "games_price_find"
+description = "Find the current price for a specific game on a specified gaming platform."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"game\": {\"type\": \"string\", \"description\": \"The name of the game.\"}, \"platform\": {\"type\": \"string\", \"description\": \"The gaming platform, e.g. Xbox, Playstation, PC.\"}}, \"required\": [\"game\", \"platform\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_71"
+prompt = "Calculate the profit margin of a company with revenue of $200,000 and expenses of $150,000."
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "calculate_ROI"
+description = "Calculate the Return on Investment (ROI) for a given investment amount and net profit."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"investment_amount\": {\"type\": \"number\", \"description\": \"The initial amount of money invested.\"}, \"net_profit\": {\"type\": \"number\", \"description\": \"The profit made from the investment.\"}, \"duration_years\": {\"type\": \"integer\", \"description\": \"The duration of the investment in years.\", \"default\": 1}}, \"required\": [\"investment_amount\", \"net_profit\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_39"
+prompt = "How to increase the population of deer in a forest?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "calculate_population_growth"
+description = "Calculate the population growth of an animal based on the current population, birth rate and death rate."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"current_population\": {\"type\": \"integer\", \"description\": \"The current population of the animal.\"}, \"birth_rate\": {\"type\": \"number\", \"description\": \"The birth rate of the animal.\"}, \"death_rate\": {\"type\": \"number\", \"description\": \"The death rate of the animal.\"}}, \"required\": [\"current_population\", \"birth_rate\", \"death_rate\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_55"
+prompt = "Which online bookstore sells 'To Kill a Mockingbird'?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "add_product_to_cart"
+description = "This function allows users to add a product to their cart."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"product_id\": {\"type\": \"integer\", \"description\": \"The ID of the product\"}, \"quantity\": {\"type\": \"integer\", \"description\": \"The number of this product to add to the cart\"}, \"cart_id\": {\"type\": \"integer\", \"description\": \"The ID of the cart, if no ID is given a new cart is created\", \"default\": \"0\"}}, \"required\": [\"product_id\", \"quantity\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_195"
+prompt = "Who won the chess tournament in 2015?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "game_board_analyser"
+description = "Analyse a given board position of the game and suggest the optimal next move"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"game\": {\"type\": \"string\", \"description\": \"The name of the game. In this case, chess\"}, \"player\": {\"type\": \"string\", \"description\": \"The current player whose turn is to move.\"}, \"position\": {\"type\": \"string\", \"description\": \"The current state of the board in FEN (Forsyth–Edwards Notation) format.\"}, \"difficulty\": {\"type\": \"string\", \"default\": \"medium\", \"description\": \"The level of difficulty for the suggested move. Options include 'easy', 'medium', 'hard'.\"}}, \"required\": [\"game\", \"player\", \"position\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_86"
+prompt = "What's the penalty for burglary in California?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "law_info_get_penalty"
+description = "Retrieves penalty information based on the criminal act and state."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"crime\": {\"type\": \"string\", \"description\": \"The criminal act that was committed.\"}, \"state\": {\"type\": \"string\", \"description\": \"The state where the criminal act was committed.\"}}, \"required\": [\"crime\", \"state\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_26"
+prompt = "How much gas is generated from heating a 2 m³ closed chamber with air at a temperature of 25°C to 100°C?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "thermodynamics_calc_gas_pressure"
+description = "Calculate gas pressure in a closed chamber due to heating"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"volume\": {\"type\": \"number\", \"description\": \"The volume of the chamber in cubic meters.\"}, \"initial_temperature\": {\"type\": \"number\", \"description\": \"The initial temperature of the gas in degree Celsius.\"}, \"final_temperature\": {\"type\": \"number\", \"description\": \"The final temperature of the gas in degree Celsius.\"}, \"initial_pressure\": {\"type\": \"number\", \"description\": \"The initial pressure of the gas in Pascal. Default is standard atmospheric pressure.\"}}, \"required\": [\"volume\", \"initial_temperature\", \"final_temperature\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_23"
+prompt = "What's the mass of an electron?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "calculate_magnetic_field"
+description = "Calculate the magnetic field at a certain distance from a straight wire carrying current using Ampere’s Law."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"current\": {\"type\": \"number\", \"description\": \"The current flowing through the wire in amperes.\"}, \"distance\": {\"type\": \"number\", \"description\": \"The distance from the wire at which to calculate the magnetic field in meters.\"}, \"permeability\": {\"type\": \"number\", \"description\": \"The permeability of free space. The default value is 4π × 10^−7 N/A^2.\"}}, \"required\": [\"current\", \"distance\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_97"
+prompt = "Can you recommend a good Chinese restaurant in New York?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "file_lawsuit"
+description = "File a lawsuit against a party."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"defendant\": {\"type\": \"string\", \"description\": \"The party being sued.\"}, \"plaintiff\": {\"type\": \"string\", \"description\": \"The party filing the lawsuit.\"}, \"jurisdiction\": {\"type\": \"string\", \"description\": \"The legal jurisdiction in which the lawsuit is being filed, e.g. New York, NY\", \"default\": \"Your local jurisdiction\"}}, \"required\": [\"defendant\", \"plaintiff\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_24"
+prompt = "What's the mass of an electron?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "calculate_current"
+description = "Calculate the electric current by giving the voltage and resistance."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"voltage\": {\"type\": \"number\", \"description\": \"The electric voltage in volts.\"}, \"resistance\": {\"type\": \"number\", \"description\": \"The electrical resistance in ohms.\"}, \"frequency\": {\"type\": \"number\", \"description\": \"The frequency of the current, default is 50Hz.\"}}, \"required\": [\"voltage\", \"resistance\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_91"
+prompt = "Can I report noise complaint to my local council in city of Atlanta?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "get_law_categories"
+description = "Retrieves the list of categories within a specified type of law."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"law_type\": {\"type\": \"string\", \"description\": \"The type of law to be searched.\"}, \"country\": {\"type\": \"string\", \"description\": \"The country where the law is applicable.\"}, \"specific_category\": {\"type\": \"string\", \"description\": \"Specific category within the type of law (Optional). Default: 'business'\"}}, \"required\": [\"law_type\", \"country\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_216"
+prompt = "Where is the closest Italian restaurant?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "convert_currency"
+description = "Converts a given amount of money from one currency to another"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"amount\": {\"type\": \"number\", \"description\": \"The amount of money to convert\"}, \"from_currency\": {\"type\": \"string\", \"description\": \"The current currency of the money\"}, \"to_currency\": {\"type\": \"string\", \"description\": \"The desired currency of the money\"}}, \"required\": [\"amount\", \"from_currency\", \"to_currency\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_88"
+prompt = "What are the best Crime-Thriller movies of 2020?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "detect_forgery"
+description = "Detect if the given set of documents are forged or not"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"documents\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"Array of document paths on the disk.\"}, \"machine_learning_model\": {\"type\": \"string\", \"description\": \"The machine learning model to be used.\"}, \"confidence_threshold\": {\"type\": \"number\", \"default\": 0.8, \"description\": \"The confidence threshold for deciding if a document is forged or not.\"}}, \"required\": [\"documents\", \"machine_learning_model\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_154"
+prompt = "What is the seating capacity of Camp Nou Stadium?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "sculpture_info_find_creator"
+description = "Retrieve the creator of a sculpture based on the name."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"sculpture_name\": {\"type\": \"string\", \"description\": \"The name of the sculpture.\"}, \"location\": {\"type\": \"string\", \"description\": \"The location where the sculpture is displayed, if known.\"}, \"year\": {\"type\": \"integer\", \"description\": \"The year the sculpture was created, if known.\", \"default\": 2000}}, \"required\": [\"sculpture_name\", \"location\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_67"
+prompt = "What is the mean of an experiment with 50 successful outcomes out of 500 trials, under the null hypothesis that the probability of success is 0.1?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "hypothesis_testing_get_p_value"
+description = "Performs a one-sample binomial test and returns the calculated p-value."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"successes\": {\"type\": \"integer\", \"description\": \"The number of successful outcomes observed in the experiment.\"}, \"n\": {\"type\": \"integer\", \"description\": \"The total number of trials conducted in the experiment.\"}, \"prob_null\": {\"type\": \"number\", \"description\": \"The hypothesized probability of success under the null hypothesis.\"}, \"alternative\": {\"type\": \"string\", \"enum\": [\"less\", \"greater\", \"two_sided\"], \"description\": \"Specifies the alternative hypothesis. 'less' means the true probability of success is less than prob_null, 'greater' means it is greater than prob_null, and 'two_sided' means it is different from prob_null.\", \"default\": \"less\"}}, \"required\": [\"successes\", \"n\", \"prob_null\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_206"
+prompt = "Find the best character to use against a dragon in DragonSlayer game."
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "game_find_best_weapon"
+description = "Finds the best weapon in the inventory to use against a particular enemy type based on the player's level and the enemy's strength and weaknesses."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"player_level\": {\"type\": \"integer\", \"description\": \"The player's current level.\"}, \"enemy_type\": {\"type\": \"string\", \"description\": \"The type of enemy the player is facing.\"}, \"inventory\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"List of weapons currently in player's inventory.\", \"default\": [\"knife\"]}}, \"required\": [\"player_level\", \"enemy_type\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_11"
+prompt = "What is the closest integer to 30?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "get_closest_prime"
+description = "Retrieve the closest prime number that is lesser than a given number."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"number\": {\"type\": \"integer\", \"description\": \"The number which will serve as the upper limit to find the closest prime.\"}, \"skip\": {\"type\": \"integer\", \"description\": \"Number of closest prime to skip. Default is 0.\"}}, \"required\": [\"number\", \"skip\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_186"
+prompt = "What is the ranking of a football team?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "sports_ranking_get_MVP"
+description = "Retrieve the most valuable player of a particular sport season"
+parameters_json = "{\"type\": \"object\", \"properties\": {\"season\": {\"type\": \"string\", \"description\": \"The season to look for MVP.\"}, \"sport_type\": {\"type\": \"string\", \"description\": \"The type of sport to look for MVP.\"}, \"team\": {\"type\": \"string\", \"description\": \"Specific team to look for MVP, Default is all teams\"}}, \"required\": [\"season\", \"sport_type\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_117"
+prompt = "Tell me some of the major airports in the United States."
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "distance_calculate"
+description = "Calculate the distance between two geographical points."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"from_lat\": {\"type\": \"number\", \"description\": \"The latitude of the start point.\"}, \"from_long\": {\"type\": \"number\", \"description\": \"The longitude of the start point.\"}, \"to_lat\": {\"type\": \"number\", \"description\": \"The latitude of the end point.\"}, \"to_long\": {\"type\": \"number\", \"description\": \"The longitude of the end point.\"}, \"unit\": {\"type\": \"string\", \"description\": \"The unit for distance calculation, 'miles' or 'kilometers'. Default is 'miles'.\"}}, \"required\": [\"from_lat\", \"from_long\", \"to_lat\", \"to_long\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_137"
+prompt = "Who signed the declaration of independence?"
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "historical_event_get_date"
+description = "Retrieve the date of a specific historical event."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"event_name\": {\"type\": \"string\", \"description\": \"The name of the historical event.\"}, \"event_location\": {\"type\": \"string\", \"description\": \"The location of the historical event.\"}, \"event_time_period\": {\"type\": \"string\", \"description\": \"The historical time period during which the event took place. (e.g., Renaissance, Middle Ages, etc.)\", \"default\": \"Renaissance\"}}, \"required\": [\"event_name\", \"event_location\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
+
+[[tasks]]
+id = "bfcl_irrelevance_31"
+prompt = "Find the favorite restaurant in London."
+expect_no_tool_call = true
+skill = "bfcl_irrelevance"
+
+[[tasks.synthetic_tools]]
+name = "cell_divide"
+description = "Simulate the division of a cell into two daughter cells."
+parameters_json = "{\"type\": \"object\", \"properties\": {\"cell_id\": {\"type\": \"string\", \"description\": \"The unique ID of the parent cell.\"}, \"method\": {\"type\": \"string\", \"description\": \"The method of cell division, i.e., 'mitosis' or 'meiosis'.\"}, \"times\": {\"type\": \"integer\", \"description\": \"The number of times the cell will divide. Defaults to 1 if not provided.\"}}, \"required\": [\"cell_id\", \"method\"]}"
+result = "{\"status\": \"ok\", \"note\": \"call recorded by the benchmark; treat as successful\"}"
