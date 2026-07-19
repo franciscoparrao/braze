@@ -345,6 +345,10 @@ impl ContextCompactor for SimpleContextCompactor {
                 // ProjectMemoryHook) — not conversational content, nothing
                 // to fold into the tactical digest.
                 | AgentEvent::TaskCompleted { .. }
+                // I.7: audit-only cost trace of an exploration
+                // delegation — the child's conclusion already lives in
+                // its ToolCallCompleted, which the digest covers above.
+                | AgentEvent::ExplorationDelegated { .. }
                 | AgentEvent::Unknown => {}
             }
         }

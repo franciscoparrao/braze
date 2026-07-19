@@ -117,6 +117,9 @@ pub struct ConfigOverrides {
     /// C′.2 — lista de tareas tipada (`BRAZE_ENABLE_TASK_LIST`).
     #[serde(default)]
     pub enable_task_list: Option<bool>,
+    /// I.7 — explorador aislado (`BRAZE_ENABLE_EXPLORATION`).
+    #[serde(default)]
+    pub enable_exploration: Option<bool>,
     /// E′ I.6 — snapshot de entorno en el system prompt
     /// (`BRAZE_ENVIRONMENT_BLOCK`).
     #[serde(default)]
@@ -337,6 +340,16 @@ impl ConfigOverrides {
                             reason: e.to_string(),
                         })?;
                     overrides.enable_task_list = Some(parsed);
+                }
+                "ENABLE_EXPLORATION" => {
+                    let parsed = value
+                        .parse::<bool>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.enable_exploration = Some(parsed);
                 }
                 "ENABLE_PROJECT_MEMORY" => {
                     let parsed = value

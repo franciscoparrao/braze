@@ -230,6 +230,21 @@ pub enum AgentEvent {
         name: String,
         reason: String,
     },
+    /// I.7: a broad read-only exploration was delegated to the isolated
+    /// child loop (`exploration` in braze-engine,
+    /// `docs/explorador-aislado-ab-design.md`). Audit-only — the
+    /// child's transcript is deliberately discarded (that isolation IS
+    /// the lever); this event plus an aggregate `Usage` are the rollout
+    /// log's only trace of what the delegation cost, which is what the
+    /// pre-registered A/B's token accounting reads.
+    ExplorationDelegated {
+        /// The question the parent asked, verbatim.
+        question: String,
+        /// Completion rounds the child used (capped by the engine).
+        child_rounds: u32,
+        /// Input+output tokens the child consumed, summed.
+        child_tokens: u64,
+    },
     /// A typed task list entry (`crate::task_list` in braze-engine)
     /// transitioned to `done` via `task_update`. The task list itself is
     /// deliberately NOT persisted as its own state (in-memory, reset per
@@ -487,6 +502,36 @@ mod tests {
                 assert_eq!(text, "over 80% of budget");
             }
             other => panic!("expected HarnessNote, got {other:?}"),
+        }
+    }
+
+    /// I.7: `ExplorationDelegated` round-trips with its snake_case tag
+    /// and all three fields — the A/B's token accounting reads them
+    /// back from the rollout log.
+    #[test]
+    fn exploration_delegated_round_trips_through_json() {
+        let event = AgentEvent::ExplorationDelegated {
+            question: "which file defines parse_header?".to_string(),
+            child_rounds: 3,
+            child_tokens: 1500,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"exploration_delegated\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        match decoded {
+            AgentEvent::ExplorationDelegated {
+                question,
+                child_rounds,
+                child_tokens,
+            } => {
+                assert_eq!(question, "which file defines parse_header?");
+                assert_eq!(child_rounds, 3);
+                assert_eq!(child_tokens, 1500);
+            }
+            other => panic!("expected ExplorationDelegated, got {other:?}"),
         }
     }
 

@@ -655,6 +655,12 @@ pub struct AblationOverrides {
     /// SLM distractors) — the suffix still means what every suffix
     /// means: "this row diverges from the config default".
     pub enable_task_list: bool,
+    /// `+ablate:explore` — ENABLES the I.7 isolated exploration child
+    /// loop (`docs/explorador-aislado-ab-design.md`). Same documented
+    /// enabling-key exception as `enable_task_list`: the lever defaults
+    /// OFF (one extra tool is a potential SLM distractor), so its
+    /// suffix enables rather than disables.
+    pub enable_exploration: bool,
     /// `+ablate:prompt-tools` — brazo B del A/B pre-registrado de
     /// constrained decoding (docs/constrained-decoding-ab-design.md): el
     /// request Ollama va SIN el campo `tools` (inventario como addendum
@@ -707,7 +713,7 @@ impl AblationOverrides {
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
-         task-list, prompt-tools, constrained-tools, project-memory, lead-summary, ttc=N, best-of-n=N, \
+         task-list, explore, prompt-tools, constrained-tools, project-memory, lead-summary, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
          tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N";
 
@@ -754,6 +760,7 @@ impl AblationOverrides {
                     out.lead_failure_threshold = Some(Self::parse_usize(key, value)?)
                 }
                 "task-list" => out.enable_task_list = true,
+                "explore" => out.enable_exploration = true,
                 "prompt-tools" => out.enable_prompt_tools = true,
                 "constrained-tools" => out.enable_constrained_tools = true,
                 "project-memory" => out.enable_project_memory = true,
@@ -841,6 +848,9 @@ impl AblationOverrides {
         }
         if self.enable_task_list {
             parts.push("task-list".to_string());
+        }
+        if self.enable_exploration {
+            parts.push("explore".to_string());
         }
         if self.enable_prompt_tools {
             parts.push("prompt-tools".to_string());

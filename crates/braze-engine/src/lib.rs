@@ -10,6 +10,7 @@
 mod engine;
 mod hooks;
 mod project_memory_hook;
+mod exploration;
 mod task_list;
 mod tool_search;
 mod error;

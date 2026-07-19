@@ -256,6 +256,11 @@ impl Engine {
             // itself, never persisted (persisting it every round would
             // be the prose-plan noise this lever exists to replace).
             let mut request_messages = messages.clone();
+            // I.7: the explore tool joins the inventory only when the
+            // lever is on — same opt-in posture as the task tools below.
+            if self.exploration_enabled {
+                tool_stubs.push(crate::exploration::explore_tool_stub());
+            }
             if self.task_list_enabled {
                 tool_stubs.extend(crate::task_list::task_tool_stubs());
                 let task_list = self.task_list.lock().unwrap();

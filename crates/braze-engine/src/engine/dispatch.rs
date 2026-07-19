@@ -259,6 +259,79 @@ impl Engine {
                 continue;
             }
 
+            // I.7 (crate::exploration): the explore tool delegates a
+            // read-only question to the isolated child loop — same
+            // inline treatment as `search_tools` (no registry schema;
+            // no permission guard: the child can only invoke read-only
+            // tools by construction). Only intercepted while the lever
+            // is on, so the name passes through untouched otherwise.
+            if self.exploration_enabled && call.name == crate::exploration::EXPLORE_TOOL {
+                let question = call
+                    .arguments
+                    .get("question")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let outcome = if question.trim().is_empty() {
+                    crate::exploration::ExplorationOutcome {
+                        content: "explore needs a non-empty 'question' string".to_string(),
+                        is_error: true,
+                        child_rounds: 0,
+                        child_input_tokens: 0,
+                        child_output_tokens: 0,
+                    }
+                } else {
+                    self.run_exploration(&question).await
+                };
+                let child_tokens =
+                    outcome.child_input_tokens + outcome.child_output_tokens;
+                // The child's cost enters the rollout log twice on
+                // purpose: an aggregate Usage (so every existing token
+                // accounting — bench sums, budget audits — counts it
+                // with zero new code) and the audit event (so the A/B
+                // can attribute it to delegation specifically).
+                if child_tokens > 0 {
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::Usage {
+                            input_tokens: outcome.child_input_tokens.min(u32::MAX as u64)
+                                as u32,
+                            output_tokens: outcome.child_output_tokens.min(u32::MAX as u64)
+                                as u32,
+                            stop_reason: Some("exploration_child".to_string()),
+                            cache_read_tokens: None,
+                            cache_write_tokens: None,
+                        },
+                        observer,
+                    )
+                    .await?;
+                }
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ExplorationDelegated {
+                        question,
+                        child_rounds: outcome.child_rounds,
+                        child_tokens,
+                    },
+                    observer,
+                )
+                .await?;
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result: ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: outcome.content,
+                            is_error: outcome.is_error,
+                        },
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
+            }
+
             // C′.2 (crate::task_list): the two task tools are
             // harness-owned state mutations — same inline treatment as
             // `search_tools` (no registry schema, no permission guard:
@@ -595,5 +668,170 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    /// I.7 (`crate::exploration`): the isolated child loop behind the
+    /// `explore` tool. Runs the SAME `ModelBackend` as the executor —
+    /// the point of the pre-registered design: any gain is attributable
+    /// to context isolation, never to added capability — against a
+    /// disposable in-memory transcript, with only the read-only tools
+    /// (`CHILD_READ_ONLY_TOOLS`) dispatched directly (no permission
+    /// guard needed by construction) and a low round cap. Every failure
+    /// mode degrades to a recoverable tool result: the lever must never
+    /// kill the parent turn.
+    pub(super) async fn run_exploration(
+        &self,
+        question: &str,
+    ) -> crate::exploration::ExplorationOutcome {
+        use crate::exploration::{
+            CHILD_PROMPT_ADDENDUM, CHILD_READ_ONLY_TOOLS, EXPLORATION_FAILED_RESULT,
+            MAX_CHILD_ROUNDS,
+        };
+
+        let failed = |rounds: u32, input: u64, output: u64| crate::exploration::ExplorationOutcome {
+            content: EXPLORATION_FAILED_RESULT.to_string(),
+            is_error: true,
+            child_rounds: rounds,
+            child_input_tokens: input,
+            child_output_tokens: output,
+        };
+
+        // The child's inventory: only the read-only subset the registry
+        // actually has (a registry without `grep` just yields a smaller
+        // child inventory, not an error).
+        let child_stubs: Vec<ToolStub> = match self.tools.all_stubs().await {
+            Ok(stubs) => stubs
+                .into_iter()
+                .filter(|s| CHILD_READ_ONLY_TOOLS.contains(&s.name.as_str()))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        let system_prompt = format!("{}{}", self.system_prompt, CHILD_PROMPT_ADDENDUM);
+
+        let mut messages = vec![Message::text(Role::User, question.to_string())];
+        let mut input_tokens: u64 = 0;
+        let mut output_tokens: u64 = 0;
+        let mut rounds: u32 = 0;
+
+        while rounds < MAX_CHILD_ROUNDS {
+            rounds += 1;
+            let req = CompletionRequest {
+                messages: messages.clone(),
+                tool_stubs: child_stubs.clone(),
+                system_prompt: system_prompt.clone(),
+                max_tokens: self.max_tokens,
+            };
+            let mut stream = match self.model.complete(req).await {
+                Ok(stream) => stream,
+                Err(err) => {
+                    tracing::warn!(error = %err, "exploration child: completion failed");
+                    return failed(rounds, input_tokens, output_tokens);
+                }
+            };
+
+            let mut text = String::new();
+            let mut calls: Vec<ToolCall> = Vec::new();
+            let mut stream_failed = false;
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(CompletionEvent::TextDelta(delta)) => text.push_str(&delta),
+                    Ok(CompletionEvent::ToolCallRequested {
+                        id,
+                        name,
+                        arguments,
+                    }) => calls.push(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    }),
+                    Ok(CompletionEvent::Usage {
+                        input_tokens: it,
+                        output_tokens: ot,
+                        ..
+                    }) => {
+                        input_tokens += u64::from(it);
+                        output_tokens += u64::from(ot);
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        tracing::warn!(error = %err, "exploration child: stream failed");
+                        stream_failed = true;
+                        break;
+                    }
+                }
+            }
+            if stream_failed {
+                return failed(rounds, input_tokens, output_tokens);
+            }
+
+            if calls.is_empty() {
+                let conclusion = text.trim();
+                if conclusion.is_empty() {
+                    return failed(rounds, input_tokens, output_tokens);
+                }
+                return crate::exploration::ExplorationOutcome {
+                    content: conclusion.to_string(),
+                    is_error: false,
+                    child_rounds: rounds,
+                    child_input_tokens: input_tokens,
+                    child_output_tokens: output_tokens,
+                };
+            }
+
+            // Append the assistant round and dispatch the read-only
+            // calls directly — anything outside the allowlist gets a
+            // recoverable error result (depth 1: `explore` itself is
+            // never in the allowlist).
+            let mut assistant_content: Vec<ContentBlock> = Vec::new();
+            if !text.is_empty() {
+                assistant_content.push(ContentBlock::Text { text: text.clone() });
+            }
+            for call in &calls {
+                assistant_content.push(ContentBlock::ToolUse {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    input: call.arguments.clone(),
+                });
+            }
+            messages.push(Message {
+                role: Role::Assistant,
+                content: assistant_content,
+            });
+
+            let mut result_content: Vec<ContentBlock> = Vec::new();
+            for call in &calls {
+                let result = if CHILD_READ_ONLY_TOOLS.contains(&call.name.as_str()) {
+                    match self.tools.dispatch(call).await {
+                        Ok(result) => result,
+                        Err(err) => ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: err.to_string(),
+                            is_error: true,
+                        },
+                    }
+                } else {
+                    ToolResult {
+                        tool_call_id: call.id.clone(),
+                        content: format!(
+                            "'{}' is not available here — this exploration helper can only \
+                             use read_file, grep, and glob",
+                            call.name
+                        ),
+                        is_error: true,
+                    }
+                };
+                result_content.push(ContentBlock::ToolResult {
+                    tool_use_id: result.tool_call_id,
+                    content: result.content,
+                    is_error: result.is_error,
+                });
+            }
+            messages.push(Message {
+                role: Role::User,
+                content: result_content,
+            });
+        }
+
+        failed(rounds, input_tokens, output_tokens)
     }
 }

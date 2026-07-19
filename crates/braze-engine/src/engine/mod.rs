@@ -244,6 +244,13 @@ pub struct Engine {
     /// tools extra son distractores potenciales para un SLM; entra al
     /// bench por su propia fila (`+ablate:task-list`).
     task_list_enabled: bool,
+    /// I.7 (`crate::exploration`): expone la tool `explore` — el
+    /// mini-loop hijo aislado de solo-lectura. OFF por default, mismo
+    /// razonamiento que la task list (una tool extra es un distractor
+    /// potencial); entra al bench por `+ablate:explore` y su adopción
+    /// la decide el A/B pre-registrado
+    /// (`docs/explorador-aislado-ab-design.md`).
+    exploration_enabled: bool,
     /// El estado de la lista (por turno, en memoria — se resetea al
     /// inicio de cada `run_turn`, J-4 docs/AUDITORIA-2026-07-v7.md: sin
     /// el reset, los planes de turnos/temas distintos se mezclaban y un
@@ -342,6 +349,7 @@ impl Engine {
             tool_search_threshold: crate::tool_search::DEFAULT_TOOL_SEARCH_THRESHOLD,
             activated_deferred_tools: std::sync::Mutex::new(std::collections::HashSet::new()),
             task_list_enabled: false,
+            exploration_enabled: false,
             task_list: std::sync::Mutex::new(crate::task_list::TaskList::default()),
             turn_harness_notes: std::sync::Mutex::new(Vec::new()),
             skill_registry: None,
@@ -529,6 +537,15 @@ impl Engine {
     /// `+ablate:task-list`. Chainable.
     pub fn with_task_list_enabled(mut self, enabled: bool) -> Self {
         self.task_list_enabled = enabled;
+        self
+    }
+
+    /// Enables the I.7 isolated exploration child loop
+    /// (`crate::exploration`) — the harness-owned `explore` tool. Off by
+    /// default; `Config::enable_exploration` / `+ablate:explore`.
+    /// Chainable.
+    pub fn with_exploration_enabled(mut self, enabled: bool) -> Self {
+        self.exploration_enabled = enabled;
         self
     }
 
@@ -4960,6 +4977,177 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&skills_dir);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- I.7: explorador de contexto aislado
+    // (docs/explorador-aislado-ab-design.md) ---
+
+    /// The delegation round-trip: the parent calls `explore`, the child
+    /// loop (same scripted backend) answers in one tools-free round, the
+    /// conclusion comes back as the explore call's tool result, and the
+    /// rollout log records the audit event + aggregate child usage —
+    /// but NONE of the child's own transcript (isolation is the lever).
+    #[tokio::test]
+    async fn an_exploration_delegation_round_trips_and_stays_isolated() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Script order: parent round 1 (calls explore) → child round
+        // (answers, no tools) → parent round 2 (final answer).
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-explore".to_string(),
+                    name: "explore".to_string(),
+                    arguments: serde_json::json!({
+                        "question": "which file defines parse_header?"
+                    }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta(
+                    "parse_header is defined in src/header.rs.".to_string(),
+                ),
+                CompletionEvent::Usage {
+                    input_tokens: 120,
+                    output_tokens: 30,
+                    stop_reason: Some("stop".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("Está en src/header.rs.".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_exploration_enabled(true);
+
+        engine
+            .run_turn(&session, "¿dónde se define parse_header?", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        // The audit event carries the question and the child's cost.
+        let delegated = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ExplorationDelegated {
+                    question,
+                    child_rounds,
+                    child_tokens,
+                } => Some((question.clone(), *child_rounds, *child_tokens)),
+                _ => None,
+            })
+            .expect("ExplorationDelegated must be persisted");
+        assert_eq!(delegated.0, "which file defines parse_header?");
+        assert_eq!(delegated.1, 1, "the child answered in one round");
+        assert_eq!(delegated.2, 150, "child input+output tokens summed");
+
+        // The conclusion is the explore call's tool result…
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::ToolCallCompleted { result, .. }
+                    if !result.is_error
+                        && result.content.contains("src/header.rs")
+            )),
+            "the child's conclusion must come back as the tool result"
+        );
+        // …and the child's transcript is NOT in the parent's log: the
+        // only AssistantText is the parent's final answer.
+        let assistant_texts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::AssistantText { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            assistant_texts,
+            vec!["Está en src/header.rs."],
+            "isolation: the child's own text must never enter the parent log"
+        );
+        // The aggregate child usage rides as a Usage event so every
+        // existing token accounting counts it.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::Usage { stop_reason: Some(reason), input_tokens: 120, output_tokens: 30, .. }
+                    if reason == "exploration_child"
+            )),
+            "aggregate child usage must be persisted: {events:#?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The lever must never kill the turn: a child that produces nothing
+    /// usable degrades to a recoverable tool error the parent can act on.
+    #[tokio::test]
+    async fn a_failed_exploration_degrades_to_a_recoverable_tool_error() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-explore".to_string(),
+                    name: "explore".to_string(),
+                    arguments: serde_json::json!({ "question": "¿algo?" }),
+                },
+                CompletionEvent::Done,
+            ],
+            // Child round: empty text, no tool calls → exploration fails.
+            vec![CompletionEvent::Done],
+            vec![
+                CompletionEvent::TextDelta("Exploro yo mismo.".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_exploration_enabled(true);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("the failed exploration must not kill the turn");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::ToolCallCompleted { result, .. }
+                    if result.is_error && result.content.contains("exploration failed")
+            )),
+            "expected the recoverable error result: {events:#?}"
+        );
+
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 

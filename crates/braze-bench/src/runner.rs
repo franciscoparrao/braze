@@ -399,6 +399,7 @@ pub async fn run_task(
     // C′.2: la fila puede prender la task list aunque config la tenga
     // off (default) — el brazo planner→tasks del A/B pre-registrado.
     .with_task_list_enabled(config.enable_task_list || ablation.enable_task_list)
+    .with_exploration_enabled(config.enable_exploration || ablation.enable_exploration)
     // A/B constrained decoding (docs/constrained-decoding-ab-design.md):
     // el canal de vuelta de los brazos `+ablate:prompt-tools`/
     // `constrained-tools` — el envelope se parsea como canal primario

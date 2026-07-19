@@ -76,6 +76,7 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "tool_search_threshold",
     // C′.2 — lista de tareas tipada (task_add/task_update).
     "enable_task_list",
+    "enable_exploration",
     // E′ I.6 — snapshot de entorno en el system prompt.
     "environment_block",
     // docs/project-memory-design.md — memoria de proyecto entre sesiones.

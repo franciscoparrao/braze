@@ -460,6 +460,10 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         // Audit-only trace for downstream consumers (braze-memory's
         // ProjectMemoryHook) — never rendered back to the model.
         | AgentEvent::TaskCompleted { .. }
+        // I.7: audit-only cost trace — the child's conclusion reaches
+        // the model as the explore call's ToolCallCompleted, rendered
+        // above like any other observation.
+        | AgentEvent::ExplorationDelegated { .. }
         | AgentEvent::Unknown => None,
     }
 }

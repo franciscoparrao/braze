@@ -493,6 +493,12 @@ pub struct Config {
     /// SLM; se promueve solo si su A/B lo valida.
     #[serde(default)]
     pub enable_task_list: bool,
+    /// I.7 — explorador de contexto aislado (tool `explore`,
+    /// `docs/explorador-aislado-ab-design.md`). OFF por default, mismo
+    /// posicionamiento que `enable_task_list`: la palanca entra apagada
+    /// y se promueve solo si su A/B pre-registrado la valida.
+    #[serde(default)]
+    pub enable_exploration: bool,
     /// E′ I.6 (docs/harness-engineering-hooks-skills-2026-07-10.md):
     /// anexa al system prompt un snapshot del entorno (branch + git
     /// status recortado + fecha + OS) generado por el composition root —
@@ -607,6 +613,7 @@ impl Default for Config {
             references: Vec::new(),
             tool_search_threshold: default_tool_search_threshold(),
             enable_task_list: false,
+            enable_exploration: false,
             environment_block: false,
             enable_project_memory: false,
             enable_lead_summary: false,
@@ -849,6 +856,9 @@ impl Config {
         }
         if let Some(v) = overrides.enable_task_list {
             self.enable_task_list = v;
+        }
+        if let Some(v) = overrides.enable_exploration {
+            self.enable_exploration = v;
         }
         if let Some(v) = overrides.environment_block {
             self.environment_block = v;
