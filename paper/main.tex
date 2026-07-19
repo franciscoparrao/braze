@@ -1220,25 +1220,39 @@ recovers both, but by different deliveries at different scales
 (Figure~\ref{fig:rescate}). For the capable executor, re-rendering the
 same prose plan as user-role context eliminates the collapse: 95.8\%
 raw against an 86.3\% same-sweep baseline. That raw $+10$\,pp delta,
-however, does not survive a closer look at the baseline arm: the same
-transient network event that contaminated this sweep's 3B task-list
-arm (below) also cost the coder \emph{baseline} 10 of its 13 failures
---- requests that never reached the model or streams that failed
-mid-flight (wall-clock ${<}1$\,s or explicit transport errors;
-\texttt{docs/emse-r2-analysis-2026-07-17.md}). Excluding runs lost to
-transport from both numerator and denominator on every arm of this
-sweep --- the same treatment the interrupted scale-curve slice already
-receives (\S\ref{sec:threats}) --- the coder baseline is 82/85
-(96.5\%), the user-role arm 91/93 (97.8\%), and the delta $+1.4$\,pp
-[$-4.5$, $+7.9$]: the fixed delivery restores the ceiling executor to
-its baseline, with the empty-response signature nearly gone (1
-occurrence) and \texttt{error\_recovery} 13/15~$\to$~15/15 (a skill
-untouched by the transport failures on either side; directional at
-$n{=}15$) --- but it does not demonstrably \emph{beat} that baseline.
-This also resolves what would otherwise look like an unexplained
-12\,pp swing in the coder's baseline across sweeps (97.9\% in the
-scale curve vs.\ 86.3\% here): net of transport failures the two
-sweeps agree (97.9\% vs.\ 96.5\%). For the small executor, whose arms
+however, did not survive a closer look at the baseline arm: a
+transient network event cost the coder \emph{baseline} 10 of its 13
+failures (requests that never reached the model;
+\texttt{docs/emse-r2-analysis-2026-07-17.md}). An earlier revision of
+this section corrected for that with an analytical exclusion; we have
+since replaced the exclusion with data. All three coder arms were
+re-measured under a pre-registered clean-re-run design
+(\texttt{docs/rerun-contaminated-cells-design-2026-07-18.md}, Bloque
+2; same 2\%-transport validity rule as \S\ref{sec:bfcl}; the first
+re-run attempt was itself invalidated by that rule after exposing a
+circuit-breaker bug in the harness — a cancelled half-open probe
+poisoned two arms — which we fixed, disclosed, and preserved before
+re-running). The clean sweep (285 runs, 2026-07-19) has \emph{zero}
+transport failures under the audit criterion in all three arms; its
+eleven \texttt{model\_backend\_error} rows are the model emitting
+malformed XML tool-call syntax that the textual-rescue parser
+surfaces as a stream error (wall-clock 18--78\,s — model failures,
+not infrastructure; that the rescue ladder converts them into
+backend errors rather than degrading is itself a harness finding we
+record for future work). On clean data: coder baseline 93/95 =
+97.9\% [92.6, 99.4]\% --- now agreeing exactly with the scale
+curve's 97.9\%, resolving the apparent cross-sweep swing --- and the
+user-role arm 90/95 = 94.7\% [88.3, 97.7]\%, delta $-3.2$\,pp
+[$-9.8$, $+2.9$]: the fixed delivery restores the ceiling executor
+from its 49\% collapse to its own baseline band, but does not beat
+it. The task-list delivery at the ceiling, however, \emph{diverges}
+from the earlier exclusion-based estimate, and we report it as the
+pre-registered design requires: 84/95 = 88.4\%, delta $-9.5$\,pp
+[$-17.6$, $-2.2$] --- outside zero, on the harmful side (its failure
+mix: four timeouts, the XML-rescue errors above, and one tool
+assertion). At the ceiling, converting the plan into typed task
+state does not merely fail to help; it costs measurable pass rate.
+For the small executor, whose arms
 in this sweep show no transport failures, prose alone is not enough ---
 user-role rendering alone reaches only 63\%, marginally under its
 67\% baseline --- but delivering the plan as \braze{}'s typed task list
@@ -1270,9 +1284,13 @@ guardrail skills do not degrade; and the delivery costs roughly
 $2\times$ the baseline's input tokens (5{,}352 vs.\ 2{,}635 per run)
 and $4\times$ its output tokens --- a cost the criterion explicitly
 counts. The user-role delivery at 3B fails more clearly (target pair
-10/30, below baseline), and the two ceiling deliveries recover the
-collapse without measurably exceeding their baseline ($+1.4$ and
-$+2.4$\,pp, both intervals crossing zero). \emph{Deviation note
+10/30, below baseline); at the ceiling, the user-role delivery
+recovers the collapse without measurably exceeding its baseline
+($-3.2$\,pp, crossing zero) and the task-list delivery lands below
+its baseline outright ($-9.5$\,pp [$-17.6$, $-2.2$], clean re-run) —
+reinforcing the rejection from a second direction: the delivery with
+the largest (marginal) movement at 3B is measurably harmful at the
+scale ceiling. \emph{Deviation note
 (2026-07-17)}: the criterion's rejection clause prescribes removing
 the lever; we keep it implemented and opt-in --- never default ---
 because the iteration's diagnostic finding is this section's actual
@@ -1288,9 +1306,11 @@ were transient Nitro network errors concentrated entirely in that arm,
 not a property of the task-list delivery; the clean re-run is the 79\%
 reported above. The same network event's lighter footprint on the
 coder arms (10, 2, and 8 transport failures on baseline, user-role,
-and task-list respectively) is what the exclusion above corrects; we
-disclose both the contaminated attempt and the correction rather than
-silently substitute either.
+and task-list respectively) is what the clean re-run above replaces;
+we disclose the contaminated original, the intermediate
+exclusion-based estimate, the invalidated first re-run attempt, and
+the clean re-measurement, rather than silently substitute any of
+them.
 
 \subsection{Tool deferral: cheaper, not free}\label{sec:searchtools}
 % Fuente: docs/sweep-search-tools-ab-n15-2026-07-12.md (n=90/brazo,
@@ -1740,14 +1760,18 @@ it. A later audit prompted by this paper's second pre-submission
 review found the same event also reached that sweep's coder arms
 asymmetrically (10 transport failures on the baseline, 2 on the
 user-role arm, 8 on the task-list arm), depressing the coder baseline
-and inflating the apparent gain of the fixed deliveries;
-\S\ref{sec:planner} now reports those arms net of transport failures,
-under an explicit criterion (a \texttt{model\_backend\_error} whose
-request never reached the model --- wall-clock under one second --- or
-whose stream failed in flight; genuine empty responses do not qualify)
-applied uniformly to every arm of that sweep, with raw and corrected
-numbers both given in
-\texttt{docs/emse-r2-analysis-2026-07-17.md}. The scale-curve sweep (\S\ref{sec:curve}) was collected in two
+and inflating the apparent gain of the fixed deliveries. An
+intermediate revision corrected this with an analytical exclusion
+(criterion and raw-vs-corrected numbers in
+\texttt{docs/emse-r2-analysis-2026-07-17.md}); \S\ref{sec:planner}
+now reports a pre-registered clean re-measurement of all three coder
+arms instead --- whose own first attempt was invalidated by the
+committed 2\%-transport rule after exposing a circuit-breaker
+probe-cancellation bug in the harness (fixed with regression tests;
+attempt preserved with a \texttt{.contaminated} suffix), and whose
+valid attempt has zero transport failures. Three generations of the
+same numbers --- contaminated, exclusion-corrected, cleanly
+re-measured --- are all preserved in the repository. The scale-curve sweep (\S\ref{sec:curve}) was collected in two
 slices roughly eight hours apart after Nitro became unreachable
 mid-sweep; the interrupted slice's 1{,}140 dead rows were excluded from
 analysis, and the two valid slices are treated as coming from the same
@@ -1872,11 +1896,17 @@ interests.
 \section{Sweep inventory}\label{app:sweeps}
 
 Table~\ref{tab:sweeps} lists every sweep cited in this paper, in the
-order they appear: 6{,}602 total runs across 15 sweep files (a
-sixteenth entry, the 3B task-list re-run of \S\ref{sec:planner}, is a
+order they appear: 7{,}077 total runs across 17 sweep files (an
+eighteenth entry, the 3B task-list re-run of \S\ref{sec:planner}, is a
 partial re-run of 95 further runs replacing a contaminated arm, not a
-new sweep; the three invalidated attempts at the BFCL anchor,
-preserved for disclosure, are likewise not counted). Each
+new sweep; the three invalidated attempts at the BFCL anchor and the
+invalidated first attempt at rerun-block2, preserved for disclosure,
+are likewise not counted). The $\dagger$ on rerun-block2's commit
+marks a disclosed metadata artifact: that sweep's binary predates its
+recorded commit --- the commit was captured when the JSON was written,
+at the end of a multi-hour sweep during which HEAD advanced (the
+harness now captures sweep identity at start, a fix this very sweep
+motivated). Each
 row's commit is the \texttt{braze\_git\_commit} embedded in that
 sweep's own JSON metadata at the time it was written, not necessarily
 the HEAD commit at time of writing this paper; where a later
@@ -1908,6 +1938,8 @@ gemma4-e4b-solo-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:curve} \\
 braze-composite-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:curve} \\
 external-bare-lead-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:external} \\
 bfcl-anchor & 2026-07-18/19 & \texttt{bc30a80} & 1{,}500 & \ref{sec:bfcl} \\
+rerun-block1 (1B plan+lead) & 2026-07-19 & \texttt{7528841} & 190 & \ref{sec:curve} \\
+rerun-block2 (coder arms) & 2026-07-19 & \texttt{70c2072}$^{\dagger}$ & 285 & \ref{sec:planner} \\
 \bottomrule
 \end{tabular}
 \end{table}

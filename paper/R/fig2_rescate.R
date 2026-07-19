@@ -59,6 +59,11 @@ conteo <- function(path, backend_exacto, excluir_transporte = FALSE) {
 CURVA <- "docs/sweep-curva-multiescala-2026-07-10.qwen.json"
 AB    <- "docs/sweep-planner-ab-2026-07-11.json"
 RERUN <- "docs/sweep-planner-ab-3b-tasklist-rerun-2026-07-11.json"
+# Re-run limpio pre-registrado de los TRES brazos coder (Bloque 2,
+# docs/rerun-contaminated-cells-design-2026-07-18.md, corrido
+# 2026-07-19): cero transporte por el criterio de la auditoría —
+# reemplaza la exclusión analítica del sweep AB para el coder.
+RERUN2 <- "docs/sweep-rerun-block2-coder-planner-2026-07-19.json"
 L <- "+plan:ollama:gemma4:e4b"
 
 celdas <- tribble(
@@ -68,10 +73,10 @@ celdas <- tribble(
   "qwen3.5-coder", "assistant", CURVA, paste0("ollama:qwen3.5-coder", L), CURVA, "ollama:qwen3.5-coder",
   # iteración: prosa como user
   "qwen2.5:3b", "user", AB, paste0("ollama:qwen2.5:3b", L), AB, "ollama:qwen2.5:3b",
-  "qwen3.5-coder", "user", AB, paste0("ollama:qwen3.5-coder", L), AB, "ollama:qwen3.5-coder",
+  "qwen3.5-coder", "user", RERUN2, paste0("ollama:qwen3.5-coder", L), RERUN2, "ollama:qwen3.5-coder",
   # iteración: plan → task list tipada
   "qwen2.5:3b", "tasks", RERUN, paste0("ollama:qwen2.5:3b", L, "+ablate:task-list"), AB, "ollama:qwen2.5:3b",
-  "qwen3.5-coder", "tasks", AB, paste0("ollama:qwen3.5-coder", L, "+ablate:task-list"), AB, "ollama:qwen3.5-coder"
+  "qwen3.5-coder", "tasks", RERUN2, paste0("ollama:qwen3.5-coder", L, "+ablate:task-list"), RERUN2, "ollama:qwen3.5-coder"
 )
 
 wilson_lohi <- function(x, n, z = 1.96) {
