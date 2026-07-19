@@ -99,7 +99,7 @@ pub async fn run(
     model_candidates: Vec<String>,
     skill_candidates: Vec<SkillCandidate>,
 ) -> Result<(), TuiError> {
-    print_banner(&theme, &status_line);
+    takeover_screen(&theme, &status_line);
     let mut guard = terminal::setup()?;
     app::run(
         &mut guard.terminal,
@@ -123,6 +123,70 @@ pub async fn run(
 /// with the inline-viewport machinery (`terminal.rs`'s module doc:
 /// deliberately no alternate screen, so anything printed before raw mode
 /// began just... stays, like any other line the shell already had).
+/// Takes over the terminal on launch the way established fullscreen
+/// TUIs do — banner at the top of a fresh screen, composer anchored at
+/// the bottom — WITHOUT giving up the inline-viewport + native-
+/// scrollback architecture (docs/TUI-INVESTIGACION-2026-07.md,
+/// convergence #1): no alternate screen is entered; this only chooses
+/// WHERE the inline viewport starts. Mechanics:
+///
+/// 1. Whatever the shell had on screen is scrolled up into the
+///    terminal's own scrollback (newlines from the bottom row — the
+///    one method that reliably preserves it; `Clear` alone would
+///    discard the visible lines) — a "soft clear", not a purge.
+/// 2. The banner prints at the top of the now-blank screen.
+/// 3. The cursor parks `VIEWPORT_HEIGHT` rows above the bottom, which
+///    is exactly where `terminal::setup()`'s inline viewport anchors —
+///    so the composer opens at the bottom edge, and the transcript
+///    grows upward above it, exactly like the fullscreen tools the
+///    layout mimics.
+///
+/// Best-effort by design: this is cosmetic, so any failure (no real
+/// terminal behind stdout, size query refused) degrades to printing
+/// the banner wherever the cursor already was — the pre-takeover
+/// behavior — rather than failing startup. On a terminal too short to
+/// fit banner + viewport (see `takeover_target_row`), the reposition
+/// is skipped for the same reason.
+fn takeover_screen(theme: &Theme, status_line: &str) {
+    use std::io::Write;
+
+    use crossterm::cursor::MoveTo;
+    use crossterm::execute;
+
+    let mut stdout = std::io::stdout();
+    let rows = crossterm::terminal::size().map(|(_cols, rows)| rows).ok();
+    let target = rows.and_then(|rows| takeover_target_row(rows, terminal::VIEWPORT_HEIGHT));
+
+    if let (Some(rows), Some(target)) = (rows, target) {
+        // Soft clear: push the shell's screen into scrollback, then
+        // start fresh from the top.
+        let _ = execute!(stdout, MoveTo(0, rows.saturating_sub(1)));
+        print!("{}", "\n".repeat(usize::from(rows)));
+        let _ = stdout.flush();
+        let _ = execute!(stdout, MoveTo(0, 0));
+        print_banner(theme, status_line);
+        let _ = execute!(stdout, MoveTo(0, target));
+        let _ = stdout.flush();
+    } else {
+        print_banner(theme, status_line);
+    }
+}
+
+/// Rows the banner needs on screen (`print_banner`: blank, 3 icon
+/// lines, blank).
+const BANNER_ROWS: u16 = 5;
+
+/// The row the cursor must park on so the inline viewport occupies
+/// exactly the bottom `viewport_height` rows — or `None` when the
+/// terminal is too short to hold banner + viewport without them
+/// colliding, in which case the takeover is skipped entirely (a
+/// cramped-but-working layout beats a "fullscreen" one that overwrites
+/// its own banner).
+fn takeover_target_row(rows: u16, viewport_height: u16) -> Option<u16> {
+    let target = rows.checked_sub(viewport_height)?;
+    (target >= BANNER_ROWS).then_some(target)
+}
+
 /// The icon renders in `theme.accent` — braze's identity color (see
 /// `Theme::accent`) — and the info lines reuse the same
 /// "backend:model" `status_line` the status bar shows all session, so
@@ -185,6 +249,21 @@ mod tests {
     /// its named crossterm equivalent, not the `Reset` fallback — the
     /// whole point of a hand-written match instead of a generic
     /// conversion.
+    /// The takeover only happens when banner and viewport genuinely
+    /// both fit — on a 24-row terminal the viewport parks at row 16
+    /// (24 − 8), leaving the 5 banner rows clear; anything shorter than
+    /// 13 rows skips the takeover instead of self-overwriting.
+    #[test]
+    fn takeover_target_row_leaves_room_for_the_banner_or_declines() {
+        assert_eq!(takeover_target_row(24, 8), Some(16));
+        // Exactly banner + viewport: target row == BANNER_ROWS, still ok.
+        assert_eq!(takeover_target_row(13, 8), Some(5));
+        // One row short: viewport would overlap the banner — decline.
+        assert_eq!(takeover_target_row(12, 8), None);
+        // Shorter than the viewport itself — decline, no underflow.
+        assert_eq!(takeover_target_row(5, 8), None);
+    }
+
     #[test]
     fn to_crossterm_color_covers_every_color_the_built_in_themes_use() {
         for theme in [Theme::dark(), Theme::light(), Theme::high_contrast()] {

@@ -2652,6 +2652,28 @@ cambian la superficie inicial. Dentro de la doctrina de `theme.rs`
 Tests: 1029 → 1032 (accent no-colisión, marcador accent, keycaps del
 hint; snapshots regenerados ×4). pty 11/11 re-verificado post-cambio.
 
+**Takeover de pantalla al abrir** (mismo día, pedido del usuario: "los
+modelos establecidos abren en pantalla completa"): `takeover_screen` en
+lib.rs — soft-clear (newlines desde la última fila: lo que había en
+pantalla se preserva en el scrollback, a diferencia de un `Clear`
+pelado), banner al tope de la pantalla limpia, y cursor estacionado
+`VIEWPORT_HEIGHT` filas antes del fondo, que es exactamente donde
+`terminal::setup()` ancla el viewport inline — composer al borde
+inferior y transcript creciendo hacia arriba, como las TUIs fullscreen,
+SIN alternate screen (la arquitectura viewport-inline + scrollback
+nativo de la convergencia #1 queda intacta; solo se elige DÓNDE
+arranca). Best-effort: sin terminal real o con pantalla más corta que
+banner+viewport (`takeover_target_row`, con test), degrada al
+comportamiento previo. Verificado en pty 100×30 (6/6: banner filas 0-4,
+centro despejado, composer al fondo funcional, Ctrl+C limpio). Nota de
+harness NUEVA: (a) el winsize del pty debe fijarse en el HIJO antes del
+exec (braze consulta `terminal::size()` al arrancar; el default de un
+pty fresco es 0×0 y el takeover declina), y (b) al responder `ESC[6n`
+hay que alimentar a pyte lo que venía ANTES de la consulta en el mismo
+chunk (un `MoveTo` previo en el mismo write cambia la respuesta
+correcta — responder con el cursor viejo ancla el viewport en la fila
+equivocada).
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace
