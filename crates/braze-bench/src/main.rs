@@ -158,6 +158,20 @@ async fn run() -> Result<(), BenchError> {
     let config = braze_config::Config::load()?;
     let tasks = task::load_suite(&cli.suite)?;
 
+    // La identidad del sweep se captura al INICIO, no al escribir el
+    // JSON (lección del re-run Bloque 2, 2026-07-19): en un sweep de
+    // horas, HEAD y el archivo de suite pueden cambiar MIENTRAS corre
+    // (commits de integración aterrizando en paralelo en el mismo
+    // árbol) — la metadata debe describir lo que corrió, no el estado
+    // del repo al momento de terminar. Aquel sweep quedó registrado
+    // con un commit varios pasos posterior al del binario. Caveat que
+    // esta captura no cierra: el binario pudo compilarse en un commit
+    // anterior al HEAD del arranque — cerrar eso del todo requeriría
+    // embeber el commit en tiempo de build (build.rs), anotado como
+    // mejora futura, no hecho aquí.
+    let suite_fingerprint = metadata::fingerprint_bytes(&std::fs::read(&cli.suite)?);
+    let braze_git_commit = metadata::current_git_commit().await;
+
     // Opt-in transcript preservation (Issue 4,
     // docs/emse-review-2026-07-13-checklist.md) — was an uncommitted local
     // patch (docs/sweep-search-tools-ab-n15-2026-07-12.md:116), now a real
@@ -483,11 +497,10 @@ async fn run() -> Result<(), BenchError> {
     report::print_table(&results);
 
     if let Some(output_path) = &cli.output {
-        // E6 (docs/AUDITORIA-2026-07-v3.md): only worth computing when
-        // actually writing a JSON file — the suite re-read, the git
-        // subprocess, and (if any Ollama backend is in the sweep) the
-        // digest lookups are all wasted work for a stdout-only run.
-        let suite_bytes = std::fs::read(&cli.suite)?;
+        // E6 (docs/AUDITORIA-2026-07-v3.md): the digest lookups only
+        // run when actually writing a JSON file. The suite fingerprint
+        // and git commit, in contrast, were captured at sweep START —
+        // see the comment at the top of `run()`.
         let ollama_models: Vec<String> = {
             let mut models: Vec<String> = specs
                 .iter()
@@ -508,8 +521,8 @@ async fn run() -> Result<(), BenchError> {
             repetitions: cli.repetitions,
             task_timeout_secs: cli.task_timeout_secs,
             suite_path: cli.suite.display().to_string(),
-            suite_fingerprint: metadata::fingerprint_bytes(&suite_bytes),
-            braze_git_commit: metadata::current_git_commit().await,
+            suite_fingerprint,
+            braze_git_commit,
             ollama_model_digests: metadata::collect_ollama_model_digests(
                 &config.ollama_base_url,
                 &ollama_models,
