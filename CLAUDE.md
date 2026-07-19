@@ -1,20 +1,23 @@
 # braze — motor agéntico genérico en Rust (experimento)
 
-> **Estado (2026-07-11):** MVP completo, reorientado a **"maestro en
+> **Estado (2026-07-18):** MVP completo, reorientado a **"maestro en
 > modelos pequeños"** — el harness como variable que compensa la escala
 > del modelo (respaldo: SWE-agent/ACI y el TR de Qwen3-Coder-Next, ver
-> `docs/SOTA-2026-07.md`). Fases 1-5 + TUI (2 fases) + auditorías
-> **v1-v7** (roadmap v6 Paquetes 1-4 y v7 Paquete 1 ejecutados; abiertos
-> vigentes en `docs/AUDITORIA-2026-07-v7.md`); split planificador/
-> ejecutor: el veredicto A/B negativo inicial era **un bug de render —
-> el planner se rescató** bajo pre-registro (+10/+12pp en el 3b según
-> entrega; con lead presente la entrega óptima se invierte y task-list
-> +lead resta, ver `docs/sweep-planlead-2026-07-11.md`); estudio
-> consolidado de 3 harnesses (A′-E′ + I.7) ejecutado; evidencia
-> experimental del paper completa y manuscrito en `paper/` (esqueleto
-> compila, 3 figuras reproducibles con `make`). Creado 2026-07-03.
-> Ver `PLAN.md` para la arquitectura, el grafo de dependencias, y una
-> sección por cada incremento con su verificación.
+> `docs/SOTA-2026-07.md`; el encuadre ya tiene nombre de disciplina:
+> "harness engineering", delta de literatura en
+> `docs/AUDITORIA-2026-07-v8.md` § 6). Fases 1-5 + TUI (2 fases) +
+> auditorías **v1-v8** (v8 ejecutó en el día sus Paquetes 0-3 completos
+> y el top-6 S/M del Paquete 4; abiertos vigentes en
+> `docs/AUDITORIA-2026-07-v8.md`); split planificador/ejecutor rescatado
+> bajo pre-registro (`docs/sweep-planlead-2026-07-11.md`); **P1.1
+> ejecutado**: `engine.rs` (11.4k líneas) partido en 9 módulos
+> (`engine/` + `rescue.rs`), queda solo repartir su `mod tests`;
+> evidencia experimental del paper completa, manuscrito en `paper/`, y
+> el ancla BFCL corrida el 2026-07-18 (análisis en curso). Creado
+> 2026-07-03. Ver `PLAN.md` para la arquitectura y verificación por
+> incremento.
+
+**Wiki de referencia**: ver `wiki/index.md`
 
 ## Qué es
 
@@ -77,9 +80,10 @@ sin index — los wires nunca dropean una call en silencio); y
 
 ## Arquitectura
 
-Workspace de 14 crates (`crates/braze-*`, incluye `braze-tui`,
-`braze-bench` y `braze-skills` — este último agregado 2026-07-11, D′ del
-estudio consolidado: skills locales explicit-only), grafo de
+Workspace de 15 crates (`crates/braze-*`, incluye `braze-tui`,
+`braze-bench`, `braze-skills` — D′ del estudio consolidado: skills
+locales explicit-only — y `braze-memory`, la memoria de proyecto
+cross-sesión del Paper 2, agregado 2026-07-16), grafo de
 dependencias en niveles — ver `PLAN.md` para el diagrama y las firmas de
 los tres traits que actúan de contrato congelado: `ToolProvider`
 (`braze-tools-core`), `ModelBackend` (`braze-model`),
@@ -97,13 +101,17 @@ del autor** (datacube-rs, geostat-rs, swarm-abm son 100% sync + rayon):
 Todo lo demás sigue la convención habitual: `thiserror` v2, `clap` v4,
 `serde`+`serde_json`, licencia dual `MIT OR Apache-2.0`, archivo-por-módulo.
 
-## Estado del código (2026-07-11)
+## Estado del código (2026-07-18)
 
-Los 14 crates tienen lógica real y verificada. `cargo build/test/clippy
---workspace` verdes: **~900 tests**, clippy `-D warnings` limpio.
-Deuda estructural conocida: `engine.rs` llegó a ~10.100 líneas (P1.1 de
-las auditorías — cada paquete de cierres lo agranda; el split va ANTES
-de la próxima ronda de features/Fase 2). La
+Los 15 crates tienen lógica real y verificada. `cargo build/test/clippy
+--workspace` verdes: **~1.000 tests**, clippy `-D warnings` limpio.
+**P1.1 ejecutado** (4 commits, 2026-07-18): `engine.rs` vive ahora en
+`engine/` (mod.rs solo struct+builders+tests, más `context`, `turn`,
+`round`, `dispatch`, `planner`, `fallback`, `hooks_dispatch`) y la
+escalera de rescate en `src/rescue.rs` — extracción verbatim, tests
+verdes tras cada paso; queda solo repartir el `mod tests` (~7.100
+líneas) entre módulos destino. J-20 (symlinks): aceptación MVP
+**ratificada** por el autor el 2026-07-18. La
 convención de verificación del proyecto: cada incremento se prueba
 también **en vivo** (pty scripteado contra el binario real para la TUI,
 sweeps de braze-bench contra modelos reales, smoke contra APIs reales) —
@@ -124,30 +132,57 @@ rápido (~2s vs ~90-100s por tarea). `RUST_LOG=braze_engine=info` sobre
 un sweep muestra las activaciones de palancas del engine (rescates,
 compactación) — braze-bench instala subscriber de tracing.
 
+## Palancas nuevas del 2026-07-18 (auditoría v8, ver su § por detalle)
+
+- **Circuit breaker por destino+modelo** en braze-model: fallos de
+  transporte consecutivos abren el breaker (4xx/429/Decode neutrales,
+  stream-aware, probe 600s); kill-switch `BRAZE_CIRCUIT_BREAKER=off`;
+  `CircuitOpen` clasifica `HarnessError` en el bench (fuera del
+  denominador).
+- **Reporte del bench**: pass^k de tau-bench (la métrica de
+  confiabilidad de la tesis — reveló que gpt-oss:20b es pass^5=100% y
+  los fallos de gemma4:e4b son sistemáticos, no flakiness) y
+  comparación pareada McNemar exacto + Holm vs el primer brazo (K-19).
+- **Grading semántico**: `expect_cargo_check = true` en la suite corre
+  cargo check real post-run; needles fijados contra fixtures canónicos.
+- **Prompt caching Anthropic directo** (3 breakpoints, como OpenRouter;
+  `+ablate:no-caching` aplica).
+- **Summary-por-lead** (`enable_lead_summary` / `+ablate:lead-summary`):
+  la compactación le pide el summary al modelo del `--lead`, fallback
+  al digest determinístico.
+- **TTC local** (`+ablate:ttc=N`): N rollouts + selección por
+  auto-consistencia sobre `outcome_fingerprint`, costos sumados.
+- **`braze run --output-format json`** para CI/scripting; `ollama stop`
+  del bench ahora apunta al nodo remoto (`OLLAMA_HOST`, K-11).
+- Seguridad (v8 Paquete 2): `git diff/log/show` path-checked, `.braze/`
+  Irreversible para escrituras del modelo, `ask_user` sanitizado,
+  ProjectMemory sin `objective`/`notes` en el render y con campos
+  sanitizados, reparación N-5 bajo el lock N-27.
+
 ## Próximos pasos al retomar
 
-(Actualizado 2026-07-11 tras la auditoría v7 — los ítems históricos de
-esta sección ya se ejecutaron: la iteración del planner CERRÓ con
-rescate, la sintaxis `+lead:` existe y su A/B de 3 brazos está medido, y
-el breaker por turno existe como `max_turn_total_tokens` desde el
-Paquete 3 de v6.)
+(Actualizado 2026-07-18 tras ejecutar la auditoría v8 — Paquetes 0-3
+completos y el top-6 S/M del Paquete 4 en main; el sweep BFCL corrió el
+mismo día.)
 
-- **Manuscrito** (`paper/`): escribir la prosa de los TODOs de
-  `main.tex` (mapeados a `docs/sweep-*.md`); `/verify-refs` sobre
-  `refs.bib`; decidir venue (TMLR vs EMSE) y migrar template; `/zenodo`
-  para el DOI del artefacto. Los caveats de la auditoría v7 ya están
-  anotados en § Threats to Validity.
-- **Roadmap v7** (`docs/AUDITORIA-2026-07-v7.md`): Paquetes 2-4 —
-  multi-turno (J-3 harness notes turn-scoped, J-4 task list reset, J-13
-  ask_user sin timeout de 120s), seguridad (J-18 `ls`/`wc` path-checked,
-  J-19 sanitizar ANSI en approval prompts, ratificar J-20 symlink), y el
-  resto por conveniencia.
-- **P0.2 restante**: el breaker de TOKENS por turno existe
-  (`max_turn_total_tokens`, default off); faltan las variantes de costo
-  USD en runtime y walltime por turno.
-- **P1.1**: split de `engine.rs` (~10.100 líneas) — antes de Fase 2.
-- Infra Nitro: IP fija en el router, `OLLAMA_KEEP_ALIVE`, retry opt-in
-  de Ollama para sweeps largos.
+- **Ancla BFCL**: análisis post-sweep (transporte 2% → grader → E1-E4,
+  `docs/bfcl-anchor-RESUME.md`) e integración al paper; luego re-runs
+  bloques 1-2 y probe Parte B (diseños pre-registrados).
+- **A/B Gemma4**: actualizar Ollama de Nitro a ≥0.32.1 (fix de tool
+  calling del 16-jul) y re-correr e4b vs gpt-oss:20b con el MISMO
+  digest (`c6eb396dbd59` — el stealth refresh del 15-jul aún no llega
+  al registry); vigilar el cambio de digest para el A/B de pesos.
+- **A/Bs nuevos de la cola de Nitro**: lead-summary (con `num_ctx`
+  chico para que compacte de verdad) y TTC (`qwen2.5:3b` vs
+  `+ablate:ttc=3`, cruzado con pass^k).
+- **Manuscrito** (`paper/`): prosa de los TODOs, `/verify-refs`, venue,
+  `/zenodo`; anotar en Threats el complemento McNemar/Holm y las citas
+  nuevas de v8 § 6 (Constraint Tax, Trivedy, MemCoder, pass^k).
+- **P1.1 resto**: repartir el `mod tests` de `engine/mod.rs`.
+- **v8 restantes**: Paquete 4 L (Landlock write-only, subagente
+  Viewer/Editor, background trans-ronda), P0.2 (costo USD/walltime por
+  turno), K-16 (negative-cache MCP), AGENTS.md interop.
+- Infra Nitro: IP fija en el router, `OLLAMA_KEEP_ALIVE`.
 
 ## Modelos locales recomendados (Ollama)
 
@@ -165,6 +200,16 @@ día) **98.9% pass rate a 13.0s promedio por tarea** — supera a
 (`schema_validation_failures=0`). Detalle completo de la decisión —
 incluye por qué se descartó construir un `LocalBackend` in-process para
 conseguir esta mejora — en `docs/local-backend-stencil-design.md`.
+
+Nota Gemma 4 (2026-07-18): Google publicó un *stealth refresh* el
+15-jul (fixes de tool calling, τ²-Airline +8pp en E4B) pero los pesos
+NO están en el registry de Ollama todavía (`gemma4:e4b` sigue en digest
+`c6eb396dbd59`, el mismo del sweep del 13-jul — re-pullear es no-op).
+La palanca accionable es **Ollama ≥0.32.1** (16-jul, fix propio de tool
+calling Gemma 4); el A/B de runtime está en "Próximos pasos". pass^k
+mostró que los 3 fallos de e4b son sistemáticos (una tarea de
+`single_tool`), no flakiness — si el fix los repara, e4b salta a
+pass^5=100% y desafía a gpt-oss:20b como default por RAM.
 
 `qwen3.5-coder` sigue siendo un modelo local sólido (sweep 2026-07-06,
 `docs/sweep-nitro-sampling-2026-07-06/`: 6/6 en `g10-weak-skills` a temp
