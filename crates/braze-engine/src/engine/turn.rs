@@ -106,6 +106,14 @@ impl Engine {
         // itself would be the thing making the session unresumable).
         let existing_events = self.load_and_repair(session, observer).await?;
 
+        // J-12 (docs/AUDITORIA-2026-07-v7.md): `loaded_skills` is
+        // in-memory only — after a restart (`--resume`) or a `/model`
+        // engine rebuild, the log's `SkillLoaded` events are the only
+        // trace of guidance the conversation still references. Re-load
+        // those bodies before this turn's own mentions resolve, so the
+        // system prompt keeps carrying what the transcript assumes.
+        self.rehydrate_skills_from_log(&existing_events);
+
         // D′: `$skill` mentions resolve before anything else this turn —
         // the study's point is loading the guidance BEFORE the executor's
         // first mistake, not after.
@@ -620,6 +628,54 @@ impl Engine {
             prompt.push_str(&skill.prompt_addendum());
         }
         prompt
+    }
+
+    /// J-12 (docs/AUDITORIA-2026-07-v7.md): re-loads every skill the
+    /// session log records as loaded but that this `Engine` instance
+    /// doesn't hold in memory — the `--resume`/`/model`-rebuild
+    /// counterpart of `load_mentioned_skills`. Persists nothing (the log
+    /// already records each original load; re-appending would double the
+    /// bench's `SkillLoaded` counts on every resumed turn) and applies
+    /// no per-turn cap (each body already passed the cap when it
+    /// originally loaded). A body that became unreadable since — file
+    /// deleted, registry paths changed — degrades to a warn and a system
+    /// prompt without that addendum: same "an optional enhancement must
+    /// not kill the turn" posture as the planner.
+    fn rehydrate_skills_from_log(&self, events: &[AgentEvent]) {
+        let Some(registry) = &self.skill_registry else {
+            return;
+        };
+        for event in events {
+            let AgentEvent::SkillLoaded { name, .. } = event else {
+                continue;
+            };
+            if self
+                .loaded_skills
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|s| s.name == *name)
+            {
+                continue;
+            }
+            match registry.load_body(name, self.skills_max_body_tokens) {
+                Some(loaded) => {
+                    tracing::info!(
+                        skill = %loaded.name,
+                        estimated_tokens = loaded.estimated_tokens,
+                        "skill rehydrated from session log (J-12)"
+                    );
+                    self.loaded_skills.lock().unwrap().push(loaded);
+                }
+                None => {
+                    tracing::warn!(
+                        skill = %name,
+                        "skill recorded in session log is no longer loadable — \
+                         proceeding without its guidance"
+                    );
+                }
+            }
+        }
     }
 
     /// D′: resolves this turn's explicit `$skill` mentions against the
