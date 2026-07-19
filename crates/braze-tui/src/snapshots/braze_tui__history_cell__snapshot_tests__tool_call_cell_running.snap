@@ -1,5 +1,6 @@
 ---
 source: crates/braze-tui/src/history_cell.rs
+assertion_line: 876
 expression: "render_to_buffer(&cell, 40)"
 ---
 Buffer {
@@ -9,6 +10,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Yellow, bg: Reset, underline: Reset, modifier: NONE,
-        x: 2, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 2, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

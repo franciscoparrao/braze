@@ -123,25 +123,32 @@ pub async fn run(
 /// with the inline-viewport machinery (`terminal.rs`'s module doc:
 /// deliberately no alternate screen, so anything printed before raw mode
 /// began just... stays, like any other line the shell already had).
-/// Reuses `theme`'s existing semantic colors rather than adding a new
-/// "brand" slot to `Theme`, and the same "backend:model" `status_line`
-/// the status bar shows all session — so the banner always reflects
-/// what's actually running instead of a hardcoded placeholder
-/// (docs/usability-log-2026-07-07-si2.md, comparación contra el cookbook
-/// de OpenRouter).
+/// The icon renders in `theme.accent` — braze's identity color (see
+/// `Theme::accent`) — and the info lines reuse the same
+/// "backend:model" `status_line` the status bar shows all session, so
+/// the banner always reflects what's actually running instead of a
+/// hardcoded placeholder (docs/usability-log-2026-07-07-si2.md,
+/// comparación contra el cookbook de OpenRouter). The version comes
+/// from the crate itself (`CARGO_PKG_VERSION`), so it can never drift
+/// from what was actually built.
 fn print_banner(theme: &Theme, status_line: &str) {
     use crossterm::style::Stylize;
 
-    let icon = to_crossterm_color(theme.success);
+    let icon = to_crossterm_color(theme.accent);
     let text = to_crossterm_color(theme.muted);
 
     println!();
     println!("  {}", "▛▀▜".with(icon));
-    println!("  {}  {}", "▙ ▟".with(icon), "braze".bold());
+    println!(
+        "  {}  {} {}",
+        "▙ ▟".with(icon),
+        "braze".bold(),
+        concat!("v", env!("CARGO_PKG_VERSION")).with(text)
+    );
     println!(
         "  {}  {}",
         "▘▀▘".with(icon),
-        format!("motor agéntico en Rust · {status_line}").with(text)
+        format!("{status_line} · /help para comandos y atajos").with(text)
     );
     println!();
 }
@@ -162,6 +169,7 @@ fn to_crossterm_color(color: ratatui::style::Color) -> crossterm::style::Color {
         RColor::Yellow => CColor::Yellow,
         RColor::Magenta => CColor::Magenta,
         RColor::Cyan => CColor::Cyan,
+        RColor::Blue => CColor::Blue,
         RColor::White => CColor::White,
         RColor::DarkGray => CColor::DarkGrey,
         _ => CColor::Reset,
@@ -180,7 +188,13 @@ mod tests {
     #[test]
     fn to_crossterm_color_covers_every_color_the_built_in_themes_use() {
         for theme in [Theme::dark(), Theme::light(), Theme::high_contrast()] {
-            for color in [theme.success, theme.error, theme.warning, theme.muted] {
+            for color in [
+                theme.success,
+                theme.error,
+                theme.warning,
+                theme.muted,
+                theme.accent,
+            ] {
                 assert_ne!(
                     to_crossterm_color(color),
                     crossterm::style::Color::Reset,

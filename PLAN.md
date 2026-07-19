@@ -2624,6 +2624,34 @@ con un modelo que efectivamente llame la tool (los unit tests cubren
 canal y flujo; el overlay se verificó solo por render de código), y las
 celdas de compactación (siguen siendo diferido explícito).
 
+### Rediseño visual (2026-07-19, mismo día)
+
+Séptimo incremento de la fase, pedido al ver que los seis anteriores no
+cambian la superficie inicial. Dentro de la doctrina de `theme.rs`
+(solo slots ANSI nombrados, nunca RGB literal):
+
+- **`Theme.accent`** — quinto color, la identidad visual de braze
+  ("esto es braze / esto es tuyo", nunca outcome): Cyan en dark, Blue
+  en light (Cyan es el otro hue lavado sobre fondo claro), Magenta en
+  high-contrast (su warning ya ocupa Cyan). Test: el accent no
+  colisiona con ningún semántico de su propio preset.
+- **Banner**: ícono en accent (antes success), versión desde
+  `CARGO_PKG_VERSION` (no puede driftear de lo compilado), y pista de
+  `/help` en la línea de info.
+- **Marcador `>` del usuario** en accent bold (`UserCell` gana `theme`).
+- **Bordes**: composer en accent; overlays de aprobación y pregunta en
+  warning — "decide aquí" se distingue de "escribe aquí" de un vistazo.
+- **Hint por spans**: keycaps en bold (tono muted — la fila sigue
+  tranquila), spinner en accent (es braze trabajando, no un outcome).
+  `idle_hint_line` como función libre testeable.
+- **Popups**: nombres `/comando` y `$skill` en accent con descripción
+  muted; la fila seleccionada mantiene el `REVERSED` de línea completa.
+- **Tool calls**: nombre en bold en ambos estados — el transcript se
+  escanea por nombre de tool.
+
+Tests: 1029 → 1032 (accent no-colisión, marcador accent, keycaps del
+hint; snapshots regenerados ×4). pty 11/11 re-verificado post-cambio.
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace

@@ -327,11 +327,19 @@ impl App {
         // "bordered" input style: plain `─` lines above/below, no
         // OSC 11 background-color detection needed — works on any
         // terminal, same portability reasoning `theme.rs` already
-        // documents for colors. Set once here (not re-set every `draw`,
-        // which only borrows `&self`) since the style never changes
-        // mid-session.
+        // documents for colors. The border renders in `theme.accent`
+        // (braze's identity color — "this is where you type"); the
+        // approval/question overlays that borrow this slot re-border in
+        // `warning` instead (see `draw`), so attention-needed states
+        // are distinguishable at a glance from the ordinary composer.
+        // Set once here (not re-set every `draw`, which only borrows
+        // `&self`) since the style never changes mid-session.
         let mut composer = TextArea::default();
-        composer.set_block(Block::default().borders(Borders::TOP | Borders::BOTTOM));
+        composer.set_block(
+            Block::default()
+                .borders(Borders::TOP | Borders::BOTTOM)
+                .border_style(Style::default().fg(theme.accent)),
+        );
         Self {
             engine,
             session,
@@ -1324,6 +1332,7 @@ impl App {
         self.commit_cell(
             &UserCell {
                 text: user_text.clone(),
+                theme: self.theme,
             },
             terminal,
         )?;
@@ -1717,7 +1726,7 @@ impl App {
                 width: active_area.width,
                 height: active_area.height + hint_area.height,
             };
-            draw_popup(frame, popup_area, popup);
+            draw_popup(frame, popup_area, popup, self.theme);
         } else if let Some(request) = front_question {
             // `ask_user` options list — same rows the `/`/`@` popup
             // reuses (a question only arrives mid-turn, when no popup
@@ -1748,27 +1757,45 @@ impl App {
                 Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
                     .areas(hint_area);
 
+            // Built as styled spans, not one flat string: the spinner
+            // carries the accent (it's braze working, not an outcome)
+            // and the idle keycaps render bold so the hint scans as
+            // "keys, then what they do" — see `idle_hint_line`.
+            let muted = Style::default().fg(self.theme.muted);
             let hint = if !self.pending_approvals.is_empty() {
-                "esperando tu decisión... (y permitir · n/Esc denegar)".to_string()
+                Line::from(Span::styled(
+                    "esperando tu decisión... (y permitir · n/Esc denegar)",
+                    muted,
+                ))
             } else if self.switching_model {
-                format!("{} cambiando de modelo... (Ctrl+C salir)", self.spinner_glyph())
+                Line::from(vec![
+                    Span::styled(
+                        self.spinner_glyph().to_string(),
+                        Style::default().fg(self.theme.accent),
+                    ),
+                    Span::styled(" cambiando de modelo... (Ctrl+C salir)", muted),
+                ])
             } else if self.turn_running {
                 let elapsed = self
                     .turn_started_at
                     .map(|start| format!(" {}s", start.elapsed().as_secs()))
                     .unwrap_or_default();
-                format!(
-                    "{} esperando respuesta del modelo...{elapsed} (Ctrl+C salir · Esc interrumpir)",
-                    self.spinner_glyph()
-                )
+                Line::from(vec![
+                    Span::styled(
+                        self.spinner_glyph().to_string(),
+                        Style::default().fg(self.theme.accent),
+                    ),
+                    Span::styled(
+                        format!(
+                            " esperando respuesta del modelo...{elapsed} (Ctrl+C salir · Esc interrumpir)"
+                        ),
+                        muted,
+                    ),
+                ])
             } else {
-                "Enter enviar · Ctrl+J salto de linea · / comandos · @ archivos · Ctrl+T output · Ctrl+C salir"
-                    .to_string()
+                idle_hint_line(self.theme)
             };
-            frame.render_widget(
-                Paragraph::new(hint).style(Style::default().fg(self.theme.muted)),
-                hint_left,
-            );
+            frame.render_widget(Paragraph::new(hint), hint_left);
 
             let status = status_bar::render(
                 &self.status_line,
@@ -1799,7 +1826,11 @@ impl App {
             // should read as "the same input area, showing something
             // else right now" rather than switching to an unbordered
             // look just because a `TextArea` isn't what's rendering.
-            let border = Block::default().borders(Borders::TOP | Borders::BOTTOM);
+            // Border in `warning`, not the composer's `accent`: the slot
+            // changed from "type here" to "decide here".
+            let border = Block::default()
+                .borders(Borders::TOP | Borders::BOTTOM)
+                .border_style(Style::default().fg(self.theme.warning));
             let inner_area = border.inner(composer_area);
             frame.render_widget(border, composer_area);
             // N-31 (docs/AUDITORIA-2026-07-v2.md): `inner_area` is a fixed
@@ -1828,7 +1859,11 @@ impl App {
             // above, in `draw_question_options`. Same N-31 protections as
             // the approval overlay: the hint row is always reserved, and
             // the question is capped to what provably fits above it.
-            let border = Block::default().borders(Borders::TOP | Borders::BOTTOM);
+            // Same `warning` border as the approval overlay: this slot
+            // is asking for a decision, not for a message.
+            let border = Block::default()
+                .borders(Borders::TOP | Borders::BOTTOM)
+                .border_style(Style::default().fg(self.theme.warning));
             let inner_area = border.inner(composer_area);
             frame.render_widget(border, composer_area);
             let available_rows_for_question =
@@ -1893,9 +1928,14 @@ fn draw_question_options(
 }
 
 /// Renders the `/`/`@` suggestion list into `area` — a free function
-/// (not a method) since it only needs `popup`, not the rest of `App`.
-fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
+/// (not a method) since it only needs `popup` and the theme, not the
+/// rest of `App`. Command/skill names render in `theme.accent` (what
+/// you'd type is braze chrome, not content); the selected row keeps the
+/// whole-line `REVERSED` treatment, which reads over any foreground.
+fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup, theme: Theme) {
     let selected_style = Style::default().add_modifier(Modifier::REVERSED);
+    let accent = Style::default().fg(theme.accent);
+    let muted = Style::default().fg(theme.muted);
 
     let lines: Vec<Line> = match popup {
         ComposerPopup::Slash {
@@ -1904,15 +1944,17 @@ fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
             .iter()
             .enumerate()
             .map(|(i, cmd)| {
-                let style = if i == *selected {
-                    selected_style
+                if i == *selected {
+                    Line::from(Span::styled(
+                        format!("/{}  {}", cmd.name, cmd.description),
+                        selected_style,
+                    ))
                 } else {
-                    Style::default()
-                };
-                Line::from(Span::styled(
-                    format!("/{}  {}", cmd.name, cmd.description),
-                    style,
-                ))
+                    Line::from(vec![
+                        Span::styled(format!("/{}", cmd.name), accent),
+                        Span::styled(format!("  {}", cmd.description), muted),
+                    ])
+                }
             })
             .collect(),
         ComposerPopup::Mention {
@@ -1980,27 +2022,68 @@ fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: &ComposerPopup) {
                 .skip(start)
                 .take(POPUP_MAX_VISIBLE)
                 .map(|(i, candidate)| {
-                    let style = if i == *selected {
-                        selected_style
+                    if i == *selected {
+                        Line::from(Span::styled(
+                            format!(
+                                "${}  {}  ({}/{})",
+                                candidate.name,
+                                candidate.description,
+                                i + 1,
+                                candidates.len()
+                            ),
+                            selected_style,
+                        ))
                     } else {
-                        Style::default()
-                    };
-                    Line::from(Span::styled(
-                        format!(
-                            "${}  {}  ({}/{})",
-                            candidate.name,
-                            candidate.description,
-                            i + 1,
-                            candidates.len()
-                        ),
-                        style,
-                    ))
+                        Line::from(vec![
+                            Span::styled(format!("${}", candidate.name), accent),
+                            Span::styled(
+                                format!(
+                                    "  {}  ({}/{})",
+                                    candidate.description,
+                                    i + 1,
+                                    candidates.len()
+                                ),
+                                muted,
+                            ),
+                        ])
+                    }
                 })
                 .collect()
         }
     };
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// The idle hint row, as styled spans: each keycap bold (still in the
+/// muted tone — the hint stays quiet overall), its label plain muted —
+/// so the row scans as "keys, then what they do" instead of one flat
+/// gray string. A free function (like `backtrack_preview`) so the span
+/// structure is testable without a full `App`.
+fn idle_hint_line(theme: Theme) -> Line<'static> {
+    let key = Style::default()
+        .fg(theme.muted)
+        .add_modifier(Modifier::BOLD);
+    let label = Style::default().fg(theme.muted);
+    let mut spans = Vec::new();
+    for (i, (k, l)) in [
+        ("Enter", " enviar"),
+        ("Ctrl+J", " salto de linea"),
+        ("/", " comandos"),
+        ("@", " archivos"),
+        ("Ctrl+T", " output"),
+        ("Ctrl+C", " salir"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if i > 0 {
+            spans.push(Span::styled(" · ", label));
+        }
+        spans.push(Span::styled(k, key));
+        spans.push(Span::styled(l, label));
+    }
+    Line::from(spans)
 }
 
 /// First visible index for a `visible`-row window over a `len`-item list
@@ -2196,6 +2279,27 @@ mod tests {
     #[test]
     fn clamp_height_leaves_a_normal_count_untouched() {
         assert_eq!(clamp_height(42), 42);
+    }
+
+    /// The idle hint alternates bold keycaps with plain labels, all in
+    /// the muted tone — the row stays quiet, but keys stand out.
+    #[test]
+    fn idle_hint_line_bolds_every_keycap_and_keeps_labels_plain() {
+        let theme = Theme::dark();
+        let line = idle_hint_line(theme);
+        let keys: Vec<&str> = line
+            .spans
+            .iter()
+            .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(keys, vec!["Enter", "Ctrl+J", "/", "@", "Ctrl+T", "Ctrl+C"]);
+        assert!(
+            line.spans
+                .iter()
+                .all(|s| s.style.fg == Some(theme.muted)),
+            "every span stays in the muted tone"
+        );
     }
 
     #[test]

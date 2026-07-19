@@ -19,18 +19,23 @@ pub trait HistoryCell {
     fn as_text(&self) -> Text<'_>;
 }
 
-/// What the user typed. The only visual distinction this skeleton draws
-/// between roles: a `> ` marker on the first line (continuation lines of
-/// a multi-line message get a blank-space marker instead, so they still
-/// line up under the first). Deliberately not markdown-rendered — unlike
-/// the assistant's side, literal user input shouldn't be reinterpreted.
+/// What the user typed: a `> ` marker on the first line (continuation
+/// lines of a multi-line message get a blank-space marker instead, so
+/// they still line up under the first). The marker renders in
+/// `theme.accent` — "this line is yours" is identity, not outcome, so
+/// it gets braze's identity color rather than a semantic one.
+/// Deliberately not markdown-rendered — unlike the assistant's side,
+/// literal user input shouldn't be reinterpreted.
 pub struct UserCell {
     pub text: String,
+    pub theme: Theme,
 }
 
 impl HistoryCell for UserCell {
     fn as_text(&self) -> Text<'_> {
-        let marker_style = Style::default().add_modifier(Modifier::BOLD);
+        let marker_style = Style::default()
+            .fg(self.theme.accent)
+            .add_modifier(Modifier::BOLD);
         let lines: Vec<Line<'static>> = self
             .text
             .lines()
@@ -160,10 +165,14 @@ fn summarize_tool_output(content: &str) -> String {
 
 impl HistoryCell for ToolCallCell {
     fn as_text(&self) -> Text<'_> {
+        // The tool's name is the line's anchor — bold in both states, so
+        // a transcript full of tool calls scans by name, with outcomes
+        // and summaries as the secondary read.
+        let name_style = Style::default().add_modifier(Modifier::BOLD);
         match &self.state {
             ToolCallOutcome::Running => Text::from(Line::from(vec![
                 Span::styled("▶ ", Style::default().fg(self.theme.warning)),
-                Span::raw(self.name.clone()),
+                Span::styled(self.name.clone(), name_style),
             ])),
             ToolCallOutcome::Done { is_error, summary } => {
                 let (glyph, color) = if *is_error {
@@ -173,7 +182,7 @@ impl HistoryCell for ToolCallCell {
                 };
                 let mut spans = vec![
                     Span::styled(glyph, Style::default().fg(color)),
-                    Span::raw(self.name.clone()),
+                    Span::styled(self.name.clone(), name_style),
                 ];
                 if !summary.is_empty() {
                     spans.push(Span::raw(": "));
@@ -506,11 +515,25 @@ mod tests {
     fn user_cell_marks_the_first_line_and_indents_continuation_lines() {
         let cell = UserCell {
             text: "primera linea\nsegunda linea".to_string(),
+            theme: Theme::dark(),
         };
         let text = cell.as_text();
         assert_eq!(text.lines.len(), 2);
         assert_eq!(text.lines[0].spans[0].content, "> ");
         assert_eq!(text.lines[1].spans[0].content, "  ");
+    }
+
+    /// The `>` marker carries the theme's accent — identity, not
+    /// outcome (see `UserCell`'s doc comment).
+    #[test]
+    fn user_cell_marker_renders_in_the_accent_color() {
+        let theme = Theme::dark();
+        let cell = UserCell {
+            text: "hola".to_string(),
+            theme,
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines[0].spans[0].style.fg, Some(theme.accent));
     }
 
     #[test]
@@ -834,6 +857,7 @@ mod snapshot_tests {
     fn user_cell_multiline() {
         let cell = UserCell {
             text: "primera linea\nsegunda linea mas larga que la primera".to_string(),
+            theme: Theme::dark(),
         };
         insta::assert_debug_snapshot!(render_to_buffer(&cell, 40));
     }

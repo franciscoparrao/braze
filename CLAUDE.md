@@ -60,8 +60,11 @@ scrollback nativo, streaming markdown con gateo por fence, tool-call
 cells, approval overlay, slash commands con popup (`/help`, `/model`,
 `/skills`, `/permissions`, `/tasks`, `/quit`), @-menciones, `$skill`
 picker, Ctrl+T (output completo de la última tool call), backtrack
-Esc-Esc, temas (dark/light/high-contrast), **`/model` picker** para
-cambiar de backend/modelo a mitad de sesión, **`ask_user` nativo**
+Esc-Esc, temas (dark/light/high-contrast, ahora con **color `accent`**
+de identidad: banner, marcador `>`, borde del composer, spinner y
+nombres en popups; overlays de decisión en warning), **`/model`
+picker** para cambiar de backend/modelo a mitad de sesión, **`ask_user`
+nativo**
 (overlay de opciones 1-4/flechas; Esc = sin respuesta), celdas
 `HarnessNote` (J-26) y `◈ skill cargada`, y barra de estado rica
 (skills cargadas + tokens, con degradación `fit_right` en terminal
