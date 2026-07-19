@@ -198,6 +198,16 @@ struct App {
     theme: Theme,
     total_input_tokens: u64,
     total_output_tokens: u64,
+    /// Distinct skill names this session has seen `SkillLoaded` events
+    /// for — drives the status bar's "skills N" segment. Live-turn
+    /// loads only: J-12 rehydration on `--resume` deliberately emits no
+    /// events, so a resumed session's count starts at what the *new*
+    /// turns load (the transcript above already shows the old loads).
+    loaded_skill_names: Vec<String>,
+    /// When the in-flight turn started (`submit`) — the running hint
+    /// shows the elapsed seconds so a long tool-calling turn reads as
+    /// "alive and 47s in", not just a spinner. `None` while idle.
+    turn_started_at: Option<Instant>,
     /// Accumulates the assistant's streaming text for the round in
     /// progress and gates what's safe to commit to the scrollback vs.
     /// still-live preview — see its own doc comment.
@@ -330,6 +340,8 @@ impl App {
             theme,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            loaded_skill_names: Vec::new(),
+            turn_started_at: None,
             markdown: MarkdownStreamCollector::default(),
             pending_tool_names: HashMap::new(),
             composer,
@@ -1205,6 +1217,7 @@ impl App {
         )?;
 
         self.turn_running = true;
+        self.turn_started_at = Some(Instant::now());
         self.markdown = MarkdownStreamCollector::default();
         self.pending_tool_names.clear();
 
@@ -1248,6 +1261,7 @@ impl App {
             handle.abort();
         }
         self.turn_running = false;
+        self.turn_started_at = None;
 
         // Aborting the top-level `run_turn` task does not cancel any
         // tool-dispatch background task it spawned via `TaskNotifier`
@@ -1468,6 +1482,21 @@ impl App {
                 self.total_input_tokens += u64::from(input_tokens);
                 self.total_output_tokens += u64::from(output_tokens);
             }
+            TuiUpdate::Event(AgentEvent::SkillLoaded { name, .. }) => {
+                // Feeds the status bar's "skills N" segment. The load
+                // itself is worth a transcript line too — the whole D′
+                // lever is invisible otherwise.
+                if !self.loaded_skill_names.contains(&name) {
+                    self.loaded_skill_names.push(name.clone());
+                }
+                self.commit_cell(
+                    &NoticeCell {
+                        message: format!("◈ skill cargada: {name}"),
+                        theme: self.theme,
+                    },
+                    terminal,
+                )?;
+            }
             TuiUpdate::Event(AgentEvent::HarnessNote { kind, text }) => {
                 // J-26 (docs/AUDITORIA-2026-07-v7.md): this event IS
                 // rendered into the model's history — the user should
@@ -1493,10 +1522,12 @@ impl App {
             _ if !self.turn_running => {}
             TuiUpdate::TurnFinished(Ok(())) => {
                 self.turn_running = false;
+                self.turn_started_at = None;
                 self.current_turn = None;
             }
             TuiUpdate::TurnFinished(Err(message)) => {
                 self.turn_running = false;
+                self.turn_started_at = None;
                 self.current_turn = None;
                 // N-30 (docs/AUDITORIA-2026-07-v2.md): a round that fails
                 // mid-stream never gets an `AgentEvent::AssistantText`
@@ -1610,8 +1641,12 @@ impl App {
             } else if self.switching_model {
                 format!("{} cambiando de modelo... (Ctrl+C salir)", self.spinner_glyph())
             } else if self.turn_running {
+                let elapsed = self
+                    .turn_started_at
+                    .map(|start| format!(" {}s", start.elapsed().as_secs()))
+                    .unwrap_or_default();
                 format!(
-                    "{} esperando respuesta del modelo... (Ctrl+C salir · Esc interrumpir)",
+                    "{} esperando respuesta del modelo...{elapsed} (Ctrl+C salir · Esc interrumpir)",
                     self.spinner_glyph()
                 )
             } else {
@@ -1628,7 +1663,11 @@ impl App {
                 self.session,
                 self.total_input_tokens,
                 self.total_output_tokens,
+                self.loaded_skill_names.len(),
             );
+            // Narrow terminal: keep the dynamic tail (skills/tokens),
+            // drop the static head — see `status_bar::fit_right`.
+            let status = status_bar::fit_right(&status, usize::from(hint_right.width));
             frame.render_widget(
                 Paragraph::new(status)
                     .style(Style::default().fg(self.theme.muted))
