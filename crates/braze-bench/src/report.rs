@@ -221,6 +221,131 @@ fn binomial(n: u32, k: u32) -> f64 {
     (0..k).map(|i| (n - i) as f64 / (k - i) as f64).product()
 }
 
+/// Una comparación pareada brazo-vs-control (v8 K-19): los sweeps de
+/// braze-bench comparten `seed + repetition` entre brazos, así que cada
+/// (task_id, repetition) existe en ambos y forma un PAR — el diseño
+/// pareado que el Wilson pooleado de arriba ignora. El test es McNemar
+/// exacto: solo los pares DISCORDANTES (uno pasa, el otro no) llevan
+/// información; bajo H0 se reparten Binomial(b+c, ½).
+struct PairedComparison {
+    arm: String,
+    /// Pares donde ambos brazos tienen fila contable — los pares con
+    /// `HarnessError` en cualquiera de los dos lados se excluyen y se
+    /// reportan en `dropped_pairs` (no silent caps).
+    n_pairs: u32,
+    dropped_pairs: u32,
+    /// Discordantes: solo el control pasó (`b`) / solo el brazo pasó (`c`).
+    control_only: u32,
+    arm_only: u32,
+    p_exact: f64,
+    /// Ajustado por Holm-Bonferroni sobre la familia "todos los brazos
+    /// vs el control" de este sweep — sin esto, 4-5 comparaciones a
+    /// α=0.05 esperan ≥1 falso positivo por sweep (v8 K-19).
+    p_holm: f64,
+}
+
+/// p exacto (dos colas) de McNemar: con `b`+`c` discordantes, bajo H0
+/// `b ~ Binomial(b+c, ½)` — p = 2·P(X ≤ min(b,c)), capado a 1. Sin
+/// discordantes no hay evidencia en ninguna dirección: p = 1.
+fn mcnemar_exact_p(control_only: u32, arm_only: u32) -> f64 {
+    let n = control_only + arm_only;
+    if n == 0 {
+        return 1.0;
+    }
+    let k = control_only.min(arm_only);
+    let half_n = 0.5f64.powi(n as i32);
+    let tail: f64 = (0..=k).map(|i| binomial(n, i) * half_n).sum();
+    (2.0 * tail).min(1.0)
+}
+
+/// Holm-Bonferroni step-down sobre la familia de p-values: ordenados
+/// ascendentes, `p_(i)` se ajusta a `max_{j<=i} (m-j)·p_(j)` (índice
+/// 0-based), capado a 1 — controla FWER sin la sobre-corrección de
+/// Bonferroni plano. Devuelve los ajustados EN EL ORDEN ORIGINAL.
+fn holm_adjust(p_values: &[f64]) -> Vec<f64> {
+    let m = p_values.len();
+    let mut order: Vec<usize> = (0..m).collect();
+    order.sort_by(|&a, &b| p_values[a].total_cmp(&p_values[b]));
+
+    let mut adjusted = vec![0.0f64; m];
+    let mut running_max = 0.0f64;
+    for (rank, &original_index) in order.iter().enumerate() {
+        let stepped = ((m - rank) as f64) * p_values[original_index];
+        running_max = running_max.max(stepped.min(1.0));
+        adjusted[original_index] = running_max;
+    }
+    adjusted
+}
+
+/// Construye las comparaciones pareadas de cada brazo contra el PRIMER
+/// brazo del sweep (la convención del proyecto: el control va primero
+/// en `--backends`). `None` si hay menos de dos brazos.
+fn paired_comparisons(
+    results: &[TaskResult],
+    backend_order: &[&str],
+) -> Option<Vec<PairedComparison>> {
+    let (&control, arms) = backend_order.split_first()?;
+    if arms.is_empty() {
+        return None;
+    }
+
+    // (task_id, repetition) -> passed, solo filas contables (sin
+    // harness_error) — el mismo criterio N-37 del resto del reporte.
+    let outcomes_for = |backend: &str| -> std::collections::HashMap<(String, u32), bool> {
+        results
+            .iter()
+            .filter(|r| r.backend == backend)
+            .filter(|r| r.failure_cause != Some(FailureCause::HarnessError))
+            .map(|r| ((r.task_id.clone(), r.repetition), r.passed))
+            .collect()
+    };
+    let control_outcomes = outcomes_for(control);
+
+    let mut comparisons: Vec<PairedComparison> = arms
+        .iter()
+        .map(|&arm| {
+            let arm_outcomes = outcomes_for(arm);
+            let total_keys: std::collections::HashSet<&(String, u32)> =
+                control_outcomes.keys().chain(arm_outcomes.keys()).collect();
+            let mut n_pairs = 0u32;
+            let mut dropped_pairs = 0u32;
+            let mut control_only = 0u32;
+            let mut arm_only = 0u32;
+            for key in total_keys {
+                match (control_outcomes.get(key), arm_outcomes.get(key)) {
+                    (Some(&control_passed), Some(&arm_passed)) => {
+                        n_pairs += 1;
+                        match (control_passed, arm_passed) {
+                            (true, false) => control_only += 1,
+                            (false, true) => arm_only += 1,
+                            _ => {}
+                        }
+                    }
+                    // Un lado sin fila contable (harness_error o suite
+                    // distinta): el par no existe.
+                    _ => dropped_pairs += 1,
+                }
+            }
+            PairedComparison {
+                arm: arm.to_string(),
+                n_pairs,
+                dropped_pairs,
+                control_only,
+                arm_only,
+                p_exact: mcnemar_exact_p(control_only, arm_only),
+                p_holm: 0.0, // se llena abajo, sobre la familia completa
+            }
+        })
+        .collect();
+
+    let p_values: Vec<f64> = comparisons.iter().map(|c| c.p_exact).collect();
+    let adjusted = holm_adjust(&p_values);
+    for (comparison, p_holm) in comparisons.iter_mut().zip(adjusted) {
+        comparison.p_holm = p_holm;
+    }
+    Some(comparisons)
+}
+
 /// Sums optional per-row USD costs into an optional total — `None` only
 /// when every row was `None` (no pricing anywhere: stay silent rather
 /// than claim "$0"); `Some(sum)` once at least one row reported.
@@ -361,6 +486,34 @@ pub fn print_table(results: &[TaskResult]) {
                 .collect();
             println!("{:<24} {}", summary.backend, cells.join("  "));
         }
+    }
+
+    // v8 K-19 — el diseño pareado que los seeds compartidos habilitan:
+    // McNemar exacto por brazo contra el PRIMER brazo (control), Holm
+    // sobre la familia. Complementa (no reemplaza) el Wilson de arriba,
+    // cuyo caveat i.i.d. sigue documentado en `BackendSummary`.
+    let backend_order_refs: Vec<&str> = summaries.iter().map(|s| s.backend.as_str()).collect();
+    if let Some(comparisons) = paired_comparisons(results, &backend_order_refs) {
+        println!(
+            "\n== Comparación pareada vs control '{}' (McNemar exacto + Holm) ==",
+            backend_order_refs[0]
+        );
+        for c in &comparisons {
+            let significance = if c.p_holm < 0.05 { "  *" } else { "" };
+            let dropped_note = if c.dropped_pairs > 0 {
+                format!("  [pares sin contraparte: {}]", c.dropped_pairs)
+            } else {
+                String::new()
+            };
+            println!(
+                "{:<24} pares={:<4} solo-control={:<3} solo-brazo={:<3} p={:.4} p_holm={:.4}{significance}{dropped_note}",
+                c.arm, c.n_pairs, c.control_only, c.arm_only, c.p_exact, c.p_holm
+            );
+        }
+        println!(
+            "(* p_holm < 0.05; solo los pares discordantes llevan información — \
+             'solo-brazo' > 'solo-control' favorece al brazo)"
+        );
     }
 
     // Per-skill breakdown (F8): a flat pass-rate can't show *where* a
@@ -597,6 +750,82 @@ mod tests {
         assert_eq!(binomial(3, 3), 1.0);
         assert_eq!(binomial(2, 3), 0.0);
         assert_eq!(binomial(4, 0), 1.0);
+    }
+
+    /// v8 K-19 — McNemar exacto fijado con valores a mano:
+    /// b=5,c=0 → p = 2·C(5,0)·2⁻⁵ = 2/32; b=1,c=8 → p =
+    /// 2·(C(9,0)+C(9,1))·2⁻⁹ = 20/512; sin discordantes → p = 1.
+    #[test]
+    fn mcnemar_exact_p_matches_hand_computed_values() {
+        assert!((mcnemar_exact_p(0, 0) - 1.0).abs() < 1e-12);
+        assert!((mcnemar_exact_p(5, 0) - 0.0625).abs() < 1e-12);
+        assert!((mcnemar_exact_p(0, 5) - 0.0625).abs() < 1e-12, "simétrico");
+        assert!((mcnemar_exact_p(1, 8) - 0.0390625).abs() < 1e-12);
+        // Reparto parejo: máxima compatibilidad con H0.
+        assert!((mcnemar_exact_p(3, 3) - 1.0).abs() < 1e-9);
+    }
+
+    /// Holm step-down fijado a mano: [0.01, 0.04, 0.03] → ordenados
+    /// [0.01, 0.03, 0.04] con multiplicadores 3,2,1 → [0.03, 0.06,
+    /// max(0.06, 0.04)] = [0.03, 0.06, 0.06] mapeado al orden original.
+    #[test]
+    fn holm_adjust_matches_hand_computed_values() {
+        let adjusted = holm_adjust(&[0.01, 0.04, 0.03]);
+        assert!((adjusted[0] - 0.03).abs() < 1e-12);
+        assert!((adjusted[1] - 0.06).abs() < 1e-12);
+        assert!((adjusted[2] - 0.06).abs() < 1e-12);
+        // Un solo p-value: Holm es identidad (capada a 1).
+        let single = holm_adjust(&[0.2]);
+        assert!((single[0] - 0.2).abs() < 1e-12);
+        assert!(holm_adjust(&[0.9, 0.8]).iter().all(|p| *p <= 1.0));
+    }
+
+    /// El pareo usa (task_id, repetition), excluye pares donde falta la
+    /// contraparte contable, y cuenta discordantes en la dirección
+    /// correcta.
+    #[test]
+    fn paired_comparisons_pair_by_task_and_rep_and_count_discordants() {
+        fn row(backend: &str, task: &str, rep: u32, passed: bool) -> TaskResult {
+            let mut r = result(passed, 10, 1, 1);
+            r.backend = backend.to_string();
+            r.task_id = task.to_string();
+            r.repetition = rep;
+            r
+        }
+        let mut rows = vec![
+            // Par concordante (ambos pasan).
+            row("control", "a", 0, true),
+            row("brazo", "a", 0, true),
+            // Discordante: solo el brazo pasa.
+            row("control", "b", 0, false),
+            row("brazo", "b", 0, true),
+            // Discordante: solo el control pasa.
+            row("control", "a", 1, true),
+            row("brazo", "a", 1, false),
+            // El control tiene una fila cuyo par del brazo es
+            // harness_error → el par se excluye y se cuenta.
+            row("control", "c", 0, true),
+        ];
+        let mut orphan = row("brazo", "c", 0, false);
+        orphan.failure_cause = Some(FailureCause::HarnessError);
+        rows.push(orphan);
+
+        let comparisons =
+            paired_comparisons(&rows, &["control", "brazo"]).expect("dos brazos → Some");
+        assert_eq!(comparisons.len(), 1);
+        let c = &comparisons[0];
+        assert_eq!(c.n_pairs, 3);
+        assert_eq!(c.dropped_pairs, 1);
+        assert_eq!(c.control_only, 1);
+        assert_eq!(c.arm_only, 1);
+        // b=1, c=1 → p = 2·C(2,0+..=1)... k=1, n=2: 2·(C(2,0)+C(2,1))·¼
+        // capado a 1.
+        assert!((c.p_exact - 1.0).abs() < 1e-9);
+
+        assert!(
+            paired_comparisons(&rows, &["control"]).is_none(),
+            "con un solo brazo no hay comparación"
+        );
     }
 
     fn result(
