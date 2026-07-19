@@ -224,6 +224,11 @@ def cmd_run(args):
     env.setdefault("BRAZE_OLLAMA_TRANSPORT_RETRIES", "6")
     env.setdefault("BRAZE_CIRCUIT_BREAKER", "off")
 
+    # La identidad del sweep se captura al INICIO (misma lección que
+    # braze-bench, commit 9b22b0a): HEAD puede avanzar durante un run de
+    # horas; la metadata describe lo que corrió.
+    metadata = collect_metadata(env["BRAZE_OLLAMA_BASE_URL"], models)
+
     total = len(sample) * args.reps
     n = 0
     for instance_id in sample:
@@ -304,12 +309,7 @@ def cmd_run(args):
             runs.append(record)
             sh(["rm", "-rf", str(work)])
 
-            out = {
-                "metadata": collect_metadata(
-                    env["BRAZE_OLLAMA_BASE_URL"], models
-                ),
-                "runs": runs,
-            }
+            out = {"metadata": metadata, "runs": runs}
             out_json.write_text(json.dumps(out, ensure_ascii=False, indent=1))
             preds_path.write_text(
                 "\n".join(json.dumps(p, ensure_ascii=False) for p in preds) + "\n"
