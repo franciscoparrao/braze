@@ -278,6 +278,41 @@ impl HistoryCell for PlanCell {
     }
 }
 
+/// An operational note the harness injected into the model's
+/// conversation (`AgentEvent::HarnessNote` — A′.2: "80% of the turn's
+/// budget is spent", "the next round is this turn's last"). J-26
+/// (docs/AUDITORIA-2026-07-v7.md): the TUI used to swallow these in
+/// `apply_update`'s catch-all, so the user never saw what the harness
+/// told the model — while `braze-bench` counts them. Same muted
+/// treatment as `PlanCell`: harness-to-model context worth glancing at,
+/// not primary conversation content. The note text is shown verbatim
+/// (English — it's what the model actually received); `kind` is the
+/// machine-readable tag the bench counts by (`"turn_budget"` /
+/// `"iteration_cap"`).
+pub struct HarnessNoteCell {
+    pub kind: String,
+    pub text: String,
+    pub theme: Theme,
+}
+
+impl HistoryCell for HarnessNoteCell {
+    fn as_text(&self) -> Text<'_> {
+        let mut lines = vec![Line::from(Span::styled(
+            format!("⚑ harness → modelo · {}", self.kind),
+            Style::default()
+                .fg(self.theme.muted)
+                .add_modifier(Modifier::BOLD),
+        ))];
+        lines.extend(self.text.lines().map(|line| {
+            Line::from(Span::styled(
+                format!("  {line}"),
+                Style::default().fg(self.theme.muted),
+            ))
+        }));
+        Text::from(lines)
+    }
+}
+
 /// The `/help` command's output — "fase TUI 2" (PLAN.md). Static
 /// (doesn't reflect current app state, e.g. `turn_running`) — a
 /// deliberate simplification for a command whose whole purpose is
@@ -526,6 +561,26 @@ mod tests {
         assert_eq!(text.lines[0].spans[0].content, "interrupted by user");
     }
 
+    /// Regression test for J-26 (docs/AUDITORIA-2026-07-v7.md): the
+    /// harness's note to the model renders as a header (with its
+    /// machine-readable kind) plus one line per note line — mirroring
+    /// `PlanCell`'s multi-line construction.
+    #[test]
+    fn harness_note_cell_renders_a_header_with_kind_plus_note_lines() {
+        let cell = HarnessNoteCell {
+            kind: "turn_budget".to_string(),
+            text: "80% of the turn's token budget is spent.\nFinish now.".to_string(),
+            theme: Theme::dark(),
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines.len(), 3);
+        assert!(text.lines[0].spans[0].content.contains("turn_budget"));
+        assert_eq!(
+            text.lines[2].spans[0].content,
+            "  Finish now."
+        );
+    }
+
     #[test]
     fn help_cell_lists_commands_and_keybindings() {
         let text = HelpCell.as_text();
@@ -709,6 +764,16 @@ mod snapshot_tests {
     #[test]
     fn help_cell() {
         insta::assert_debug_snapshot!(render_to_buffer(&HelpCell, 50));
+    }
+
+    #[test]
+    fn harness_note_cell() {
+        let cell = HarnessNoteCell {
+            kind: "iteration_cap".to_string(),
+            text: "The next round is this turn's last.".to_string(),
+            theme: Theme::dark(),
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 50));
     }
 
     #[test]

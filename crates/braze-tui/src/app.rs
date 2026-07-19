@@ -29,8 +29,8 @@ use crate::approval::ApprovalRequest;
 use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len};
 use crate::error::TuiError;
 use crate::history_cell::{
-    AssistantMarkdownCell, ErrorCell, ExpandedToolOutputCell, HelpCell, HistoryCell, NoticeCell,
-    PermissionCell, PlanCell, ToolCallCell, UserCell,
+    AssistantMarkdownCell, ErrorCell, ExpandedToolOutputCell, HarnessNoteCell, HelpCell,
+    HistoryCell, NoticeCell, PermissionCell, PlanCell, ToolCallCell, UserCell,
 };
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::mentions::{list_files, matching_files};
@@ -1287,6 +1287,14 @@ impl App {
             }) => {
                 self.total_input_tokens += u64::from(input_tokens);
                 self.total_output_tokens += u64::from(output_tokens);
+            }
+            TuiUpdate::Event(AgentEvent::HarnessNote { kind, text }) => {
+                // J-26 (docs/AUDITORIA-2026-07-v7.md): this event IS
+                // rendered into the model's history — the user should
+                // see what the harness told the model, not just the
+                // model's reaction to it.
+                let theme = self.theme;
+                self.commit_cell(&HarnessNoteCell { kind, text, theme }, terminal)?;
             }
             TuiUpdate::Event(_) => {
                 // Compaction/permission-request-mirror/unknown events:
