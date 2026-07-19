@@ -1,10 +1,10 @@
 ---
 source: crates/braze-tui/src/history_cell.rs
-assertion_line: 823
+assertion_line: 912
 expression: "render_to_buffer(&HelpCell, 50)"
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 50, height: 23 },
+    area: Rect { x: 0, y: 0, width: 50, height: 27 },
     content: [
         "Atajos                                            ",
         "Enter enviar · Ctrl+J salto de línea              ",
@@ -22,6 +22,10 @@ Buffer {
         "backend[:modelo] directo)                         ",
         "/skills  listar las skills disponibles e insertar ",
         "una mención $skill                                ",
+        "/permissions  ver las decisiones de permisos de   ",
+        "esta sesión                                       ",
+        "/tasks  ver las tareas que el modelo marcó        ",
+        "completadas en esta sesión                        ",
         "/quit, /exit  salir de braze                      ",
         "                                                  ",
         "Menciones                                         ",
@@ -35,7 +39,7 @@ Buffer {
         x: 6, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 8, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 9, y: 18, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 9, y: 22, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

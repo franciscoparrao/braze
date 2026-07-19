@@ -345,6 +345,66 @@ impl HistoryCell for HarnessNoteCell {
     }
 }
 
+/// The `/permissions` command's output: every permission decision in
+/// this session's rollout log, latest decision per action — read fresh
+/// from the store (same single-source-of-truth seam as Ctrl+T), never
+/// from TUI-side state. The transcript's `PermissionCell`s already show
+/// each decision as it happened; this is the consolidated "what does
+/// the session currently remember" view (an allowed decision with a
+/// permission key is what `--resume` re-seeds into the guard).
+pub struct PermissionsListCell {
+    /// `(action description, allowed)`, in first-seen order.
+    pub entries: Vec<(String, bool)>,
+    pub theme: Theme,
+}
+
+impl HistoryCell for PermissionsListCell {
+    fn as_text(&self) -> Text<'_> {
+        let mut lines = vec![Line::from(Span::styled(
+            "◆ permisos decididos en esta sesión",
+            Style::default().add_modifier(Modifier::BOLD),
+        ))];
+        lines.extend(self.entries.iter().map(|(action, allowed)| {
+            let (glyph, color, verb) = if *allowed {
+                ("✓ ", self.theme.success, "permitida")
+            } else {
+                ("✗ ", self.theme.error, "denegada")
+            };
+            Line::from(vec![
+                Span::styled(glyph, Style::default().fg(color)),
+                Span::raw(format!("{verb}: {action}")),
+            ])
+        }));
+        Text::from(lines)
+    }
+}
+
+/// The `/tasks` command's output: every `TaskCompleted` the session's
+/// rollout log records (the only durable trace of the typed task list —
+/// the list itself is in-memory and reset per turn, see
+/// `braze-engine::task_list`). Same fresh-from-the-store seam as
+/// `/permissions`.
+pub struct TasksListCell {
+    pub entries: Vec<String>,
+    pub theme: Theme,
+}
+
+impl HistoryCell for TasksListCell {
+    fn as_text(&self) -> Text<'_> {
+        let mut lines = vec![Line::from(Span::styled(
+            "◆ tareas completadas en esta sesión",
+            Style::default().add_modifier(Modifier::BOLD),
+        ))];
+        lines.extend(self.entries.iter().map(|description| {
+            Line::from(vec![
+                Span::styled("✓ ", Style::default().fg(self.theme.success)),
+                Span::raw(description.clone()),
+            ])
+        }));
+        Text::from(lines)
+    }
+}
+
 /// The `/help` command's output — "fase TUI 2" (PLAN.md). Static
 /// (doesn't reflect current app state, e.g. `turn_running`) — a
 /// deliberate simplification for a command whose whole purpose is
@@ -368,6 +428,8 @@ impl HistoryCell for HelpCell {
                 "/model  cambiar de backend/modelo (picker; /model backend[:modelo] directo)",
             ),
             Line::from("/skills  listar las skills disponibles e insertar una mención $skill"),
+            Line::from("/permissions  ver las decisiones de permisos de esta sesión"),
+            Line::from("/tasks  ver las tareas que el modelo marcó completadas en esta sesión"),
             Line::from("/quit, /exit  salir de braze"),
             Line::from(""),
             Line::from(Span::styled("Menciones", heading_style)),
@@ -593,6 +655,33 @@ mod tests {
         };
         let text = cell.as_text();
         assert_eq!(text.lines[0].spans[0].content, "interrupted by user");
+    }
+
+    #[test]
+    fn permissions_list_cell_renders_latest_verdict_per_action() {
+        let cell = PermissionsListCell {
+            entries: vec![
+                ("run `cargo test`".to_string(), true),
+                ("delete file /tmp/x".to_string(), false),
+            ],
+            theme: Theme::dark(),
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines.len(), 3);
+        assert!(text.lines[1].spans[1].content.contains("permitida"));
+        assert!(text.lines[2].spans[1].content.contains("denegada"));
+    }
+
+    #[test]
+    fn tasks_list_cell_renders_a_check_per_completed_task() {
+        let cell = TasksListCell {
+            entries: vec!["leer notas.txt".to_string(), "editar main.rs".to_string()],
+            theme: Theme::dark(),
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines.len(), 3);
+        assert_eq!(text.lines[1].spans[0].content, "✓ ");
+        assert!(text.lines[2].spans[1].content.contains("editar main.rs"));
     }
 
     #[test]

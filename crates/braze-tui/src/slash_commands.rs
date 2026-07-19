@@ -24,6 +24,14 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "listar las skills disponibles e insertar una mención $skill",
     },
     SlashCommand {
+        name: "permissions",
+        description: "ver las decisiones de permisos de esta sesión",
+    },
+    SlashCommand {
+        name: "tasks",
+        description: "ver las tareas que el modelo marcó completadas en esta sesión",
+    },
+    SlashCommand {
         name: "quit",
         description: "salir de braze",
     },

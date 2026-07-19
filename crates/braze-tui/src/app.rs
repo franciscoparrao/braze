@@ -30,7 +30,8 @@ use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len}
 use crate::error::TuiError;
 use crate::history_cell::{
     AssistantMarkdownCell, ErrorCell, ExpandedToolOutputCell, HarnessNoteCell, HelpCell,
-    HistoryCell, NoticeCell, PermissionCell, PlanCell, QuestionCell, ToolCallCell, UserCell,
+    HistoryCell, NoticeCell, PermissionCell, PermissionsListCell, PlanCell, QuestionCell,
+    TasksListCell, ToolCallCell, UserCell,
 };
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::mentions::{list_files, matching_files};
@@ -642,7 +643,7 @@ impl App {
             }
             (KeyCode::Enter, KeyModifiers::NONE) => {
                 if !self.turn_running && !self.switching_model {
-                    self.submit(terminal)?;
+                    self.submit(terminal).await?;
                 }
                 // Else: a turn is already running (or a `/model` switch
                 // is rebuilding the engine) — ignore the submission
@@ -1037,8 +1038,10 @@ impl App {
     /// Executes a built-in `/command` — only ever called from `submit`
     /// after `parse_slash_command` confirms `command` is a registered
     /// name, so the wildcard arm here is unreachable in practice, not a
-    /// silent fallback for a typo.
-    fn run_slash_command(
+    /// silent fallback for a typo. Async since `/permissions`/`/tasks`
+    /// read the rollout log (the same fresh-from-the-store seam Ctrl+T
+    /// uses).
+    async fn run_slash_command(
         &mut self,
         command: &str,
         args: Option<&str>,
@@ -1053,12 +1056,121 @@ impl App {
                 None => self.open_model_picker(terminal),
             },
             "skills" => self.open_skills_picker(terminal),
+            "permissions" => self.show_session_permissions(terminal).await,
+            "tasks" => self.show_completed_tasks(terminal).await,
             "quit" | "exit" => {
                 self.should_quit = true;
                 Ok(())
             }
             _ => Ok(()),
         }
+    }
+
+    /// `/permissions`: the latest decision per action in this session's
+    /// rollout log — what the session "remembers" (an allowed, keyed
+    /// decision is exactly what `--resume` re-seeds into the guard).
+    async fn show_session_permissions(
+        &mut self,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
+        let events = match self.store.load(&self.session).await {
+            Ok(events) => events,
+            // A session with no turns yet has no rollout log at all —
+            // that's the ordinary "nothing decided yet" case (the
+            // friendly notice below), not a read failure.
+            Err(braze_session::SessionError::NotFound(_)) => Vec::new(),
+            Err(err) => {
+                return self.commit_cell(
+                    &NoticeCell {
+                        message: format!("no se pudo leer el historial de la sesión: {err}"),
+                        theme: self.theme,
+                    },
+                    terminal,
+                );
+            }
+        };
+
+        // Latest decision per action, in first-seen order: re-asking the
+        // same action later in the session overwrites in place rather
+        // than listing the action twice with contradictory verdicts.
+        let mut entries: Vec<(String, bool)> = Vec::new();
+        for event in &events {
+            if let AgentEvent::PermissionDecided { action, allowed, .. } = event {
+                match entries.iter_mut().find(|(a, _)| a == action) {
+                    Some(entry) => entry.1 = *allowed,
+                    None => entries.push((action.clone(), *allowed)),
+                }
+            }
+        }
+
+        if entries.is_empty() {
+            return self.commit_cell(
+                &NoticeCell {
+                    message: "esta sesión aún no registra ninguna decisión de permisos"
+                        .to_string(),
+                    theme: self.theme,
+                },
+                terminal,
+            );
+        }
+        self.commit_cell(
+            &PermissionsListCell {
+                entries,
+                theme: self.theme,
+            },
+            terminal,
+        )
+    }
+
+    /// `/tasks`: every `TaskCompleted` in this session's rollout log —
+    /// the durable trace of the typed task list (C′.2; the live list is
+    /// per-turn in-memory engine state the TUI can't and shouldn't
+    /// mirror).
+    async fn show_completed_tasks(
+        &mut self,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
+        let events = match self.store.load(&self.session).await {
+            Ok(events) => events,
+            // Same fresh-session case as `show_session_permissions`.
+            Err(braze_session::SessionError::NotFound(_)) => Vec::new(),
+            Err(err) => {
+                return self.commit_cell(
+                    &NoticeCell {
+                        message: format!("no se pudo leer el historial de la sesión: {err}"),
+                        theme: self.theme,
+                    },
+                    terminal,
+                );
+            }
+        };
+
+        let entries: Vec<String> = events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::TaskCompleted { description } => Some(description.clone()),
+                _ => None,
+            })
+            .collect();
+
+        if entries.is_empty() {
+            return self.commit_cell(
+                &NoticeCell {
+                    message: "esta sesión aún no registra tareas completadas (la task list \
+                              del engine es opt-in: enable_task_list)"
+                        .to_string(),
+                    theme: self.theme,
+                },
+                terminal,
+            );
+        }
+        self.commit_cell(
+            &TasksListCell {
+                entries,
+                theme: self.theme,
+            },
+            terminal,
+        )
     }
 
     /// Opens the `/skills` picker over `skill_candidates` — a
@@ -1182,7 +1294,7 @@ impl App {
         }
     }
 
-    fn submit(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+    async fn submit(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
         let text = self.composer.lines().join("\n");
         let trimmed = text.trim();
         if trimmed.is_empty() {
@@ -1202,7 +1314,7 @@ impl App {
         {
             self.composer = TextArea::default();
             self.popup = None;
-            return self.run_slash_command(command, args, terminal);
+            return self.run_slash_command(command, args, terminal).await;
         }
 
         let user_text = trimmed.to_string();
