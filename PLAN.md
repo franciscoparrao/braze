@@ -2531,6 +2531,99 @@ tocó nada fuera de lo que este trabajo cambió.
 
 Nada commiteado todavía.
 
+## Fase TUI 3 — "TUI profesional" (2026-07-19)
+
+Sesión dedicada al foco nuevo declarado tras cerrar el ancla BFCL: subir
+la TUI de "completa" a "profesional". Seis incrementos, cada uno con
+tests y verificación en vivo al final; cierra además dos hallazgos
+vigentes de la auditoría v7 (J-26 y J-12).
+
+1. **J-26 cerrado — celda `HarnessNote`**: `apply_update` ya no traga el
+   evento en el catch-all; `HarnessNoteCell` (header `⚑ harness → modelo
+   · {kind}` + texto verbatim, tratamiento muted estilo `PlanCell`). El
+   usuario ve ahora exactamente lo que el harness inyectó al modelo
+   ("80% del presupuesto gastado", "última ronda") — el bench ya los
+   contaba, la TUI los ocultaba.
+
+2. **`ask_user` nativo en `--tui`**: `ChannelQuestionPrompt` en
+   `braze-tui/src/question.rs` (espejo de `ChannelConfirmationPrompt`,
+   mismo canal mpsc + oneshot; sin persistencia propia — el par
+   tool_use/tool_result ya es durable). Overlay de opciones: lista
+   numerada en las filas del popup (ventana `popup_window_start` para 4
+   opciones en 3 filas), pregunta + hint en el slot del composer
+   (mismas protecciones N-31). Teclas: `1-4` directo, `↑↓`+Enter, Esc =
+   sin respuesta (`None` — el provider le dice al modelo "the user did
+   not answer", nunca adivina). Cola `VecDeque` como approvals
+   (aprobación pendiente tiene precedencia); staleness guard N-29
+   idéntico (pregunta que llega idle → `None` inmediato);
+   `interrupt_turn` drena con `None`. `QuestionCell` deja el
+   intercambio en el transcript. Wiring en `braze-cli`: el path `--tui`
+   deja de pasar `ask_user_prompt: None`; la excepción J-13
+   (`with_untimed_tool`) aplica automáticamente vía `ask_user_enabled`;
+   el factory de `/model` comparte el mismo canal.
+
+3. **`/skills` picker**: nuevo slash command; `SkillCandidate`
+   (name+description, dato plano — braze-tui sigue sin depender de
+   braze-skills) descubierto al arranque en `braze-cli` con el mismo
+   `SkillRegistry::discover` del engine. Picker con ventana estilo
+   `/model`; aceptar inserta `$name ` en el composer (autocompletado
+   puro — la carga sigue siendo el trigger explícito del engine, D′).
+   Registry vacío → notice apuntando a `[skills].paths`.
+
+4. **J-12 cerrado — skills sobreviven `--resume`**:
+   `Engine::rehydrate_skills_from_log` (braze-engine `turn.rs`) corre
+   tras `load_and_repair` y antes de las menciones del turno: por cada
+   `SkillLoaded` del log cuyo nombre no está en memoria, re-ejecuta
+   `load_body()`. No persiste eventos nuevos (evita duplicar los
+   conteos del bench en cada turno resumido), no aplica el cap por
+   turno (ya pasaron por él al cargarse), y un body iligible degrada a
+   warn. Cubre también el rebuild de engine de `/model` a mitad de
+   sesión. Test de regresión: dos engines sobre el mismo store, el
+   segundo recibe el body en su system prompt con exactamente 1
+   `SkillLoaded` en el log.
+
+5. **Barra de estado rica + hint con tiempo**: `status_bar::render`
+   agrega `· skills N` (solo si N>0); `App` trackea nombres distintos
+   vía el evento `SkillLoaded` (que además commitea celda `◈ skill
+   cargada: {name}` — la palanca D′ era invisible en vivo). El hint de
+   turno en curso muestra los segundos transcurridos. Y
+   `status_bar::fit_right`: en terminal angosta la barra conserva la
+   COLA dinámica (skills/tokens) con marcador `…` en vez de perder
+   justo eso — modo de falla observado en vivo (pty 100×30) donde el
+   `Paragraph` right-aligned recortaba el overflow.
+
+6. **`/permissions` y `/tasks`** (solo lectura, v1): leen el rollout
+   log fresco (mismo seam que Ctrl+T). `/permissions` consolida la
+   última decisión por acción (`PermissionsListCell`); `/tasks` lista
+   los `TaskCompleted` (la task list viva es estado in-memory por turno
+   del engine — lo durable es el evento). Sesión sin log
+   (`SessionError::NotFound`, cazado por el harness pty en una sesión
+   fresca) → notice amistoso, no error. `run_slash_command`/`submit`
+   pasaron a async para poder leer el store.
+
+**Tests**: 1013 → 1029 workspace verdes (nuevas celdas + snapshots,
+canal de preguntas ×4, fit_right, rehidratación J-12, status bar);
+clippy `-D warnings` limpio. Snapshots nuevos: harness_note_cell,
+question_cell_answered/unanswered; help_cell actualizado (×2).
+
+**Verificación en vivo** (pty+pyte, binario real, harness en scratchpad
+`tui_live_test.py` + `tui_live_skill_turn.py`): (1) sin modelo — /help
+lista los 3 comandos nuevos, /skills picker muestra las 2 skills del
+fixture y Down+Enter inserta `$review ` en el composer, /permissions y
+/tasks muestran sus notices de sesión fresca, /quit exit 0 (11/11
+checks); (2) turno REAL contra Nitro (`qwen2.5:7b`): `usa $testing…` →
+celda `◈ skill cargada: testing`, el modelo llamó `shell_exec` real y
+respondió "listo" siguiendo la guía de la skill, barra `· skills 1 ·
+tokens 2768↑/29↓` visible a 160 y (post-fit_right) a 100 columnas,
+/quit exit 0 (4/4). Nota de harness reconfirmada: el primer Enter tras
+tipear `/comando` lo consume el popup de sugerencias como
+autocompletado — cerrar con Esc antes de Enter (o Enter doble).
+
+**Pendiente de esta fase**: verificación en vivo del overlay `ask_user`
+con un modelo que efectivamente llame la tool (los unit tests cubren
+canal y flujo; el overlay se verificó solo por render de código), y las
+celdas de compactación (siguen siendo diferido explícito).
+
 ## Archivos críticos
 
 - `/home/franciscoparrao/proyectos/braze/Cargo.toml` — manifiesto de workspace

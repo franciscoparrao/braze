@@ -53,15 +53,20 @@ Diferido a Fase 2: sandboxing Landlock/seccomp, multi-agente/grafo de
 threads, observabilidad OTLP, paquetes de skills cargables, sistema de
 hooks plugueable.
 
-**TUI (`braze-tui`)**: completa con fase 2 incluida (2026-07-05/06) —
-`braze chat --tui`, opt-in (promoverla a default sigue diferido).
-Viewport inline + scrollback nativo, streaming markdown con gateo por
-fence, tool-call cells, approval overlay, slash commands con popup
-(`/help`, `/model`, `/quit`), @-menciones, Ctrl+T (output completo de la
-última tool call), backtrack Esc-Esc, temas (dark/light/high-contrast),
-y **`/model` picker** para cambiar de backend/modelo a mitad de sesión
-(rebuild del Engine + mismo session id; candidatos = backends
-configurados + modelos instalados en el server Ollama).
+**TUI (`braze-tui`)**: completa con fases 2 y 3 incluidas (fase 3
+"profesional", 2026-07-19 — ver PLAN.md § "Fase TUI 3") — `braze chat
+--tui`, opt-in (promoverla a default sigue diferido). Viewport inline +
+scrollback nativo, streaming markdown con gateo por fence, tool-call
+cells, approval overlay, slash commands con popup (`/help`, `/model`,
+`/skills`, `/permissions`, `/tasks`, `/quit`), @-menciones, `$skill`
+picker, Ctrl+T (output completo de la última tool call), backtrack
+Esc-Esc, temas (dark/light/high-contrast), **`/model` picker** para
+cambiar de backend/modelo a mitad de sesión, **`ask_user` nativo**
+(overlay de opciones 1-4/flechas; Esc = sin respuesta), celdas
+`HarnessNote` (J-26) y `◈ skill cargada`, y barra de estado rica
+(skills cargadas + tokens, con degradación `fit_right` en terminal
+angosta). J-12 cerrado en el engine: las skills cargadas se rehidratan
+del rollout log en `--resume` y tras el rebuild de `/model`.
 
 **Palancas de confiabilidad para modelos chicos** (backlog 1-7,
 2026-07-06 — cada una con su sección en PLAN.md): rescate textual de
@@ -178,10 +183,14 @@ mismo día.)
 - **Manuscrito** (`paper/`): prosa de los TODOs, `/verify-refs`, venue,
   `/zenodo`; anotar en Threats el complemento McNemar/Holm y las citas
   nuevas de v8 § 6 (Constraint Tax, Trivedy, MemCoder, pass^k).
+- **TUI**: verificación en vivo del overlay `ask_user` con un modelo
+  que llame la tool (resto de la fase 3 verificado en vivo el
+  2026-07-19); celdas de compactación (diferido explícito).
 - **P1.1 resto**: repartir el `mod tests` de `engine/mod.rs`.
 - **v8 restantes**: Paquete 4 L (Landlock write-only, subagente
   Viewer/Editor, background trans-ronda), P0.2 (costo USD/walltime por
-  turno), K-16 (negative-cache MCP), AGENTS.md interop.
+  turno), K-16 (negative-cache MCP), AGENTS.md interop. J-12 y J-26
+  (v7) quedaron cerrados con la fase TUI 3.
 - Infra Nitro: IP fija en el router, `OLLAMA_KEEP_ALIVE`.
 
 ## Modelos locales recomendados (Ollama)
