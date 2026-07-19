@@ -515,6 +515,17 @@ async fn run() -> Result<(), BenchError> {
                 &ollama_models,
             )
             .await,
+            // Serving-layer identity (EMSE blind b2, Issue 3): only
+            // looked up when some backend actually talks to Ollama —
+            // best-effort, same posture as the digests above.
+            ollama_server_version: if ollama_models.is_empty() {
+                None
+            } else {
+                braze_model::ollama_server_version(&config.ollama_base_url)
+                    .await
+                    .ok()
+                    .flatten()
+            },
             // H-17: the resolved display name carries the full spec —
             // executor, +plan:/+lead: halves, and the +ablate: suffix —
             // so the run itself records which ablations were active.

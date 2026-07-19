@@ -57,8 +57,9 @@ to make that question measurable: every reliability lever is
 independently switchable per benchmark row, every run is reproducible
 from a commit hash and suite fingerprint, and design decisions were
 pre-registered before their evaluations ran. Across 1{,}520 runs
-spanning four executor scales and four harness configurations, a small
-lead model that proactively opens each turn pins the composite system
+spanning four executor scales and four harness configurations, a
+locally-served lead model that proactively opens each turn pins the
+composite system
 at the lead's \emph{own} ceiling regardless of executor scale: a 1B
 executor rises from 19\% to 89\% pass rate, outperforming unassisted
 3B (68\%) and 7B (80\%) baselines (scale and model family are not
@@ -226,7 +227,8 @@ around the actual contribution.
     \citep{bfcl} --- sampling seed, argument-level AST grader, and
     readings all committed before the sweep ran --- replicates the
     central lever outside the authored suite ($+72.0$\,pp at 1B
-    versus $+70.5$\,pp authored, both far from zero), preserves the
+    versus $+70.5$\,pp authored, both far from zero; three single-turn
+    categories), preserves the
     baseline ordering, reproduces the ceiling-pinning null, and
     quantifies the thesis in one number per model: the gap between
     naming the right tool and producing correct arguments is
@@ -542,7 +544,18 @@ from resource contention, which is the reason for the one-sweep-at-a-time
 discipline throughout.
 
 \paragraph{Reproducibility.} Every sweep JSON embeds the harness git
-commit, a suite fingerprint, and per-model digests; confidence
+commit, a suite fingerprint, and per-model digests. One component of
+the stack was \emph{not} recorded in sweep metadata at collection
+time: the version of the Ollama server itself --- a genuine gap, since
+chat-template rendering, the layer \S\ref{sec:planner} locates a
+mechanism in, changes across Ollama releases. We close it two ways.
+Retrospectively: the inference node's service journal and server
+binary (installed 2026-06-08, predating every sweep in
+Table~\ref{tab:sweeps}) show a single version, Ollama 0.30.7, serving
+the entire collection window --- no sweep in this paper spans a server
+upgrade. Prospectively: the harness now embeds the server's reported
+version (\texttt{/api/version}) in every sweep's metadata, so this
+identity can never again go unrecorded. Confidence
 intervals are 95\% Wilson ($n{=}95$ per cell unless noted), with
 Newcombe/MOVER intervals for differences between arms --- Wilson score
 bounds \emph{without} continuity correction, applied uniformly (where
@@ -1791,7 +1804,8 @@ we report that as a finding rather than understate it.
 
 % =====================================================================
 \paragraph{Artifact availability.} \braze{} is open-source
-(\todo{repo URL at submission}), dual-licensed MIT/Apache-2.0. Every
+(\url{https://github.com/franciscoparrao/braze}), dual-licensed
+MIT/Apache-2.0. Every
 sweep this paper cites is reproducible from its raw JSON results file,
 committed to the repository alongside a reproduction command; commit
 hashes, suite fingerprints, and per-model digests embedded in each JSON

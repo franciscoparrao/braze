@@ -1,0 +1,27 @@
+{
+  "title": "braze: an open-source agentic coding harness where every reliability lever is an independently switchable benchmark ablation",
+  "description": "Rust workspace (15 crates) implementing an agentic coding-CLI harness and its benchmark runner (braze-bench). Built as research infrastructure for the study \"Not All Scaffolding Helps: A Lever-by-Lever Study of Agentic Harnesses at Small-Model Scales\": every reliability lever (lead model, planner, tool deferral, textual rescue, observation collapse, post-edit check, task list) toggles per benchmark row via +ablate: suffixes, and every sweep JSON embeds the harness git commit, suite fingerprint, per-model digests, and Ollama server version. This deposit archives the code and the raw sweep JSON files cited by the manuscript.",
+  "creators": [
+    {
+      "name": "Parra Ortiz, Francisco",
+      "affiliation": "Department of Informatics Engineering, Universidad de Santiago de Chile (USACH)",
+      "orcid": "TODO-ORCID-BEFORE-RELEASE"
+    }
+  ],
+  "keywords": [
+    "LLM agents",
+    "agentic software engineering",
+    "small language models",
+    "tool calling",
+    "benchmark",
+    "ablation study",
+    "pre-registration",
+    "Rust"
+  ],
+  "license": "MIT",
+  "upload_type": "software",
+  "access_right": "open",
+  "language": "eng",
+  "communities": [],
+  "related_identifiers": []
+}

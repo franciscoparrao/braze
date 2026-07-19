@@ -542,6 +542,42 @@ pub async fn ollama_model_digest(
         .map(str::to_string))
 }
 
+/// The Ollama server's own version (`GET /api/version`) — the
+/// serving-layer identity a sweep's metadata was missing (EMSE blind
+/// review b2, Issue 3, 2026-07-19): chat-template rendering — the very
+/// layer braze's planner mechanism findings live in — changes across
+/// Ollama releases, so a sweep pinned to a harness commit and model
+/// digests but not to a server version is not fully reproducible.
+/// Same shape as [`ollama_model_digest`]: a plain result the caller
+/// treats as best-effort.
+pub async fn ollama_server_version(base_url: &str) -> Result<Option<String>, ModelError> {
+    let url = format!("{}/api/version", base_url.trim_end_matches('/'));
+    let client = crate::http_client::build_client_with_timeouts(
+        std::time::Duration::from_secs(10),
+        LIST_MODELS_READ_TIMEOUT,
+    );
+
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| ModelError::Request(format!("ollama request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(http_error_to_model_error(response, "ollama").await);
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ModelError::Decode(format!("ollama /api/version: invalid JSON: {e}")))?;
+
+    Ok(body
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string))
+}
+
 /// How long a warm-up load may take before we give up on it. Loading a
 /// mid-size model from disk into RAM/VRAM takes seconds to a couple of
 /// minutes on slow disks — far more than `LIST_MODELS_READ_TIMEOUT`, but
@@ -582,6 +618,37 @@ pub async fn warm_up_ollama_model(base_url: &str, model: &str) -> Result<(), Mod
 mod tests {
     use super::*;
     use braze_types::{Message, Role};
+
+    /// EMSE blind b2, Issue 3 (2026-07-19): the serving-layer version
+    /// must round-trip from `/api/version` so sweep metadata can pin it.
+    #[tokio::test]
+    async fn ollama_server_version_parses_the_version_field() {
+        let body = br#"{"version":"0.30.7"}"#.to_vec();
+        let addr =
+            crate::test_support::spawn_canned_http_server(200, "application/json", body).await;
+
+        let version = ollama_server_version(&format!("http://{addr}"))
+            .await
+            .expect("version lookup should succeed");
+        assert_eq!(version.as_deref(), Some("0.30.7"));
+    }
+
+    #[tokio::test]
+    async fn ollama_server_version_is_none_when_the_field_is_missing() {
+        let body = br#"{}"#.to_vec();
+        let addr =
+            crate::test_support::spawn_canned_http_server(200, "application/json", body).await;
+
+        let version = ollama_server_version(&format!("http://{addr}"))
+            .await
+            .expect("a well-formed but versionless body is not an error");
+        assert_eq!(version, None);
+    }
+
+    #[tokio::test]
+    async fn ollama_server_version_errors_on_an_unreachable_server() {
+        assert!(ollama_server_version("http://127.0.0.1:1").await.is_err());
+    }
 
     #[tokio::test]
     async fn list_ollama_models_returns_the_installed_model_names_in_order() {

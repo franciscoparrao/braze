@@ -32,6 +32,16 @@ pub struct RunMetadata {
     /// `braze_model::ollama_model_digest`. Empty when the sweep touches
     /// no Ollama backend.
     pub ollama_model_digests: Vec<OllamaModelDigest>,
+    /// The Ollama server's own version (`GET /api/version`), when the
+    /// sweep touches an Ollama backend and the server answered — the
+    /// serving-layer identity earlier sweeps' metadata was missing
+    /// (EMSE blind review b2, Issue 3, 2026-07-19): chat-template
+    /// rendering changes across Ollama releases, and braze's own
+    /// planner findings locate a mechanism precisely in that layer, so
+    /// model digests without a server version under-specify the
+    /// serving stack. `None` when no Ollama backend is involved or the
+    /// lookup failed — best-effort, same posture as the digests.
+    pub ollama_server_version: Option<String>,
     /// The full display name of every backend row this sweep ran —
     /// executor, `+plan:`/`+lead:` halves, AND the `+ablate:` suffix
     /// with every active ablation key (H-17,

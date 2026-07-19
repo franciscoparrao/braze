@@ -635,6 +635,7 @@ mod tests {
             suite_fingerprint: "deadbeef".to_string(),
             braze_git_commit: Some("abc123".to_string()),
             ollama_model_digests: vec![],
+            ollama_server_version: Some("0.30.7".to_string()),
             backend_specs: vec![
                 "ollama:qwen2.5:3b".to_string(),
                 "ollama:qwen2.5:3b+lead:ollama:x+ablate:no-lead".to_string(),

@@ -28,5 +28,8 @@ pub use anthropic::AnthropicBackend;
 pub use backend::{CompletionEvent, CompletionRequest, ModelBackend};
 pub use error::ModelError;
 pub use escalation::EscalatingBackend;
-pub use ollama::{OllamaBackend, list_ollama_models, ollama_model_digest, warm_up_ollama_model};
+pub use ollama::{
+    OllamaBackend, list_ollama_models, ollama_model_digest, ollama_server_version,
+    warm_up_ollama_model,
+};
 pub use openrouter::OpenRouterBackend;
