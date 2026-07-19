@@ -19,12 +19,14 @@ mod history_cell;
 mod markdown_stream;
 mod mentions;
 mod observer;
+mod question;
 mod slash_commands;
 mod status_bar;
 mod terminal;
 mod theme;
 
 pub use approval::{ApprovalRequest, ChannelConfirmationPrompt};
+pub use question::{ChannelQuestionPrompt, QuestionRequest};
 pub use error::TuiError;
 pub use theme::Theme;
 
@@ -79,6 +81,7 @@ pub async fn run(
     live_session: Arc<std::sync::Mutex<SessionId>>,
     store: Arc<dyn braze_session::SessionStore>,
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
+    questions: mpsc::UnboundedReceiver<QuestionRequest>,
     status_line: String,
     theme: Theme,
     engine_factory: EngineFactory,
@@ -92,6 +95,7 @@ pub async fn run(
         live_session,
         store,
         approvals,
+        questions,
         status_line,
         theme,
         engine_factory,

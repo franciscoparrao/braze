@@ -943,20 +943,27 @@ async fn run() -> Result<(), CliError> {
     // instead of the session this process started with.
     let live_session = std::sync::Arc::new(std::sync::Mutex::new(session));
 
-    // E′ I.5: `ask_user` is exposed only in the interactive PLAIN chat
-    // loop — not in `run` (one-shot, no human at the keyboard), and not
-    // in `--tui` yet (v1: the overlay wiring is deferred; the trait lives
-    // in braze-permissions so the TUI can add a channel impl later). The
-    // prompt shares the chat loop's single stdin reader (see
-    // `terminal_question`) so a piped answer isn't swallowed by the
-    // loop's read-ahead buffer.
+    // E′ I.5: `ask_user` is exposed in both interactive chat frontends —
+    // the plain loop over stdin (sharing the loop's single reader, see
+    // `terminal_question`, so a piped answer isn't swallowed by its
+    // read-ahead buffer) and `--tui` over a channel to the app loop's
+    // options overlay (`ChannelQuestionPrompt`, same shape as the
+    // approval channel). Never in `run` — one-shot, no human at the
+    // keyboard. `question_rx` is only consumed by the TUI arm below;
+    // the channel simply goes unused in the other paths.
     let plain_chat = matches!(cli.command, Command::Chat { .. }) && !tui_mode;
     let stdin_lines = terminal_question::shared_stdin();
+    let (question_tx, question_rx) =
+        tokio::sync::mpsc::unbounded_channel::<braze_tui::QuestionRequest>();
     let ask_user_prompt: Option<std::sync::Arc<dyn braze_permissions::QuestionPrompt>> =
         if plain_chat {
             Some(std::sync::Arc::new(
                 terminal_question::TerminalQuestionPrompt::new(std::sync::Arc::clone(&stdin_lines)),
             ))
+        } else if tui_mode {
+            Some(std::sync::Arc::new(braze_tui::ChannelQuestionPrompt::new(
+                question_tx.clone(),
+            )))
         } else {
             None
         };
@@ -1055,6 +1062,7 @@ async fn run() -> Result<(), CliError> {
             let factory_live_session = std::sync::Arc::clone(&live_session);
             let factory_store = std::sync::Arc::clone(&store);
             let factory_approval_tx = approval_tx.clone();
+            let factory_question_tx = question_tx.clone();
             let factory_cwd = cwd.clone();
             let engine_factory: braze_tui::EngineFactory = Box::new(move |spec: String| {
                 let mut config = factory_config.clone();
@@ -1063,6 +1071,7 @@ async fn run() -> Result<(), CliError> {
                 let live_session = std::sync::Arc::clone(&factory_live_session);
                 let store = std::sync::Arc::clone(&factory_store);
                 let approval_tx = factory_approval_tx.clone();
+                let question_tx = factory_question_tx.clone();
                 let cwd = factory_cwd.clone();
                 Box::pin(async move {
                     let (backend, model) = match spec.split_once(':') {
@@ -1088,8 +1097,12 @@ async fn run() -> Result<(), CliError> {
                         true,
                         supervised,
                         &cwd,
-                        // TUI: `ask_user` deferred to a channel impl (v1).
-                        None,
+                        // Same channel the startup engine's `ask_user`
+                        // sends into — the rebuilt engine's questions
+                        // land in the same overlay.
+                        Some(std::sync::Arc::new(
+                            braze_tui::ChannelQuestionPrompt::new(question_tx.clone()),
+                        )),
                     )
                     .await
                     // El engine reconstruido registra su propio hook de
@@ -1108,6 +1121,7 @@ async fn run() -> Result<(), CliError> {
                 std::sync::Arc::clone(&live_session),
                 std::sync::Arc::clone(&store),
                 approval_rx,
+                question_rx,
                 status_line,
                 tui_theme,
                 engine_factory,

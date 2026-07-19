@@ -1,0 +1,17 @@
+---
+source: crates/braze-tui/src/history_cell.rs
+assertion_line: 831
+expression: "render_to_buffer(&cell, 50)"
+---
+Buffer {
+    area: Rect { x: 0, y: 0, width: 50, height: 1 },
+    content: [
+        "? ¿cuál archivo edito? → config.toml              ",
+    ],
+    styles: [
+        x: 0, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
+        x: 2, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 25, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 36, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+    ]
+}

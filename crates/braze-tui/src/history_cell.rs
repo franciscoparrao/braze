@@ -278,6 +278,38 @@ impl HistoryCell for PlanCell {
     }
 }
 
+/// An `ask_user` exchange, recorded once it's been answered (`app.rs`'s
+/// `answer_pending_question`) — same audit-trail rationale as
+/// `PermissionCell`: what got asked and what the user chose belongs in
+/// the transcript, not just in the ephemeral overlay that asked. The
+/// full option list isn't repeated here (it was on screen a moment ago,
+/// and the model's tool result records the chosen text anyway).
+pub struct QuestionCell {
+    pub question: String,
+    /// The chosen option's text, or `None` when the user declined to
+    /// answer (Esc) — rendered as "sin respuesta", matching what the
+    /// model is told ("The user did not answer").
+    pub answer: Option<String>,
+    pub theme: Theme,
+}
+
+impl HistoryCell for QuestionCell {
+    fn as_text(&self) -> Text<'_> {
+        let (glyph, color, answer) = match &self.answer {
+            Some(text) => ("? ", self.theme.success, text.as_str()),
+            None => ("? ", self.theme.warning, "sin respuesta"),
+        };
+        Text::from(Line::from(vec![
+            Span::styled(glyph, Style::default().fg(color)),
+            Span::raw(format!("{} → ", self.question)),
+            Span::styled(
+                answer.to_string(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+        ]))
+    }
+}
+
 /// An operational note the harness injected into the model's
 /// conversation (`AgentEvent::HarnessNote` — A′.2: "80% of the turn's
 /// budget is spent", "the next round is this turn's last"). J-26
@@ -561,6 +593,29 @@ mod tests {
         assert_eq!(text.lines[0].spans[0].content, "interrupted by user");
     }
 
+    #[test]
+    fn question_cell_answered_shows_question_and_chosen_option() {
+        let cell = QuestionCell {
+            question: "¿cuál archivo edito?".to_string(),
+            answer: Some("config.toml".to_string()),
+            theme: Theme::dark(),
+        };
+        let text = cell.as_text();
+        assert!(text.lines[0].spans[1].content.contains("cuál archivo"));
+        assert_eq!(text.lines[0].spans[2].content, "config.toml");
+    }
+
+    #[test]
+    fn question_cell_unanswered_says_so_instead_of_guessing() {
+        let cell = QuestionCell {
+            question: "¿a o b?".to_string(),
+            answer: None,
+            theme: Theme::dark(),
+        };
+        let text = cell.as_text();
+        assert_eq!(text.lines[0].spans[2].content, "sin respuesta");
+    }
+
     /// Regression test for J-26 (docs/AUDITORIA-2026-07-v7.md): the
     /// harness's note to the model renders as a header (with its
     /// machine-readable kind) plus one line per note line — mirroring
@@ -764,6 +819,26 @@ mod snapshot_tests {
     #[test]
     fn help_cell() {
         insta::assert_debug_snapshot!(render_to_buffer(&HelpCell, 50));
+    }
+
+    #[test]
+    fn question_cell_answered() {
+        let cell = QuestionCell {
+            question: "¿cuál archivo edito?".to_string(),
+            answer: Some("config.toml".to_string()),
+            theme: Theme::dark(),
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 50));
+    }
+
+    #[test]
+    fn question_cell_unanswered() {
+        let cell = QuestionCell {
+            question: "¿a o b?".to_string(),
+            answer: None,
+            theme: Theme::dark(),
+        };
+        insta::assert_debug_snapshot!(render_to_buffer(&cell, 50));
     }
 
     #[test]

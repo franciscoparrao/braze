@@ -30,11 +30,12 @@ use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len}
 use crate::error::TuiError;
 use crate::history_cell::{
     AssistantMarkdownCell, ErrorCell, ExpandedToolOutputCell, HarnessNoteCell, HelpCell,
-    HistoryCell, NoticeCell, PermissionCell, PlanCell, ToolCallCell, UserCell,
+    HistoryCell, NoticeCell, PermissionCell, PlanCell, QuestionCell, ToolCallCell, UserCell,
 };
 use crate::markdown_stream::MarkdownStreamCollector;
 use crate::mentions::{list_files, matching_files};
 use crate::observer::{ChannelObserver, TuiUpdate};
+use crate::question::QuestionRequest;
 use crate::slash_commands::{SlashCommand, matching_commands};
 use crate::status_bar;
 use crate::terminal::{ACTIVE_ROWS, Backend};
@@ -88,6 +89,7 @@ pub async fn run(
     live_session: Arc<std::sync::Mutex<SessionId>>,
     store: Arc<dyn braze_session::SessionStore>,
     approvals: mpsc::UnboundedReceiver<ApprovalRequest>,
+    questions: mpsc::UnboundedReceiver<QuestionRequest>,
     status_line: String,
     theme: Theme,
     engine_factory: EngineFactory,
@@ -98,6 +100,7 @@ pub async fn run(
         live_session,
         store,
         approvals,
+        questions,
         status_line,
         theme,
         engine_factory,
@@ -249,10 +252,24 @@ struct App {
     /// confirmation at once; only the front one is shown, answering it
     /// reveals the next.
     pending_approvals: VecDeque<ApprovalRequest>,
+    /// `ask_user` questions waiting on an answer, in arrival order —
+    /// same `VecDeque` rationale as `pending_approvals` (two tool calls
+    /// dispatched concurrently in the same round can each ask at once).
+    /// Only the front one is shown; a pending *approval* takes
+    /// precedence over a pending question in both key routing and
+    /// drawing (`on_key`/`draw` check approvals first) — a permission
+    /// decision guards an action about to run, a question just blocks
+    /// one tool's result.
+    pending_questions: VecDeque<QuestionRequest>,
+    /// Selection index into the *front* pending question's options —
+    /// reset to 0 every time a question is answered (the next question's
+    /// options are unrelated to where the cursor was on this one's).
+    question_selected: usize,
     should_quit: bool,
     update_tx: mpsc::UnboundedSender<TuiUpdate>,
     update_rx: mpsc::UnboundedReceiver<TuiUpdate>,
     approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
+    question_rx: mpsc::UnboundedReceiver<QuestionRequest>,
 }
 
 impl App {
@@ -262,6 +279,7 @@ impl App {
         live_session: Arc<std::sync::Mutex<SessionId>>,
         store: Arc<dyn braze_session::SessionStore>,
         approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
+        question_rx: mpsc::UnboundedReceiver<QuestionRequest>,
         status_line: String,
         theme: Theme,
         engine_factory: EngineFactory,
@@ -308,10 +326,13 @@ impl App {
             switch_tx,
             switch_rx,
             pending_approvals: VecDeque::new(),
+            pending_questions: VecDeque::new(),
+            question_selected: 0,
             should_quit: false,
             update_tx,
             update_rx,
             approval_rx,
+            question_rx,
         }
     }
 
@@ -395,6 +416,19 @@ impl App {
                         let _ = request.respond.send(false);
                     }
                 }
+                Some(request) = self.question_rx.recv() => {
+                    // Same staleness reasoning as the approval arm above
+                    // (N-29): a legitimate `ask_user` only ever arrives
+                    // while its own turn is still running — anything
+                    // arriving while idle belongs to an abandoned turn.
+                    // Answer "no answer" (never a guessed choice) instead
+                    // of queuing an overlay for a turn that's gone.
+                    if self.turn_running {
+                        self.pending_questions.push_back(request);
+                    } else {
+                        let _ = request.respond.send(None);
+                    }
+                }
             }
         }
     }
@@ -435,6 +469,51 @@ impl App {
                 }
                 // Ignore everything else while a decision is pending —
                 // no typing into the composer, no accidental submit.
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        if !self.pending_questions.is_empty() {
+            let options_len = self
+                .pending_questions
+                .front()
+                .map(|q| q.options.len())
+                .unwrap_or(0);
+            match key.code {
+                // Direct pick: '1'..='4' (AskUserProvider caps options at
+                // 2..=4, so single digits always suffice). Out-of-range
+                // digits are ignored rather than answering anything.
+                KeyCode::Char(c @ '1'..='4') => {
+                    let index = c as usize - '1' as usize;
+                    if index < options_len {
+                        self.answer_pending_question(Some(index), terminal)?;
+                    }
+                }
+                KeyCode::Up => {
+                    self.question_selected = self
+                        .question_selected
+                        .checked_sub(1)
+                        .unwrap_or(options_len.saturating_sub(1));
+                }
+                KeyCode::Down => {
+                    if options_len > 0 {
+                        self.question_selected = (self.question_selected + 1) % options_len;
+                    }
+                }
+                KeyCode::Enter => {
+                    let index = self.question_selected.min(options_len.saturating_sub(1));
+                    self.answer_pending_question(Some(index), terminal)?;
+                }
+                KeyCode::Esc => {
+                    // Same `last_esc_at` hygiene as the approval Esc arm
+                    // above: this Esc is declining a question, not part
+                    // of an idle Esc-Esc backtrack double-tap.
+                    self.last_esc_at = None;
+                    self.answer_pending_question(None, terminal)?;
+                }
+                // Ignore everything else while a question is pending —
+                // same "no typing into the composer" rule as approvals.
                 _ => {}
             }
             return Ok(());
@@ -1120,6 +1199,14 @@ impl App {
         for request in self.pending_approvals.drain(..) {
             let _ = request.respond.send(false);
         }
+        // Same for pending `ask_user` questions: anything still queued
+        // belongs to the turn just abandoned — answer "no answer" (the
+        // provider's honest no-guess outcome), and reset the selection
+        // cursor for whatever the next turn may ask.
+        for request in self.pending_questions.drain(..) {
+            let _ = request.respond.send(None);
+        }
+        self.question_selected = 0;
 
         if let Some(tail) = self.markdown.finish() {
             self.commit_cell(&AssistantMarkdownCell { markdown: tail }, terminal)?;
@@ -1156,6 +1243,36 @@ impl App {
             &PermissionCell {
                 description,
                 allowed,
+                theme: self.theme,
+            },
+            terminal,
+        )?;
+        Ok(())
+    }
+
+    /// Answers the front pending `ask_user` question and commits a
+    /// `QuestionCell` recording the exchange — the question sibling of
+    /// `answer_pending_approval`. `choice` is the 0-based option index,
+    /// or `None` when the user declined (Esc). The selection cursor
+    /// resets for whatever question is revealed next.
+    fn answer_pending_question(
+        &mut self,
+        choice: Option<usize>,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
+        let Some(request) = self.pending_questions.pop_front() else {
+            return Ok(());
+        };
+        self.question_selected = 0;
+        let answer_text = choice.and_then(|i| request.options.get(i).cloned());
+        let question = request.question.clone();
+        // Best-effort send, same as approvals: the awaiting `ask()` may
+        // already be gone if its turn was interrupted.
+        let _ = request.respond.send(choice);
+        self.commit_cell(
+            &QuestionCell {
+                question,
+                answer: answer_text,
                 theme: self.theme,
             },
             terminal,
@@ -1374,6 +1491,15 @@ impl App {
         ])
         .areas(area);
 
+        // A pending approval takes precedence over a pending question
+        // (see `pending_questions`'s doc comment) — the question's
+        // overlay only shows once no approval is in front.
+        let front_question = self
+            .pending_approvals
+            .is_empty()
+            .then(|| self.pending_questions.front())
+            .flatten();
+
         if let Some(popup) = &self.popup {
             // Reuses the active-preview + hint rows for the popup
             // instead of growing the viewport — see `POPUP_MAX_VISIBLE`'s
@@ -1386,6 +1512,19 @@ impl App {
                 height: active_area.height + hint_area.height,
             };
             draw_popup(frame, popup_area, popup);
+        } else if let Some(request) = front_question {
+            // `ask_user` options list — same rows the `/`/`@` popup
+            // reuses (a question only arrives mid-turn, when no popup
+            // can be open and the live preview has already flushed its
+            // round's text). The question itself renders in the composer
+            // slot below.
+            let options_area = Rect {
+                x: active_area.x,
+                y: active_area.y,
+                width: active_area.width,
+                height: active_area.height + hint_area.height,
+            };
+            draw_question_options(frame, options_area, request, self.question_selected);
         } else {
             let pending = self.markdown.pending();
             if !pending.is_empty() {
@@ -1468,10 +1607,75 @@ impl App {
                 Line::from(answer_hint).style(Style::default().fg(self.theme.warning)),
             ];
             frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner_area);
+        } else if let Some(request) = front_question {
+            // The question itself, in the same bordered composer slot the
+            // approval overlay uses (same "the input area, showing
+            // something else right now" reasoning) — its options render
+            // above, in `draw_question_options`. Same N-31 protections as
+            // the approval overlay: the hint row is always reserved, and
+            // the question is capped to what provably fits above it.
+            let border = Block::default().borders(Borders::TOP | Borders::BOTTOM);
+            let inner_area = border.inner(composer_area);
+            frame.render_widget(border, composer_area);
+            let available_rows_for_question =
+                usize::from(inner_area.height.saturating_sub(1).max(1));
+            let max_chars = available_rows_for_question
+                .saturating_mul(usize::from(inner_area.width.max(1)))
+                .saturating_sub(2); // the "? " marker's own columns
+            let question = truncate_for_display(&request.question, max_chars);
+            let hint = format!(
+                "↑↓ o 1-{} elegir · Enter responder · Esc no responder",
+                request.options.len()
+            );
+            let lines = vec![
+                Line::from(format!("? {question}")),
+                Line::from(hint).style(Style::default().fg(self.theme.warning)),
+            ];
+            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner_area);
         } else {
             frame.render_widget(&self.composer, composer_area);
         }
     }
+}
+
+/// Renders the front pending `ask_user` question's options into `area` —
+/// numbered (matching the '1'..='4' direct-pick keys), selection
+/// reversed, windowed around the selection the same way the `/model`
+/// picker windows (4 options don't fit the 3-row budget). A free
+/// function for the same reason as `draw_popup`: it needs only the
+/// request and selection, not the rest of `App`.
+fn draw_question_options(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    request: &QuestionRequest,
+    selected: usize,
+) {
+    let selected_style = Style::default().add_modifier(Modifier::REVERSED);
+    let total = request.options.len();
+    let start = popup_window_start(selected, total, POPUP_MAX_VISIBLE);
+    let lines: Vec<Line> = request
+        .options
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(POPUP_MAX_VISIBLE)
+        .map(|(i, option)| {
+            let style = if i == selected {
+                selected_style
+            } else {
+                Style::default()
+            };
+            // The `(i/total)` marker only appears when the list can't
+            // fully fit — same signal as the `/model` picker's.
+            let marker = if total > POPUP_MAX_VISIBLE {
+                format!("  ({}/{})", i + 1, total)
+            } else {
+                String::new()
+            };
+            Line::from(Span::styled(format!("{}. {option}{marker}", i + 1), style))
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 /// Renders the `/`/`@` suggestion list into `area` — a free function
