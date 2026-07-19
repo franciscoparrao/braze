@@ -1,0 +1,157 @@
+# Suite del A/B del explorador aislado (I.7,
+# docs/explorador-aislado-ab-design.md — diseño y criterio
+# pre-registrados el 2026-07-11, commit 4517b6d; suite escrita
+# 2026-07-19 junto a la implementación del mecanismo).
+#
+# El suite default no ejercita búsqueda-amplia: sus tareas apuntan al
+# archivo por nombre. Estas 6 tareas ponen la respuesta en UNO de 12-15
+# archivos de setup y el resto es ruido plausible — miden si delegar la
+# exploración a un hijo aislado (+ablate:explore) mejora pass rate y/o
+# reduce tokens frente a explorar inline, CON EL MISMO MODELO en ambos
+# roles.
+#
+# Brazos del A/B (2 executors × 4 brazos × 6 tareas × 5 reps = 240):
+#   ollama:qwen2.5:3b                     → baseline (explora inline)
+#   ollama:qwen2.5:3b+ablate:explore      → la palanca completa
+#   ollama:qwen2.5:3b+ablate:explore;no-prune → ¿el aislamiento subsume al colapso?
+#   ollama:qwen2.5:3b+ablate:no-prune     → referencia sin colapso
+# (ídem qwen2.5:7b)
+#
+# expect_max_tokens en las tareas 1-3 (por diseño): acota la patología
+# de ventana (los loops de 30-48K tokens observados en fig. 3 del
+# paper), no el uso normal — un pass que quema la ventana no valida la
+# palanca. Los tokens del hijo CUENTAN (Usage agregado
+# stop_reason=exploration_child, ver crates/braze-engine/src/exploration.rs).
+
+# ── 1. Valor de config entre 15 servicios ─────────────────────────────
+[[tasks]]
+id = "find_config_value"
+prompt = "En el directorio config/ hay un archivo de configuración por servicio. ¿Qué valor tiene `timeout` en el servicio de pagos? Responde solo el número."
+expect_text_contains = "45"
+expect_max_tokens = 25000
+skill = "exploration"
+
+[tasks.setup_files]
+"config/auth.toml" = "# servicio de autenticación\ntimeout = 10\nretries = 3\n"
+"config/pagos.toml" = "# servicio de pagos\ntimeout = 45\nretries = 2\n"
+"config/usuarios.toml" = "# servicio de usuarios\ntimeout = 15\nretries = 3\n"
+"config/inventario.toml" = "# servicio de inventario\ntimeout = 20\nretries = 1\n"
+"config/envios.toml" = "# servicio de envíos\ntimeout = 30\nretries = 4\n"
+"config/notificaciones.toml" = "# servicio de notificaciones\ntimeout = 5\nretries = 5\n"
+"config/reportes.toml" = "# servicio de reportes\ntimeout = 60\nretries = 1\n"
+"config/facturacion.toml" = "# servicio de facturación\ntimeout = 25\nretries = 2\n"
+"config/catalogo.toml" = "# servicio de catálogo\ntimeout = 12\nretries = 3\n"
+"config/busqueda.toml" = "# servicio de búsqueda\ntimeout = 8\nretries = 2\n"
+"config/sesiones.toml" = "# servicio de sesiones\ntimeout = 18\nretries = 3\n"
+"config/metricas.toml" = "# servicio de métricas\ntimeout = 90\nretries = 1\n"
+"config/colas.toml" = "# servicio de colas\ntimeout = 40\nretries = 6\n"
+"config/cache.toml" = "# servicio de caché\ntimeout = 2\nretries = 1\n"
+"config/gateway.toml" = "# gateway de entrada\ntimeout = 35\nretries = 2\n"
+
+# ── 2. Definición de función entre 12 fuentes ─────────────────────────
+[[tasks]]
+id = "find_function_definition"
+prompt = "¿En qué archivo del directorio src/ se DEFINE la función parse_frame? Responde solo la ruta del archivo."
+expect_text_contains = "codec.rs"
+expect_max_tokens = 25000
+skill = "exploration"
+
+[tasks.setup_files]
+"src/main.rs" = "mod codec;\nmod red;\nfn main() {\n    let f = codec::parse_frame(&datos);\n}\n"
+"src/codec.rs" = "/// Decodifica un frame del wire.\npub fn parse_frame(bytes: &[u8]) -> Frame {\n    Frame::from(bytes)\n}\n"
+"src/red.rs" = "pub fn conectar(host: &str) -> Conexion {\n    Conexion::nueva(host)\n}\n"
+"src/buffer.rs" = "pub fn reservar(n: usize) -> Vec<u8> {\n    vec![0; n]\n}\n"
+"src/checksum.rs" = "pub fn crc32(datos: &[u8]) -> u32 {\n    datos.iter().fold(0, |a, b| a ^ *b as u32)\n}\n"
+"src/reloj.rs" = "pub fn ahora_ms() -> u64 {\n    0\n}\n"
+"src/log.rs" = "pub fn registrar(msg: &str) {\n    println!(\"{msg}\");\n}\n"
+"src/config.rs" = "pub fn cargar() -> Config {\n    Config::default()\n}\n"
+"src/cliente.rs" = "use crate::codec;\npub fn recibir(c: &Conexion) {\n    let _ = codec::parse_frame(c.leer());\n}\n"
+"src/servidor.rs" = "pub fn escuchar(puerto: u16) {\n    // acepta conexiones\n}\n"
+"src/errores.rs" = "pub enum Error {\n    Conexion,\n    Formato,\n}\n"
+"src/tipos.rs" = "pub struct Frame {\n    pub datos: Vec<u8>,\n}\n"
+
+# ── 3. Origen de un error entre 14 logs ───────────────────────────────
+[[tasks]]
+id = "find_error_source"
+prompt = "En el directorio logs/ hay un log por servicio. Un solo servicio reportó un ERROR de conexión rechazada. ¿Cuál? Responde solo el nombre del servicio."
+expect_text_contains = "almacen"
+expect_max_tokens = 25000
+skill = "exploration"
+
+[tasks.setup_files]
+"logs/auth.log" = "INFO arranque ok\nINFO 42 logins\n"
+"logs/pagos.log" = "INFO arranque ok\nWARN latencia alta\n"
+"logs/usuarios.log" = "INFO arranque ok\nINFO sync completo\n"
+"logs/almacen.log" = "INFO arranque ok\nERROR conexión rechazada por el upstream\n"
+"logs/envios.log" = "INFO arranque ok\nINFO 17 despachos\n"
+"logs/notificaciones.log" = "INFO arranque ok\nWARN cola creciendo\n"
+"logs/reportes.log" = "INFO arranque ok\nINFO reporte diario emitido\n"
+"logs/facturacion.log" = "INFO arranque ok\nINFO 88 facturas\n"
+"logs/catalogo.log" = "INFO arranque ok\nINFO índice reconstruido\n"
+"logs/busqueda.log" = "INFO arranque ok\nWARN índice desactualizado\n"
+"logs/sesiones.log" = "INFO arranque ok\nINFO 301 sesiones activas\n"
+"logs/metricas.log" = "INFO arranque ok\nINFO flush cada 60s\n"
+"logs/colas.log" = "INFO arranque ok\nINFO 5 workers\n"
+"logs/gateway.log" = "INFO arranque ok\nINFO 1200 requests\n"
+
+# ── 4. Conteo transversal (obliga a barrer TODO, no basta encontrar uno) ─
+[[tasks]]
+id = "count_matches_across_files"
+prompt = "¿Cuántos archivos del directorio modulos/ mencionan la palabra 'deprecado'? Responde solo el número."
+expect_text_contains = "4"
+skill = "exploration"
+
+[tasks.setup_files]
+"modulos/alfa.txt" = "módulo alfa: estable\n"
+"modulos/beta.txt" = "módulo beta: deprecado desde v2\n"
+"modulos/gamma.txt" = "módulo gamma: estable\n"
+"modulos/delta.txt" = "módulo delta: deprecado, usar epsilon\n"
+"modulos/epsilon.txt" = "módulo epsilon: estable, reemplaza a delta\n"
+"modulos/zeta.txt" = "módulo zeta: experimental\n"
+"modulos/eta.txt" = "módulo eta: deprecado sin reemplazo\n"
+"modulos/theta.txt" = "módulo theta: estable\n"
+"modulos/iota.txt" = "módulo iota: experimental\n"
+"modulos/kappa.txt" = "módulo kappa: estable\n"
+"modulos/lambda.txt" = "módulo lambda: deprecado desde v3\n"
+"modulos/mu.txt" = "módulo mu: estable\n"
+"modulos/nu.txt" = "módulo nu: experimental\n"
+
+# ── 5. Encontrar Y editar (¿la conclusión del explorador es accionable?) ─
+[[tasks]]
+id = "find_then_edit"
+prompt = "Uno de los archivos del directorio src/ define la constante MAX_REINTENTOS. Encuéntralo y cambia su valor de 3 a 5."
+skill = "exploration"
+
+[tasks.setup_files]
+"src/principal.rs" = "mod politica;\nfn main() {}\n"
+"src/politica.rs" = "pub const MAX_REINTENTOS: u32 = 3;\n"
+"src/conexion.rs" = "pub fn abrir() {}\n"
+"src/lectura.rs" = "pub fn leer() -> Vec<u8> { vec![] }\n"
+"src/escritura.rs" = "pub fn escribir(_: &[u8]) {}\n"
+"src/estado.rs" = "pub struct Estado;\n"
+"src/colas2.rs" = "pub fn encolar() {}\n"
+"src/workers.rs" = "pub const NUM_WORKERS: u32 = 4;\n"
+"src/limites.rs" = "pub const MAX_TAMANO: usize = 1024;\n"
+"src/tiempos.rs" = "pub const TIMEOUT_MS: u64 = 500;\n"
+"src/marcas.rs" = "pub const VERSION: &str = \"2.1\";\n"
+"src/utilidades.rs" = "pub fn nada() {}\n"
+
+[tasks.expect_file_contains]
+"src/politica.rs" = ["MAX_REINTENTOS", "5"]
+
+# ── 6. Control negativo: la respuesta está en el prompt ───────────────
+# Un brazo +explore que delega acá está delegando compulsivamente (el
+# análogo de no_tool para esta palanca; el criterio pre-registrado
+# rechaza con >2/5 reps delegando — se cuenta por los eventos
+# ExplorationDelegated del rollout log, no por pass/fail).
+[[tasks]]
+id = "question_answerable_without_exploring"
+prompt = "El punto de entrada de este proyecto es el archivo arranque.rs (esto es un dato, no hace falta verificarlo). ¿Cuál es el punto de entrada del proyecto? Responde solo el nombre del archivo."
+expect_no_tool_call = true
+expect_text_contains = "arranque.rs"
+skill = "no_exploration_control"
+
+[tasks.setup_files]
+"src/arranque.rs" = "fn main() {}\n"
+"src/otros.rs" = "// nada\n"
+"LEEME.md" = "Proyecto de ejemplo.\n"
