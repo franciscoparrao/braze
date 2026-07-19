@@ -31,6 +31,7 @@
 \title{Not All Scaffolding Helps: A Lever-by-Lever Study of Agentic
 Harnesses at Small-Model Scales, with Pre-Registered Adoption Criteria
 for Key Levers}
+\titlerunning{Not All Scaffolding Helps}
 
 \author{Francisco Parra}
 
@@ -84,6 +85,13 @@ mechanism experimentally (proactive opening, not reactive escalation)
 and show that two-level tool deferral cuts prompt tokens $5$--$6\times$
 at a real, scale-dependent correctness cost whose diagnosed mechanism
 is compositional brittleness of the small model, not tool findability.
+A pre-registered external anchor --- 60 tasks sampled
+deterministically from the Berkeley Function-Calling Leaderboard,
+graded by an argument-level AST checker committed before the sweep ran
+--- replicates the central result outside our own tasks: the lead
+lever moves the 1B executor by $+72$\,pp on the anchor versus
+$+70.5$\,pp on the authored suite, with baseline ordering preserved
+and the ceiling-pinning null intact.
 For practitioners the takeaway is that not all scaffolding helps by
 default: which lever helps, and in which delivery format, is itself
 scale-dependent and must be measured per deployment rather than
@@ -213,6 +221,17 @@ around the actual contribution.
     composition pattern and the helper model's own capability, not to
     \braze{}'s additional engineering specifically, at least at a scale
     this sample size can detect (\S\ref{sec:external}).
+  \item \textbf{An external task anchor}: a pre-registered 60-task
+    subset of the Berkeley Function-Calling Leaderboard
+    \citep{bfcl} --- sampling seed, argument-level AST grader, and
+    readings all committed before the sweep ran --- replicates the
+    central lever outside the authored suite ($+72.0$\,pp at 1B
+    versus $+70.5$\,pp authored, both far from zero), preserves the
+    baseline ordering, reproduces the ceiling-pinning null, and
+    quantifies the thesis in one number per model: the gap between
+    naming the right tool and producing correct arguments is
+    $+47$\,pp at 1B but $3$--$4$\,pp for competent models
+    (\S\ref{sec:bfcl}).
   \item \textbf{Causal isolation of the dominant lever}: a three-arm
     experiment separating proactive opening from reactive escalation
     shows the entire gain comes from the former; the reactive trigger
@@ -900,6 +919,107 @@ orchestration logic under test) and what a fully independent comparison
 identified as a candidate during this work but did not implement ---
 would additionally require.
 
+\subsection{An external task anchor: a pre-registered BFCL
+subset}\label{sec:bfcl}
+% Fuente: docs/sweep-bfcl-anchor-2026-07-18.md,
+% docs/bfcl-anchor-design-2026-07-18.md, docs/bfcl-anchor-RESUME.md
+
+Every result so far is measured on tasks we authored, and
+\S\ref{sec:threats} names the sharpest consequence: circularity
+between the suite and the harness tuned against it. This section
+anchors the paper's central claims on tasks we did not write. The
+design was committed before the sweep ran
+(\texttt{docs/bfcl-anchor-design-2026-07-18.md}): 60 tasks sampled
+deterministically (seed 42) from the Berkeley Function-Calling
+Leaderboard \citep{bfcl}, 20 each from the \texttt{simple},
+\texttt{multiple}, and \texttt{irrelevance} categories; an offline
+grader in the BFCL style (AST equality over function name \emph{and}
+arguments, per-category acceptable-answer sets) committed alongside
+the design; four readings (E1--E4) pre-declared; and a validity rule
+--- no arm may exceed 2\% transport failures --- committed after
+three earlier attempts at this sweep were invalidated by
+infrastructure, not by models (an OOM from model stacking on the
+inference host, a degraded-network run without transport retries,
+and a host-contention run $8\times$ slower than baseline; all three
+are preserved in the repository for disclosure). Five arms
+$\times$ 300 runs each (60 tasks $\times$ 5 repetitions) give 1{,}500
+runs; the first valid attempt passed the rule in every arm (worst
+arm: 1.0\% transport).
+
+Two grading levels matter below: \emph{online} (did the model call
+the expected tool --- the identity proxy \braze{}'s own runner can
+grade live) and \emph{offline} (the committed AST grader --- the
+level that counts, and the one all claims below use).
+Table~\ref{tab:bfcl} gives both, next to each arm's authored-suite
+score.
+
+\begin{table}[t]
+\centering\small
+\caption{The BFCL anchor, all five arms: online (tool-identity
+proxy), offline (pre-committed AST grader over name and arguments;
+Wilson 95\% CI), and each arm's score on the authored 19-task suite
+for comparison. $n{=}300$ per arm.}
+\label{tab:bfcl}
+\begin{tabular}{lrrr}
+\toprule
+Arm & Online & Offline [CI 95\%] & Authored \\
+\midrule
+\texttt{gemma4:e4b} & 95.7\% & 92.7\% [89.1, 95.1] & 91.6\% \\
+\texttt{llama3.2:1b} & 67.7\% & 20.7\% [16.5, 25.6] & 18.9\% \\
+\texttt{1b+lead:e4b} & 96.0\% & 92.7\% [89.1, 95.1] & 89.5\% \\
+\texttt{qwen2.5:3b} & 75.7\% & 71.7\% [66.3, 76.5] & 68.4\% \\
+\texttt{qwen3.5-coder} & 71.3\% & 80.3\% [75.5, 84.4] & 97.9\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The baseline ordering transfers (E1).} Offline,
+\texttt{qwen3.5-coder} $>$ \texttt{qwen2.5:3b} $>$
+\texttt{llama3.2:1b} (80.3\% $>$ 71.7\% $>$ 20.7\%) --- the same
+ordering as the authored suite, with absolute levels within
+3.3\,pp of the authored ones for four of five arms. The exception is
+informative: \texttt{qwen3.5-coder} scores 80.3\% on the anchor
+versus 97.9\% authored, which we read as BFCL exercising a wider
+variety of argument formats than our suite does.
+
+\paragraph{The central lever replicates (E2).} On the authored suite
+the proactive lead moves the 1B executor by $+70.5$\,pp. On the
+anchor, offline: \textbf{$+72.0$\,pp} (20.7\% $\to$ 92.7\%), Newcombe
+95\% CI [$+65.9$, $+76.9$]\,pp, and [$+61.0$, $+82.7$]\,pp under
+task-level cluster bootstrap --- far from zero under both, and
+within 1.5\,pp of the authored effect. The paper's headline lever
+transfers to a benchmark we did not author.
+
+\paragraph{The ceiling-pinning null replicates (E3).} As on the
+authored suite, the composite is statistically indistinguishable from
+the lead alone: composite $-$ solo $= +0.0$\,pp offline (Newcombe
+[$-4.3$, $+4.3$]\,pp), and the composite tracks \texttt{gemma4:e4b}'s
+per-category profile exactly (88/100, 100/100, 90/100 across
+\texttt{irrelevance}/\texttt{multiple}/\texttt{simple}). The lead
+sets the ceiling; the 1B executor neither adds to it nor drags it
+down --- consistent with the pinned-ceiling reading of
+\S\ref{sec:curve}.
+
+\paragraph{The identity$\to$arguments gap quantifies the thesis
+(E4).} The difference between the online and offline levels is, per
+model, a one-number summary of why argument-level harness support
+exists: $+47.0$\,pp for \texttt{llama3.2:1b} --- the 1B names the
+right tool in 67.7\% of runs but produces arguments that survive AST
+grading in only 20.7\% --- versus $+3$--$4$\,pp for the competent
+models. Naming the tool is not the bottleneck at 1B; constructing
+its arguments is, and that is precisely the failure class the
+schema-repair, rescue, and escalation levers target. The gap is also
+\emph{negative} for one arm ($-9.0$\,pp, \texttt{qwen3.5-coder}):
+the thinking model produces correct calls that the identity proxy
+fails to credit, a grading-validity caveat taken up in
+\S\ref{sec:threats}.
+
+One category note: \texttt{irrelevance} (decline to call any tool
+when none applies) is the discriminant axis --- \texttt{qwen2.5:3b}
+falls to 36\% and \texttt{qwen3.5-coder} to 52\% while
+\texttt{gemma4:e4b} holds 88\% --- consistent with BFCL's own recent
+repositioning of this category as a hallucination measurement.
+
 \subsection{Isolating the mechanism: proactive opening, not reactive
 escalation}\label{sec:mechanism}
 % Fuente: docs/sweep-lead-3brazos-2026-07-10.md
@@ -1414,26 +1534,50 @@ noisy, points in the helpful direction.
 % =====================================================================
 \section{Threats to Validity}\label{sec:threats}
 
-\paragraph{Suite coverage (external and construct validity).} All results are measured on one 19-task
-suite we authored, spanning five skills chosen to separate common
-agentic failure modes (tool selection, multi-step composition, error
-recovery, distractor rejection) rather than to match any published
-benchmark's task distribution. We do not know how these findings
-transfer to a broader or externally validated suite (e.g.\ a
-Berkeley Function-Calling Leaderboard subset \citep{bfcl}), and
-anchoring against one is future work rather than something this paper
-does. A sharper version of this threat is circularity: the same 19
-tasks served as the development-time regression target for the harness
-whose levers this paper evaluates --- several hardening passes tuned
-assertions and defaults against failures on exactly this suite --- so
-levers may be fit to the suite in ways an external task set would
-expose. Relatedly, the suite leaves little headroom at the top of the
+\paragraph{Suite coverage (external and construct validity).} Most
+results are measured on one 19-task suite we authored, spanning five
+skills chosen to separate common agentic failure modes (tool
+selection, multi-step composition, error recovery, distractor
+rejection) rather than to match any published benchmark's task
+distribution. The sharpest version of this threat is circularity: the
+same 19 tasks served as the development-time regression target for the
+harness whose levers this paper evaluates --- several hardening passes
+tuned assertions and defaults against failures on exactly this suite
+--- so levers may be fit to the suite in ways an external task set
+would expose. \S\ref{sec:bfcl} now bounds this threat for the paper's
+\emph{central} claims: on a pre-registered BFCL subset the lead
+lever's effect at 1B ($+72.0$\,pp), the baseline ordering, and the
+ceiling-pinning null all replicate. It does not eliminate the threat
+for the rest: the planner/delivery results, the tool-deferral cost,
+and the secondary ablations remain measured on the authored suite
+only, and the anchor itself covers three single-turn BFCL categories
+--- not multi-turn, parallel-call, or execution-graded tasks --- so
+coverage is partial by design. Relatedly, the authored suite leaves
+little headroom at the top of the
 scale range: with the solo lead at 91\% and the ceiling baseline at
 98\%, a composite has at most a few points of room in which to
 demonstrate a gain over the lead alone, so the three-way null of
 \S\ref{sec:external} is partially built into the instrument --- tasks
 this saturated cannot, by construction, exhibit large composition
-gains; a harder suite could.
+gains; a harder suite could (though the anchor's own version of the
+null, at a 92.7\% ceiling, repeats the pattern).
+
+\paragraph{Tool-identity grading is not neutral across model families
+(construct validity).} \S\ref{sec:bfcl}'s two grading levels disagree
+in opposite directions depending on the model: the identity proxy
+\emph{overstates} the 1B executor by 47\,pp (right tool, wrong
+arguments) and \emph{understates} the thinking model by 9\,pp
+(correct calls the proxy fails to credit; we report the direction
+only --- we did not diagnose the proxy's precise failure mode on
+this model's long, multi-round transcripts). Any evaluation that
+grades agentic tool use by ``did it call the expected tool'' ---
+including \braze{}'s own live runner metric, and informal
+comparisons between published numbers graded at different levels ---
+inherits a family-dependent bias, not just added noise. The authored
+suite's semantic outcome checks (needle assertions, compile-checked
+edits) sit closer to the AST level than to the identity level, which
+is why the authored and offline-anchor numbers agree as well as they
+do in \S\ref{sec:bfcl}'s E1.
 
 \paragraph{The external comparison point is independent in orchestration
 logic only, not in underlying infrastructure (construct validity).} \S\ref{sec:external}'s
@@ -1667,10 +1811,11 @@ interests.
 \section{Sweep inventory}\label{app:sweeps}
 
 Table~\ref{tab:sweeps} lists every sweep cited in this paper, in the
-order they appear: 5{,}102 total runs across 14 sweep files (a
-fifteenth entry, the 3B task-list re-run of \S\ref{sec:planner}, is a
+order they appear: 6{,}602 total runs across 15 sweep files (a
+sixteenth entry, the 3B task-list re-run of \S\ref{sec:planner}, is a
 partial re-run of 95 further runs replacing a contaminated arm, not a
-new sweep). Each
+new sweep; the three invalidated attempts at the BFCL anchor,
+preserved for disclosure, are likewise not counted). Each
 row's commit is the \texttt{braze\_git\_commit} embedded in that
 sweep's own JSON metadata at the time it was written, not necessarily
 the HEAD commit at time of writing this paper; where a later
@@ -1701,6 +1846,7 @@ external-bare-lead & 2026-07-13 & \texttt{ec61f5e} & 95 & \ref{sec:external} \\
 gemma4-e4b-solo-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:curve} \\
 braze-composite-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:curve} \\
 external-bare-lead-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:external} \\
+bfcl-anchor & 2026-07-18/19 & \texttt{bc30a80} & 1{,}500 & \ref{sec:bfcl} \\
 \bottomrule
 \end{tabular}
 \end{table}
