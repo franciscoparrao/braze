@@ -83,3 +83,25 @@ contaminado disclosado".
 
 En ambos bloques el intento contaminado original queda commiteado y
 citado; nada se sustituye en silencio.
+
+## Adenda 2026-07-19 — primer intento del Bloque 2 INVALIDADO (regla del 2%)
+
+El primer intento del Bloque 2 (corrido 2026-07-19, preservado en
+`docs/sweep-rerun-block2-coder-planner-2026-07-19.contaminated-breaker-probe.json`)
+se descarta por la regla pre-registrada: baseline coder 4/95 = 4.2% de
+transporte (> 2%), y los brazos 2-3 fueron destruidos por un **bug del
+circuit breaker** que el propio sweep expuso: tras abrirse por 5 fallos
+de transporte consecutivos, el probe half-open fue cancelado por el
+timeout por-tarea del runner (que dropea el future de `run_turn`) y el
+slot del probe quedó reclamado hasta el PROBE_TIMEOUT de 600s —
+durante esa ventana cada tarea falló instantáneo con "a probe call is
+already in flight" (140 filas harness_error; el brazo task-list quedó
+0/95). Fix: `Guard` del breaker ahora libera el slot del probe en su
+`Drop` cuando nunca reportó outcome (con token de claim para no liberar
+el slot de un reclamante posterior), + 3 tests de regresión. El re-run
+del Bloque 2 se lanza con el binario arreglado Y con
+`BRAZE_CIRCUIT_BREAKER=off` (kill-switch documentado): en contexto de
+sweep, el retry de transporte + el timeout por tarea ya contabilizan el
+transporte, y un trip del breaker solo puede cascadear — la palanca es
+para uso interactivo. Se disclosa aquí en vez de re-litigar el
+protocolo: la regla de validez y las lecturas pre-declaradas no cambian.

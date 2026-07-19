@@ -198,15 +198,17 @@ impl CircuitBreaker {
         }
     }
 
-    /// Whether a call may proceed right now. `Ok(())` means proceed
-    /// (Closed, or this call is the one HalfOpen probe); `Err` means
-    /// fail fast without touching the network.
-    fn check(&self, key: &str) -> Result<(), ModelError> {
+    /// Whether a call may proceed right now. `Ok(None)` means proceed
+    /// normally (Closed); `Ok(Some(claim))` means proceed AND this call
+    /// is the one HalfOpen probe — `claim` is the token
+    /// [`Self::release_probe`] needs if the probe is dropped without
+    /// reporting; `Err` means fail fast without touching the network.
+    fn check(&self, key: &str) -> Result<Option<Instant>, ModelError> {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let now = Instant::now();
 
         match inner.state {
-            State::Closed => Ok(()),
+            State::Closed => Ok(None),
             State::Open => {
                 let opened_at = inner.opened_at.unwrap_or(now);
                 if now.duration_since(opened_at) < self.open_duration {
@@ -223,22 +225,55 @@ impl CircuitBreaker {
                 inner.state = State::HalfOpen;
                 inner.half_open_claimed_at = Some(now);
                 tracing::info!(key, "circuit breaker half-open: letting one probe through");
-                Ok(())
+                Ok(Some(now))
             }
             State::HalfOpen => {
-                let claimed_at = inner.half_open_claimed_at.unwrap_or(now);
+                let Some(claimed_at) = inner.half_open_claimed_at else {
+                    // The previous probe's Guard was dropped without
+                    // reporting and released the slot on Drop — claim it
+                    // immediately instead of failing fast until the
+                    // wall-clock reclaim below would kick in. This is
+                    // the fix for the 2026-07-19 sweep contamination
+                    // (re-run Bloque 2): the bench's per-task timeout
+                    // drops `run_turn` futures, and a dropped *probe*
+                    // used to leave the breaker fail-fasting every
+                    // subsequent task for up to PROBE_TIMEOUT — 140
+                    // instant harness_error rows in two arms.
+                    inner.half_open_claimed_at = Some(now);
+                    tracing::info!(key, "circuit breaker: probe slot free; claiming");
+                    return Ok(Some(now));
+                };
                 if now.duration_since(claimed_at) < self.probe_timeout {
                     return Err(ModelError::CircuitOpen(format!(
                         "circuit breaker for {key} half-open — a probe call is \
                          already in flight"
                     )));
                 }
-                // The previous probe never reported back in time —
-                // reclaim the slot rather than waiting forever.
+                // The previous probe never reported back in time (and
+                // its Guard never dropped either — e.g. a killed
+                // process) — reclaim the slot rather than waiting
+                // forever.
                 inner.half_open_claimed_at = Some(now);
                 tracing::info!(key, "circuit breaker: reclaiming an abandoned half-open probe");
-                Ok(())
+                Ok(Some(now))
             }
+        }
+    }
+
+    /// Frees the HalfOpen probe slot claimed at `claim` — called from
+    /// [`Guard`]'s `Drop` when a probe call was cancelled (future
+    /// dropped) without ever reporting an outcome. Only releases if the
+    /// slot still belongs to that exact claim: a later caller may have
+    /// legitimately reclaimed it after `probe_timeout`, and releasing
+    /// *their* claim would admit two concurrent probes.
+    fn release_probe(&self, claim: Instant, key: &str) {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if inner.state == State::HalfOpen && inner.half_open_claimed_at == Some(claim) {
+            inner.half_open_claimed_at = None;
+            tracing::info!(
+                key,
+                "circuit breaker: probe dropped without reporting; slot released"
+            );
         }
     }
 
@@ -331,25 +366,44 @@ pub(crate) fn acquire(key: &str) -> Result<Guard, ModelError> {
         return Ok(Guard {
             breaker: None,
             key: String::new(),
+            probe_claim: None,
         });
     }
     let breaker = breaker_for(key);
-    breaker.check(key)?;
+    let probe_claim = breaker.check(key)?;
     Ok(Guard {
         breaker: Some(breaker),
         key: key.to_string(),
+        probe_claim,
     })
 }
 
 /// One admitted call's reporting handle. Consuming (`observe_ok` /
 /// `observe_err` take `self`) so an outcome can only be reported once;
-/// dropping it without reporting records *nothing* — deliberate, so a
-/// caller-side cancellation (user hit Esc, future dropped mid-stream)
-/// doesn't count against the destination. An abandoned HalfOpen probe is
-/// reclaimed by [`PROBE_TIMEOUT`], not by `Drop`.
+/// dropping it without reporting records *no outcome* — deliberate, so
+/// a caller-side cancellation (user hit Esc, future dropped mid-stream)
+/// doesn't count against the destination. The one thing a
+/// dropped-without-reporting Guard DOES do is release the HalfOpen
+/// probe slot if this call had claimed it (`probe_claim`) — without
+/// that, a probe cancelled by a caller-side timeout left the breaker
+/// fail-fasting every other call for up to [`PROBE_TIMEOUT`], which
+/// destroyed two arms of the 2026-07-19 re-run sweep (140 instant
+/// `harness_error` rows). The wall-clock reclaim stays as the fallback
+/// for probes that vanish without a Drop (killed process).
 pub(crate) struct Guard {
     breaker: Option<Arc<CircuitBreaker>>,
     key: String,
+    /// `Some(claim)` when this call is the HalfOpen probe — the token
+    /// `Drop` uses to release the slot if no outcome was ever reported.
+    probe_claim: Option<Instant>,
+}
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        if let (Some(breaker), Some(claim)) = (self.breaker.take(), self.probe_claim) {
+            breaker.release_probe(claim, &self.key);
+        }
+    }
 }
 
 impl std::fmt::Debug for Guard {
@@ -362,16 +416,19 @@ impl std::fmt::Debug for Guard {
 
 impl Guard {
     /// The call completed end-to-end (terminal stream event seen).
-    pub(crate) fn observe_ok(self) {
-        if let Some(breaker) = self.breaker {
+    /// `take()` empties the breaker handle so the subsequent `Drop`
+    /// releases nothing — the outcome report below already resolves the
+    /// probe's fate.
+    pub(crate) fn observe_ok(mut self) {
+        if let Some(breaker) = self.breaker.take() {
             breaker.record(Outcome::Success, &self.key);
         }
     }
 
     /// The call failed — at send time, at status-check time, or
     /// mid-stream. [`classify`] decides whether it counts.
-    pub(crate) fn observe_err(self, err: &ModelError) {
-        if let Some(breaker) = self.breaker {
+    pub(crate) fn observe_err(mut self, err: &ModelError) {
+        if let Some(breaker) = self.breaker.take() {
             breaker.record(classify(err), &self.key);
         }
     }
@@ -502,6 +559,95 @@ mod tests {
         breaker.record(Outcome::Neutral, "test");
 
         breaker.check("test").expect("closed — the destination answered");
+    }
+
+    /// Regression test for the 2026-07-19 re-run Bloque 2 contamination:
+    /// a probe whose Guard is dropped without reporting (the bench's
+    /// per-task timeout cancels `run_turn` futures) must free the slot
+    /// IMMEDIATELY — the next call becomes the new probe — instead of
+    /// fail-fasting every caller for up to PROBE_TIMEOUT (140 instant
+    /// harness_error rows across two arms).
+    #[test]
+    fn a_released_probe_slot_is_claimable_immediately() {
+        let mut breaker = fresh_breaker();
+        breaker.open_duration = Duration::from_millis(1);
+        for _ in 0..DEFAULT_TRIP_THRESHOLD {
+            fail(&breaker);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+        let claim = breaker
+            .check("test")
+            .expect("cooldown elapsed — this call is the probe")
+            .expect("must have claimed the probe");
+
+        // Without the release, this would fail fast ("probe in flight").
+        breaker.release_probe(claim, "test");
+        breaker
+            .check("test")
+            .expect("released slot must be claimable at once")
+            .expect("and the new call must be a probe, not a plain pass");
+    }
+
+    /// The Guard end-to-end version of the same regression: dropping a
+    /// probe Guard without calling `observe_*` releases the slot.
+    #[test]
+    fn dropping_a_probe_guard_without_reporting_frees_the_slot() {
+        let mut breaker = fresh_breaker();
+        breaker.open_duration = Duration::from_millis(1);
+        let breaker = Arc::new(breaker);
+        for _ in 0..DEFAULT_TRIP_THRESHOLD {
+            assert!(breaker.check("test").expect("closed").is_none());
+            breaker.record(Outcome::Failure, "test");
+        }
+        std::thread::sleep(Duration::from_millis(5));
+        let claim = breaker
+            .check("test")
+            .expect("probe allowed")
+            .expect("claimed");
+        let guard = Guard {
+            breaker: Some(Arc::clone(&breaker)),
+            key: "test".to_string(),
+            probe_claim: Some(claim),
+        };
+        drop(guard); // cancelled without reporting — must release
+
+        breaker
+            .check("test")
+            .expect("slot must be free after the drop")
+            .expect("next call claims the probe");
+    }
+
+    /// A stale release token (from a probe that was already reclaimed by
+    /// the wall-clock fallback) must NOT free the newer claimer's slot —
+    /// otherwise two probes could run concurrently.
+    #[test]
+    fn a_stale_release_does_not_free_a_newer_claim() {
+        let mut breaker = fresh_breaker();
+        breaker.open_duration = Duration::from_millis(1);
+        breaker.probe_timeout = Duration::from_millis(5);
+        for _ in 0..DEFAULT_TRIP_THRESHOLD {
+            fail(&breaker);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+        let stale_claim = breaker
+            .check("test")
+            .expect("first probe")
+            .expect("claimed");
+
+        // The wall-clock fallback reclaims after probe_timeout…
+        std::thread::sleep(Duration::from_millis(10));
+        breaker
+            .check("test")
+            .expect("reclaimed by the fallback")
+            .expect("new claim");
+
+        // …so the stale token must be a no-op, and the newer claim must
+        // still hold the slot.
+        breaker.release_probe(stale_claim, "test");
+        assert!(
+            breaker.check("test").is_err(),
+            "the newer probe's slot must still be claimed"
+        );
     }
 
     /// A failed probe reopens the breaker (and restarts its own
