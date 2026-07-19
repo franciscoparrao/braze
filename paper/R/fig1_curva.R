@@ -64,9 +64,17 @@ leer_sweep_limpio <- function(path, solo_brazo) {
 
 curva <- bind_rows(
   leer_sweep("docs/sweep-curva-multiescala-2026-07-10.qwen.json"),
-  leer_sweep_limpio("docs/sweep-curva-multiescala-2026-07-10.partial-1b.json",
-                    solo_brazo = CELDA_CONTAMINADA) |>
-    filter(startsWith(backend, "ollama:llama3.2:1b"))
+  # La celda 1B compuesta ya NO se toma del slice contaminado con
+  # exclusión analítica: el re-run limpio pre-registrado
+  # (docs/rerun-contaminated-cells-design-2026-07-18.md, corrido
+  # 2026-07-19 con CERO fallos de transporte) la reemplaza entera, a
+  # n=95 — 84/95 = 88.4%. Las demás celdas 1B siguen viniendo del
+  # sweep original (sin la compuesta).
+  leer_sweep("docs/sweep-curva-multiescala-2026-07-10.partial-1b.json") |>
+    filter(startsWith(backend, "ollama:llama3.2:1b"),
+           backend != CELDA_CONTAMINADA),
+  leer_sweep("docs/sweep-rerun-block1-1b-planlead-2026-07-19.json") |>
+    filter(backend == CELDA_CONTAMINADA)
 )
 
 brazo_de <- function(b) {
@@ -105,9 +113,9 @@ datos <- curva |>
                    labels = c("baseline", "+planner", "+lead", "+planner+lead"))
   )
 
-# 15 celdas intactas a n=95; la contaminada queda en 65 tras excluir sus
-# 30 filas muertas por transporte (ver comentario de CELDA_CONTAMINADA).
-stopifnot(nrow(datos) == 16, sum(datos$n == 95) == 15, sum(datos$n == 65) == 1)
+# 16 celdas a n=95: 15 del sweep original + la 1B compuesta del re-run
+# limpio (ver comentario en `curva`).
+stopifnot(nrow(datos) == 16, all(datos$n == 95))
 
 # `gemma4:e4b` solo — referencia horizontal, no forma parte del eje de
 # escala de executors (no es una fila de la curva, es el techo del

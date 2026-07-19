@@ -796,7 +796,8 @@ pre-registration in \S\ref{sec:planner}.
 \paragraph{The lead absorbs the planner's damage at every scale.} When
 both levers are active, the composition is statistically
 indistinguishable from the lead alone at all four executor scales:
-$-0.2$\,pp at 1B (89.2\% vs.\ 89.5\%), $-3.2$\,pp at 3B (88\% vs.\
+$+0.0$\,pp at 1B (88.4\% vs.\ 88.4\%, pre-registered clean re-run ---
+see below), $-3.2$\,pp at 3B (88\% vs.\
 92\%), $0.0$\,pp at 7B (95\%~=~95\%), and $-2.1$\,pp at the ceiling
 (92\% vs.\ 94\%) --- every Newcombe interval crosses zero. A lever that
 costs an executor its entire pass rate on its own (0/95 at 1B) costs
@@ -807,25 +808,35 @@ executor is doing --- including following a plan delivered in a format
 that destroys it unassisted --- stops being the binding constraint.
 
 The 1B cell in that comparison corrects an earlier version of this
-analysis, and we report the correction rather than only its result. The
-value originally computed for the composed arm at 1B was 61.1\%
-(58/95), which supported the opposite reading: that the lead only
-partially repairs the damage at the smallest scale. An audit of the
-sweep's own logs (\texttt{docs/curve-transport-audit-2026-07-18.md})
-found that 30 of that cell's 95 runs died of transport failures --- the
-engine logged ``planner call failed; proceeding without a plan'' with a
-connection error in 30 distinct sessions, and those 30 runs scored
-0/30, making them dead rows rather than degraded ones. The 65 runs that
-reached the server score 58/65 = 89.2\% [79.4, 94.7]\%. The exclusion
-criterion is the one already defined for a different sweep
-(\S\ref{sec:threats}), applied here unchanged rather than tailored to
-this cell; the other fifteen cells of this sweep carry at most four such
-runs each and would move by at most 3.0\,pp, well inside their own
-intervals (\S\ref{sec:threats}). A clean re-run of this cell alongside
-an anchor cell is pre-registered
-(\texttt{docs/rerun-contaminated-cells-design-2026-07-18.md}) and
-pending inference-node availability; until it runs we report the
-transport-corrected number together with this provenance.
+analysis, and we report the correction's full history rather than only
+its result. The value originally computed for the composed arm at 1B
+was 61.1\% (58/95), which supported the opposite reading: that the
+lead only partially repairs the damage at the smallest scale. An audit
+of the sweep's own logs
+(\texttt{docs/curve-transport-audit-2026-07-18.md}) found that 30 of
+that cell's 95 runs died of transport failures --- the engine logged
+``planner call failed; proceeding without a plan'' with a connection
+error in 30 distinct sessions, and those 30 runs scored 0/30, making
+them dead rows rather than degraded ones (the 65 runs that reached the
+server score 58/65 = 89.2\% [79.4, 94.7]\%). Rather than leave the
+correction as an analytical exclusion over already-seen data, we
+re-measured the cell under a pre-registered design
+(\texttt{docs/rerun-contaminated-cells-design-2026-07-18.md}: the
+composed cell together with its \texttt{+lead} comparison cell in one
+two-arm sweep, so the delta is within-sweep by construction; a
+committed validity rule --- no arm may exceed 2\% transport failures
+--- decides whether the sweep counts before any number is read). The
+clean re-run (190 runs, 2026-07-19; \emph{zero} transport failures in
+either arm, every failure a semantic assertion) gives composed 84/95 =
+88.4\% [80.4, 93.4]\% and lead-alone 84/95 = 88.4\% --- a delta of
+exactly $+0.0$\,pp, Newcombe [$-9.4$, $+9.4$]. The pre-declared
+reading for this outcome applies: the lead absorbs the planner's
+damage \emph{completely} at every scale measured, including the
+smallest, and the earlier ``partial repair at 1B'' reading is
+withdrawn as a transport artifact. The 1B numbers in the opening
+paragraph above are the re-run's; the contaminated attempt and the
+intermediate exclusion-based estimate are both preserved in the
+repository.
 
 \paragraph{The 7B exception is informative, not noise.} 7B is the only
 scale where the (undamaged, pre-iteration) prose plan helps: baseline
