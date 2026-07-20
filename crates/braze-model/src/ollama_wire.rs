@@ -462,6 +462,16 @@ pub(crate) struct OllamaStreamState {
     /// the hard-truncation check below (used by tests that don't care
     /// about it). See [`Self::handle_line`]'s `done` branch.
     num_ctx: u32,
+    /// Reasoning text Ollama returns in `message.thinking` for
+    /// harmony/thinking models (gpt-oss, qwen3.5-coder). Buffered, NOT
+    /// streamed as text: reasoning is not the model's answer, and
+    /// surfacing it live would put chain-of-thought in the transcript
+    /// of every round. It is emitted as the round's text ONLY as a
+    /// last-resort fallback — see the `done` branch.
+    thinking: String,
+    /// Whether this round ever produced real content or a tool call —
+    /// what decides if the buffered `thinking` is needed as a fallback.
+    produced_output: bool,
 }
 
 impl OllamaStreamState {
@@ -470,6 +480,8 @@ impl OllamaStreamState {
             done: false,
             stream_error: None,
             num_ctx,
+            thinking: String::new(),
+            produced_output: false,
         }
     }
 
@@ -488,11 +500,23 @@ impl OllamaStreamState {
             if let Some(content) = message.get("content").and_then(Value::as_str)
                 && !content.is_empty()
             {
+                self.produced_output = true;
                 events.push(CompletionEvent::TextDelta(content.to_string()));
+            }
+            // Incidente roam (2026-07-19): un modelo harmony/thinking
+            // (gpt-oss:20b) puede gastar toda una ronda en
+            // `message.thinking` y devolver `content` vacío sin tool
+            // calls — el engine lo veía como respuesta vacía, disparaba
+            // el fallback H-3 (que volvía a caer en thinking) y el turno
+            // moría en silencio a mitad del andamiaje. Se acumula acá y
+            // solo se usa si la ronda no produjo nada más (ver `done`).
+            if let Some(thinking) = message.get("thinking").and_then(Value::as_str) {
+                self.thinking.push_str(thinking);
             }
             if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
                 for call in tool_calls {
                     if let Some(event) = tool_call_from_json(call) {
+                        self.produced_output = true;
                         events.push(event);
                     }
                 }
@@ -500,6 +524,26 @@ impl OllamaStreamState {
         }
 
         if json.get("done").and_then(Value::as_bool) == Some(true) {
+            // Fallback de thinking (incidente roam): la ronda terminó
+            // sin contenido ni tool calls, pero el modelo SÍ generó
+            // razonamiento. Emitirlo como texto es estrictamente mejor
+            // que la alternativa medida en producción — respuesta vacía
+            // → fallback H-3 → turno muerto en silencio — y es honesto:
+            // si el modelo solo razonó, eso ES todo lo que produjo. Se
+            // marca explícitamente para que el usuario sepa de qué canal
+            // salió y no lo lea como una respuesta deliberada.
+            if !self.produced_output && !self.thinking.trim().is_empty() {
+                tracing::warn!(
+                    thinking_chars = self.thinking.len(),
+                    "ollama round produced only `thinking`; surfacing it as text \
+                     (a thinking model spent the round reasoning without answering)"
+                );
+                events.push(CompletionEvent::TextDelta(format!(
+                    "[razonamiento del modelo, sin respuesta final]\n{}",
+                    self.thinking.trim()
+                )));
+                self.produced_output = true;
+            }
             let input_tokens = json
                 .get("prompt_eval_count")
                 .and_then(Value::as_u64)
@@ -1042,6 +1086,74 @@ mod tests {
     /// implementó la señal de truncamiento dura"): `prompt_eval_count >=
     /// num_ctx` means Ollama silently truncated the prompt — this must
     /// surface as a stream error, not a normal completion.
+    /// Regression test for the roam incident (2026-07-19): a
+    /// harmony/thinking model that spends a whole round in
+    /// `message.thinking` with empty `content` and no tool calls must
+    /// surface that reasoning as text — the alternative, measured in
+    /// production, is an empty response that kills the turn.
+    #[test]
+    fn a_thinking_only_round_surfaces_the_reasoning_as_text() {
+        let mut state = OllamaStreamState::new(0);
+        let events = state.handle_line(&serde_json::json!({
+            "message": {"role": "assistant", "content": "", "thinking": "I should create main.rs next."}
+        }));
+        assert!(events.is_empty(), "thinking must NOT stream as it arrives");
+
+        let events = state.handle_line(&serde_json::json!({"done": true, "eval_count": 12}));
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                CompletionEvent::TextDelta(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(text.contains("I should create main.rs next."), "got: {text}");
+        assert!(text.contains("razonamiento"), "must be marked as reasoning: {text}");
+    }
+
+    /// The fallback must NOT fire when the round produced real content:
+    /// reasoning stays out of the transcript in the normal case.
+    #[test]
+    fn thinking_is_dropped_when_the_round_produced_content() {
+        let mut state = OllamaStreamState::new(0);
+        state.handle_line(&serde_json::json!({
+            "message": {"role": "assistant", "content": "listo", "thinking": "long private reasoning"}
+        }));
+        let events = state.handle_line(&serde_json::json!({"done": true, "eval_count": 5}));
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                CompletionEvent::TextDelta(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(!text.contains("long private reasoning"), "got: {text}");
+    }
+
+    /// Nor when the round produced a tool call — the model acted, its
+    /// reasoning is not the answer.
+    #[test]
+    fn thinking_is_dropped_when_the_round_produced_a_tool_call() {
+        let mut state = OllamaStreamState::new(0);
+        state.handle_line(&serde_json::json!({
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "private reasoning",
+                "tool_calls": [{"function": {"name": "glob", "arguments": {"pattern": "*"}}}]
+            }
+        }));
+        let events = state.handle_line(&serde_json::json!({"done": true, "eval_count": 20}));
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                CompletionEvent::TextDelta(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(text.is_empty(), "got: {text}");
+    }
+
     #[test]
     fn stream_state_detects_hard_truncation_via_prompt_eval_count() {
         let mut state = OllamaStreamState::new(4096);
