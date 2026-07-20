@@ -379,7 +379,16 @@ no-lead,\allowbreak task-list,\allowbreak\ldots\}}), so a claim like
 "the lead model helps" is a number with a confidence interval and a
 commit hash behind it, not a design note.
 
-\paragraph{Breadth versus depth.} A complementary empirical tradition
+\paragraph{Breadth versus depth.} This paper sits inside a fast-growing
+empirical tradition of evaluating LLMs on software-engineering tasks
+under controlled designs --- recent examples in this journal alone
+measure refactoring consistency \citep{zhang2026refactoring} and
+code-generation robustness \citep{liu2026robustness} --- and treats
+its benchmark-and-harness pair as research infrastructure in the sense
+of benchmarking-as-empirical-standard
+\citep{hasselbring2021benchmarking}: the instrument is versioned,
+fingerprinted, and shipped so the measurement can be re-run, not just
+read. A complementary tradition
 studies agent frameworks by mining many of them at once. Hasan et al.'s
 study of testing practices across open-source AI agent frameworks and
 agentic applications \citep{hasan2026testing} is this paper's closest
@@ -587,9 +596,13 @@ conclusions survive them. Throughout, ``statistically
 indistinguishable'' means the 95\% interval on the within-comparison
 delta crosses zero; no equivalence margin was pre-declared, so such
 statements are failures to detect an effect at the stated interval
-width, not demonstrations of equivalence. Finally, this paper reports
+width, not demonstrations of equivalence --- the formal instrument for
+the latter would be an equivalence test against a justified margin
+\citep{lakens2017equivalence}, which we did not pre-commit and
+therefore do not retrofit. Finally, this paper reports
 on the order of twenty between-arm interval comparisons in total and
-applies no family-wise correction across them: adopt/reject decisions
+applies no family-wise correction across them
+\citep[cf.][]{demsar2006statistical}: adopt/reject decisions
 are governed by the pre-registered criteria below, but any individual
 uncorrected interval should be read with that multiplicity in mind
 (flagged again as a conclusion-validity threat in
@@ -633,7 +646,13 @@ evaluation, rather than being justified after seeing the numbers. We
 follow the same discipline in this paper's newest ablation, the
 constrained-decoding investigation of \S\ref{sec:constrained}: its
 criterion, including the exact iteration this section reports it
-triggering, was committed before the sweep ran. We view pre-registration
+triggering, was committed before the sweep ran. Pre-registration's
+case as a guard against post-hoc rationalization is well established
+across empirical disciplines \citep{nosek2018preregistration}, and
+this journal's own open-science initiative
+\citep{mendez2019openscience} and the community's empirical standards
+\citep{ralph2021standards} push the same direction for software
+engineering specifically. We view pre-registration
 here not as a formality borrowed from clinical trials but as an
 engineering safeguard specific to iterating on a harness against a
 small, noisy benchmark: without a criterion fixed in advance, a
@@ -1614,7 +1633,9 @@ results are measured on one 19-task suite we authored, spanning five
 skills chosen to separate common agentic failure modes (tool
 selection, multi-step composition, error recovery, distractor
 rejection) rather than to match any published benchmark's task
-distribution. The sharpest version of this threat is circularity: the
+distribution --- purposive construction, not sampling from any defined
+task population, with the generalization limits that entails
+\citep{baltes2022sampling}. The sharpest version of this threat is circularity: the
 same 19 tasks served as the development-time regression target for the
 harness whose levers this paper evaluates --- several hardening passes
 tuned assertions and defaults against failures on exactly this suite
