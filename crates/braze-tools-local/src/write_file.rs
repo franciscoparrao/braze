@@ -68,6 +68,25 @@ pub async fn write_file(args: WriteFileArgs) -> Result<String, String> {
         ));
     }
 
+    // Incidente roam (2026-07-19): al andamiar un workspace nuevo, el
+    // modelo escribe `roam-core/Cargo.toml` antes de que `roam-core/`
+    // exista — el fallo costaba una ronda extra de mkdir (y en aquel
+    // turno, la ronda que murió). Crear los padres es seguro por
+    // construcción: el PermissionGuard ya aprobó ESTA ruta (los padres
+    // son prefijos de una ruta permitida dentro del allowlist), y es la
+    // semántica de la tool Write de los harnesses de referencia.
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| {
+                format!(
+                    "failed to create parent directory '{}': {err}",
+                    parent.display()
+                )
+            })?;
+    }
     tokio::fs::write(&path, args.content.as_bytes())
         .await
         .map_err(|err| format!("failed to write '{}': {err}", path.display()))?;
@@ -79,6 +98,34 @@ pub async fn write_file(args: WriteFileArgs) -> Result<String, String> {
 mod tests {
     use super::*;
     use crate::test_support::unique_temp_dir;
+
+    /// Regression test for the roam incident (2026-07-19): writing to
+    /// a path whose parent directory doesn't exist yet must create the
+    /// parents (workspace scaffolding writes `roam-core/Cargo.toml`
+    /// before any `mkdir`), not fail the call.
+    #[tokio::test]
+    async fn creates_missing_parent_directories() {
+        let dir = unique_temp_dir("write-file-parents");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let file_path = dir.join("nuevo-crate").join("src").join("lib.rs");
+
+        let result = write_file(WriteFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            content: "pub fn hola() {}\n".to_string(),
+            allow_shrink: false,
+        })
+        .await;
+
+        assert!(result.is_ok(), "got: {result:?}");
+        let contents = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read back written file");
+        assert_eq!(contents, "pub fn hola() {}\n");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
 
     #[tokio::test]
     async fn creates_file_with_given_content() {
@@ -106,18 +153,24 @@ mod tests {
 
     #[tokio::test]
     async fn write_failure_is_a_recoverable_error() {
-        // Parent directory doesn't exist -> the write fails.
-        let dir = unique_temp_dir("write-file-missing-parent");
-        let file_path = dir.join("nested").join("out.txt");
+        // The target path IS a directory -> the write fails. (A missing
+        // parent no longer fails since the roam fix: parents are
+        // created like `mkdir -p`.)
+        let dir = unique_temp_dir("write-file-target-is-dir");
+        let target = dir.join("soy-un-directorio");
+        tokio::fs::create_dir_all(&target)
+            .await
+            .expect("create target dir");
 
         let result = write_file(WriteFileArgs {
-            path: file_path.to_string_lossy().into_owned(),
+            path: target.to_string_lossy().into_owned(),
             content: "payload".to_string(),
             allow_shrink: false,
         })
         .await;
 
         assert!(result.is_err());
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     // --- shrink preflight (P0.3, docs/AUDITORIA-2026-07-v4.md; formerly

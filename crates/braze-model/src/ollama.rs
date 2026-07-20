@@ -36,6 +36,14 @@ fn transport_retries_from_env() -> u32 {
 /// para ráfagas de red degradada (segundos a decenas de segundos), no
 /// para outages largos; con el cap de 10 reintentos el peor caso por
 /// request es ~2.5 min, bien por debajo del timeout de tarea del bench.
+/// Reintentos siempre-on del 500 "error parsing tool call" de Ollama —
+/// el incidente roam (2026-07-19): un fallo de parseo POR-MUESTRA del
+/// lado del server (razonamiento harmony filtrado al canal de tools),
+/// donde re-muestrear es barato y casi siempre repara. Distinto del
+/// retry de transporte (opt-in por env) y del dictamen anti-martilleo
+/// de H-19 (que aplica a saturación, no a esto).
+const TOOL_PARSE_500_RETRIES: u32 = 2;
+
 fn transport_retry_backoff(attempt: u32) -> std::time::Duration {
     match attempt {
         1 => std::time::Duration::from_secs(1),
@@ -278,7 +286,7 @@ impl ModelBackend for OllamaBackend {
         let send_result = async {
             let max_attempts = 1 + transport_retries_from_env();
             let mut attempt = 0u32;
-            let response = loop {
+            loop {
                 attempt += 1;
                 let sent = self
                     .client
@@ -287,8 +295,8 @@ impl ModelBackend for OllamaBackend {
                     .json(&body)
                     .send()
                     .await;
-                match sent {
-                    Ok(r) => break r,
+                let response = match sent {
+                    Ok(r) => r,
                     Err(e) if attempt < max_attempts => {
                         let delay = transport_retry_backoff(attempt);
                         tracing::warn!(
@@ -299,17 +307,51 @@ impl ModelBackend for OllamaBackend {
                             "ollama transport error on request send; retrying"
                         );
                         tokio::time::sleep(delay).await;
+                        continue;
                     }
                     Err(e) => {
                         return Err(ModelError::Request(format!("ollama request failed: {e}")));
                     }
-                }
-            };
+                };
 
-            if !response.status().is_success() {
+                if response.status().is_success() {
+                    return Ok(response);
+                }
+                // Incidente roam (2026-07-19, primera sesión de braze
+                // como herramienta de producción): Ollama devuelve 500
+                // "error parsing tool call" cuando el RAZONAMIENTO de un
+                // modelo harmony/thinking (gpt-oss:20b) se filtra al
+                // canal de tool-calls y su parser server-side no puede
+                // con el blob — un fallo POR-MUESTRA, no de saturación,
+                // así que el dictamen de H-19 ("no martillar un backend
+                // local saturado") no aplica: re-muestrear con el mismo
+                // request es la medicina exacta, cuesta cero bytes de
+                // stream consumidos, y convierte una muerte fatal del
+                // turno en una ronda recuperada. Acotado y siempre-on
+                // (no depende del env de transporte, que es opt-in para
+                // OTRA clase de fallo): esta clase de 500 es
+                // determinística de diagnóstico pero estocástica de
+                // ocurrencia — el próximo sample casi siempre parsea.
+                if response.status().as_u16() == 500 {
+                    let status = response.status();
+                    let body = response.text().await.unwrap_or_default();
+                    if body.contains("error parsing tool call")
+                        && attempt < 1 + TOOL_PARSE_500_RETRIES
+                    {
+                        tracing::warn!(
+                            attempt,
+                            "ollama 500 'error parsing tool call' (sample-level \
+                             parse failure); re-sampling the round"
+                        );
+                        tokio::time::sleep(transport_retry_backoff(attempt)).await;
+                        continue;
+                    }
+                    // Mismo formato que http_error_to_model_error, cuyo
+                    // body este branch ya consumió.
+                    return Err(ModelError::Request(format!("ollama HTTP {status}: {body}")));
+                }
                 return Err(http_error_to_model_error(response, "ollama").await);
             }
-            Ok(response)
         }
         .await;
         let response = match send_result {
