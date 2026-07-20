@@ -22,6 +22,16 @@ pub(super) struct TurnDispatchState {
     /// one minted so far this turn — see `ensure_unique_tool_call_id` and
     /// N-14, docs/AUDITORIA-2026-07-v2.md.
     pub(super) known_tool_call_ids: HashSet<String>,
+    /// Cuántas veces se leyó cada ruta en ESTE turno sin haberla
+    /// editado después — la palanca de "relectura improductiva"
+    /// (incidente roam #5/#6, 2026-07-20). El guard de llamadas
+    /// repetidas solo corta argumentos IDÉNTICOS; en producción un
+    /// modelo chico esquivó ese corte variando (offset, limit) y
+    /// releyó el mismo archivo de 103 líneas 5-10 veces en ventanas
+    /// solapadas, sin editar, hasta agotar el cap del turno. Leer un
+    /// archivo grande por trozos es legítimo, así que esto NO bloquea:
+    /// anexa una nota accionable al resultado a partir del umbral.
+    pub(super) reads_by_path: HashMap<String, u32>,
 }
 
 /// RAII guard for [`Engine::turn_in_progress`] — see that field's doc
@@ -179,6 +189,7 @@ impl Engine {
             schema_retry_counts: HashMap::new(),
             seen_calls: HashSet::new(),
             known_tool_call_ids: Self::existing_tool_call_ids(&existing_events),
+            reads_by_path: HashMap::new(),
         };
 
         // D5: whether *any* round of this specific turn has dispatched a

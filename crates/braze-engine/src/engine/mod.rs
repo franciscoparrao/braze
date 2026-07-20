@@ -93,6 +93,13 @@ const KEEP_RAW_TAIL: usize = 6;
 /// annotation on `ToolStub` if that becomes a real gap.
 const MUTATING_TOOL_NAMES: &[&str] = &["write_file", "edit_file", "shell_exec"];
 
+/// A partir de cuántas lecturas de la MISMA ruta en un turno, sin
+/// edición intermedia, el harness anexa la nota de relectura
+/// improductiva (`crate::engine::dispatch`). Cuatro deja pasar el uso
+/// legítimo (abrir un archivo largo por trozos) y ataca el bucle
+/// observado en producción.
+const UNPRODUCTIVE_REREAD_THRESHOLD: u32 = 4;
+
 /// Consecutive zero-tool-call turns before `run_turn` injects the
 /// narration-without-action reminder (D5, docs/AUDITORIA-2026-07-v3.md).
 /// `2`: the *third* such turn in a row gets the reminder — one narrated
@@ -6101,6 +6108,120 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::HarnessNote { .. })),
             "ablated engine must emit no notes"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Minimal `read_file` stand-in for the re-read nudge test: always
+    /// succeeds, so the nudge is the only thing distinguishing the
+    /// fourth result from the first three.
+    struct StubReadFileProvider;
+
+    #[async_trait]
+    impl ToolProvider for StubReadFileProvider {
+        fn provider_id(&self) -> &str {
+            "stub-read"
+        }
+        async fn list_stubs(&self) -> Result<Vec<braze_types::ToolStub>, ToolError> {
+            Ok(vec![braze_types::ToolStub {
+                name: "read_file".to_string(),
+                summary: "read a file".to_string(),
+                source: "stub".to_string(),
+                input_schema: None,
+            }])
+        }
+        async fn resolve_schema(
+            &self,
+            name: &str,
+        ) -> Result<Option<braze_tools_core::ToolSchema>, ToolError> {
+            Ok((name == "read_file").then(|| braze_tools_core::ToolSchema {
+                name: "read_file".to_string(),
+                description: "read a file".to_string(),
+                input_schema: serde_json::json!({"type": "object"}),
+            }))
+        }
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: "linea a\nlinea b\n".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    /// Regression test for the roam #6 incident (2026-07-20): a model
+    /// that re-reads the same file with slightly different windows
+    /// evades the exact-args repeated-call guard. Observed twice in
+    /// production: 5 and 10 reads of one 103-line file, zero edits,
+    /// until the turn's cap killed it. The nudge must ride the FOURTH
+    /// read's successful result — appended, never blocking (chunked
+    /// reads of a big file are legitimate).
+    #[tokio::test]
+    async fn re_reading_one_file_without_editing_appends_a_nudge() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Four reads of the same path with DIFFERENT windows — exactly
+        // the shape that slips past `seen_calls`.
+        let mut rounds: Vec<Vec<CompletionEvent>> = (0..4)
+            .map(|i| {
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: format!("call-{i}"),
+                        name: "read_file".to_string(),
+                        arguments: serde_json::json!({
+                            "path": "notas.txt",
+                            "offset": i * 3 + 1,
+                            "limit": 10
+                        }),
+                    },
+                    CompletionEvent::Done,
+                ]
+            })
+            .collect();
+        rounds.push(vec![
+            CompletionEvent::TextDelta("listo".to_string()),
+            CompletionEvent::Done,
+        ]);
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(rounds)),
+            ToolRegistry::new(vec![Box::new(StubReadFileProvider)]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "revisa notas.txt", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let nudged: Vec<&String> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolCallCompleted { result, .. }
+                    if result.content.contains("without editing it") =>
+                {
+                    Some(&result.content)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            nudged.len(),
+            1,
+            "exactly the fourth read must carry the nudge: {events:#?}"
+        );
+        assert!(
+            nudged[0].contains("notas.txt") && !nudged[0].starts_with("[harness]"),
+            "the nudge is appended to the real content, not a replacement: {}",
+            nudged[0]
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

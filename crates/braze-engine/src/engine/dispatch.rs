@@ -77,8 +77,14 @@ impl Engine {
             schema_retry_counts: retry_counts,
             seen_calls,
             known_tool_call_ids,
+            reads_by_path,
         } = state;
 
+        // Nota de relectura improductiva por id de llamada — ver
+        // `TurnDispatchState::reads_by_path`. Se calcula al despachar
+        // (donde se conocen nombre y argumentos) y se anexa al resultado
+        // exitoso, sin bloquearlo.
+        let mut reread_nudge: HashMap<String, String> = HashMap::new();
         let mut handle_to_id: HashMap<TaskHandle, String> = HashMap::new();
         let mut pending: HashSet<TaskHandle> = HashSet::new();
         // F6: resolves a completed call's id back to its tool name, so a
@@ -499,6 +505,36 @@ impl Engine {
             // the line the human then typed was consumed by the chat loop
             // as a brand-new prompt. Blocking indefinitely is the correct
             // semantics here, exactly like the approval prompts.
+            // Contabilidad de relectura improductiva (incidente roam):
+            // una edición exitosa sobre una ruta reinicia su contador
+            // (el modelo actuó); una lectura lo incrementa y, pasado el
+            // umbral, prepara la nota que se anexará a su resultado.
+            if let Some(path) = call
+                .arguments
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+            {
+                if MUTATING_TOOL_NAMES.contains(&call.name.as_str()) {
+                    reads_by_path.remove(&path);
+                } else if call.name == "read_file" {
+                    let count = reads_by_path.entry(path.clone()).or_insert(0);
+                    *count += 1;
+                    if *count >= UNPRODUCTIVE_REREAD_THRESHOLD {
+                        reread_nudge.insert(
+                            call.id.clone(),
+                            format!(
+                                "\n\n[harness] You have read '{path}' {count} times this \
+                                 turn without editing it. Re-reading is not making progress: \
+                                 if you know what to change, make the edit now; if the file \
+                                 is broken or you have lost track of its state, replace it \
+                                 wholesale with write_file instead of reading it again."
+                            ),
+                        );
+                    }
+                }
+            }
+
             if self.untimed_tools.contains(&call.name) {
                 tracing::debug!(tool = %call.name, id = %call.id, "dispatching interactive tool call inline (no timeout)");
                 self.append_and_notify(
@@ -634,6 +670,17 @@ impl Engine {
                             .is_some_and(|name| MUTATING_TOOL_NAMES.contains(&name.as_str()))
                     {
                         seen_calls.clear();
+                    }
+                    // Nota de relectura improductiva: se anexa al
+                    // resultado EXITOSO (nunca convierte una lectura
+                    // válida en error — leer un archivo largo por trozos
+                    // es legítimo; el bucle observado no lo era).
+                    let mut result = result;
+                    if !result.is_error
+                        && let Some(nudge) = reread_nudge.remove(&id)
+                    {
+                        tracing::info!(id = %id, "appending unproductive-reread nudge");
+                        result.content.push_str(&nudge);
                     }
                     self.append_and_notify(
                         session,
