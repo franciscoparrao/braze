@@ -349,6 +349,12 @@ impl Engine {
             // reflects the *summed* cost of every candidate this round
             // generated, not just the winner's — see
             // `complete_with_best_of_n`.
+            // Incidente roam #8: se recuerda cuántos tokens generó la
+            // ronda para que un `EmptyModelResponse` pueda distinguir
+            // "el modelo no dijo nada" de "dijo algo que el harness no
+            // supo mapear" (canal de razonamiento/commentary no
+            // expuesto, o tool call que no parseó y se descartó).
+            let round_output_tokens = usage.as_ref().map(|u| u.output_tokens).unwrap_or(0);
             if let Some(round_usage) = usage {
                 // v4 P0.2: feed the turn's cumulative-token breaker (the
                 // check at the top of the next iteration).
@@ -484,7 +490,9 @@ impl Engine {
                             SummaryFallbackOutcome::CallFailed => {}
                         }
                     }
-                    return Err(EngineError::EmptyModelResponse);
+                    return Err(EngineError::EmptyModelResponse {
+                        generated_tokens: round_output_tokens,
+                    });
                 }
                 // Final response: no further tool calls requested.
                 self.append_and_notify(

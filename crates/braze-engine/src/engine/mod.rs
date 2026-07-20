@@ -1621,7 +1621,7 @@ mod tests {
 
         let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
         assert!(
-            matches!(result, Err(EngineError::EmptyModelResponse)),
+            matches!(result, Err(EngineError::EmptyModelResponse { .. })),
             "expected an empty completion to be reported as an error, got {result:?}"
         );
 
@@ -1896,7 +1896,7 @@ mod tests {
 
         let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
         assert!(
-            matches!(result, Err(EngineError::EmptyModelResponse)),
+            matches!(result, Err(EngineError::EmptyModelResponse { .. })),
             "expected a dead fallback call to keep surfacing as an error, got {result:?}"
         );
 

@@ -69,8 +69,23 @@ pub enum EngineError {
     /// turno como éxito silencioso") rather than treated as silent
     /// convergence, since under best-of-n several empty candidates can
     /// share the same signature and win the vote outright.
-    #[error("model's response had no text and requested no tool calls")]
-    EmptyModelResponse,
+    #[error(
+        "model's response had no text and requested no tool calls \
+         (the round generated {generated_tokens} output tokens — if that is \
+         not zero, the model emitted something the harness could not map: \
+         a reasoning/commentary channel this backend does not surface, or a \
+         tool call that failed to parse and was dropped)"
+    )]
+    EmptyModelResponse {
+        /// Tokens the provider reported for the empty round (`eval_count`
+        /// en Ollama). Incidente roam #8 (2026-07-20): un turno murió
+        /// con rondas de 11 y 31 tokens que no eran contenido, ni
+        /// `thinking`, ni tool call — y el error de entonces ("no text
+        /// and no tool calls") no permitía distinguir "el modelo no dijo
+        /// NADA" de "el modelo dijo algo que el harness no supo leer".
+        /// Sin este número, esa diferencia es invisible en el log.
+        generated_tokens: u32,
+    },
 
     /// A second `run_turn` call was attempted on this `Engine` while a
     /// first one was still in flight — N-17
