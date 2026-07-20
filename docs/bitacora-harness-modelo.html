@@ -80,15 +80,15 @@
 
 <h1>Bitácora harness↔modelo</h1>
 <p class="lede">Qué falla cuando un modelo local de 20B intenta programar de verdad — y qué parte de eso es arreglable desde el harness.</p>
-<p class="meta">braze × roam · registro vivo · última actualización 2026-07-20 (14.ª sesión)</p>
+<p class="meta">braze × roam · registro vivo · última actualización 2026-07-20 (15.ª sesión)</p>
 
 <p>Este documento registra un experimento en curso: usar <strong>braze</strong> (harness agéntico propio, Rust) con <strong>gpt-oss:20b</strong> corriendo local en CPU para desarrollar <strong>roam</strong> (motor de movement ecology) como proyecto real, y tratar cada falla como evidencia sobre la interfaz harness↔modelo.</p>
 
-<p>La premisa: el bench autoral de braze mide palancas en tareas diseñadas para medirlas. El uso productivo expone otra clase de fallo — el que ningún benchmark produce porque nadie lo escribió a propósito. Quince hallazgos en catorce sesiones sugieren que esa clase es grande.</p>
+<p>La premisa: el bench autoral de braze mide palancas en tareas diseñadas para medirlas. El uso productivo expone otra clase de fallo — el que ningún benchmark produce porque nadie lo escribió a propósito. Dieciséis hallazgos en quince sesiones sugieren que esa clase es grande.</p>
 
 <div class="kpis">
-  <div class="kpi"><div class="v">14</div><div class="k">sesiones</div></div>
-  <div class="kpi"><div class="v">15</div><div class="k">hallazgos</div></div>
+  <div class="kpi"><div class="v">15</div><div class="k">sesiones</div></div>
+  <div class="kpi"><div class="v">16</div><div class="k">hallazgos</div></div>
   <div class="kpi"><div class="v">4</div><div class="k">palancas nuevas</div></div>
   <div class="kpi"><div class="v">1045→1063</div><div class="k">tests del workspace</div></div>
   <div class="kpi"><div class="v">0</div><div class="k">líneas de roam escritas por Claude</div></div>
@@ -129,6 +129,7 @@
     <tr><td class="n">13</td><td>El turno termina sin respuesta ni error — pantalla en blanco</td><td>El fallback de U-1 se gatilla con "despachó tools", que un turno sin mutaciones también cumple</td><td>Sin edición exitosa no hay nada que preservar: sale el error honesto</td><td class="n mono">28d2147</td></tr>
     <tr><td class="n">14</td><td>Denegado <code>cargo test</code>, el modelo <em>fabrica</em> que pasó</td><td>La denegación de permiso volvía como "action denied" y nada más — un callejón sin salida</td><td>El mensaje dirige: no corrió, no inventes su salida, dísela al usuario</td><td class="n mono">728486f</td></tr>
     <tr><td class="n">15</td><td>Con los tests corriendo, el modelo escribe un test que no verifica nada</td><td>Bajo presión de "que pase", referencia la propia implementación: verde tautológico</td><td class="tag self" style="display:inline-block">abierto</td><td class="n mono">—</td></tr>
+    <tr><td class="n">16</td><td>Sesión multi-turno: de 3 tareas encadenadas solo la 1.ª entregó; las otras dos no produjeron nada</td><td>La compactación (num_ctx 8192, cola cruda de 6 eventos) folda el código que el modelo <em>acababa de escribir</em>; en el turno siguiente ancla el edit contra su propia memoria comprimida y falla</td><td class="tag self" style="display:inline-block">abierto</td><td class="n mono">—</td></tr>
   </tbody>
 </table>
 </div>
@@ -199,6 +200,21 @@
   <p class="note">Nota de transparencia: para medir limpio, restauré <code>lib.rs</code> al estado previo entre las dos corridas (una copia del <em>propio</em> output anterior del modelo, no código escrito por Claude) y concedí los permisos con <code>yes | braze run</code>. Dos corridas de la misma tarea el mismo día; el estado que quedó en roam es el de la corrida limpia.</p>
 </div>
 
+<div class="finding">
+  <h3>#16 — La sesión multi-turno, por fin <span class="tag self">abierto</span></h3>
+  <p class="sym"><strong>Síntoma:</strong> primera sesión deliberadamente <em>multi-turno</em> — tres tareas encadenadas en un mismo <code>braze chat</code>, cada una construyendo sobre la anterior (<code>duration()</code>, luego <code>mean_speed()</code> que la usa, luego tests de ambas). El turno 1 entregó <code>duration()</code> limpio. Los turnos 2 y 3 <strong>no produjeron nada</strong>: al final, ni <code>mean_speed()</code> ni tests nuevos en el archivo.</p>
+  <p>El mecanismo es exactamente el que ninguna tarea de una sola sesión podía exponer. Con <code>num_ctx=8192</code> y una cola cruda de solo 6 eventos, la compactación disparó <strong>14 veces</strong> en la sesión — casi una por ronda una vez que el historial creció. En el turno 2, el modelo intentó anclar su edición en el cuerpo de <code>duration()</code> — el código que <em>él mismo había escrito un turno antes</em> — pero ese texto ya estaba foldeado en un resumen con pérdida. Reconstruyó el <code>old_string</code> de memoria, no calzó, y el edit falló. No por el bug de "ya está aplicado" (#10): por <em>recordar mal lo que escribió</em>.</p>
+  <p>De ahí, cascada. El turno 2 no se recuperó: buscó con la tool inexistente <code>search</code>, releyó, y cerró vía el fallback de resumen emitiendo su propio razonamiento como respuesta ("We need to add mean_speed()… Let's insert…") — un plan disfrazado de resultado, con cero ediciones. El turno 3 entonces fue a buscar <code>mean_speed()</code>, que no existía, y gastó todo su tiempo releyendo el archivo en ventanas solapadas hasta que el reloj de pared lo mató. <strong>Un turno que cree haber hecho algo, pero no lo hizo, envenena al siguiente.</strong></p>
+  <p>Tres cosas que este modo de falla enseña sobre palancas ya existentes:</p>
+  <ul>
+    <li>La <strong>nota de relectura improductiva (#6) disparó cinco veces</strong> en el turno 3 y <em>no cambió el comportamiento</em>: cuando la causa es que la compactación borró el estado, decirle "deja de releer" no ayuda, porque releer es lo único que le queda para recuperarlo.</li>
+    <li>La <strong>sugerencia de tool inexistente (#9) no es pegajosa</strong>: el modelo alcanzó <code>search</code> cuatro veces en la sesión, y cada compactación borró la lección del error anterior.</li>
+    <li>El <strong>guard del turno vacío (#13) no cubre este caso</strong>: sólo falla el turno cuando el fallback de resumen vuelve <em>vacío</em>. Acá volvió <em>no-vacío</em> (razonamiento), así que el turno terminó en Ok sin haber editado nada. La señal <code>turn_did_edit</code> existe pero no se consulta en esta rama.</li>
+  </ul>
+  <p>Por qué queda <strong>abierto</strong> y no parcheado en caliente: la raíz es de <em>configuración</em> (un <code>num_ctx</code> de 8192 es demasiado chico para multi-turno; el propio código contempla 32768 en un nodo LAN, y Nitro lo aguanta), y los arreglos de código que se insinúan —endurecer #13 para el resumen no-vacío sin edición, hacer el anclaje de ediciones consciente de la compactación, preservar verbatim el propio output reciente del modelo a través del fold— son cambios de diseño que merecen su propia sesión, no un remiendo al final de una larga. Se registra con el diagnóstico completo; el fix es el próximo incremento.</p>
+  <p class="note">Método: la sesión se manejó headless con un driver <code>pexpect</code> (la técnica de "pty scripteado" del proyecto) que envía cada tarea al ver el prompt <code>&gt; </code> y contesta los permisos — aprueba <code>cargo*</code>, deniega el resto. Transcript y rollout log completos en el scratchpad.</p>
+</div>
+
 <h2>El patrón meta</h2>
 
 <p>Doce de los quince hallazgos son de <strong>interfaz</strong>, no de capacidad. El modelo sabía qué hacer; el harness le devolvía algo que no podía usar (un error sin diagnóstico, un canal que no leía, una pista falsa desde <code>.git</code>), o le quitaba tiempo que necesitaba (el reloj contra el humano), o le avisaba tarde (la nota sin margen), o no le devolvía nada y lo dejó concluir de más (el silencio del guardrail).</p>
@@ -220,6 +236,8 @@
 <p>El relanzamiento de la tarea 3 —pensado para <em>medir</em> si la palanca #11 cambiaba el comportamiento— no midió nada: el turno murió antes de aterrizar la primera edición, así que el guardrail nunca llegó a hablar. A cambio dejó dos hallazgos que no se buscaban. Es el tercer intento seguido en que el experimento no responde la pregunta que se le hizo y responde una mejor, lo cual dice algo sobre cuán poco explorada está esta superficie: <strong>trece hallazgos en trece sesiones, y ninguna sesión todavía ha terminado sin encontrar uno</strong>.</p>
 
 <p class="quote">Mientras la tasa de hallazgos por sesión no baje, la conclusión honesta no es "el harness ya está bien" sino "todavía no se sabe cuán grande es esto".</p>
+
+<p>La sesión 15 confirmó la apuesta que motivaba todo esto. Durante catorce sesiones, cada hallazgo salió de un turno cold-start de una sola tarea — y quedaba la sospecha, escrita en los comentarios del propio <code>engine</code>, de que el modo multi-turno escondía una clase entera que el bench single-turn nunca vio. La primera sesión multi-turno la sacó a la luz en el primer intento: no un bug puntual sino un <em>modo de falla en cascada</em>, donde la compactación —afinada y observada solo en single-turn— le borra al modelo la memoria de su propio código reciente, y un turno que fracasa en silencio contamina al siguiente. Es el hallazgo que más se parece a la tesis del experimento: la interfaz no falla en un punto, falla en cómo <em>acumula</em>.</p>
 
 <p>La sesión 14 agregó un matiz que vale la pena aislar. Por primera vez las palancas nuevas <em>funcionaron y se vieron funcionar</em>: el guardrail de #11 habló, el modelo lo leyó y actuó, y su comportamiento cambió respecto de la sesión anterior. Eso es la tesis del experimento confirmándose en pequeño. Pero el mismo movimiento reveló que la verificación puede ser hueca (#15), lo que reubica el objetivo: el harness no puede <em>garantizar</em> que un modelo chico verifique de verdad, solo subir la probabilidad de que lo intente y bajar el costo de que lo diga cuando no puede. La corrección sigue necesitando un juez externo — acá, un humano con una calculadora de haversine.</p>
 
