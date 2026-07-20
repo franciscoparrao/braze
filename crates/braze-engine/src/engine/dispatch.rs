@@ -581,7 +581,10 @@ impl Engine {
 
         // If `next_completed` times out, every still-pending task is
         // aborted (N-33, docs/AUDITORIA-2026-07-v2.md) and treated as
-        // failed so the turn proceeds rather than hanging forever.
+        // failed so the turn proceeds rather than hanging forever —
+        // salvo que la ventana se haya ido esperando a un humano (ver el
+        // branch `None`, incidente roam #3).
+        let mut human_wait_at_window_start = braze_permissions::human_wait_accumulated();
         while !pending.is_empty() {
             match self
                 .notifier
@@ -640,6 +643,30 @@ impl Engine {
                     .await?;
                 }
                 None => {
+                    // Incidente roam #3 (2026-07-20): el timeout existe
+                    // para matar una EJECUCIÓN desbocada, no para apurar
+                    // a un humano. Si en esta ventana el harness estuvo
+                    // bloqueado esperando una decisión de permiso — o si
+                    // sigue esperándola ahora mismo — el reloj se
+                    // reinicia por esa deliberación en vez de cancelar:
+                    // en producción, un `shell_exec` que pedía aprobación
+                    // moría a los 120s mientras la persona miraba el
+                    // overlay, el modelo recibía "tool call timed out",
+                    // reintentaba, y el usuario aprobaba dos veces la
+                    // misma acción. Ver `braze_permissions::human_wait`.
+                    let human_waited = braze_permissions::human_wait_accumulated();
+                    if braze_permissions::human_is_waiting()
+                        || human_waited > human_wait_at_window_start
+                    {
+                        tracing::info!(
+                            pending = pending.len(),
+                            waited_ms = (human_waited - human_wait_at_window_start).as_millis() as u64,
+                            still_waiting = braze_permissions::human_is_waiting(),
+                            "tool completion window elapsed while blocked on a human                              decision; extending instead of cancelling"
+                        );
+                        human_wait_at_window_start = human_waited;
+                        continue;
+                    }
                     tracing::error!(
                         pending = pending.len(),
                         timeout_secs = self.tool_completion_timeout.as_secs(),

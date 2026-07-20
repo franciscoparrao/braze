@@ -105,7 +105,14 @@ impl PermissionGuard {
                 {
                     return Ok(());
                 }
-                if self.prompt.confirm(action).await {
+                // Incidente roam #3: el reloj del `tool_completion_timeout`
+                // no debe correr contra la deliberación de la persona —
+                // ver `crate::human_wait`. El guard marca el intervalo;
+                // el dispatcher del engine lo descuenta.
+                let waiting = crate::human_wait::HumanWait::start();
+                let approved = self.prompt.confirm(action).await;
+                drop(waiting);
+                if approved {
                     if let Some(key) = derive_permission_key(action) {
                         self.remembered.lock().unwrap().insert(key);
                     }
