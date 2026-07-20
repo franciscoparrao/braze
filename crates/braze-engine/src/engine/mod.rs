@@ -6106,6 +6106,83 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    /// Regression test for the roam #5 incident (2026-07-20): with a
+    /// realistic cap, a convergence note must arrive with REAL runway
+    /// (past 70% of the cap), not only the one-round warning at the
+    /// edge. In production a 20B model burned 17 rounds re-reading a
+    /// file it had broken, got the last-round note at round 19 of 20,
+    /// and spent it on a repeated grep.
+    #[tokio::test]
+    async fn a_convergence_note_arrives_with_runway_before_the_last_round() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // 10 tool-calling rounds then text: the cap is 10, so the
+        // convergence note must fire at round 7 (70%) — three rounds of
+        // runway — and the last-round note still at round 9.
+        let mut rounds: Vec<Vec<CompletionEvent>> = (0..9)
+            .map(|i| {
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: format!("call-{i}"),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({ "text": format!("r{i}") }),
+                    },
+                    CompletionEvent::Done,
+                ]
+            })
+            .collect();
+        rounds.push(vec![
+            CompletionEvent::TextDelta("listo".to_string()),
+            CompletionEvent::Done,
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(rounds)),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_iterations(10);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let kinds: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::HarnessNote { kind, .. } => Some(kind.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            kinds.iter().any(|k| k == "iteration_converge"),
+            "expected a convergence note with runway, got: {kinds:?}"
+        );
+        assert_eq!(
+            kinds.iter().filter(|k| *k == "iteration_converge").count(),
+            1,
+            "the convergence note must fire exactly once"
+        );
+        // Y sigue llegando el aviso de última ronda: son dos funciones
+        // distintas, no un reemplazo.
+        assert!(
+            kinds.iter().any(|k| k == "iteration_cap"),
+            "the last-round note must still fire: {kinds:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     /// The iteration-cap note fires exactly once, right before the final
     /// round — "round N of N is your last" — so a model that would blow
     /// the cap gets one explicit chance to answer instead.

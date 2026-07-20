@@ -199,6 +199,7 @@ impl Engine {
         // the prompt budget it's trying to protect. (The iteration-cap
         // note needs no flag: `round` hits its threshold exactly once.)
         let mut budget_note_emitted = false;
+        let mut convergence_note_emitted = false;
 
         for round in 0..self.max_turn_iterations {
             // v4 P0.2 (docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3):
@@ -542,6 +543,40 @@ impl Engine {
                         session,
                         &AgentEvent::HarnessNote {
                             kind: "turn_budget".to_string(),
+                            text: text.clone(),
+                        },
+                        observer,
+                    )
+                    .await?;
+                    self.turn_harness_notes.lock().unwrap().push(text);
+                }
+                // Incidente roam #5 (2026-07-20, quinta sesión en
+                // producción): la nota de abajo avisa con UNA ronda de
+                // margen, y eso no es "antes de quedarse sin espacio" —
+                // es el borde mismo. Observado: gpt-oss:20b rompió un
+                // archivo con un edit, gastó 17 rondas releyéndolo en
+                // ventanas solapadas, recibió el aviso en la ronda 19 de
+                // 20 y la usó en un grep repetido. Un modelo chico
+                // necesita margen REAL para cambiar de estrategia, así
+                // que se avisa además a los ~70% del cap: no "es tu
+                // última ronda" (que invita a rendirse) sino "vas a la
+                // mitad larga, converge". Dos notas, dos funciones
+                // distintas.
+                if self.max_turn_iterations >= 6
+                    && !convergence_note_emitted
+                    && (round + 1).saturating_mul(10) >= self.max_turn_iterations.saturating_mul(7)
+                    && round + 2 < self.max_turn_iterations
+                {
+                    convergence_note_emitted = true;
+                    let text = format!(
+                        "You are at round {} of this turn's {} (past 70%). Converge now:                          prefer finishing with what you have over further exploration, and                          if something is broken, fix it with one decisive edit rather than                          re-reading.",
+                        round + 1,
+                        self.max_turn_iterations
+                    );
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::HarnessNote {
+                            kind: "iteration_converge".to_string(),
                             text: text.clone(),
                         },
                         observer,
