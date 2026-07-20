@@ -287,6 +287,16 @@ pub struct Engine {
     /// con edición previa, "verifica y cierra". Se limpia al inicio de
     /// cada `run_turn`, igual que `turn_harness_notes`.
     turn_did_edit: std::sync::atomic::AtomicBool,
+    /// ¿Este turno DESPACHÓ una edición de archivo, exitosa o no
+    /// (`FILE_MUTATING_TOOL_NAMES`, sin el guard de `!is_error`)?
+    /// Distingue "intentó cambiar el workspace y no lo logró" de "solo
+    /// leyó". Con `turn_did_edit` desglosa el fallback de resumen
+    /// (incidente roam #16): `attempted && !did` = el turno quiso editar
+    /// y aterrizó cero → un resumen no-vacío es razonamiento hueco, se
+    /// falla; `!attempted` = quizá un Q&A read-only legítimo cuya
+    /// respuesta quedó en el canal de razonamiento, se respeta. Se limpia
+    /// al inicio de cada `run_turn`.
+    turn_attempted_edit: std::sync::atomic::AtomicBool,
     /// D′ (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte
     /// III): registry de skills descubiertas al arranque. `None` (el
     /// default y el bench siempre) = feature apagada.
@@ -374,6 +384,7 @@ impl Engine {
             task_list: std::sync::Mutex::new(crate::task_list::TaskList::default()),
             turn_harness_notes: std::sync::Mutex::new(Vec::new()),
             turn_did_edit: std::sync::atomic::AtomicBool::new(false),
+            turn_attempted_edit: std::sync::atomic::AtomicBool::new(false),
             skill_registry: None,
             loaded_skills: std::sync::Mutex::new(Vec::new()),
             skills_max_body_tokens: 1200,
@@ -1134,6 +1145,51 @@ mod tests {
         }
     }
 
+    /// Offers `write_file` but every call comes back as an error result
+    /// (`is_error: true`) — the shape of a real `edit_file` that failed
+    /// with `old_string not found` or a denied write. Used to test
+    /// incident roam #16: a turn that ATTEMPTED an edit and landed none.
+    struct FailingWriteToolProvider;
+
+    #[async_trait]
+    impl ToolProvider for FailingWriteToolProvider {
+        fn provider_id(&self) -> &str {
+            "test:failing_write"
+        }
+
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            Ok(vec![ToolStub {
+                name: "write_file".to_string(),
+                summary: "writes a file (always fails)".to_string(),
+                source: "test:failing_write".to_string(),
+                input_schema: None,
+            }])
+        }
+
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            if name != "write_file" {
+                return Ok(None);
+            }
+            Ok(Some(ToolSchema {
+                name: name.to_string(),
+                description: name.to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                }),
+            }))
+        }
+
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: "old_string not found (simulated edit failure)".to_string(),
+                is_error: true,
+            })
+        }
+    }
+
     /// Like `EchoToolProvider`, but the delay before resolving is taken
     /// from the call's `delay_ms` argument — lets a test make a round's
     /// concurrently-dispatched tool calls resolve in a chosen order
@@ -1874,6 +1930,158 @@ mod tests {
         assert!(
             matches!(result, Err(EngineError::EmptyModelResponse { .. })),
             "a turn that changed nothing and said nothing must not report success, got {result:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Incidente roam #16 (2026-07-20): el caso que el fix de #13 NO
+    /// cubría. El turno intenta una edición que FALLA, aterriza cero, y
+    /// el fallback de resumen devuelve texto NO-vacío (razonamiento
+    /// disfrazado de respuesta). #13 solo fallaba con resumen vacío; con
+    /// texto, el turno terminaba en Ok con un resultado hueco que
+    /// envenenaba al siguiente. Ahora `attempted && !landed` lo falla.
+    #[tokio::test]
+    async fn a_nonempty_summary_after_a_failed_edit_and_no_landed_edit_fails() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            // Ronda 0: intenta write_file (el provider lo devuelve is_error).
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({ "path": "a.rs" }),
+                },
+                CompletionEvent::Done,
+            ],
+            // Ronda 1: sin texto ni tool calls → gatilla el fallback.
+            vec![CompletionEvent::Done],
+            // Fallback de resumen: texto NO-vacío (el razonamiento hueco).
+            vec![
+                CompletionEvent::TextDelta(
+                    "We need to add the method. Let's insert it before the tests.".to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(FailingWriteToolProvider)]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            matches!(result, Err(EngineError::EmptyModelResponse { .. })),
+            "a turn that attempted an edit, landed none, and only produced salvaged \
+             reasoning must fail, got {result:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// El contrapeso de regresión de #16: un turno READ-ONLY legítimo que
+    /// nunca intenta editar (solo lee) y cuya respuesta llega vía el
+    /// fallback de resumen DEBE seguir terminando en Ok. Es exactamente
+    /// el caso que un `!turn_did_edit` a secas habría roto — de ahí que
+    /// el guard exija `attempted && !landed`, no solo `!landed`.
+    #[tokio::test]
+    async fn a_nonempty_summary_after_a_read_only_turn_still_ends_ok() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            // Ronda 0: solo lectura — nunca intenta editar.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({ "path": "a.rs" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![CompletionEvent::Done],
+            // Fallback: una respuesta real a una pregunta read-only.
+            vec![
+                CompletionEvent::TextDelta(
+                    "The function computes the haversine distance in meters.".to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            result.is_ok(),
+            "a read-only turn that answered via the summary fallback must not be failed \
+             by the #16 guard, got {result:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regresión de U-1: un turno que SÍ aterrizó una edición y luego
+    /// cierra vía fallback de resumen con texto sigue en Ok — el guard de
+    /// #16 exige que NO haya aterrizado ninguna edición, así que un edit
+    /// exitoso lo desactiva por completo.
+    #[tokio::test]
+    async fn a_nonempty_summary_after_a_successful_edit_still_ends_ok() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({ "path": "a.rs" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![CompletionEvent::Done],
+            vec![
+                CompletionEvent::TextDelta("Added the method and it compiles.".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            // ReadWriteToolProvider's write_file succeeds → turn_did_edit.
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            result.is_ok(),
+            "a turn with a successful edit must stay Ok even if it closed via the summary \
+             fallback, got {result:?}"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

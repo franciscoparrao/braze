@@ -107,6 +107,8 @@ impl Engine {
         self.turn_harness_notes.lock().unwrap().clear();
         self.turn_did_edit
             .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.turn_attempted_edit
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         // N-4 (docs/AUDITORIA-2026-07-v2.md): repair any tool_use orphaned
         // by a crash/kill/power-loss in a *previous* run *before* this
@@ -456,6 +458,45 @@ impl Engine {
                             .await?
                         {
                             SummaryFallbackOutcome::Summarized => {
+                                // Incidente roam #16 (2026-07-20, sesión
+                                // multi-turno): que el fallback devuelva
+                                // texto NO prueba que el turno logró algo.
+                                // En la cascada multi-turno, el turno 2
+                                // intentó dos ediciones (ambas fallaron),
+                                // aterrizó cero, y el fallback emitió su
+                                // planificación como respuesta ("We need
+                                // to add mean_speed()…"). Terminar en Ok
+                                // con ese texto hueco envenenó al turno 3,
+                                // que fue a buscar lo que el 2 no creó.
+                                //
+                                // Discriminador (ver `turn_attempted_edit`):
+                                // "intentó editar y no aterrizó nada" =
+                                // hueco, se falla; "nunca intentó editar"
+                                // = quizá un Q&A read-only legítimo cuya
+                                // respuesta quedó en el canal de
+                                // razonamiento — que es exactamente lo que
+                                // este fallback existe para rescatar, así
+                                // que se respeta. `!turn_did_edit` a secas
+                                // rompería ese caso legítimo; por eso el
+                                // guard exige `attempted && !did`.
+                                let attempted = self
+                                    .turn_attempted_edit
+                                    .load(std::sync::atomic::Ordering::Relaxed);
+                                let landed = self
+                                    .turn_did_edit
+                                    .load(std::sync::atomic::Ordering::Relaxed);
+                                if attempted && !landed {
+                                    tracing::warn!(
+                                        round,
+                                        "summary fallback produced text but this turn attempted \
+                                         a file edit and landed none; the 'answer' is salvaged \
+                                         reasoning — failing instead of ending Ok with a hollow \
+                                         result that would poison the next turn"
+                                    );
+                                    return Err(EngineError::EmptyModelResponse {
+                                        generated_tokens: round_output_tokens,
+                                    });
+                                }
                                 self.consecutive_turns_without_tool_calls
                                     .store(0, std::sync::atomic::Ordering::SeqCst);
                                 return Ok(());

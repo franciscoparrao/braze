@@ -561,9 +561,13 @@ impl Engine {
                 if !result.is_error && MUTATING_TOOL_NAMES.contains(&call.name.as_str()) {
                     seen_calls.clear();
                 }
-                if !result.is_error && FILE_MUTATING_TOOL_NAMES.contains(&call.name.as_str()) {
-                    self.turn_did_edit
+                if FILE_MUTATING_TOOL_NAMES.contains(&call.name.as_str()) {
+                    self.turn_attempted_edit
                         .store(true, std::sync::atomic::Ordering::Relaxed);
+                    if !result.is_error {
+                        self.turn_did_edit
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                 }
                 self.append_and_notify(
                     session,
@@ -675,13 +679,16 @@ impl Engine {
                     {
                         seen_calls.clear();
                     }
-                    if !result.is_error
-                        && id_to_name
-                            .get(&id)
-                            .is_some_and(|name| FILE_MUTATING_TOOL_NAMES.contains(&name.as_str()))
+                    if id_to_name
+                        .get(&id)
+                        .is_some_and(|name| FILE_MUTATING_TOOL_NAMES.contains(&name.as_str()))
                     {
-                        self.turn_did_edit
+                        self.turn_attempted_edit
                             .store(true, std::sync::atomic::Ordering::Relaxed);
+                        if !result.is_error {
+                            self.turn_did_edit
+                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
                     }
                     // Nota de relectura improductiva: se anexa al
                     // resultado EXITOSO (nunca convierte una lectura
