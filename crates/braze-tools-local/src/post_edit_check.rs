@@ -31,15 +31,24 @@ use braze_config::FormatterConfig;
 /// symbol.
 const MAX_FEEDBACK_CHARS: usize = 2_000;
 
+/// Presupuesto de los warnings anexados a un check EXITOSO (incidente
+/// roam #11). Un orden de magnitud por debajo de `MAX_FEEDBACK_CHARS`:
+/// el objetivo es que el residuo de una edición incompleta sea visible,
+/// no volcarle al modelo el lint completo del crate.
+const MAX_WARNING_LINES: usize = 3;
+const MAX_WARNING_CHARS: usize = 400;
+
 /// Runs the guardrail for `path` (already resolved to an absolute path
 /// by the provider), using the configured formatter list (v4 P1.6),
 /// and returns the feedback block to append to the tool result, or
 /// `None` when there is nothing to say — no formatter matches the file's
-/// extension, the matching entry is `disabled`, the formatter command
-/// isn't runnable or timed out, or the check passed. Only command
-/// failure (non-zero exit) + `error:`-prefixed stderr lines produces
-/// feedback: a clean check appends nothing, so the guardrail is
-/// token-free on the happy path.
+/// extension, the matching entry is `disabled`, or the formatter command
+/// isn't runnable or timed out.
+///
+/// Un check EXITOSO ya no devuelve `None` (incidente roam #11): confirma
+/// que compila, acota que eso NO es haber corrido tests, y anexa hasta
+/// [`MAX_WARNING_LINES`] warnings. `None` queda reservado para "el
+/// guardrail no pudo decir nada", que es información distinta de "pasó".
 pub(crate) async fn post_edit_feedback(path: &str, formatters: &[FormatterConfig]) -> Option<String> {
     let ext = Path::new(path).extension()?.to_string_lossy().to_lowercase();
     let fmt = formatters.iter().find(|f| {
@@ -105,7 +114,54 @@ async fn check_with_formatter(fmt: &FormatterConfig, cwd: &Path) -> Option<Strin
     };
 
     if output.status.success() {
-        return None;
+        // Incidente roam #11 (2026-07-20, tarea 3 del testbed): en éxito
+        // el guardrail devolvía `None` — silencio absoluto. El modelo no
+        // puede distinguir "el check pasó" de "el check no corrió" ni de
+        // "no había formatter", y lee la ausencia de errores como
+        // "verificado": tras una edición limpia declaró la tarea
+        // terminada sin correr `cargo test`, que el prompt pedía
+        // explícitamente. El silencio no era token-free, era ambiguo.
+        // Ahora se confirma el éxito Y se acota qué significa.
+        //
+        // Los warnings se anexan por la misma razón: viven en el stderr
+        // de un exit 0, que es justo donde muere el residuo de una
+        // eliminación (imports muertos, docstrings huérfanos — ambos
+        // observados en la tarea 2). Su presupuesto es deliberadamente
+        // mucho menor que `MAX_FEEDBACK_CHARS`: el modo de falla del
+        // incidente #7 fue ahogar el canal con texto, y un warning no
+        // justifica el mismo espacio que un error.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let mut warnings = String::new();
+        // `contains`, no `starts_with`: el formatter por defecto usa
+        // `--message-format=short`, que antepone la ubicación
+        // (`src/main.rs:1:5: warning: …`). Misma heurística laxa que el
+        // camino de errores de abajo, y por la misma razón.
+        for (shown, line) in stderr
+            .lines()
+            .filter(|line| line.contains("warning:"))
+            .enumerate()
+        {
+            if shown == MAX_WARNING_LINES || warnings.len() + line.len() + 1 > MAX_WARNING_CHARS {
+                warnings.push_str("… (more warnings omitted)\n");
+                break;
+            }
+            warnings.push_str(line);
+            warnings.push('\n');
+        }
+
+        let mut note = format!(
+            "\n\n[post-edit check] `{}` passed in {} — the code COMPILES. \
+             That is all this confirms: no tests were run. If this task has a \
+             verification step, it has not happened yet.",
+            program,
+            cwd.display()
+        );
+        if !warnings.is_empty() {
+            note.push_str("\nWarnings (not errors, but often the leftovers of an \
+                           incomplete edit — unused imports, dead code):\n");
+            note.push_str(warnings.trim_end());
+        }
+        return Some(note);
     }
 
     // Combine stdout+stderr — many tools (ruff, tsc) put diagnostics on
@@ -240,16 +296,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Incidente roam #11 (2026-07-20): un check exitoso confirma que
+    /// COMPILA y dice explícitamente que eso no es haber corrido tests.
+    /// El contrato anterior era devolver `None` ("token-free happy
+    /// path"), y el silencio resultó indistinguible de "el guardrail no
+    /// corrió" — el modelo lo leyó como verificación completa y cerró la
+    /// tarea sin ejecutar `cargo test`.
     #[tokio::test]
-    async fn a_clean_crate_produces_no_feedback() {
+    async fn a_clean_crate_confirms_compilation_and_scopes_it() {
         let dir = temp_dir("clean");
         write_project(&dir, "fn main() {}");
 
+        let feedback = post_edit_feedback(
+            &dir.join("src/main.rs").to_string_lossy(),
+            default_rust_formatters().as_slice(),
+        )
+        .await
+        .expect("a passing check must confirm it passed, not stay silent");
+        assert!(feedback.contains("[post-edit check]"), "got: {feedback}");
         assert!(
-            post_edit_feedback(&dir.join("src/main.rs").to_string_lossy(), default_rust_formatters().as_slice())
-                .await
-                .is_none(),
-            "a passing check must append nothing (token-free happy path)"
+            feedback.contains("COMPILES"),
+            "the confirmation must say what passed: {feedback}"
+        );
+        assert!(
+            feedback.contains("no tests were run"),
+            "the confirmation must scope itself so it is not read as full \
+             verification: {feedback}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Los warnings de un exit 0 son el único lugar donde aparece el
+    /// residuo de una edición incompleta (imports muertos tras eliminar
+    /// una función — observado en la tarea 2 del testbed), y el
+    /// guardrail los descartaba junto con el resto del stderr exitoso.
+    #[tokio::test]
+    async fn a_clean_crate_surfaces_its_warnings() {
+        let dir = temp_dir("warn");
+        // Compila, pero deja un import muerto: exactamente la forma del
+        // residuo observado en producción.
+        write_project(&dir, "use std::collections::HashMap;\nfn main() {}");
+
+        let feedback = post_edit_feedback(
+            &dir.join("src/main.rs").to_string_lossy(),
+            default_rust_formatters().as_slice(),
+        )
+        .await
+        .expect("a passing check with warnings must still speak");
+        assert!(
+            feedback.contains("Warnings (not errors"),
+            "warnings must be labelled as such, never as failures: {feedback}"
+        );
+        assert!(
+            feedback.contains("unused import"),
+            "the actual warning must reach the model: {feedback}"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

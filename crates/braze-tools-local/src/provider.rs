@@ -461,6 +461,49 @@ mod tests {
         assert!(stubs.iter().all(|s| s.source == "local"));
     }
 
+    /// Incidente roam #11: camino completo, no solo la función del
+    /// guardrail — un `write_file` real sobre un crate real debe dejar
+    /// la confirmación DENTRO del `ToolResult` que ve el modelo. El
+    /// contrato viejo (silencio en éxito) hacía que este resultado fuera
+    /// idéntico al de un archivo sin guardrail aplicable.
+    #[tokio::test]
+    async fn a_successful_edit_carries_the_post_edit_confirmation() {
+        let dir = std::env::temp_dir().join(format!("braze-provider-pec-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).expect("crate dirs");
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"pec-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .expect("manifest");
+
+        let provider = LocalToolsProvider::new(allow_guard(dir.clone()));
+        let target = dir.join("src/main.rs");
+        let result = provider
+            .invoke(&call(
+                "write_file",
+                serde_json::json!({
+                    "path": target.to_string_lossy(),
+                    "content": "fn main() {}\n",
+                }),
+            ))
+            .await
+            .expect("write_file must succeed");
+
+        assert!(!result.is_error, "the edit itself must succeed: {result:?}");
+        assert!(
+            result.content.contains("the code COMPILES"),
+            "the model must see that the check ran and passed: {}",
+            result.content
+        );
+        assert!(
+            result.content.contains("no tests were run"),
+            "…and must not be able to read it as full verification: {}",
+            result.content
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test]
     async fn resolve_schema_for_unknown_tool_is_ok_none() {
         let provider = LocalToolsProvider::new(allow_guard(std::env::temp_dir()));
