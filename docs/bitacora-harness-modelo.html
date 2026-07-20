@@ -80,17 +80,17 @@
 
 <h1>Bitácora harness↔modelo</h1>
 <p class="lede">Qué falla cuando un modelo local de 20B intenta programar de verdad — y qué parte de eso es arreglable desde el harness.</p>
-<p class="meta">braze × roam · registro vivo · última actualización 2026-07-20 (12.ª sesión)</p>
+<p class="meta">braze × roam · registro vivo · última actualización 2026-07-20 (13.ª sesión)</p>
 
 <p>Este documento registra un experimento en curso: usar <strong>braze</strong> (harness agéntico propio, Rust) con <strong>gpt-oss:20b</strong> corriendo local en CPU para desarrollar <strong>roam</strong> (motor de movement ecology) como proyecto real, y tratar cada falla como evidencia sobre la interfaz harness↔modelo.</p>
 
-<p>La premisa: el bench autoral de braze mide palancas en tareas diseñadas para medirlas. El uso productivo expone otra clase de fallo — el que ningún benchmark produce porque nadie lo escribió a propósito. Once hallazgos en doce sesiones sugieren que esa clase es grande.</p>
+<p>La premisa: el bench autoral de braze mide palancas en tareas diseñadas para medirlas. El uso productivo expone otra clase de fallo — el que ningún benchmark produce porque nadie lo escribió a propósito. Trece hallazgos en trece sesiones sugieren que esa clase es grande.</p>
 
 <div class="kpis">
-  <div class="kpi"><div class="v">12</div><div class="k">sesiones</div></div>
-  <div class="kpi"><div class="v">11</div><div class="k">hallazgos</div></div>
-  <div class="kpi"><div class="v">3</div><div class="k">palancas nuevas</div></div>
-  <div class="kpi"><div class="v">1045→1059</div><div class="k">tests del workspace</div></div>
+  <div class="kpi"><div class="v">13</div><div class="k">sesiones</div></div>
+  <div class="kpi"><div class="v">13</div><div class="k">hallazgos</div></div>
+  <div class="kpi"><div class="v">4</div><div class="k">palancas nuevas</div></div>
+  <div class="kpi"><div class="v">1045→1063</div><div class="k">tests del workspace</div></div>
   <div class="kpi"><div class="v">0</div><div class="k">líneas de roam escritas por Claude</div></div>
 </div>
 
@@ -125,6 +125,8 @@
     <tr><td class="n">9</td><td>El modelo sigue una pista falsa; llama 3× a una tool inexistente</td><td><code>grep -r</code> descendía a <code>.git/</code>; el error de tool desconocida no sugería alternativa</td><td>Excluir <code>.git</code>/<code>target</code>/…; sugerencia "¿quisiste decir?"</td><td class="n mono">3c93bba</td></tr>
     <tr><td class="n">10</td><td>Tras terminar la tarea, el modelo relee el archivo 3× y choca con el guard</td><td>La nota de convergencia aconseja "arregla con un edit decisivo" a un turno que <em>ya editó bien</em></td><td><strong>Palanca nueva</strong>: la nota distingue si el turno ya editó y aconseja verificar</td><td class="n mono">6892b11</td></tr>
     <tr><td class="n">11</td><td>El modelo cierra la tarea sin correr los tests que el prompt pedía</td><td>El guardrail post-edit devolvía <code>None</code> en éxito: el silencio es indistinguible de "no corrió"</td><td>Confirmación acotada ("compila, <em>no</em> es un test run") + warnings visibles</td><td class="n mono">9b3516f</td></tr>
+    <tr><td class="n">12</td><td>El modelo manda un reemplazo abreviado con <code>...</code> literal</td><td><code>edit_file</code> escribe <code>new_string</code> verbatim y no inspeccionaba su contenido</td><td>Rechazo si hay marcador de elisión <em>y</em> el texto se acorta; deriva a <code>write_file</code></td><td class="n mono">28d2147</td></tr>
+    <tr><td class="n">13</td><td>El turno termina sin respuesta ni error — pantalla en blanco</td><td>El fallback de U-1 se gatilla con "despachó tools", que un turno sin mutaciones también cumple</td><td>Sin edición exitosa no hay nada que preservar: sale el error honesto</td><td class="n mono">28d2147</td></tr>
   </tbody>
 </table>
 </div>
@@ -170,9 +172,18 @@
   <p class="note">Nota de método: la primera versión del filtro usaba <code>starts_with("warning:")</code>, compilaba, y no capturaba un solo warning real — el formatter por defecto corre con <code>--message-format=short</code>, que antepone la ubicación. Lo atrapó el test escrito contra la salida real de <code>cargo</code>, no la revisión del código.</p>
 </div>
 
+<div class="finding">
+  <h3>#12 — La corrupción que no ocurrió por suerte <span class="tag new">palanca nueva</span></h3>
+  <p class="sym"><strong>Síntoma:</strong> ninguno. Ese es el punto.</p>
+  <p>Relanzada la tarea 3 pidiendo sólo los tests, el turno murió sin aplicar una sola edición. En el rollout log, el <code>new_string</code> del segundo <code>edit_file</code> era literalmente <code>"    #[test]\n    fn test_mcp_square_with_interior_point() {\n..."</code>: el modelo abrevió el reemplazo y dejó una elisión donde debía ir el cuerpo. El <em>lazy diff</em> de la literatura de Aider, en vivo.</p>
+  <p><code>edit_file</code> escribe <code>new_string</code> verbatim. Si <code>old_string</code> hubiera matcheado —y estuvo cerca: falló por una diferencia de texto, no por la elisión— ese <code>...</code> habría quedado dentro de <code>lib.rs</code> con el resto del bloque borrado, sin error, sin warning, y con el post-edit check reportando que compila, porque <code>...</code> dentro de una función es sintaxis inválida pero el bloque truncado bien podría no serlo. La única defensa fue el azar.</p>
+  <p>La guarda pide <strong>dos</strong> señales antes de rechazar: un marcador de elisión <em>y</em> un <code>new_string</code> más corto que el <code>old_string</code> que reemplaza. Abreviar es, por definición, acortar. Con una sola señal se castigaría código legítimo — <code>...</code> es sintaxis válida en Python y un comentario puede mencionarlo. Y un falso positivo no bloquea a nadie: el mensaje deriva a <code>write_file</code>, que es la salida correcta igual.</p>
+  <p class="note">Es el primer hallazgo del experimento que no viene de un fallo observado sino de leer <em>por qué</em> un fallo no fue peor. Los otros doce se anunciaron solos.</p>
+</div>
+
 <h2>El patrón meta</h2>
 
-<p>Nueve de los once hallazgos son de <strong>interfaz</strong>, no de capacidad. El modelo sabía qué hacer; el harness le devolvía algo que no podía usar (un error sin diagnóstico, un canal que no leía, una pista falsa desde <code>.git</code>), o le quitaba tiempo que necesitaba (el reloj contra el humano), o le avisaba tarde (la nota sin margen), o no le devolvía nada y lo dejó concluir de más (el silencio del guardrail).</p>
+<p>Once de los trece hallazgos son de <strong>interfaz</strong>, no de capacidad. El modelo sabía qué hacer; el harness le devolvía algo que no podía usar (un error sin diagnóstico, un canal que no leía, una pista falsa desde <code>.git</code>), o le quitaba tiempo que necesitaba (el reloj contra el humano), o le avisaba tarde (la nota sin margen), o no le devolvía nada y lo dejó concluir de más (el silencio del guardrail).</p>
 
 <p>El hallazgo #11 obligó además a abrir una categoría que el método no tenía. Ignorar dos instrucciones explícitas del prompt ("agrega tests", "verifica con <code>cargo test</code>") es, estrictamente, una <strong>falla de capacidad</strong>: al modelo se le dijo y no lo hizo. Por la regla del método, eso no se arregla acá. Pero el harness sí puede <em>compensarla</em> — no obligando a correr tests, sino dejando de emitir una señal que el modelo estaba leyendo como permiso para no hacerlo. La distinción útil no es "capacidad vs. interfaz" sino <strong>qué déficit del modelo el harness puede compensar barato</strong>, que es exactamente la tesis que el paper mide.</p>
 
@@ -187,6 +198,10 @@
 <p>Eso sugirió un incremento concreto: la nota de convergencia debería saber si el turno <em>ya hizo ediciones exitosas</em> y cambiar el consejo de "arregla con una edición decisiva" a "verifica lo que editaste". Quedó anotado — y la sesión siguiente lo produjo en vivo (hallazgo #10), así que está implementado.</p>
 
 <p>Vale la pena notar el orden: el patrón se dedujo del comportamiento antes de tener un caso limpio que lo aislara. Es la primera vez en esta bitácora que la lectura del log <em>predice</em> un hallazgo en vez de explicarlo después.</p>
+
+<p>El relanzamiento de la tarea 3 —pensado para <em>medir</em> si la palanca #11 cambiaba el comportamiento— no midió nada: el turno murió antes de aterrizar la primera edición, así que el guardrail nunca llegó a hablar. A cambio dejó dos hallazgos que no se buscaban. Es el tercer intento seguido en que el experimento no responde la pregunta que se le hizo y responde una mejor, lo cual dice algo sobre cuán poco explorada está esta superficie: <strong>trece hallazgos en trece sesiones, y ninguna sesión todavía ha terminado sin encontrar uno</strong>.</p>
+
+<p class="quote">Mientras la tasa de hallazgos por sesión no baje, la conclusión honesta no es "el harness ya está bien" sino "todavía no se sabe cuán grande es esto".</p>
 
 <p>La variante que la tarea 2 dejó abierta — el residuo invisible de una eliminación — quedó cerrada por el mismo fix del hallazgo #11, con un presupuesto de warnings deliberadamente estrecho para no repetir el error del #7.</p>
 
