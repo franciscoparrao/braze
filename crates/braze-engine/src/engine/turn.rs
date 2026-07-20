@@ -105,6 +105,8 @@ impl Engine {
         // must not remain a live instruction in turn 2).
         self.task_list.lock().unwrap().clear();
         self.turn_harness_notes.lock().unwrap().clear();
+        self.turn_did_edit
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         // N-4 (docs/AUDITORIA-2026-07-v2.md): repair any tool_use orphaned
         // by a crash/kill/power-loss in a *previous* run *before* this
@@ -587,11 +589,43 @@ impl Engine {
                     && round + 2 < self.max_turn_iterations
                 {
                     convergence_note_emitted = true;
-                    let text = format!(
-                        "You are at round {} of this turn's {} (past 70%). Converge now:                          prefer finishing with what you have over further exploration, and                          if something is broken, fix it with one decisive edit rather than                          re-reading.",
-                        round + 1,
-                        self.max_turn_iterations
-                    );
+                    // Incidente roam #10 (2026-07-20, tarea 2 del
+                    // testbed): el consejo "si algo está roto, arréglalo
+                    // con UN edit decisivo" es correcto para un turno que
+                    // aún no tocó nada, y contraproducente para uno que ya
+                    // editó con éxito. Observado: el modelo terminó los
+                    // edits en la ronda 5, un `edit_file` posterior falló
+                    // con `old_string not found` (porque el cambio YA
+                    // estaba aplicado), y la nota de la ronda 14 lo empujó
+                    // a seguir "arreglando" — tres relecturas de lib.rs y
+                    // un choque con el guard de duplicados antes de cerrar.
+                    // Con edición previa el consejo correcto es el
+                    // opuesto: verifica una vez y responde.
+                    let text = if self
+                        .turn_did_edit
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        format!(
+                            "You are at round {} of this turn's {} (past 70%), and you have \
+                             already applied at least one successful edit. Converge now: run \
+                             your check (tests/build) once if you have not, then answer with \
+                             what you have. Do not re-read files you already edited to \
+                             reassure yourself — if an edit failed with 'old_string not \
+                             found', the likeliest reason is that the change is already in \
+                             place.",
+                            round + 1,
+                            self.max_turn_iterations
+                        )
+                    } else {
+                        format!(
+                            "You are at round {} of this turn's {} (past 70%). Converge now: \
+                             prefer finishing with what you have over further exploration, \
+                             and if something is broken, fix it with one decisive edit \
+                             rather than re-reading.",
+                            round + 1,
+                            self.max_turn_iterations
+                        )
+                    };
                     self.append_and_notify(
                         session,
                         &AgentEvent::HarnessNote {

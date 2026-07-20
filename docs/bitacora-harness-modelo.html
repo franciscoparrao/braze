@@ -80,17 +80,17 @@
 
 <h1>Bitácora harness↔modelo</h1>
 <p class="lede">Qué falla cuando un modelo local de 20B intenta programar de verdad — y qué parte de eso es arreglable desde el harness.</p>
-<p class="meta">braze × roam · registro vivo · última actualización 2026-07-20</p>
+<p class="meta">braze × roam · registro vivo · última actualización 2026-07-20 (11.ª sesión)</p>
 
 <p>Este documento registra un experimento en curso: usar <strong>braze</strong> (harness agéntico propio, Rust) con <strong>gpt-oss:20b</strong> corriendo local en CPU para desarrollar <strong>roam</strong> (motor de movement ecology) como proyecto real, y tratar cada falla como evidencia sobre la interfaz harness↔modelo.</p>
 
-<p>La premisa: el bench autoral de braze mide palancas en tareas diseñadas para medirlas. El uso productivo expone otra clase de fallo — el que ningún benchmark produce porque nadie lo escribió a propósito. Nueve hallazgos en diez sesiones sugieren que esa clase es grande.</p>
+<p>La premisa: el bench autoral de braze mide palancas en tareas diseñadas para medirlas. El uso productivo expone otra clase de fallo — el que ningún benchmark produce porque nadie lo escribió a propósito. Diez hallazgos en once sesiones sugieren que esa clase es grande.</p>
 
 <div class="kpis">
-  <div class="kpi"><div class="v">10</div><div class="k">sesiones</div></div>
-  <div class="kpi"><div class="v">9</div><div class="k">hallazgos</div></div>
-  <div class="kpi"><div class="v">1</div><div class="k">palanca nueva</div></div>
-  <div class="kpi"><div class="v">1045→1056</div><div class="k">tests del workspace</div></div>
+  <div class="kpi"><div class="v">11</div><div class="k">sesiones</div></div>
+  <div class="kpi"><div class="v">10</div><div class="k">hallazgos</div></div>
+  <div class="kpi"><div class="v">2</div><div class="k">palancas nuevas</div></div>
+  <div class="kpi"><div class="v">1045→1057</div><div class="k">tests del workspace</div></div>
   <div class="kpi"><div class="v">0</div><div class="k">líneas de roam escritas por Claude</div></div>
 </div>
 
@@ -123,6 +123,7 @@
     <tr><td class="n">7</td><td>El turno revienta su presupuesto de tokens</td><td>El fix #3 volcaba el razonamiento <em>completo</em> de un modelo en espiral</td><td>Cap de 800 chars conservando la cola</td><td class="n mono">4c84c22</td></tr>
     <tr><td class="n">8</td><td>Turno muerto con rondas de 11 y 31 tokens "vacías"</td><td>No se podía distinguir "no dijo nada" de "dijo algo que el harness no mapea"</td><td><code>EmptyModelResponse</code> reporta los tokens generados</td><td class="n mono">953941a</td></tr>
     <tr><td class="n">9</td><td>El modelo sigue una pista falsa; llama 3× a una tool inexistente</td><td><code>grep -r</code> descendía a <code>.git/</code>; el error de tool desconocida no sugería alternativa</td><td>Excluir <code>.git</code>/<code>target</code>/…; sugerencia "¿quisiste decir?"</td><td class="n mono">3c93bba</td></tr>
+    <tr><td class="n">10</td><td>Tras terminar la tarea, el modelo relee el archivo 3× y choca con el guard</td><td>La nota de convergencia aconseja "arregla con un edit decisivo" a un turno que <em>ya editó bien</em></td><td><strong>Palanca nueva</strong>: la nota distingue si el turno ya editó y aconseja verificar</td><td class="n mono">pendiente</td></tr>
   </tbody>
 </table>
 </div>
@@ -151,9 +152,17 @@
   <p>Cambiar morir en silencio por morir ahogado no es una mejora. El cap conserva la <em>cola</em> del razonamiento: lo último pensado es lo más cercano a una conclusión.</p>
 </div>
 
+<div class="finding">
+  <h3>#10 — El consejo correcto, en el turno equivocado <span class="tag new">palanca nueva</span></h3>
+  <p class="sym"><strong>Síntoma:</strong> el modelo termina la tarea en la ronda 5 (dos ediciones exitosas, tests verdes), y aun así gasta las rondas 12–16 releyendo el mismo archivo hasta que el guard de duplicados lo corta.</p>
+  <p>El disparador está en el propio transcript: un <code>edit_file</code> tardío falló con <code>old_string not found</code> — porque el cambio <em>ya estaba aplicado</em>. El modelo leyó ese error como "algo está roto". Y la nota de convergencia de la ronda 14, escrita para el turno que aún no ha tocado nada, lo confirmó: <em>"si algo está roto, arréglalo con un edit decisivo en vez de releer"</em>. El harness empujó a seguir arreglando lo que ya estaba bien.</p>
+  <p>El fix invierte el consejo cuando el turno registra una edición de archivo exitosa: verifica una vez, responde, y no releas lo que editaste — con la explicación de qué significa realmente <code>old_string not found</code>. <code>shell_exec</code> queda fuera del criterio a propósito: el harness no sabe si un comando escribió algo, y <code>cargo test</code> no es una edición.</p>
+  <p class="note">Este hallazgo estaba <em>predicho</em> en la versión anterior de esta bitácora ("anotado, no implementado") a partir del patrón conductual de abajo. La sesión siguiente lo produjo en vivo.</p>
+</div>
+
 <h2>El patrón meta</h2>
 
-<p>Siete de los nueve hallazgos son de <strong>interfaz</strong>, no de capacidad. El modelo sabía qué hacer; el harness le devolvía algo que no podía usar (un error sin diagnóstico, un canal que no leía, una pista falsa desde <code>.git</code>), o le quitaba tiempo que necesitaba (el reloj contra el humano), o le avisaba tarde (la nota sin margen).</p>
+<p>Ocho de los diez hallazgos son de <strong>interfaz</strong>, no de capacidad. El modelo sabía qué hacer; el harness le devolvía algo que no podía usar (un error sin diagnóstico, un canal que no leía, una pista falsa desde <code>.git</code>), o le quitaba tiempo que necesitaba (el reloj contra el humano), o le avisaba tarde (la nota sin margen).</p>
 
 <p>Y hay un patrón conductual que se repite y todavía no está resuelto:</p>
 
@@ -161,7 +170,11 @@
 
 <p>El caso más nítido: cuatro ediciones correctas en las primeras rondas, y luego dieciséis rondas releyendo el archivo sin nunca correr <code>cargo test</code> — que habría confirmado el éxito. Murió en el cap sin enterarse de que había ganado. En otro turno, el post-edit check reportó el error exacto con número de línea y el modelo lo ignoró durante diecisiete rondas.</p>
 
-<p>Eso sugiere el próximo incremento: la nota de convergencia debería saber si el turno <em>ya hizo ediciones exitosas</em> y cambiar el consejo de "arregla con una edición decisiva" a "verifica lo que editaste". Anotado, no implementado.</p>
+<p>Eso sugirió un incremento concreto: la nota de convergencia debería saber si el turno <em>ya hizo ediciones exitosas</em> y cambiar el consejo de "arregla con una edición decisiva" a "verifica lo que editaste". Quedó anotado — y la sesión siguiente lo produjo en vivo (hallazgo #10), así que está implementado.</p>
+
+<p>Vale la pena notar el orden: el patrón se dedujo del comportamiento antes de tener un caso limpio que lo aislara. Es la primera vez en esta bitácora que la lectura del log <em>predice</em> un hallazgo en vez de explicarlo después.</p>
+
+<p>Y queda una variante del mismo patrón todavía abierta. En esta sesión el modelo borró <code>hello()</code> pero dejó vivos sus <code>use std::time::{SystemTime, UNIX_EPOCH}</code>, ahora muertos. El guardrail post-edit corre <code>cargo check</code> y devuelve <strong>errores</strong> al modelo, no <em>warnings</em> — y el residuo de una eliminación es exactamente lo que aparece como warning. El modelo no podía verlo. No está arreglado: devolver todos los warnings arriesga ahogar el canal, que es justo el modo de falla del hallazgo #7.</p>
 
 <h2>Qué se construyó mientras tanto</h2>
 

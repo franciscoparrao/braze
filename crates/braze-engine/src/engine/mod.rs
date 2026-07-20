@@ -93,6 +93,14 @@ const KEEP_RAW_TAIL: usize = 6;
 /// annotation on `ToolStub` if that becomes a real gap.
 const MUTATING_TOOL_NAMES: &[&str] = &["write_file", "edit_file", "shell_exec"];
 
+/// Subconjunto de `MUTATING_TOOL_NAMES` que con certeza tocó el
+/// workspace. `shell_exec` queda FUERA a propósito: el harness no sabe
+/// si el comando escribió algo, y `cargo test` (el caso normal) no es
+/// una edición. Se usa para la nota de convergencia, donde afirmar "ya
+/// editaste" en falso es peor que no decir nada — ver incidente roam
+/// #10 en `docs/bitacora-harness-modelo.html`.
+const FILE_MUTATING_TOOL_NAMES: &[&str] = &["write_file", "edit_file"];
+
 /// A partir de cuántas lecturas de la MISMA ruta en un turno, sin
 /// edición intermedia, el harness anexa la nota de relectura
 /// improductiva (`crate::engine::dispatch`). Cuatro deja pasar el uso
@@ -273,6 +281,12 @@ pub struct Engine {
     /// bench single-turn jamás vio este modo de falla). Se limpia al
     /// inicio de cada `run_turn`.
     turn_harness_notes: std::sync::Mutex<Vec<String>>,
+    /// ¿Este turno ya aplicó una edición de archivo EXITOSA
+    /// (`FILE_MUTATING_TOOL_NAMES`)? Cambia el consejo de la nota de
+    /// convergencia: sin edición previa, "arregla con un edit decisivo";
+    /// con edición previa, "verifica y cierra". Se limpia al inicio de
+    /// cada `run_turn`, igual que `turn_harness_notes`.
+    turn_did_edit: std::sync::atomic::AtomicBool,
     /// D′ (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte
     /// III): registry de skills descubiertas al arranque. `None` (el
     /// default y el bench siempre) = feature apagada.
@@ -359,6 +373,7 @@ impl Engine {
             exploration_enabled: false,
             task_list: std::sync::Mutex::new(crate::task_list::TaskList::default()),
             turn_harness_notes: std::sync::Mutex::new(Vec::new()),
+            turn_did_edit: std::sync::atomic::AtomicBool::new(false),
             skill_registry: None,
             loaded_skills: std::sync::Mutex::new(Vec::new()),
             skills_max_body_tokens: 1200,
@@ -6299,6 +6314,102 @@ mod tests {
         assert!(
             kinds.iter().any(|k| k == "iteration_cap"),
             "the last-round note must still fire: {kinds:?}"
+        );
+        // Sin edición previa en el turno (echo no es mutante), el consejo
+        // es el original: arregla con un edit decisivo.
+        let convergence_text = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::HarnessNote { kind, text } if kind == "iteration_converge" => {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .expect("convergence note present");
+        assert!(
+            convergence_text.contains("fix it with one decisive edit"),
+            "a turn that never edited must get the decisive-edit advice: {convergence_text}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for the roam #10 incident (2026-07-20, tarea 2 del
+    /// testbed): when the turn has ALREADY landed a successful edit, the
+    /// convergence note must not tell the model to "fix it with one
+    /// decisive edit" — that advice sent gpt-oss:20b back to re-read a
+    /// file it had already fixed, after an `old_string not found` error
+    /// that only meant the change was already applied. With a prior edit
+    /// the advice inverts: verify once and answer.
+    #[tokio::test]
+    async fn the_convergence_note_says_verify_when_the_turn_already_edited() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Round 0 writes (successful mutation), rounds 1..8 read, round 9
+        // answers. Cap 10 ⇒ the convergence note fires at round 7, well
+        // after the edit landed.
+        let mut rounds: Vec<Vec<CompletionEvent>> = vec![vec![
+            CompletionEvent::ToolCallRequested {
+                id: "call-w".to_string(),
+                name: "write_file".to_string(),
+                arguments: serde_json::json!({ "path": "a.rs" }),
+            },
+            CompletionEvent::Done,
+        ]];
+        rounds.extend((0..8).map(|i| {
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: format!("call-r{i}"),
+                    name: "read_file".to_string(),
+                    // Rutas distintas: aísla este test de la nota de
+                    // relectura improductiva, que es otra palanca.
+                    arguments: serde_json::json!({ "path": format!("f{i}.rs") }),
+                },
+                CompletionEvent::Done,
+            ]
+        }));
+        rounds.push(vec![
+            CompletionEvent::TextDelta("listo".to_string()),
+            CompletionEvent::Done,
+        ]);
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(rounds)),
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_iterations(10);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let convergence_text = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::HarnessNote { kind, text } if kind == "iteration_converge" => {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .expect("convergence note present");
+        assert!(
+            convergence_text.contains("already applied at least one successful edit"),
+            "a turn that edited must get the verify-and-close advice: {convergence_text}"
+        );
+        assert!(
+            !convergence_text.contains("fix it with one decisive edit"),
+            "the decisive-edit advice must NOT survive a landed edit: {convergence_text}"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
