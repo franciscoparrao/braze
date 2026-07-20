@@ -36,9 +36,22 @@ pub async fn grep(args: GrepArgs) -> Result<String, String> {
     // `--` stops grep's own option parsing so a `pattern` or `path` that
     // happens to start with `-` (e.g. a pattern of `-f/etc/passwd`) is
     // never reinterpreted as a flag.
+    // Incidente roam #9 (2026-07-20): sin exclusiones, un `grep -r`
+    // sobre la raíz de un repo entra a `.git/` y devuelve mensajes de
+    // commit, refs y objetos sueltos como si fueran código. Observado en
+    // producción: el modelo buscó un símbolo, recibió el texto de un
+    // COMMIT_EDITMSG y siguió el hilo equivocado. Se excluyen los
+    // directorios que jamás son la respuesta a "¿dónde está X en el
+    // código?" — el usuario que de verdad quiera mirar dentro puede
+    // apuntar `path` ahí explícitamente, porque `--exclude-dir` solo
+    // poda el descenso recursivo, no una ruta dada a mano.
     let cmd_args = vec![
         "-r".to_string(),
         "-n".to_string(),
+        "--exclude-dir=.git".to_string(),
+        "--exclude-dir=target".to_string(),
+        "--exclude-dir=node_modules".to_string(),
+        "--exclude-dir=.venv".to_string(),
         mode_flag.to_string(),
         "--".to_string(),
         args.pattern,

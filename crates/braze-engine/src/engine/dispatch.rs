@@ -460,11 +460,9 @@ impl Engine {
                     // names that actually exist (already at hand from this
                     // round's stubs) so the model can retry with a valid
                     // one instead of repeating the same hallucination.
-                    let available = available_tools
-                        .iter()
-                        .map(|s| s.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    let available_names: Vec<&str> =
+                        available_tools.iter().map(|s| s.name.as_str()).collect();
+                    let available = available_names.join(", ");
                     tracing::warn!(
                         tool = %call.name,
                         "no provider advertises this tool; not dispatching"
@@ -476,9 +474,11 @@ impl Engine {
                             result: ToolResult {
                                 tool_call_id: call.id.clone(),
                                 content: format!(
-                                    "Unknown tool '{}'. Available tools are: {available}. \
-                                     Retry using one of these exact names.",
-                                    call.name
+                                    "Unknown tool '{}'.{} Available tools are: \
+                                     {available}. Retry using one of these exact \
+                                     names.",
+                                    call.name,
+                                    did_you_mean(&call.name, &available_names)
                                 ),
                                 is_error: true,
                             },
@@ -907,5 +907,78 @@ impl Engine {
         }
 
         failed(rounds, input_tokens, output_tokens)
+    }
+}
+
+/// Sugerencia "¿quisiste decir X?" para una tool inexistente — incidente
+/// roam #9 (2026-07-20): gpt-oss:20b llamó tres veces en un mismo turno
+/// a `search`, que no existe, quemando tres rondas; el error listaba las
+/// tools válidas pero no señalaba la obvia (`grep`). Heurística
+/// deliberadamente tonta —substring en cualquier dirección, y si no,
+/// distancia de edición 1-2 sobre nombres cortos— porque el objetivo es
+/// nombrar UN candidato evidente, no resolver búsqueda difusa. Devuelve
+/// "" cuando no hay candidato claro, para no inventar pistas.
+fn did_you_mean(requested: &str, available: &[&str]) -> String {
+    let req = requested.to_lowercase();
+    let best = available.iter().find(|name| {
+        let n = name.to_lowercase();
+        n.contains(&req) || req.contains(&n) || edit_distance_at_most_2(&req, &n)
+    });
+    match best {
+        Some(name) => format!(" Did you mean '{name}'?"),
+        None => String::new(),
+    }
+}
+
+/// Distancia de Levenshtein acotada a 2 — suficiente para typos
+/// (`read_fil`, `grepp`) sin traer una dependencia ni comparar nombres
+/// que solo comparten longitud.
+fn edit_distance_at_most_2(a: &str, b: &str) -> bool {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    if a.len().abs_diff(b.len()) > 2 {
+        return false;
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()] <= 2
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::{did_you_mean, edit_distance_at_most_2};
+
+    /// El caso real: el modelo pidió `search`, existe `grep`. No hay
+    /// parecido léxico, así que la heurística NO debe inventar — pero un
+    /// typo cercano sí debe resolverse.
+    #[test]
+    fn suggests_a_close_name_and_stays_quiet_otherwise() {
+        let tools = ["read_file", "write_file", "edit_file", "shell_exec", "grep", "glob"];
+        assert_eq!(did_you_mean("grepp", &tools), " Did you mean 'grep'?");
+        assert_eq!(did_you_mean("read_fil", &tools), " Did you mean 'read_file'?");
+        // `search` no se parece a nada disponible: sin pista inventada.
+        assert_eq!(did_you_mean("search", &tools), "");
+    }
+
+    /// Un nombre que CONTIENE a uno válido (o al revés) cuenta como
+    /// candidato: `file_read`/`read` son errores típicos de un modelo
+    /// que recuerda la familia pero no el nombre exacto.
+    #[test]
+    fn substring_matches_count_as_candidates() {
+        let tools = ["read_file", "grep"];
+        assert_eq!(did_you_mean("read", &tools), " Did you mean 'read_file'?");
+    }
+
+    #[test]
+    fn edit_distance_is_bounded() {
+        assert!(edit_distance_at_most_2("grep", "grepp"));
+        assert!(!edit_distance_at_most_2("grep", "shell_exec"));
     }
 }
