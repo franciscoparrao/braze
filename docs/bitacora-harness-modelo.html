@@ -123,7 +123,7 @@
     <tr><td class="n">7</td><td>El turno revienta su presupuesto de tokens</td><td>El fix #3 volcaba el razonamiento <em>completo</em> de un modelo en espiral</td><td>Cap de 800 chars conservando la cola</td><td class="n mono">4c84c22</td></tr>
     <tr><td class="n">8</td><td>Turno muerto con rondas de 11 y 31 tokens "vacías"</td><td>No se podía distinguir "no dijo nada" de "dijo algo que el harness no mapea"</td><td><code>EmptyModelResponse</code> reporta los tokens generados</td><td class="n mono">953941a</td></tr>
     <tr><td class="n">9</td><td>El modelo sigue una pista falsa; llama 3× a una tool inexistente</td><td><code>grep -r</code> descendía a <code>.git/</code>; el error de tool desconocida no sugería alternativa</td><td>Excluir <code>.git</code>/<code>target</code>/…; sugerencia "¿quisiste decir?"</td><td class="n mono">3c93bba</td></tr>
-    <tr><td class="n">10</td><td>Tras terminar la tarea, el modelo relee el archivo 3× y choca con el guard</td><td>La nota de convergencia aconseja "arregla con un edit decisivo" a un turno que <em>ya editó bien</em></td><td><strong>Palanca nueva</strong>: la nota distingue si el turno ya editó y aconseja verificar</td><td class="n mono">pendiente</td></tr>
+    <tr><td class="n">10</td><td>Tras terminar la tarea, el modelo relee el archivo 3× y choca con el guard</td><td>La nota de convergencia aconseja "arregla con un edit decisivo" a un turno que <em>ya editó bien</em></td><td><strong>Palanca nueva</strong>: la nota distingue si el turno ya editó y aconseja verificar</td><td class="n mono">6892b11</td></tr>
   </tbody>
 </table>
 </div>
