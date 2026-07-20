@@ -214,6 +214,26 @@ impl LocalToolsProvider {
         result
     }
 
+    /// Incidente roam #14 (2026-07-20): una denegación de permiso volvía
+    /// como `"action denied: run \`cargo test\`"` y nada más — un
+    /// callejón sin salida. Observado en vivo: el modelo quiso verificar
+    /// con `cargo test`, el permiso se denegó (en `braze run` headless
+    /// EOF = no), y sin saber qué hacer con el "no" el modelo <em>fabricó
+    /// el éxito</em> ("Running cargo test should now compile… confirming
+    /// both behave as expected") sobre un test que en realidad fallaba.
+    /// El mensaje ahora dirige: el comando NO corrió, no inventes su
+    /// salida, y si era verificación, díselo al usuario con el comando
+    /// exacto. Vale para modo interactivo también: un usuario que deniega
+    /// dejaba al modelo en el mismo pozo.
+    fn denied_message(err: &braze_permissions::PermissionError) -> String {
+        format!(
+            "{err}. The command did NOT run — no output was produced. Do not assume it \
+             succeeded or invent its result. If this was a verification step (tests, a \
+             build, a linter), say plainly in your final answer that you could not run it, \
+             and include the exact command so the user can run it themselves."
+        )
+    }
+
     async fn invoke_shell_exec(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
         let args: ShellExecArgs = parse_args(call)?;
         let action = ActionDescriptor::ShellCommand {
@@ -224,7 +244,7 @@ impl LocalToolsProvider {
             .await
             .map_err(|err| ToolError::InvocationFailed {
                 name: call.name.clone(),
-                message: err.to_string(),
+                message: Self::denied_message(&err),
             })?;
         Ok(self.wrap(
             call,
@@ -275,7 +295,7 @@ impl LocalToolsProvider {
             .await
             .map_err(|err| ToolError::InvocationFailed {
                 name: call.name.clone(),
-                message: err.to_string(),
+                message: Self::denied_message(&err),
             })
     }
 }
@@ -773,8 +793,16 @@ mod tests {
             ))
             .await;
 
-        assert!(result.is_err());
+        let err = result.expect_err("a denied command must fail");
         assert!(target.exists(), "denied shell command must not run");
+        // Incidente roam #14: la denegación debe dirigir, no ser un
+        // callejón sin salida que invite a fabricar el resultado.
+        let msg = err.to_string();
+        assert!(msg.contains("did NOT run"), "got: {msg}");
+        assert!(
+            msg.contains("could not run it") && msg.contains("command"),
+            "the denial must steer the model to surface the command to the user: {msg}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
