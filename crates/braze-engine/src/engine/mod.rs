@@ -1761,6 +1761,12 @@ mod tests {
     /// with the tool results preserved and NO fabricated final answer —
     /// while a fallback whose *call itself* dies keeps failing (next
     /// test), so real backend errors don't hide behind this tolerance.
+    ///
+    /// El tool call es `write_file`, no `echo` (incidente roam #13): la
+    /// tolerancia se justifica por trabajo REAL en disco, y con un
+    /// stand-in no-mutante el test afirmaba algo más amplio de lo que el
+    /// caso motivador sostiene — precisamente el hueco por el que un
+    /// turno sin una sola mutación exitosa terminaba en Ok silencioso.
     #[tokio::test]
     async fn an_empty_summary_round_after_a_dispatched_tool_call_ends_the_turn_without_failing() {
         let (store, dir) = temp_store();
@@ -1770,8 +1776,8 @@ mod tests {
             vec![
                 CompletionEvent::ToolCallRequested {
                     id: "call-1".to_string(),
-                    name: "echo".to_string(),
-                    arguments: serde_json::json!({ "text": "hola" }),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({ "path": "a.rs" }),
                 },
                 CompletionEvent::Done,
             ],
@@ -1783,7 +1789,7 @@ mod tests {
 
         let engine = Engine::new(
             Box::new(model),
-            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::clone(
                 &invocations,
             )))]),
             Arc::new(store),
@@ -1822,6 +1828,52 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::AssistantText { .. })),
             "an empty summary must not persist a fabricated final answer, got: {events:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Incidente roam #13 (2026-07-20): el reverso del test de arriba.
+    /// Un turno que despachó tool calls pero nunca aterrizó una mutación
+    /// —observado en vivo: sólo lecturas, dos `edit_file` rechazados—
+    /// no tiene nada que preservar. Terminar en `Ok` le dejaba al usuario
+    /// una pantalla en blanco: ni respuesta ni error. Ahora sale el
+    /// error honesto, que además reporta los tokens generados.
+    #[tokio::test]
+    async fn an_empty_summary_round_without_any_successful_edit_fails_instead_of_ending_silently() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    // Sólo lectura: el turno "hizo cosas" sin cambiar nada.
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({ "path": "a.rs" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![CompletionEvent::Done],
+            vec![CompletionEvent::Done],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            matches!(result, Err(EngineError::EmptyModelResponse { .. })),
+            "a turn that changed nothing and said nothing must not report success, got {result:?}"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

@@ -82,6 +82,17 @@ pub async fn edit_file(args: EditFileArgs, strict: bool) -> Result<String, Strin
         Err(err) => return Err(format!("failed to read '{}': {err}", path.display())),
     };
 
+    if let Some(marker) = elision_marker(&args.old_string, &args.new_string) {
+        return Err(format!(
+            "new_string looks abbreviated: it contains {marker} while being shorter than \
+             old_string. `edit_file` writes new_string VERBATIM — a placeholder like that \
+             would be written into '{}' as literal text, silently corrupting the file. \
+             Send the complete replacement text, or use write_file with the file's full \
+             updated content.",
+            path.display()
+        ));
+    }
+
     let (updated, strategy) = apply_edit(&original, &args.old_string, &args.new_string, strict)
         .map_err(|kind| kind.into_message(&path, &original, &args.old_string))?;
 
@@ -100,6 +111,47 @@ pub async fn edit_file(args: EditFileArgs, strict: bool) -> Result<String, Strin
             path.display()
         ),
     })
+}
+
+/// Incidente roam #12 (2026-07-20): un modelo que abrevia el reemplazo
+/// ("lazy diff") manda un `new_string` con una elisión — la forma
+/// observada fue literalmente `"…fn test_mcp_square_with_interior_point()
+/// {\n..."`. `edit_file` escribe `new_string` VERBATIM, así que esa
+/// llamada habría dejado `...` como texto dentro de `lib.rs` y borrado
+/// el resto del bloque. Solo se salvó porque `old_string` no matcheó:
+/// una corrupción silenciosa a un fallo de suerte de distancia.
+///
+/// La heurística exige DOS señales para no castigar código legítimo
+/// (`...` es sintaxis válida en Python, y un comentario puede
+/// mencionarlo): un marcador de elisión Y un `new_string` más corto que
+/// el `old_string` que reemplaza. Abreviar es, por definición, acortar.
+/// Un falso positivo no bloquea al modelo: el mensaje lo manda a
+/// `write_file`, que es la salida correcta de todos modos.
+fn elision_marker(old_string: &str, new_string: &str) -> Option<&'static str> {
+    if new_string.len() >= old_string.len() {
+        return None;
+    }
+    for line in new_string.lines() {
+        let t = line.trim();
+        if t == "..." || t == "…" {
+            return Some("a bare `...` line");
+        }
+        let comment = t
+            .trim_start_matches(['/', '#', '-', '<', '!', '*', ';', '%'])
+            .trim_start_matches("--")
+            .trim();
+        if t != comment
+            && (comment.starts_with("...")
+                || comment.starts_with('…')
+                || comment.contains("rest of the")
+                || comment.contains("unchanged")
+                || comment.contains("same as before")
+                || comment.contains("existing code"))
+        {
+            return Some("an elision comment");
+        }
+    }
+    None
 }
 
 /// Which rung of the matching ladder produced the edit — surfaced in the
@@ -353,6 +405,80 @@ mod tests {
     /// ones was written to exercise.
     async fn edit_file_fuzzy(args: EditFileArgs) -> Result<String, String> {
         edit_file(args, false).await
+    }
+
+    /// Incidente roam #12: la llamada exacta que gpt-oss:20b produjo
+    /// contra roam. Si `old_string` hubiera matcheado, el `...` quedaba
+    /// escrito dentro de `lib.rs` y el resto del bloque desaparecía.
+    #[tokio::test]
+    async fn an_abbreviated_new_string_is_rejected_before_it_corrupts_the_file() {
+        let dir = unique_temp_dir("edit-file-elision");
+        let original = "    #[test]\n    fn t() {\n        let a = 1;\n        let b = 2;\n    }\n";
+        let file_path = fixture_file(&dir, original).await;
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: original.to_string(),
+            new_string: "    #[test]\n    fn t() {\n...".to_string(),
+        })
+        .await
+        .expect_err("an abbreviated replacement must be rejected");
+
+        assert!(err.contains("looks abbreviated"), "got: {err}");
+        assert!(
+            err.contains("write_file"),
+            "the rejection must steer somewhere: {err}"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(&file_path).await.expect("read back"),
+            original,
+            "the file must be untouched by a rejected edit"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// La otra forma habitual del lazy diff: el comentario que promete
+    /// que lo omitido sigue ahí.
+    #[tokio::test]
+    async fn an_elision_comment_is_rejected_too() {
+        let dir = unique_temp_dir("edit-file-elision-comment");
+        let original = "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\nfn e() {}\n";
+        let file_path = fixture_file(&dir, original).await;
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: original.to_string(),
+            new_string: "fn a() {}\n// ... rest of the functions unchanged\n".to_string(),
+        })
+        .await
+        .expect_err("an elision comment must be rejected");
+        assert!(err.contains("looks abbreviated"), "got: {err}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// La guarda no puede castigar a un edit legítimo que además crezca
+    /// — `...` es sintaxis válida en varios lenguajes y un comentario
+    /// puede mencionarlo sin estar abreviando nada.
+    #[tokio::test]
+    async fn a_longer_replacement_mentioning_dots_is_allowed() {
+        let dir = unique_temp_dir("edit-file-elision-fp");
+        let file_path = fixture_file(&dir, "x = 1\n").await;
+
+        let result = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: "x = 1\n".to_string(),
+            new_string: "def f():\n    ...\n\nx = 1\ny = 2\nz = 3\n".to_string(),
+        })
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "a replacement that GROWS is not an abbreviation: {result:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     #[tokio::test]

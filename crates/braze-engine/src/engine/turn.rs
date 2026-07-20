@@ -477,6 +477,40 @@ impl Engine {
                             // dispatched tool calls plus a paid fallback
                             // round, never a bare empty first round.
                             SummaryFallbackOutcome::Empty => {
+                                // Incidente roam #13 (2026-07-20): esta
+                                // rama existe porque U-1 tenía trabajo
+                                // REAL en disco (`write_file` aplicado) y
+                                // fallar el turno lo habría reportado como
+                                // pérdida total. Pero la condición que la
+                                // gatilla — "despachó al menos una tool
+                                // call" — también la cumple un turno que
+                                // solo leyó archivos y falló todos sus
+                                // edits, que es lo observado: dos
+                                // `edit_file` rechazados, cero mutaciones,
+                                // y el turno cerrando en Ok con la pantalla
+                                // en blanco. Al usuario le quedó "y ahí
+                                // quedó": ni respuesta ni error.
+                                //
+                                // Haber despachado tools no es haber hecho
+                                // algo. Sin una mutación exitosa no hay
+                                // nada que preservar, y el error honesto
+                                // —que además ya reporta los tokens
+                                // generados (incidente #8)— es más útil
+                                // que el silencio.
+                                if !self
+                                    .turn_did_edit
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    tracing::warn!(
+                                        round,
+                                        "summary fallback returned empty and this turn never \
+                                         landed a successful edit; surfacing the empty response \
+                                         instead of ending silently with nothing to show"
+                                    );
+                                    return Err(EngineError::EmptyModelResponse {
+                                        generated_tokens: round_output_tokens,
+                                    });
+                                }
                                 tracing::warn!(
                                     round,
                                     "summary fallback also returned empty; ending the turn with \
