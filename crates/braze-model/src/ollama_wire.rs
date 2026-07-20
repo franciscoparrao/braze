@@ -448,6 +448,12 @@ static TOOL_CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// version starts fragmenting tool call arguments, this function would
 /// need the same accumulate-until-`content_block_stop`-style buffering as
 /// the Anthropic backend.
+/// Tope del fallback de `thinking` (incidente roam #7): suficiente para
+/// que el usuario vea en qué estaba el modelo, lejos de lo que cuesta
+/// un presupuesto de turno. Se conserva la COLA del razonamiento — lo
+/// último pensado es lo más cercano a una conclusión.
+const MAX_THINKING_FALLBACK_CHARS: usize = 800;
+
 pub(crate) struct OllamaStreamState {
     pub done: bool,
     /// Set when a line carries a top-level `"error"` field — Ollama emits
@@ -538,9 +544,26 @@ impl OllamaStreamState {
                     "ollama round produced only `thinking`; surfacing it as text \
                      (a thinking model spent the round reasoning without answering)"
                 );
+                // Incidente roam #7: la primera versión de este fallback
+                // volcaba el razonamiento COMPLETO, y un modelo en
+                // espiral (miles de tokens dando vueltas sobre un test
+                // que no lograba diagnosticar) reventaba el presupuesto
+                // del turno con su propio monólogo — cambiar morir en
+                // silencio por morir ahogado no es una mejora. Se capa a
+                // la COLA: si el modelo razonó largo, lo último que
+                // pensó es lo más cercano a una conclusión.
+                let trimmed = self.thinking.trim();
+                let shown = if trimmed.chars().count() > MAX_THINKING_FALLBACK_CHARS {
+                    let tail: String = trimmed
+                        .chars()
+                        .skip(trimmed.chars().count() - MAX_THINKING_FALLBACK_CHARS)
+                        .collect();
+                    format!("…[razonamiento recortado]…{tail}")
+                } else {
+                    trimmed.to_string()
+                };
                 events.push(CompletionEvent::TextDelta(format!(
-                    "[razonamiento del modelo, sin respuesta final]\n{}",
-                    self.thinking.trim()
+                    "[razonamiento del modelo, sin respuesta final]\n{shown}"
                 )));
                 self.produced_output = true;
             }
@@ -1109,6 +1132,38 @@ mod tests {
             .collect();
         assert!(text.contains("I should create main.rs next."), "got: {text}");
         assert!(text.contains("razonamiento"), "must be marked as reasoning: {text}");
+    }
+
+    /// Regression test for the roam #7 incident (2026-07-20): the
+    /// thinking fallback must be CAPPED. Its first version dumped the
+    /// full reasoning, and a model in a diagnostic spiral blew the
+    /// turn's token budget with its own monologue — trading a silent
+    /// death for death by drowning is not an improvement.
+    #[test]
+    fn a_long_thinking_fallback_is_capped_keeping_the_tail() {
+        let mut state = OllamaStreamState::new(0);
+        let long = format!("{}CONCLUSION_AL_FINAL", "vueltas y vueltas ".repeat(400));
+        state.handle_line(&serde_json::json!({
+            "message": {"role": "assistant", "content": "", "thinking": long}
+        }));
+        let events = state.handle_line(&serde_json::json!({"done": true, "eval_count": 4000}));
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                CompletionEvent::TextDelta(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            text.chars().count() < 1000,
+            "el fallback debe estar capado, largo={}",
+            text.chars().count()
+        );
+        assert!(
+            text.contains("CONCLUSION_AL_FINAL"),
+            "debe conservar la COLA del razonamiento: {text}"
+        );
+        assert!(text.contains("recortado"), "y marcar que se recortó: {text}");
     }
 
     /// The fallback must NOT fire when the round produced real content:
