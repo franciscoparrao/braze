@@ -211,8 +211,18 @@
     <li>La <strong>sugerencia de tool inexistente (#9) no es pegajosa</strong>: el modelo alcanzó <code>search</code> cuatro veces en la sesión, y cada compactación borró la lección del error anterior.</li>
     <li>El <strong>guard del turno vacío (#13) no cubre este caso</strong>: sólo falla el turno cuando el fallback de resumen vuelve <em>vacío</em>. Acá volvió <em>no-vacío</em> (razonamiento), así que el turno terminó en Ok sin haber editado nada. La señal <code>turn_did_edit</code> existe pero no se consulta en esta rama.</li>
   </ul>
-  <p>Por qué queda <strong>abierto</strong> y no parcheado en caliente: la raíz es de <em>configuración</em> (un <code>num_ctx</code> de 8192 es demasiado chico para multi-turno; el propio código contempla 32768 en un nodo LAN, y Nitro lo aguanta), y los arreglos de código que se insinúan —endurecer #13 para el resumen no-vacío sin edición, hacer el anclaje de ediciones consciente de la compactación, preservar verbatim el propio output reciente del modelo a través del fold— son cambios de diseño que merecen su propia sesión, no un remiendo al final de una larga. Se registra con el diagnóstico completo; el fix es el próximo incremento.</p>
-  <p class="note">Método: la sesión se manejó headless con un driver <code>pexpect</code> (la técnica de "pty scripteado" del proyecto) que envía cada tarea al ver el prompt <code>&gt; </code> y contesta los permisos — aprueba <code>cargo*</code>, deniega el resto. Transcript y rollout log completos en el scratchpad.</p>
+  <p>La primera hipótesis fue que la raíz era de <em>configuración</em>: <code>num_ctx=8192</code> demasiado chico. Así que se corrió el <strong>mismo</strong> guion multi-turno barriendo la ventana. El resultado desmiente la hipótesis simple:</p>
+  <div class="scroll"><table>
+    <thead><tr><th>num_ctx</th><th>compactaciones</th><th>resultado</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">8192</td><td>14</td><td>cascada; archivo queda <em>compilando</em> (solo <code>duration()</code>)</td></tr>
+      <tr><td class="mono">16384</td><td>1</td><td>error de parseo de tool-call (razonamiento filtrado al canal de la call, HTTP 500 de Ollama, primo de #1); archivo <strong>no compila</strong> — <code>mean_speed()</code> sin <code>duration()</code></td></tr>
+      <tr><td class="mono">32768</td><td>0</td><td>CUDA out of memory — el modelo no corre; la VRAM de Nitro no da</td></tr>
+    </tbody>
+  </table></div>
+  <p>La compactación <strong>sí</strong> es dependiente de la ventana (14→1→0), así que esa mitad del diagnóstico se confirma. Pero agrandar la ventana <em>no arregla el multi-turno</em>: cambia un modo de falla por otro. A 16k la compactación casi desaparece y aparece en cambio el filtrado de razonamiento al canal de tool-call; a 32k no hay compactación pero el modelo directamente no cabe en la GPU. En <strong>ninguna</strong> ventana probada la cadena de tres turnos terminó correcta. Hay un techo de hardware —la VRAM de Nitro— que además cierra la vía de escape por configuración.</p>
+  <p>Por eso queda <strong>abierto</strong>: no es "sube el <code>num_ctx</code>". Es multi-causal (compactación con pérdida, presión de VRAM, filtrado de razonamiento al canal de tool-call bajo contextos largos) y los arreglos de código que se insinúan —endurecer #13 para el resumen no-vacío sin edición, anclaje de ediciones consciente de la compactación, preservar verbatim el propio output reciente del modelo a través del fold— son cambios de diseño que merecen su propia sesión. El diagnóstico queda completo; el fix es el próximo incremento.</p>
+  <p class="note">Método: la sesión se manejó headless con un driver <code>pexpect</code> (la técnica de "pty scripteado" del proyecto) que envía cada tarea al ver el prompt <code>&gt; </code> y contesta permisos — aprueba <code>cargo*</code>, deniega el resto. Un aprendizaje del propio driver: su primer timeout (600 s) era más corto que un turno a 32k en CPU, lo desincronizó y produjo un run inválido; subirlo a 1800 s y hacer que <em>no</em> avance de tarea en timeout lo arregló. El experimento también depura sus instrumentos.</p>
 </div>
 
 <h2>El patrón meta</h2>
