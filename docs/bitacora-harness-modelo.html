@@ -80,17 +80,17 @@
 
 <h1>Bitácora harness↔modelo</h1>
 <p class="lede">Qué falla cuando un modelo local de 20B intenta programar de verdad — y qué parte de eso es arreglable desde el harness.</p>
-<p class="meta">braze × roam · registro vivo · última actualización 2026-07-20 (11.ª sesión)</p>
+<p class="meta">braze × roam · registro vivo · última actualización 2026-07-20 (12.ª sesión)</p>
 
 <p>Este documento registra un experimento en curso: usar <strong>braze</strong> (harness agéntico propio, Rust) con <strong>gpt-oss:20b</strong> corriendo local en CPU para desarrollar <strong>roam</strong> (motor de movement ecology) como proyecto real, y tratar cada falla como evidencia sobre la interfaz harness↔modelo.</p>
 
-<p>La premisa: el bench autoral de braze mide palancas en tareas diseñadas para medirlas. El uso productivo expone otra clase de fallo — el que ningún benchmark produce porque nadie lo escribió a propósito. Diez hallazgos en once sesiones sugieren que esa clase es grande.</p>
+<p>La premisa: el bench autoral de braze mide palancas en tareas diseñadas para medirlas. El uso productivo expone otra clase de fallo — el que ningún benchmark produce porque nadie lo escribió a propósito. Once hallazgos en doce sesiones sugieren que esa clase es grande.</p>
 
 <div class="kpis">
-  <div class="kpi"><div class="v">11</div><div class="k">sesiones</div></div>
-  <div class="kpi"><div class="v">10</div><div class="k">hallazgos</div></div>
-  <div class="kpi"><div class="v">2</div><div class="k">palancas nuevas</div></div>
-  <div class="kpi"><div class="v">1045→1057</div><div class="k">tests del workspace</div></div>
+  <div class="kpi"><div class="v">12</div><div class="k">sesiones</div></div>
+  <div class="kpi"><div class="v">11</div><div class="k">hallazgos</div></div>
+  <div class="kpi"><div class="v">3</div><div class="k">palancas nuevas</div></div>
+  <div class="kpi"><div class="v">1045→1059</div><div class="k">tests del workspace</div></div>
   <div class="kpi"><div class="v">0</div><div class="k">líneas de roam escritas por Claude</div></div>
 </div>
 
@@ -99,7 +99,7 @@
 <ol class="method">
   <li><strong>Una tarea acotada por sesión</strong> de braze, siempre con criterio de término verificable (<code>cargo test</code>).</li>
   <li>Cuando falla, el diagnóstico sale del <strong>rollout log persistido</strong> (<code>~/.local/share/braze/sessions/*.jsonl</code>), no de la impresión de la TUI: eventos, argumentos, tokens y errores exactos.</li>
-  <li>Se distingue <strong>falla de capacidad</strong> (el modelo no supo) de <strong>falla de interfaz</strong> (el harness no le dio lo que necesitaba, o le dio algo que lo confundió). Solo la segunda se arregla acá.</li>
+  <li>Se distingue <strong>falla de capacidad</strong> (el modelo no supo) de <strong>falla de interfaz</strong> (el harness no le dio lo que necesitaba, o le dio algo que lo confundió). Solo la segunda se arregla acá — con una excepción que apareció en el hallazgo #11: una falla de capacidad que el harness puede <em>compensar barato</em> también entra, y se anota como tal.</li>
   <li>Fix + <strong>test de regresión</strong> + <code>cargo install</code>, y la siguiente sesión corre con el binario nuevo.</li>
   <li><strong>Claude verifica el ground truth</strong> — corre los tests, lee el código, replica los algoritmos por fuera — en vez de creerle al reporte final del modelo.</li>
 </ol>
@@ -124,6 +124,7 @@
     <tr><td class="n">8</td><td>Turno muerto con rondas de 11 y 31 tokens "vacías"</td><td>No se podía distinguir "no dijo nada" de "dijo algo que el harness no mapea"</td><td><code>EmptyModelResponse</code> reporta los tokens generados</td><td class="n mono">953941a</td></tr>
     <tr><td class="n">9</td><td>El modelo sigue una pista falsa; llama 3× a una tool inexistente</td><td><code>grep -r</code> descendía a <code>.git/</code>; el error de tool desconocida no sugería alternativa</td><td>Excluir <code>.git</code>/<code>target</code>/…; sugerencia "¿quisiste decir?"</td><td class="n mono">3c93bba</td></tr>
     <tr><td class="n">10</td><td>Tras terminar la tarea, el modelo relee el archivo 3× y choca con el guard</td><td>La nota de convergencia aconseja "arregla con un edit decisivo" a un turno que <em>ya editó bien</em></td><td><strong>Palanca nueva</strong>: la nota distingue si el turno ya editó y aconseja verificar</td><td class="n mono">6892b11</td></tr>
+    <tr><td class="n">11</td><td>El modelo cierra la tarea sin correr los tests que el prompt pedía</td><td>El guardrail post-edit devolvía <code>None</code> en éxito: el silencio es indistinguible de "no corrió"</td><td>Confirmación acotada ("compila, <em>no</em> es un test run") + warnings visibles</td><td class="n mono">9b3516f</td></tr>
   </tbody>
 </table>
 </div>
@@ -160,9 +161,20 @@
   <p class="note">Este hallazgo estaba <em>predicho</em> en la versión anterior de esta bitácora ("anotado, no implementado") a partir del patrón conductual de abajo. La sesión siguiente lo produjo en vivo.</p>
 </div>
 
+<div class="finding">
+  <h3>#11 — El silencio no era gratis, era ambiguo <span class="tag new">palanca nueva</span></h3>
+  <p class="sym"><strong>Síntoma:</strong> el modelo implementa haversine correctamente — verificado por fuera: 111.194,9 m por grado de latitud, y la convergencia de meridianos en latitud 60 da exactamente la mitad que en el ecuador — y declara la tarea terminada sin agregar un solo test y sin correr <code>cargo test</code>. Ambas cosas estaban pedidas explícitamente en el prompt.</p>
+  <p>La causa estaba en una línea del guardrail post-edit: <code>if output.status.success() { return None }</code>. En éxito no devolvía nada, y ese <code>None</code> es el mismo que devuelven "no hay formatter para esta extensión", "el binario no se pudo ejecutar" y "el check expiró". El modelo edita, no le vuelve nada, y lee la ausencia de errores como verificación. El comentario del código llamaba a esto <em>"token-free happy path"</em>; el silencio no era gratis, era ambiguo — y la ambigüedad se paga después.</p>
+  <p>Ahora un check exitoso confirma que <strong>compila</strong> y acota que eso <strong>no</strong> es haber corrido tests. <code>None</code> queda reservado para "el guardrail no pudo decir nada", que es información distinta de "pasó".</p>
+  <p>De paso cierra el hallazgo que la tarea 2 había dejado abierto. Los warnings viven en el stderr de un <em>exit 0</em>, así que se descartaban enteros — y ahí es justo donde queda el residuo de una eliminación: al borrar <code>hello()</code> el modelo dejó vivos sus imports, y su docstring huérfano se pegó a la función siguiente, de modo que la documentación pública de <code>mcp()</code> pasó a empezar con "Returns a greeting string". <code>cargo doc</code> compilaba eso sin una queja. Se anexan hasta 3 líneas de warning, un orden de magnitud por debajo del presupuesto de los errores: el modo de falla del hallazgo #7 fue ahogar el canal.</p>
+  <p class="note">Nota de método: la primera versión del filtro usaba <code>starts_with("warning:")</code>, compilaba, y no capturaba un solo warning real — el formatter por defecto corre con <code>--message-format=short</code>, que antepone la ubicación. Lo atrapó el test escrito contra la salida real de <code>cargo</code>, no la revisión del código.</p>
+</div>
+
 <h2>El patrón meta</h2>
 
-<p>Ocho de los diez hallazgos son de <strong>interfaz</strong>, no de capacidad. El modelo sabía qué hacer; el harness le devolvía algo que no podía usar (un error sin diagnóstico, un canal que no leía, una pista falsa desde <code>.git</code>), o le quitaba tiempo que necesitaba (el reloj contra el humano), o le avisaba tarde (la nota sin margen).</p>
+<p>Nueve de los once hallazgos son de <strong>interfaz</strong>, no de capacidad. El modelo sabía qué hacer; el harness le devolvía algo que no podía usar (un error sin diagnóstico, un canal que no leía, una pista falsa desde <code>.git</code>), o le quitaba tiempo que necesitaba (el reloj contra el humano), o le avisaba tarde (la nota sin margen), o no le devolvía nada y lo dejó concluir de más (el silencio del guardrail).</p>
+
+<p>El hallazgo #11 obligó además a abrir una categoría que el método no tenía. Ignorar dos instrucciones explícitas del prompt ("agrega tests", "verifica con <code>cargo test</code>") es, estrictamente, una <strong>falla de capacidad</strong>: al modelo se le dijo y no lo hizo. Por la regla del método, eso no se arregla acá. Pero el harness sí puede <em>compensarla</em> — no obligando a correr tests, sino dejando de emitir una señal que el modelo estaba leyendo como permiso para no hacerlo. La distinción útil no es "capacidad vs. interfaz" sino <strong>qué déficit del modelo el harness puede compensar barato</strong>, que es exactamente la tesis que el paper mide.</p>
 
 <p>Y hay un patrón conductual que se repite y todavía no está resuelto:</p>
 
@@ -170,15 +182,19 @@
 
 <p>El caso más nítido: cuatro ediciones correctas en las primeras rondas, y luego dieciséis rondas releyendo el archivo sin nunca correr <code>cargo test</code> — que habría confirmado el éxito. Murió en el cap sin enterarse de que había ganado. En otro turno, el post-edit check reportó el error exacto con número de línea y el modelo lo ignoró durante diecisiete rondas.</p>
 
+<p>El patrón tiene <strong>dos caras opuestas</strong>, y las dos aparecieron en sesiones consecutivas. En la tarea 2 el modelo <em>sobre-verificó</em>: terminó el trabajo y siguió releyendo. En la tarea 3 <em>sub-verificó</em>: terminó el trabajo y cerró sin comprobar nada. Parecen contrarios pero son el mismo déficit — no tiene un modelo de <em>qué evidencia confirmaría que terminó</em>, así que sin una señal externa se queda corto o se pasa de largo. Las palancas #10 y #11 atacan las dos caras: una le dice que ya editó, la otra le dice qué se verificó realmente.</p>
+
 <p>Eso sugirió un incremento concreto: la nota de convergencia debería saber si el turno <em>ya hizo ediciones exitosas</em> y cambiar el consejo de "arregla con una edición decisiva" a "verifica lo que editaste". Quedó anotado — y la sesión siguiente lo produjo en vivo (hallazgo #10), así que está implementado.</p>
 
 <p>Vale la pena notar el orden: el patrón se dedujo del comportamiento antes de tener un caso limpio que lo aislara. Es la primera vez en esta bitácora que la lectura del log <em>predice</em> un hallazgo en vez de explicarlo después.</p>
 
-<p>Y queda una variante del mismo patrón todavía abierta. En esta sesión el modelo borró <code>hello()</code> pero dejó vivos sus <code>use std::time::{SystemTime, UNIX_EPOCH}</code>, ahora muertos. El guardrail post-edit corre <code>cargo check</code> y devuelve <strong>errores</strong> al modelo, no <em>warnings</em> — y el residuo de una eliminación es exactamente lo que aparece como warning. El modelo no podía verlo. No está arreglado: devolver todos los warnings arriesga ahogar el canal, que es justo el modo de falla del hallazgo #7.</p>
+<p>La variante que la tarea 2 dejó abierta — el residuo invisible de una eliminación — quedó cerrada por el mismo fix del hallazgo #11, con un presupuesto de warnings deliberadamente estrecho para no repetir el error del #7.</p>
 
 <h2>Qué se construyó mientras tanto</h2>
 
 <p><strong>roam</strong> pasó de un <code>CLAUDE.md</code> que decía "IDEA (sin código)" a un workspace Rust que compila, con <code>Point</code>, <code>Trajectory</code>, timestamps reales del dispositivo (no del reloj del sistema) y <code>mcp()</code> — envolvente convexa por monotone chain, <strong>verificada independientemente</strong> contra el conjunto de vértices esperado y la exclusión de puntos interiores. Dos tests verdes. Todo escrito por el modelo local.</p>
+
+<p>A eso se sumaron, en las dos últimas sesiones, un CLI que imprime el MCP de una trayectoria de ejemplo y las <strong>métricas de paso</strong>: <code>speeds()</code> y <code>net_displacement()</code> sobre distancia haversine. La verificación externa las confirma — 111.194,9 m por grado de latitud, y un grado de longitud en latitud 60 mide exactamente la mitad que en el ecuador, que es la convergencia de meridianos saliendo bien. Esta vez el modelo puso los ejes en su lugar. Lo que no hizo fue escribir un solo test de eso, ni correr los que ya existían: el hallazgo #11.</p>
 
 <p>Un episodio vale por sí solo: un test de <code>mcp()</code> fallaba y el modelo gastó un turno entero buscando el bug en el algoritmo. La verificación externa mostró que <strong>el algoritmo era correcto</strong> — el error estaba en el orden de vértices que el test esperaba, porque <code>push(lat, lon)</code> pone la latitud primero mientras el algoritmo ordena por longitud. El modelo simuló su propio código correctamente, pero con los ejes intercambiados.</p>
 
