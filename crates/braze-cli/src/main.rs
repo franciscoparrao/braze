@@ -290,7 +290,8 @@ fn build_model_backend(
                 model_name,
                 config.ollama_base_url.clone(),
             )
-            .with_num_ctx(config.ollama_num_ctx);
+            .with_num_ctx(config.ollama_num_ctx)
+            .with_prompt_tools(config.ollama_prompt_tools);
             // D2 (docs/AUDITORIA-2026-07-v3.md): these five knobs existed
             // on `OllamaBackend` and as `braze-bench` CLI flags, but were
             // never wired into a real invocation — a sampling regime found
@@ -838,6 +839,15 @@ async fn run() -> Result<(), CliError> {
     if let Some(url) = cli.command.ollama_url_override() {
         config.apply_overrides(braze_config::ConfigOverrides {
             ollama_base_url: Some(url.to_string()),
+            ..Default::default()
+        });
+    }
+    // `--prompt-tools` only ever turns the mode ON (a bare flag), so fold
+    // it in only when present — never clobber a config/env `true` with the
+    // flag's absent `false`.
+    if cli.command.prompt_tools() {
+        config.apply_overrides(braze_config::ConfigOverrides {
+            ollama_prompt_tools: Some(true),
             ..Default::default()
         });
     }

@@ -245,6 +245,14 @@ pub struct Config {
     /// from the front — no error, just a model that "forgot" its system
     /// prompt and tools mid-turn. See `braze-model::OllamaBackend`.
     pub ollama_num_ctx: u32,
+    /// Send the tool inventory in the system prompt and parse tool calls
+    /// client-side (the textual rescue ladder) instead of Ollama's native
+    /// `tools` field. `false` (default) uses native tool-calling. `true`
+    /// sidesteps Ollama's server-side tool-call parser, whose
+    /// harmony-channel handling on gpt-oss returns HTTP 500 ("error
+    /// parsing tool call") under long multi-turn contexts on Ollama
+    /// < 0.32.1 (incidente roam #1). No effect on non-Ollama backends.
+    pub ollama_prompt_tools: bool,
     /// Sampling temperature for the Ollama backend (`options.temperature`).
     /// `None` (the default) leaves `OllamaBackend`'s own default (0.2,
     /// biased toward well-formed tool calls) in place. These five sampling
@@ -573,6 +581,7 @@ impl Default for Config {
             ollama_base_url: "http://localhost:11434".to_string(),
             ollama_model: "llama3.1".to_string(),
             ollama_num_ctx: 8192,
+            ollama_prompt_tools: false,
             ollama_temperature: None,
             ollama_seed: None,
             ollama_top_p: None,
@@ -743,6 +752,9 @@ impl Config {
         }
         if let Some(v) = overrides.ollama_num_ctx {
             self.ollama_num_ctx = v;
+        }
+        if let Some(v) = overrides.ollama_prompt_tools {
+            self.ollama_prompt_tools = v;
         }
         if let Some(v) = overrides.ollama_temperature {
             self.ollama_temperature = Some(v);

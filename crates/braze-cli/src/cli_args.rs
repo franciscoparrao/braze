@@ -97,6 +97,15 @@ pub enum Command {
         /// `docs/self-improvement-guide.html`.
         #[arg(long)]
         supervised: bool,
+        /// Send the tool inventory in the system prompt and parse tool
+        /// calls client-side (via the textual rescue ladder) instead of
+        /// Ollama's native `tools` field. Sidesteps Ollama's server-side
+        /// tool-call parser, whose harmony-channel handling on gpt-oss
+        /// returns HTTP 500 ("error parsing tool call") under long
+        /// multi-turn contexts on Ollama < 0.32.1 (incidente roam #1). No
+        /// effect on non-Ollama backends.
+        #[arg(long = "prompt-tools")]
+        prompt_tools: bool,
     },
     /// One-shot: run a single prompt and exit.
     Run {
@@ -124,6 +133,10 @@ pub enum Command {
         /// semantics as `chat --supervised`.
         #[arg(long)]
         supervised: bool,
+        /// Parse tool calls client-side instead of via Ollama's native
+        /// `tools` field — same semantics as `chat --prompt-tools`.
+        #[arg(long = "prompt-tools")]
+        prompt_tools: bool,
         /// `plain` (default) streams text as before; `json` prints one
         /// JSON object after the turn instead, for CI/scripting callers.
         #[arg(long, value_enum, default_value_t = OutputFormat::Plain)]
@@ -229,6 +242,14 @@ impl Command {
             Command::Permissions { .. } => false,
         }
     }
+
+    /// Whether `--prompt-tools` was passed, common to both subcommands.
+    pub fn prompt_tools(&self) -> bool {
+        match self {
+            Command::Chat { prompt_tools, .. } | Command::Run { prompt_tools, .. } => *prompt_tools,
+            Command::Permissions { .. } => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -246,6 +267,7 @@ mod tests {
             planner: planner.map(str::to_string),
             lead: None,
             supervised: false,
+            prompt_tools: false,
         }
     }
 
@@ -304,5 +326,20 @@ mod tests {
     fn supervised_defaults_to_false() {
         let cli = Cli::parse_from(["braze", "chat"]);
         assert!(!cli.command.supervised());
+    }
+
+    #[test]
+    fn prompt_tools_flag_parses_on_both_subcommands() {
+        let cli = Cli::parse_from(["braze", "chat", "--prompt-tools"]);
+        assert!(cli.command.prompt_tools());
+
+        let cli = Cli::parse_from(["braze", "run", "hola", "--prompt-tools"]);
+        assert!(cli.command.prompt_tools());
+    }
+
+    #[test]
+    fn prompt_tools_defaults_to_false() {
+        let cli = Cli::parse_from(["braze", "chat"]);
+        assert!(!cli.command.prompt_tools());
     }
 }

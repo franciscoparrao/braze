@@ -33,6 +33,8 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub ollama_num_ctx: Option<u32>,
     #[serde(default)]
+    pub ollama_prompt_tools: Option<bool>,
+    #[serde(default)]
     pub ollama_temperature: Option<f32>,
     #[serde(default)]
     pub ollama_seed: Option<u64>,
@@ -177,6 +179,17 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.ollama_num_ctx = Some(parsed);
+                }
+                "OLLAMA_PROMPT_TOOLS" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.ollama_prompt_tools = Some(parsed);
                 }
                 "OLLAMA_TEMPERATURE" => {
                     let parsed =
