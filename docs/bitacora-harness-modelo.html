@@ -89,8 +89,8 @@
 <div class="kpis">
   <div class="kpi"><div class="v">15</div><div class="k">sesiones</div></div>
   <div class="kpi"><div class="v">16</div><div class="k">hallazgos</div></div>
-  <div class="kpi"><div class="v">4</div><div class="k">palancas nuevas</div></div>
-  <div class="kpi"><div class="v">1045→1063</div><div class="k">tests del workspace</div></div>
+  <div class="kpi"><div class="v">5</div><div class="k">palancas nuevas</div></div>
+  <div class="kpi"><div class="v">1045→1066</div><div class="k">tests del workspace</div></div>
   <div class="kpi"><div class="v">0</div><div class="k">líneas de roam escritas por Claude</div></div>
 </div>
 
@@ -129,7 +129,7 @@
     <tr><td class="n">13</td><td>El turno termina sin respuesta ni error — pantalla en blanco</td><td>El fallback de U-1 se gatilla con "despachó tools", que un turno sin mutaciones también cumple</td><td>Sin edición exitosa no hay nada que preservar: sale el error honesto</td><td class="n mono">28d2147</td></tr>
     <tr><td class="n">14</td><td>Denegado <code>cargo test</code>, el modelo <em>fabrica</em> que pasó</td><td>La denegación de permiso volvía como "action denied" y nada más — un callejón sin salida</td><td>El mensaje dirige: no corrió, no inventes su salida, dísela al usuario</td><td class="n mono">728486f</td></tr>
     <tr><td class="n">15</td><td>Con los tests corriendo, el modelo escribe un test que no verifica nada</td><td>Bajo presión de "que pase", referencia la propia implementación: verde tautológico</td><td class="tag self" style="display:inline-block">abierto</td><td class="n mono">—</td></tr>
-    <tr><td class="n">16</td><td>Sesión multi-turno: de 3 tareas encadenadas solo la 1.ª entregó; las otras dos no produjeron nada</td><td>La compactación (num_ctx 8192, cola cruda de 6 eventos) folda el código que el modelo <em>acababa de escribir</em>; en el turno siguiente ancla el edit contra su propia memoria comprimida y falla</td><td class="tag self" style="display:inline-block">abierto</td><td class="n mono">—</td></tr>
+    <tr><td class="n">16</td><td>Sesión multi-turno: de 3 tareas encadenadas solo la 1.ª entregó; las otras dos no produjeron nada</td><td>La compactación (num_ctx 8192, cola cruda de 6 eventos) folda el código que el modelo <em>acababa de escribir</em>; en el turno siguiente ancla el edit contra su propia memoria comprimida y falla</td><td>Faceta "éxito hueco" cerrada (el summary no-vacío sin edición ahora falla); causa raíz abierta</td><td class="n mono">c76aa4b</td></tr>
   </tbody>
 </table>
 </div>
@@ -222,6 +222,7 @@
   </table></div>
   <p>La compactación <strong>sí</strong> es dependiente de la ventana (14→1→0), así que esa mitad del diagnóstico se confirma. Pero agrandar la ventana <em>no arregla el multi-turno</em>: cambia un modo de falla por otro. A 16k la compactación casi desaparece y aparece en cambio el filtrado de razonamiento al canal de tool-call; a 32k no hay compactación pero el modelo directamente no cabe en la GPU. En <strong>ninguna</strong> ventana probada la cadena de tres turnos terminó correcta. Hay un techo de hardware —la VRAM de Nitro— que además cierra la vía de escape por configuración.</p>
   <p>Por eso queda <strong>abierto</strong>: no es "sube el <code>num_ctx</code>". Es multi-causal (compactación con pérdida, presión de VRAM, filtrado de razonamiento al canal de tool-call bajo contextos largos) y los arreglos de código que se insinúan —endurecer #13 para el resumen no-vacío sin edición, anclaje de ediciones consciente de la compactación, preservar verbatim el propio output reciente del modelo a través del fold— son cambios de diseño que merecen su propia sesión. El diagnóstico queda completo; el fix es el próximo incremento.</p>
+  <p><strong>Faceta cerrada</strong> (<span class="mono">c76aa4b</span>): la primera de esas tres. El turno 2 no solo falló en silencio — terminó en <em>Ok</em> con su razonamiento disfrazado de respuesta, y ese éxito falso fue lo que envenenó al turno 3. El guard de #13 solo cubría el fallback <em>vacío</em>; ahora la rama de resumen <em>no-vacío</em> también se desglosa. El discriminador correcto no era "no editó" (eso rompería un Q&A read-only legítimo cuya respuesta quedó en el canal de razonamiento) sino <strong>"intentó editar y no aterrizó nada"</strong>: <code>turn_attempted_edit &amp;&amp; !turn_did_edit</code>. Un turno que quiso cambiar el workspace y produjo cero ahora <em>falla visiblemente</em> en vez de fingir. No arregla la causa raíz — la compactación sigue borrando el estado — pero convierte el modo de falla más venenoso (el silencioso que contamina el turno siguiente) en uno ruidoso que el usuario ve y reintenta.</p>
   <p class="note">Método: la sesión se manejó headless con un driver <code>pexpect</code> (la técnica de "pty scripteado" del proyecto) que envía cada tarea al ver el prompt <code>&gt; </code> y contesta permisos — aprueba <code>cargo*</code>, deniega el resto. Un aprendizaje del propio driver: su primer timeout (600 s) era más corto que un turno a 32k en CPU, lo desincronizó y produjo un run inválido; subirlo a 1800 s y hacer que <em>no</em> avance de tarea en timeout lo arregló. El experimento también depura sus instrumentos.</p>
 </div>
 
