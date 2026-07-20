@@ -92,7 +92,15 @@ graded by an argument-level AST checker committed before the sweep ran
 --- replicates the central result outside our own tasks: the lead
 lever moves the 1B executor by $+72$\,pp on the anchor versus
 $+70.5$\,pp on the authored suite, with baseline ordering preserved
-and the ceiling-pinning null intact.
+and the ceiling-pinning null intact. A second pre-registered anchor
+--- 20 SWE-bench Lite instances graded by the official test-based
+harness --- bounds the same claims at repository scale: no lever
+turns the unassisted 1B (zero patches in 40 runs) into a
+repository-capable agent, but the lead lever's behavioral effect
+transfers with statistical support (patches 0/40~$\to$~6/40,
+$p{=}0.026$), its resolution effect directionally (0~$\to$~2/40,
+including one Django issue resolved in both repetitions), and the
+ceiling-pinning pattern holds (composite 2/40 vs.\ lead alone 3/40).
 For practitioners the takeaway is that not all scaffolding helps by
 default: which lever helps, and in which delivery format, is itself
 scale-dependent and must be measured per deployment rather than
@@ -234,6 +242,15 @@ around the actual contribution.
     naming the right tool and producing correct arguments is
     $+47$\,pp at 1B but $3$--$4$\,pp for competent models
     (\S\ref{sec:bfcl}).
+  \item \textbf{A repository-level anchor}: a pre-registered 20-instance
+    SWE-bench Lite slice graded by the official test-based harness
+    bounds the claims at repository scale --- the unassisted 1B never
+    even edits (0 patches / 40 runs), the lead lever's behavioral
+    effect transfers outside noise (patches 0/40~$\to$~6/40,
+    $p{=}0.026$) with resolution moving directionally (one Django
+    issue resolved in both repetitions), and the pinned-ceiling
+    pattern replicates on execution-graded tasks
+    (\S\ref{sec:swebench}).
   \item \textbf{Causal isolation of the dominant lever}: a three-arm
     experiment separating proactive opening from reactive escalation
     shows the entire gain comes from the former; the reactive trigger
@@ -1069,6 +1086,101 @@ falls to 36\% and \texttt{qwen3.5-coder} to 52\% while
 \texttt{gemma4:e4b} holds 88\% --- consistent with BFCL's own recent
 repositioning of this category as a hallucination measurement.
 
+\subsection{A repository-level anchor: a pre-registered SWE-bench Lite
+slice}\label{sec:swebench}
+% Fuente: docs/swebench-lite-anchor-design-2026-07-19.md,
+% docs/swebench-lite-anchor-results-2026-07-19.md
+
+\S\ref{sec:bfcl} anchors the central lever on function-calling tasks;
+this section anchors it on \emph{repository-level software-engineering
+tasks} — real issues, real repositories, outcomes graded by each
+project's own tests. The design was committed before the driver was
+implemented or any run executed
+(\texttt{docs/swebench-lite-anchor-design-2026-07-19.md}): 20
+instances sampled deterministically (seed 42 over sorted instance
+ids) from SWE-bench Lite \citep{jimenez2024swebench} — the seed drew
+13 Django, 2 matplotlib, 2 sphinx, and 3 sympy instances — three arms
+(the 1B executor alone, the 1B+lead composite, and the lead alone),
+two repetitions each (120 runs, 600\,s per-attempt budget), the same
+2\%-transport validity rule as \S\ref{sec:bfcl}, and three
+pre-declared readings. Grading is the \emph{official} SWE-bench
+harness (v4.1.0, Docker): an instance is resolved only if the
+project's failing tests pass and its passing tests stay green — not
+an authored grader. The design's committed expectation was honest
+about scale: at 1B on CPU with an 8K context, the likely outcome was
+a uniform floor, and the anchor's value would then be bounding the
+paper's claims; the pre-declared readings covered both that outcome
+and its alternatives.
+
+\begin{table}[t]
+\centering\small
+\caption{The SWE-bench Lite anchor: 20 pre-registered instances
+$\times$ 2 repetitions per arm, graded by the official SWE-bench
+harness. ``Patches'' counts runs whose final \texttt{git diff} was
+non-empty.}
+\label{tab:swebench}
+\begin{tabular}{lrrr}
+\toprule
+Arm & Patches / 40 & Resolved / 40 & Median wall \\
+\midrule
+\texttt{llama3.2:1b} & 0 & 0 & 4\,s \\
+\texttt{1b+lead:e4b} & 6 & 2 (5.0\%) & 50\,s \\
+\texttt{gemma4:e4b} & 14 & 3 (7.5\%) & 158\,s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The sweep is valid (zero transport failures in all three arms, zero
+timeouts) and the outcome is \emph{not} the uniform floor
+(Table~\ref{tab:swebench}). Three readings, per the pre-declared
+table:
+
+\paragraph{The 1B alone is a floor of the most informative kind.}
+Zero non-empty patches in 40 runs, at a median of 4 seconds per run:
+the unassisted 1B does not fail at repository tasks so much as never
+engage them — it answers in prose without attempting an edit. This is
+the boundary the paper's claims need stated: no reliability lever
+measured in this paper turns a model that cannot engage a repository
+into one that can.
+
+\paragraph{The lead lever moves behavior outside noise, and resolution
+directionally.} We report two layers separately rather than blend
+them. Behaviorally, the composite produces non-empty patches in 6/40
+runs where the 1B alone produced 0/40 (Fisher exact $p{=}0.026$) —
+the lever's turn-opening converts ``never edits'' into ``edits.'' At
+the resolution layer, the composite resolves 2/40 versus 0/40
+($p{=}0.49$): directional, not separable from noise at this sample
+size — though the resolved instance
+(\texttt{django\_\_django-14382}) resolved in \emph{both}
+repetitions, consistency rather than a sampling fluke. The honest
+compound statement: the lever transfers its behavioral effect to
+repository tasks with statistical support, and its resolution effect
+only directionally.
+
+\paragraph{The pinned ceiling replicates on real tasks.} The
+composite (2/40) is indistinguishable from the lead alone (3/40,
+$p{=}1.0$), at absolute levels (5--7.5\%) that are exactly where the
+lead's own ceiling sits on tasks this hard. The paper's central
+pattern — the composite lives at the lead's ceiling; the 1B neither
+adds nor subtracts — holds on execution-graded software-engineering
+tasks, not just on the suites where we first measured it. As a
+reference point the benchmark's public leaderboards rarely cover: a
+quantized 8B-MoE helper on CPU resolves two distinct SWE-bench Lite
+instances.
+
+Costs replicate directionally too (median wall 4/50/158\,s across the
+three arms — the composite is $\sim$3$\times$ faster per run than the
+lead alone, consistent with \S\ref{sec:curve}'s accelerant reading).
+Threats specific to this anchor — the 4{,}000-character issue-text
+truncation (5 instances affected, recorded per run), pre-training
+contamination of these public repositories (affects levels, not
+between-arm comparisons), and the driver living outside
+\texttt{braze-bench} (compensated by recording the same identity
+fields: harness commit, instance list, model digests, server version)
+--- are stated in the committed design and \S\ref{sec:threats}. Raw
+runs, predictions, and the official harness's reports are in the
+repository.
+
 \subsection{Isolating the mechanism: proactive opening, not reactive
 escalation}\label{sec:mechanism}
 % Fuente: docs/sweep-lead-3brazos-2026-07-10.md
@@ -1640,15 +1752,21 @@ same 19 tasks served as the development-time regression target for the
 harness whose levers this paper evaluates --- several hardening passes
 tuned assertions and defaults against failures on exactly this suite
 --- so levers may be fit to the suite in ways an external task set
-would expose. \S\ref{sec:bfcl} now bounds this threat for the paper's
-\emph{central} claims: on a pre-registered BFCL subset the lead
-lever's effect at 1B ($+72.0$\,pp), the baseline ordering, and the
-ceiling-pinning null all replicate. It does not eliminate the threat
-for the rest: the planner/delivery results, the tool-deferral cost,
+would expose. Two pre-registered anchors now bound this threat for
+the paper's \emph{central} claims: on a BFCL subset the lead lever's
+effect at 1B ($+72.0$\,pp), the baseline ordering, and the
+ceiling-pinning null all replicate (\S\ref{sec:bfcl}); and on an
+execution-graded SWE-bench Lite slice the lever's behavioral effect
+transfers outside noise and the pinned ceiling holds, while the
+resolution-level effect is directional only at $n{=}40$ per arm
+(\S\ref{sec:swebench}) --- which is itself the bound: nothing in this
+paper shows a reliability lever conferring repository-level task
+competence a model lacks. The threat is not eliminated for the rest:
+the planner/delivery results, the tool-deferral cost,
 and the secondary ablations remain measured on the authored suite
-only, and the anchor itself covers three single-turn BFCL categories
---- not multi-turn, parallel-call, or execution-graded tasks --- so
-coverage is partial by design. Relatedly, the authored suite leaves
+only; the BFCL anchor covers three single-turn categories, and the
+SWE-bench slice is 20 instances at 2 repetitions --- coverage is
+partial by design in both. Relatedly, the authored suite leaves
 little headroom at the top of the
 scale range: with the solo lead at 91\% and the ceiling baseline at
 98\%, a composite has at most a few points of room in which to
@@ -1917,8 +2035,9 @@ interests.
 \section{Sweep inventory}\label{app:sweeps}
 
 Table~\ref{tab:sweeps} lists every sweep cited in this paper, in the
-order they appear: 7{,}077 total runs across 17 sweep files (an
-eighteenth entry, the 3B task-list re-run of \S\ref{sec:planner}, is a
+order they appear: 7{,}197 total runs across 20 sweep files (the
+SWE-bench anchor's row spans its three per-arm driver files; a
+further entry, the 3B task-list re-run of \S\ref{sec:planner}, is a
 partial re-run of 95 further runs replacing a contaminated arm, not a
 new sweep; the three invalidated attempts at the BFCL anchor and the
 invalidated first attempt at rerun-block2, preserved for disclosure,
@@ -1961,6 +2080,7 @@ external-bare-lead-power & 2026-07-13 & \texttt{ec61f5e} & 190 & \ref{sec:extern
 bfcl-anchor & 2026-07-18/19 & \texttt{bc30a80} & 1{,}500 & \ref{sec:bfcl} \\
 rerun-block1 (1B plan+lead) & 2026-07-19 & \texttt{7528841} & 190 & \ref{sec:curve} \\
 rerun-block2 (coder arms) & 2026-07-19 & \texttt{70c2072}$^{\dagger}$ & 285 & \ref{sec:planner} \\
+swebench-lite-anchor (3 arms) & 2026-07-19 & \texttt{010f501} & 120 & \ref{sec:swebench} \\
 \bottomrule
 \end{tabular}
 \end{table}
