@@ -328,6 +328,39 @@ Trampa depurada: un proceso `build-script` colgado de un intento previo
 limpio fue lo que destrabó. Si bindgen falla con `stdbool.h` pese a
 libclang-18, matar procesos `cargo`/`build-script` viejos y `cargo clean`.
 
+## Fase 3 — `stencil` GBNF: IMPLEMENTADA (2026-07-21)
+
+`stencil.rs` en braze-model (puro, mismo patrón que `harmony.rs` — 8
+tests corren sin el feature) + integración en el loop de `local.rs`.
+**Laziness manual**, no `grammar_lazy` de llama.cpp: siendo dueños del
+loop de decode, el sampler se swapea a `chain(gramática GBNF, greedy)`
+exactamente cuando empieza una tool call y vuelve a libre al completarse
+el envelope. El modelo escribe texto libre antes y después; solo la call
+está estencilada.
+
+- **ChatML/qwen**: tras el literal `<tool_call>` (rolling tail), el
+  envelope completo — `{"name": <uno-del-inventario>, "arguments":
+  <objeto JSON>}` + `</tool_call>` garantizado. Orden de claves fijo
+  (formato entrenado), nombres alucinados mueren en el sampler.
+- **Harmony/gpt-oss**: al fijar el header un destinatario
+  (`<|message|>` con `to=functions.X`), los args se estencilan a objeto
+  JSON válido; al cerrar (JsonCursor a profundidad 0) se libera y el
+  modelo emite su `<|call|>`.
+- Kill-switch **`BRAZE_LOCAL_GRAMMAR=off`** = brazo de ablación del A/B.
+- Verificado en vivo (2026-07-21, Nitro): activación/cierre trazados en
+  ambas familias, tareas correctas, y `=off` limpio.
+
+**Bug depurado en el camino (latente desde Fase 1):**
+`llama_sampler_sample()` ya hace `accept` internamente; nuestro
+`sampler.accept(token)` explícito era un **double-accept** — inofensivo
+con greedy (stateless), fatal con gramática (el stack GBNF avanzaba dos
+veces → `GGML_ASSERT(!stacks.empty())`, SIGABRT). La gramática fue lo
+que lo hizo visible.
+
+**A/B pendiente (el publicable):** sweep con `BRAZE_LOCAL_GRAMMAR`
+on/off sobre la misma suite — hipótesis: `schema_fail + rescues → 0` en
+el brazo con gramática, mismo o mejor pass rate.
+
 ## Referencias
 
 - Spike: `scratchpad/braze-local-spike/` (throwaway, fuera del workspace).

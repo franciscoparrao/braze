@@ -39,6 +39,7 @@ use crate::args_repair::{parse_arguments_with_repair, ArgumentsOutcome};
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
 use crate::harmony::{build_harmony_prompt, utc_date_string, HarmonyEvent, HarmonyMarker, HarmonyParser};
+use crate::stencil::{harmony_args_grammar, qwen_call_grammar, JsonCursor};
 
 /// Addendum de tools reproduciendo el **preámbulo nativo de qwen2.5** —
 /// el formato con el que el modelo fue entrenado (sección `# Tools`,
@@ -380,6 +381,29 @@ fn render_blocks(blocks: &[ContentBlock]) -> String {
 /// únicos (mismo esquema nonce+contador que los wires de Ollama/OpenRouter).
 static TOOL_CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Lo que el hilo de generación necesita saber de la familia del modelo:
+/// los ids de marcadores (Harmony) o el inventario de tools para el
+/// envelope del stencil (ChatML/qwen). Agrupa lo que antes eran
+/// parámetros sueltos de `generate_blocking`.
+enum FamilyRuntime {
+    ChatMl { tool_names: Vec<String> },
+    Harmony(HarmonyTokenIds),
+}
+
+/// Construye el sampler estencilado: gramática GBNF + greedy encadenados
+/// (la gramática enmascara logits; greedy elige entre lo permitido). Una
+/// gramática inválida es bug nuestro, no del modelo — se loguea y se
+/// sigue sin constraint antes que brickear la generación.
+fn constrained_sampler(model: &LlamaModel, grammar: &str) -> Option<LlamaSampler> {
+    match LlamaSampler::grammar(model, grammar, "root") {
+        Ok(g) => Some(LlamaSampler::chain_simple([g, LlamaSampler::greedy()])),
+        Err(e) => {
+            tracing::warn!(error = %e, "stencil: gramática inválida — generación sin constraint");
+            None
+        }
+    }
+}
+
 /// Traduce un [`HarmonyEvent`] del parser a su `CompletionEvent` y lo
 /// empuja. Devuelve `false` si el consumidor abandonó (cancelación).
 fn emit_harmony_event(
@@ -429,9 +453,13 @@ fn generate_blocking(
     prompt: &str,
     n_ctx: u32,
     max_tokens: u32,
-    harmony: Option<&HarmonyTokenIds>,
+    family: &FamilyRuntime,
     tx: &tokio::sync::mpsc::Sender<Result<CompletionEvent, ModelError>>,
 ) {
+    let harmony = match family {
+        FamilyRuntime::Harmony(ids) => Some(ids),
+        FamilyRuntime::ChatMl { .. } => None,
+    };
     macro_rules! bail {
         ($($arg:tt)*) => {{
             let _ = tx.blocking_send(Err(ModelError::StreamError(format!($($arg)*))));
@@ -484,13 +512,39 @@ fn generate_blocking(
     // stop limpio).
     let mut stop_reason = "length";
 
+    // Stencil (Fase 3): constrained decoding GBNF con laziness manual —
+    // el sampler se swapea a gramática+greedy exactamente cuando empieza
+    // una tool call y vuelve a libre cuando el envelope se completa.
+    // Kill-switch `BRAZE_LOCAL_GRAMMAR=off` (el brazo de ablación del
+    // A/B; misma convención que BRAZE_CIRCUIT_BREAKER).
+    let grammar_enabled = !matches!(
+        std::env::var("BRAZE_LOCAL_GRAMMAR").as_deref(),
+        Ok("off") | Ok("0")
+    );
+    // Precomputada por turno: el envelope qwen depende del inventario de
+    // tools. Caveat compartido con la escalera de rescate: un
+    // `<tool_call>` literal citado en texto libre (p.ej. dentro de un
+    // fence) también gatilla — mismo trade-off, y el kill-switch cubre.
+    let qwen_grammar = match family {
+        FamilyRuntime::ChatMl { tool_names } if grammar_enabled => qwen_call_grammar(tool_names),
+        _ => None,
+    };
+    let mut constrained = false;
+    let mut args_cursor = JsonCursor::new();
+    let mut tail = String::new();
+
     // `n_cur` es la posición en el KV-cache, no un mero contador de
     // iteraciones (arranca en `batch.n_tokens()` y sólo avanza en tokens
     // que continúan la generación) — de ahí el allow.
     #[allow(clippy::explicit_counter_loop)]
     for _ in 0..budget {
+        // OJO: `sample()` ya hace el accept internamente
+        // (`llama_sampler_sample` → `llama_sampler_accept`). Un accept
+        // explícito acá sería double-accept: inofensivo con greedy
+        // (stateless), fatal con gramática (avanza el stack GBNF dos
+        // veces → GGML_ASSERT(!stacks.empty()) — depurado en vivo,
+        // 2026-07-21).
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
-        sampler.accept(token);
         let marker = harmony.and_then(|ids| ids.marker_of(token));
         if let Some(m @ (HarmonyMarker::Call | HarmonyMarker::Return)) = marker {
             // Cierre del turno harmony (ambos son además EOG en el GGUF
@@ -526,6 +580,27 @@ fn generate_blocking(
                     return;
                 }
             }
+            if grammar_enabled {
+                match m {
+                    // El header fijó destinatario: lo que viene son los
+                    // args — estencilarlos a JSON válido.
+                    HarmonyMarker::Message if parser.tool_call_in_progress() && !constrained => {
+                        if let Some(s) = constrained_sampler(model, &harmony_args_grammar()) {
+                            sampler = s;
+                            constrained = true;
+                            args_cursor = JsonCursor::new();
+                            tracing::info!("stencil: constraint de args harmony activado");
+                        }
+                    }
+                    // Cierre de mensaje con el constraint aún puesto
+                    // (cierre off-spec): liberar antes de seguir.
+                    HarmonyMarker::End | HarmonyMarker::Start if constrained => {
+                        sampler = LlamaSampler::greedy();
+                        constrained = false;
+                    }
+                    _ => {}
+                }
+            }
         } else {
             // `special = false`: no renderizar tokens especiales de
             // plantilla (p.ej. `<|im_end|>`) como texto — no deben
@@ -541,11 +616,52 @@ fn generate_blocking(
                         {
                             return;
                         }
-                    } else if tx
-                        .blocking_send(Ok(CompletionEvent::TextDelta(piece)))
-                        .is_err()
-                    {
-                        return; // el consumidor abandonó (cancelación)
+                        // Los args estencilados avanzan el cursor; al
+                        // cerrar el objeto raíz se libera el sampler y
+                        // el modelo emite su <|call|> libremente.
+                        if constrained {
+                            args_cursor.feed(&piece);
+                            if args_cursor.complete() {
+                                sampler = LlamaSampler::greedy();
+                                constrained = false;
+                                tracing::info!(
+                                    "stencil: args JSON completos — constraint liberado"
+                                );
+                            }
+                        }
+                    } else {
+                        if tx
+                            .blocking_send(Ok(CompletionEvent::TextDelta(piece.clone())))
+                            .is_err()
+                        {
+                            return; // el consumidor abandonó (cancelación)
+                        }
+                        if qwen_grammar.is_some() {
+                            tail.push_str(&piece);
+                            let excess = tail.len().saturating_sub(64);
+                            if excess > 0 {
+                                let cut = (excess..tail.len())
+                                    .find(|i| tail.is_char_boundary(*i))
+                                    .unwrap_or(0);
+                                tail.drain(..cut);
+                            }
+                            if !constrained && tail.ends_with("<tool_call>") {
+                                if let Some(s) = constrained_sampler(
+                                    model,
+                                    qwen_grammar.as_deref().unwrap_or_default(),
+                                ) {
+                                    sampler = s;
+                                    constrained = true;
+                                    tracing::info!("stencil: envelope qwen activado");
+                                }
+                            } else if constrained && tail.ends_with("</tool_call>") {
+                                sampler = LlamaSampler::greedy();
+                                constrained = false;
+                                tracing::info!(
+                                    "stencil: envelope cerrado — constraint liberado"
+                                );
+                            }
+                        }
                     }
                 }
                 Err(e) => bail!("local: token_to_piece falló: {e}"),
@@ -617,22 +733,21 @@ impl ModelBackend for LocalBackend {
         let model = Arc::clone(&self.model);
         let n_ctx = self.n_ctx;
         let max_tokens = req.max_tokens;
-        let harmony = self.harmony.clone();
+        // Para el envelope del stencil (gramática qwen: nombre de tool
+        // restringido al inventario real del turno).
+        let family_rt = match &self.harmony {
+            Some(ids) => FamilyRuntime::Harmony(ids.clone()),
+            None => FamilyRuntime::ChatMl {
+                tool_names: req.tool_stubs.iter().map(|s| s.name.clone()).collect(),
+            },
+        };
 
         // Canal acotado: la generación bloqueante empuja, el stream async
         // consume. Si el consumidor abandona, `blocking_send` falla y la
         // generación corta (cancelación cooperativa).
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<CompletionEvent, ModelError>>(32);
         tokio::task::spawn_blocking(move || {
-            generate_blocking(
-                &backend,
-                &model,
-                &prompt,
-                n_ctx,
-                max_tokens,
-                harmony.as_ref(),
-                &tx,
-            );
+            generate_blocking(&backend, &model, &prompt, n_ctx, max_tokens, &family_rt, &tx);
         });
 
         let stream = futures::stream::unfold(rx, |mut rx| async move {

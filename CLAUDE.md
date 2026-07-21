@@ -199,10 +199,16 @@ construcción. Detalle completo y recetas en
   vale para qwen, no para gpt-oss.
 - Logs de llama.cpp/ggml ruteados a `tracing` (sin eso la TUI se rompe —
   verificado y arreglado 2026-07-21).
-- Pendiente de la línea: instalar el binario CUDA estable en Nitro (hoy
-  `target/debug` + `LD_LIBRARY_PATH`), paridad GPU vs Ollama sobre
-  qwen2.5:3b, y Fase 3 GBNF/llguidance (constrained decoding,
-  schema_fail=0 por construcción — el A/B publicable).
+- **Fase 3 (stencil GBNF, 2026-07-21)**: constrained decoding con
+  laziness manual — `stencil.rs` (gramática envelope qwen con inventario
+  de tools + args JSON harmony) y swap de sampler en el loop; kill-switch
+  `BRAZE_LOCAL_GRAMMAR=off` (brazo de ablación). Verificado en vivo en
+  ambas familias. Bug depurado: double-accept del sampler (latente desde
+  Fase 1, fatal solo con gramática). Ver design doc § Fase 3.
+- Pendiente de la línea: **el A/B publicable** (sweep
+  `BRAZE_LOCAL_GRAMMAR` on/off, hipótesis schema_fail+rescues→0),
+  instalar el binario CUDA estable en Nitro (hoy `target/debug` +
+  `LD_LIBRARY_PATH`), y paridad GPU vs Ollama sobre qwen2.5:3b.
 
 ## Próximos pasos al retomar
 
