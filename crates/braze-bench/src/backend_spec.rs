@@ -42,6 +42,9 @@ enum Provider {
     Anthropic,
     Ollama,
     OpenRouter,
+    /// LocalBackend (llama.cpp in-process). Construir requiere el feature
+    /// `local`; sin él, `build` da un error claro.
+    Local,
 }
 
 /// One `--backends` entry, already split into provider + optional model
@@ -152,9 +155,10 @@ impl BackendSpec {
             "anthropic" => Provider::Anthropic,
             "ollama" => Provider::Ollama,
             "openrouter" => Provider::OpenRouter,
+            "local" => Provider::Local,
             other => {
                 return Err(BenchError::Startup(format!(
-                    "unknown backend provider '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
+                    "unknown backend provider '{other}' (expected 'anthropic', 'ollama', 'openrouter', or 'local')"
                 )));
             }
         };
@@ -204,13 +208,15 @@ impl BackendSpec {
             Provider::Anthropic => "anthropic",
             Provider::Ollama => "ollama",
             Provider::OpenRouter => "openrouter",
+            Provider::Local => "local",
         };
         let model = self
             .model_override
             .clone()
             .unwrap_or_else(|| match self.provider {
                 Provider::Anthropic => config.anthropic_model.clone().unwrap_or_default(),
-                Provider::Ollama => config.ollama_model.clone(),
+                // El local reusa la ref de modelo de Ollama (mismo blob).
+                Provider::Ollama | Provider::Local => config.ollama_model.clone(),
                 Provider::OpenRouter => config.openrouter_model.clone().unwrap_or_default(),
             });
         if model.is_empty() {
@@ -289,7 +295,7 @@ impl BackendSpec {
             .clone()
             .unwrap_or_else(|| match self.provider {
                 Provider::Anthropic => config.anthropic_model.clone().unwrap_or_default(),
-                Provider::Ollama => config.ollama_model.clone(),
+                Provider::Ollama | Provider::Local => config.ollama_model.clone(),
                 Provider::OpenRouter => config.openrouter_model.clone().unwrap_or_default(),
             })
     }
@@ -301,6 +307,7 @@ impl BackendSpec {
             Provider::Anthropic => "anthropic",
             Provider::Ollama => "ollama",
             Provider::OpenRouter => "openrouter",
+            Provider::Local => "local",
         }
     }
 
@@ -534,7 +541,37 @@ impl BackendSpec {
                 }
                 Ok(Box::new(backend))
             }
+            Provider::Local => self.build_local(config),
         }
+    }
+
+    /// Construye el `LocalBackend` (feature `local`). El modelo se resuelve
+    /// como en el CLI: ref de Ollama (`qwen2.5:3b`, blob vía manifest) o
+    /// ruta a un `.gguf`. Reusa `ollama_num_ctx` como `num_ctx`.
+    #[cfg(feature = "local")]
+    fn build_local(&self, config: &Config) -> Result<Box<dyn ModelBackend>, BenchError> {
+        let model_ref = self
+            .model_override
+            .clone()
+            .unwrap_or_else(|| config.ollama_model.clone());
+        let n_ctx = config.ollama_num_ctx;
+        let backend = if model_ref.contains('/') || model_ref.ends_with(".gguf") {
+            braze_model::LocalBackend::from_gguf_path(&model_ref, &model_ref, n_ctx)
+        } else {
+            let root = std::env::var("BRAZE_OLLAMA_MODELS_ROOT")
+                .unwrap_or_else(|_| "/usr/share/ollama/.ollama".to_string());
+            braze_model::LocalBackend::from_ollama_model(&root, &model_ref, &model_ref, n_ctx)
+        }
+        .map_err(|e| BenchError::Startup(format!("backend local: {e}")))?;
+        Ok(Box::new(backend))
+    }
+
+    #[cfg(not(feature = "local"))]
+    fn build_local(&self, _config: &Config) -> Result<Box<dyn ModelBackend>, BenchError> {
+        Err(BenchError::Startup(
+            "el backend 'local' requiere compilar braze-bench con `--features local`"
+                .to_string(),
+        ))
     }
 }
 

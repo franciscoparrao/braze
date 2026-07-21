@@ -35,3 +35,8 @@ futures = { workspace = true }
 # los eventos de rescate textual del engine, la señal que permite saber
 # si una palanca de confiabilidad disparó de verdad durante el bench.
 tracing-subscriber = { workspace = true }
+
+[features]
+# Backend local (llama.cpp in-process). Off por default. Ver
+# docs/local-backend-design-2026-07-20.md.
+local = ["braze-model/local"]

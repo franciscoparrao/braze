@@ -1,16 +1,20 @@
 # Diseño: `LocalBackend` — inferencia in-process sobre `llama-cpp-2`
 
-> **Estado (2026-07-21):** EN CONSTRUCCIÓN — **Fase 1 funcional**. El
-> `LocalBackend` (quinto `impl ModelBackend`, feature `local`) carga el
-> GGUF de Ollama in-process y hace el **loop agéntico completo** sobre
-> qwen2.5:3b sin Ollama: tool call → ejecución → respuesta (commits
-> `9329283`, `f0094e9`). El "format tax" se resolvió reproduciendo el
-> preámbulo de tools NATIVO de qwen (no el chat template embebido —
-> `apply_chat_template` de llama-cpp-2 0.1.151 no soporta tools). Falta
-> para cerrar Fase 1: paridad de bench vs `OllamaBackend` sobre
-> qwen2.5:3b (`g10-weak-skills`) + sampling. Fase 2: GPU/CUDA + harmony
-> (gpt-oss:20b). Historial: spike exitoso; reabre la decisión de
-> 2026-07-13 sobre la justificación nueva que aquel cierre anticipó.
+> **Estado (2026-07-21):** **Fase 1 CERRADA** (funcional + paridad
+> medida). El `LocalBackend` (quinto `impl ModelBackend`, feature
+> `local`) carga el GGUF de Ollama in-process y hace loops agénticos
+> completos sobre qwen2.5:3b sin Ollama (commits `9329283`, `f0094e9`).
+> **Paridad vs `OllamaBackend`** (`default.toml`, qwen2.5:3b, mismo
+> hardware — `docs/sweep-localbackend-parity-2026-07-21.md`):
+> **paridad EXACTA en single_tool (6/7) y no_tool (3/3)**; gap en
+> multi-ronda (10/19 vs 14/19 total, McNemar p=0.22 no significativo)
+> por el "format tax" (`schema_fail=17`: el preámbulo da nombre+summary,
+> no el schema de argumentos). La paridad además cazó y arregló un bug
+> real (`LlamaBackend` singleton global). Cierra el gap: Fase 3 (GBNF)
+> o schemas en el preámbulo. **Próximo: Fase 2** (GPU/CUDA + harmony
+> para gpt-oss:20b en Nitro). Historial: spike exitoso; reabre la
+> decisión de 2026-07-13 sobre la justificación que aquel cierre
+> anticipó.
 
 ## Por qué se reabre (justificación nueva, no la vieja)
 
