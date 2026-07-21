@@ -115,7 +115,16 @@ impl LocalBackend {
         n_ctx: u32,
     ) -> Result<Self, ModelError> {
         let backend = shared_llama_backend()?;
-        let params = LlamaModelParams::default(); // n_gpu_layers = 0 (CPU, fase 1)
+        // n_gpu_layers: 0 = CPU puro (default). Con el binario compilado
+        // con el feature `cuda` y una GPU disponible,
+        // `BRAZE_LOCAL_GPU_LAYERS=N` offloada N capas a la GPU (un valor
+        // grande como 999 = todas las que quepan). Sin CUDA el valor se
+        // ignora silenciosamente (llama.cpp corre en CPU igual).
+        let gpu_layers = std::env::var("BRAZE_LOCAL_GPU_LAYERS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0);
+        let params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
         let model = LlamaModel::load_from_file(&backend, gguf.as_ref(), &params).map_err(|e| {
             ModelError::Request(format!(
                 "failed to load GGUF '{}': {e}",
