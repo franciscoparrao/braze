@@ -1,10 +1,15 @@
 # Diseño: `LocalBackend` — inferencia in-process sobre `llama-cpp-2`
 
-> **Estado (2026-07-20):** ABIERTO — spike de factibilidad **exitoso**
-> (§ "Qué probó el spike"). Reabre la decisión cerrada el 2026-07-13
-> (`docs/local-backend-stencil-design.md`) sobre una **justificación
-> nueva** que aquel cierre anticipó explícitamente. No comprometido a
-> construir todavía: este documento es la base para esa decisión.
+> **Estado (2026-07-21):** EN CONSTRUCCIÓN — Fase 1 arrancada. El
+> `LocalBackend` (quinto `impl ModelBackend`, feature `local`) ya carga
+> el GGUF de Ollama in-process, infiere y streamea end-to-end por el
+> engine real (commit `9329283`). Falta el tool-calling confiable
+> (§ Plan, fase 1): qwen2.5:3b no sigue el formato con el prompt
+> hand-rolled — el "format tax" previsto. Próximo: aplicar el chat
+> template embebido del GGUF (o GBNF de fase 3) + paridad de bench.
+> Historial: spike exitoso (§ "Qué probó el spike"); reabre la decisión
+> de 2026-07-13 (`docs/local-backend-stencil-design.md`) sobre la
+> justificación nueva que aquel cierre anticipó.
 
 ## Por qué se reabre (justificación nueva, no la vieja)
 
