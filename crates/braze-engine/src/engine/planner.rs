@@ -187,6 +187,15 @@ fn planning_system_prompt(base: &str, stubs: &[ToolStub]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // P1.1 paso 6: tests de integración movidos del mod tests de
+    // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
+    use crate::engine::test_support::*;
+    use crate::engine::Engine;
+    use braze_events::NoopObserver;
+    use braze_model::CompletionEvent;
+    use braze_session::{FileSessionStore, SimpleContextCompactor};
+    use braze_types::{ContentBlock, SessionId};
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     /// Iteración pre-registrada del planner (2026-07-10): the numbered-
     /// step counting rule the single-step discard keys on — `N.`/`N)`
@@ -201,5 +210,386 @@ mod tests {
             0
         );
         assert_eq!(count_numbered_steps("10. paso\n11. otro"), 2);
+    }
+
+    /// PLAN.md § "Split planificador/ejecutor", oleada 1: the shape a
+    /// planned turn produces — `UserMessage`, `PlanCreated`, then the
+    /// first round's tool calls — must render into a request the real
+    /// Anthropic API accepts. The plan becomes an assistant Text message
+    /// immediately before the round's assistant tool_use message
+    /// (consecutive assistant messages — already the exact shape a
+    /// text-before-tools round produces today), and the tool_use/result
+    /// pairing must survive the plan sitting in between.
+    #[tokio::test]
+    async fn a_planned_turn_shape_renders_protocol_valid_messages() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        for event in [
+            AgentEvent::UserMessage {
+                text: "haz tres cosas".to_string(),
+            },
+            AgentEvent::PlanCreated {
+                plan: "1. echo a\n2. echo b\n3. responder".to_string(),
+            },
+            AgentEvent::AssistantToolCall {
+                id: "call-1".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({ "text": "a" }),
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "call-1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "call-1".to_string(),
+                    content: "echoed: a".to_string(),
+                    is_error: false,
+                },
+            },
+            AgentEvent::AssistantText {
+                text: "listo".to_string(),
+            },
+        ] {
+            store.append(&session, &event).await.expect("seed event");
+        }
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let messages = engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        crate::protocol_check::check_anthropic_message_protocol(&messages)
+            .expect("a planned turn's rendered request must be protocol-valid");
+
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.role == braze_types::Role::User
+                    && m.content.iter().any(
+                        |b| matches!(b, ContentBlock::Text { text } if text.starts_with("Plan for this request"))
+                    )),
+            "the plan must reach the rendered request as user-role context, got: {messages:#?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// End-to-end happy path: the planner's text is persisted as
+    /// `PlanCreated` (with its `Usage` before it), the executor's first
+    /// request actually contains the rendered plan, and the whole planned
+    /// turn stays protocol-valid.
+    #[tokio::test]
+    async fn a_planned_turn_persists_the_plan_and_the_executor_sees_it() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("1. echo hi\n2. responder".to_string()),
+            CompletionEvent::Usage {
+                input_tokens: 50,
+                output_tokens: 12,
+                stop_reason: Some("end_turn".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                escalation_trigger: None,
+            },
+            CompletionEvent::Done,
+        ]]);
+
+        let executor_requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let executor = RequestCapturingModel {
+            inner: ProtocolValidatingModel::new(ScriptedModel::new(vec![
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({ "text": "hi" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ])),
+            requests: Arc::clone(&executor_requests),
+        };
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "haz echo de hi", &mut NoopObserver)
+            .await
+            .expect("planned turn should succeed");
+
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
+        match &events[1] {
+            AgentEvent::Usage { input_tokens, .. } => assert_eq!(*input_tokens, 50),
+            other => panic!("expected the planner's Usage first, got {other:?}"),
+        }
+        match &events[2] {
+            AgentEvent::PlanCreated { plan } => {
+                assert_eq!(plan, "1. echo hi\n2. responder");
+            }
+            other => panic!("expected PlanCreated, got {other:?}"),
+        }
+
+        {
+            let requests = executor_requests.lock().unwrap();
+            assert!(
+                requests[0].messages.iter().any(|m| m.content.iter().any(
+                    |b| matches!(b, ContentBlock::Text { text } if text.contains("1. echo hi") && text.starts_with("Plan for this request"))
+                )),
+                "the executor's first request must contain the rendered plan"
+            );
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Degradation rule 1: a planner whose call fails must not fail the
+    /// turn — it proceeds unplanned.
+    #[tokio::test]
+    async fn a_failing_planner_degrades_to_an_unplanned_turn() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(ErroringModel));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("the turn must survive a failing planner");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. })),
+            "no plan must be persisted when the planner fails"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { text } if text == "hola")),
+            "the executor's answer must still be persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Degradation rule 4: an empty planner response degrades to an
+    /// unplanned turn (contrast with the *executor*, where an empty
+    /// completion on the turn's very first round is a hard
+    /// `EmptyModelResponse` error — one occurring after the turn already
+    /// dispatched a tool call instead gets one tools-free summary attempt,
+    /// see `attempt_tools_free_summary_round`).
+    #[tokio::test]
+    async fn an_empty_planner_response_degrades_to_an_unplanned_turn() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![CompletionEvent::Done]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("the turn must survive an empty planner response");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. }))
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Degradation rule 2: a planner that attempts tool calls despite the
+    /// planning prompt has them ignored — never dispatched — while its
+    /// text is still used as the plan.
+    #[tokio::test]
+    async fn a_planner_that_attempts_tool_calls_has_them_ignored_but_its_text_used() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::ToolCallRequested {
+                id: "planner-call".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({ "text": "should never run" }),
+            },
+            CompletionEvent::TextDelta("1. hacer echo de hi\n2. responder".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            0,
+            "the planner's tool call must never be dispatched"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::PlanCreated { plan } if plan == "1. hacer echo de hi\n2. responder"
+            )),
+            "the planner's text must still be used as the plan"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// F7 (docs/AUDITORIA-2026-07-v3.md): `planning_system_prompt` asks
+    /// the planner to name the concrete tools it would use. A local
+    /// planner answering in its own native tool-template syntax (e.g.
+    /// Qwen's `<tool_call>{...}</tool_call>`) must have that block survive
+    /// as plain plan *text* — the textual rescue, shared with the
+    /// executor by default before this fix, would otherwise extract and
+    /// remove it from the plan before `attempt_planning_round` even
+    /// looks at `outcome.tool_calls` (already ignored there regardless).
+    #[tokio::test]
+    async fn a_planners_native_tool_template_leak_survives_as_plan_text_not_rescued() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta(
+                "1. <tool_call>{\"name\": \"read_file\", \"arguments\": {\"path\": \"x\"}}</tool_call>\n\
+                 2. responder"
+                    .to_string(),
+            ),
+            CompletionEvent::Done,
+        ]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            0,
+            "the leaked block must never be dispatched as a real call"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::PlanCreated { .. }))
+            .expect("expected a PlanCreated event")
+        {
+            AgentEvent::PlanCreated { plan } => {
+                assert!(
+                    plan.contains("<tool_call>"),
+                    "the tagged block must survive as plan text, got: {plan}"
+                );
+                assert!(plan.contains("read_file"), "got: {plan}");
+            }
+            _ => unreachable!(),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

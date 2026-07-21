@@ -851,6 +851,15 @@ fn render_events_for_lead_summary(events: &[AgentEvent]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // P1.1 paso 6: tests de integración movidos del mod tests de
+    // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
+    use crate::engine::test_support::*;
+    use crate::engine::Engine;
+    use braze_events::NoopObserver;
+    use braze_model::CompletionEvent;
+    use braze_session::{FileSessionStore, SimpleContextCompactor};
+    use braze_types::{ContentBlock, SessionId};
+    use std::sync::atomic::{AtomicU32, Ordering};
     use braze_types::ToolResult;
     // P1.1 paso 5: tests movidos del mod tests de engine/mod.rs — usan
     // las constantes de history directamente.
@@ -1045,5 +1054,567 @@ mod tests {
             (text.len() / 4) as u32,
             "expected the estimate to scale with the raw text length, not the (longer) Debug form"
         );
+    }
+
+    /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-1.
+    ///
+    /// `KEEP_RAW_TAIL` slices the last few tactical events verbatim into
+    /// the request with no awareness of `tool_use`/`tool_result` pairing.
+    /// If a round dispatches several tool calls concurrently and their
+    /// completions arrive in a different order than their requests were
+    /// issued (a realistic race under `TaskNotifier::spawn`), the log can
+    /// end up as `[..., ATC1, ATC2, ATC3, TCC1, TCC2, TCC3]`. Once that
+    /// whole span ages into the compactor's tactical window and a
+    /// compaction triggers, the raw tail keeps only the last
+    /// `KEEP_RAW_TAIL` (6) events — here, `[ATC3, TCC1, TCC2, TCC3]` plus
+    /// two audit-only `ToolCallStarted`s that don't render — cutting
+    /// `ATC1`/`ATC2` out entirely (they're not old enough to have settled
+    /// into `durable_events` either, since the whole log fits inside the
+    /// compactor's window). `TCC1`/`TCC2` still render as `tool_result`
+    /// blocks with no matching `tool_use` anywhere in the request.
+    ///
+    /// Fixed by two complementary changes: `pair_aware_tail_start` (below)
+    /// extends the cut backward so it never *excludes* a `tool_use` whose
+    /// `tool_result` survived into the tail; and `history::push_grouped`
+    /// groups consecutive `tool_use`/`tool_result` events into one
+    /// `Message` each (matching how Anthropic itself represents one
+    /// assistant turn requesting several tools), so a concurrent-dispatch
+    /// round's naturally-non-adjacent `[ToolUse, ToolUse, ToolUse]` /
+    /// `[ToolResult, ToolResult, ToolResult]` shape is never actually
+    /// invalid to begin with — the tail cut alone couldn't have fixed
+    /// that half on its own.
+    #[tokio::test]
+    async fn compaction_tail_cut_can_orphan_a_tool_result() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        fn tool_call(id: &str) -> AgentEvent {
+            AgentEvent::AssistantToolCall {
+                id: id.to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({ "text": id }),
+            }
+        }
+        fn tool_started(id: &str) -> AgentEvent {
+            AgentEvent::ToolCallStarted {
+                id: id.to_string(),
+                name: "echo".to_string(),
+                background: false,
+            }
+        }
+        fn tool_completed(id: &str) -> AgentEvent {
+            AgentEvent::ToolCallCompleted {
+                id: id.to_string(),
+                result: ToolResult {
+                    tool_call_id: id.to_string(),
+                    content: "ok".to_string(),
+                    is_error: false,
+                },
+            }
+        }
+
+        // Three concurrently-dispatched tool calls whose completions all
+        // arrive after every request was issued — a realistic ordering
+        // when tools run as independently-spawned background tasks.
+        for event in [
+            AgentEvent::UserMessage {
+                text: "please echo three things".to_string(),
+            },
+            tool_call("call-1"),
+            tool_started("call-1"),
+            tool_call("call-2"),
+            tool_started("call-2"),
+            tool_call("call-3"),
+            tool_started("call-3"),
+            tool_completed("call-1"),
+            tool_completed("call-2"),
+            tool_completed("call-3"),
+        ] {
+            store.append(&session, &event).await.expect("seed event");
+        }
+
+        // A low compaction threshold forces `load_messages` to compact on
+        // this very first call, exactly like a long-running session that
+        // has just crossed the real (default 40) threshold would.
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tactical_compaction_threshold(3);
+
+        let messages = engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        crate::protocol_check::check_anthropic_message_protocol(&messages).expect(
+            "load_messages must never hand back a request with an orphaned \
+             tool_result, regardless of where the tactical tail happens to \
+             be cut",
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// v8 § 6 — summary-por-lead: con summarizer configurado, el summary
+    /// persistido en `CompactionOccurred` es el texto que escribió el
+    /// lead, no el digest extractivo.
+    #[tokio::test]
+    async fn compaction_uses_the_lead_summarizer_when_configured() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        store
+            .append(&session, &AgentEvent::UserMessage { text: "hola".to_string() })
+            .await
+            .expect("seed event");
+        // Suficientes eventos para superar el umbral (3) Y dejar algo
+        // que dropear más allá de la cola cruda (KEEP_RAW_TAIL = 6).
+        for i in 0..10 {
+            store
+                .append(&session, &AgentEvent::AssistantText { text: format!("texto {i}") })
+                .await
+                .expect("seed event");
+        }
+        let store = Arc::new(store);
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::clone(&store) as Arc<dyn braze_session::SessionStore>,
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tactical_compaction_threshold(3)
+        .with_compaction_summarizer(Box::new(ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("resumen escrito por el lead".to_string()),
+            CompletionEvent::Done,
+        ]])));
+
+        engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let events = store.load(&session).await.expect("load events");
+        let summary = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::CompactionOccurred { summary, .. } => Some(summary.clone()),
+                _ => None,
+            })
+            .expect("compaction must have occurred");
+        assert_eq!(summary, "resumen escrito por el lead");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// v8 § 6 — el contrato "nunca peor que sin la palanca": un
+    /// summarizer cuyo stream muere sin `Done` (respuesta truncada) no
+    /// aporta summary y la compactación cae al digest extractivo de
+    /// siempre, sin error.
+    #[tokio::test]
+    async fn a_truncated_summarizer_falls_back_to_the_deterministic_digest() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        store
+            .append(&session, &AgentEvent::UserMessage { text: "hola".to_string() })
+            .await
+            .expect("seed event");
+        // Suficientes eventos para superar el umbral (3) Y dejar algo
+        // que dropear más allá de la cola cruda (KEEP_RAW_TAIL = 6).
+        for i in 0..10 {
+            store
+                .append(&session, &AgentEvent::AssistantText { text: format!("texto {i}") })
+                .await
+                .expect("seed event");
+        }
+        let store = Arc::new(store);
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::clone(&store) as Arc<dyn braze_session::SessionStore>,
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tactical_compaction_threshold(3)
+        // Stream que termina sin `Done`: la clase de truncamiento que un
+        // lead real puede producir (conexión cortada mid-respuesta).
+        .with_compaction_summarizer(Box::new(ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("truncado".to_string()),
+        ]])));
+
+        engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let events = store.load(&session).await.expect("load events");
+        let summary = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::CompactionOccurred { summary, .. } => Some(summary.clone()),
+                _ => None,
+            })
+            .expect("compaction must have occurred");
+        assert_ne!(summary, "truncado", "el texto truncado no debe usarse");
+        assert!(
+            !summary.is_empty(),
+            "el fallback debe producir el digest extractivo de siempre"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Closes the coverage gap the re-audit (docs/AUDITORIA-2026-07-v2.md,
+    /// "por qué los tests verdes no los atrapan") called out explicitly:
+    /// every existing `ProtocolValidatingModel` test runs 1-2 short rounds
+    /// that never cross `DEFAULT_TACTICAL_COMPACTION_THRESHOLD`, and every
+    /// test that *does* trigger compaction (e.g.
+    /// `compaction_tail_cut_can_orphan_a_tool_result` above) seeds events
+    /// directly and calls `load_messages` once — bypassing `run_turn`'s
+    /// real multi-turn loop entirely. Neither shape proves the two things
+    /// hold *together*, organically, over a long session: concurrent tool
+    /// dispatch completing out of order (N-1/N-2b's trigger) interacting
+    /// with compaction firing repeatedly as the log keeps growing past the
+    /// window/threshold, turn after turn.
+    ///
+    /// Drives many real turns through `run_turn`, each dispatching two
+    /// concurrently-issued tool calls that `ReorderingEchoToolProvider`
+    /// resolves in *reverse* of dispatch order (a real `tokio::spawn`/
+    /// `sleep` race, not a simulated one), with a low compaction threshold
+    /// so compaction triggers repeatedly across the run instead of once.
+    /// `ProtocolValidatingModel` panics the instant any request built
+    /// along the way would 400 against the real Anthropic API.
+    #[tokio::test]
+    async fn a_long_session_with_reordered_concurrent_tool_calls_stays_protocol_valid_across_repeated_compaction()
+     {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        const TURNS: usize = 15;
+        let mut rounds = Vec::with_capacity(TURNS * 2);
+        for i in 0..TURNS {
+            rounds.push(vec![
+                CompletionEvent::ToolCallRequested {
+                    id: format!("call-{i}-a"),
+                    name: "echo".to_string(),
+                    // Dispatched first but resolves last.
+                    arguments: serde_json::json!({ "text": "a", "delay_ms": 30 }),
+                },
+                CompletionEvent::ToolCallRequested {
+                    id: format!("call-{i}-b"),
+                    name: "echo".to_string(),
+                    // Dispatched second but resolves first.
+                    arguments: serde_json::json!({ "text": "b", "delay_ms": 1 }),
+                },
+                CompletionEvent::Done,
+            ]);
+            rounds.push(vec![
+                CompletionEvent::TextDelta(format!("turn {i} done")),
+                CompletionEvent::Done,
+            ]);
+        }
+
+        let model = ProtocolValidatingModel::new(ScriptedModel::new(rounds));
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ReorderingEchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tactical_compaction_threshold(10);
+
+        for i in 0..TURNS {
+            engine
+                .run_turn(
+                    &session,
+                    &format!("please echo turn {i}"),
+                    &mut NoopObserver,
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "turn {i} failed (every prior turn passed protocol \
+                         validation, so this is a genuine failure, not the \
+                         validator): {err}"
+                    )
+                });
+        }
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            (TURNS * 2) as u32,
+            "every tool call across every turn must have actually dispatched"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for A1/C1: when a compaction triggers,
+    /// `load_messages` must never discard the live tail entirely — the
+    /// user's just-appended message for the current turn (the newest
+    /// event in the log) has to survive as a raw message, not be
+    /// swallowed into the compaction summary with nothing concrete left
+    /// for the model to act on.
+    #[tokio::test]
+    async fn load_messages_keeps_a_live_raw_tail_when_compaction_triggers() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Seed a backlog well past the *effective* compaction threshold
+        // (hallazgo U-18: with no `context_budget_tokens` configured — the
+        // case here — the real threshold `load_messages` applies is
+        // `DEFAULT_TACTICAL_COMPACTION_THRESHOLD` scaled up, not the raw
+        // constant) with plain, non-durable-typed events (the orphan types
+        // that never leave `tactical` on their own).
+        let threshold = effective_tactical_compaction_threshold(
+            DEFAULT_TACTICAL_COMPACTION_THRESHOLD,
+            None,
+        );
+        for i in 0..(threshold + 10) {
+            store
+                .append(
+                    &session,
+                    &AgentEvent::UserMessage {
+                        text: format!("turno {i}"),
+                    },
+                )
+                .await
+                .expect("seed backlog event");
+        }
+        // The newest event — exactly what `run_turn` appends right before
+        // calling `load_messages` for the current turn.
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "pregunta actual del usuario".to_string(),
+                },
+            )
+            .await
+            .expect("seed current turn's message");
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        let messages = engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        assert!(
+            messages.iter().any(|m| matches!(
+                &m.content[0],
+                ContentBlock::Text { text } if text == "pregunta actual del usuario"
+            )),
+            "expected the live tail to include the just-appended user message, got: {messages:?}"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "sanity check: a compaction should actually have been triggered"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for C3: a single oversized event (e.g. a large
+    /// `read_file` result) must trigger compaction via the token budget
+    /// even when the raw event *count* is nowhere near
+    /// `tactical_compaction_threshold` — the count alone can't tell a
+    /// 200KB tool result apart from a two-word reply.
+    #[tokio::test]
+    async fn a_single_oversized_event_triggers_compaction_via_the_token_budget() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // The oversized event plus enough small filler events that the
+        // tactical tail (`KEEP_RAW_TAIL`) doesn't fully cover it — with 8
+        // tactical events total, compacting can actually exclude the huge
+        // one from the kept raw tail and fold it into the digest instead
+        // (see `compaction_would_help` in `load_messages`: with 2 events
+        // or fewer than `KEEP_RAW_TAIL`, the tail *is* the whole tactical
+        // slice, so compacting couldn't shrink anything and correctly
+        // wouldn't trigger at all).
+        store
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "resume este archivo".to_string(),
+                },
+            )
+            .await
+            .expect("seed user message");
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantText {
+                    text: "x".repeat(20_000),
+                },
+            )
+            .await
+            .expect("seed oversized event");
+        for i in 0..6 {
+            store
+                .append(
+                    &session,
+                    &AgentEvent::UserMessage {
+                        text: format!("mensaje de relleno {i}"),
+                    },
+                )
+                .await
+                .expect("seed filler event");
+        }
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_context_budget(1000); // ~4000 chars — the 20K-char event alone blows this.
+
+        engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "expected the token budget to trigger compaction despite the low event count"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Without a configured budget, a large event does NOT trigger
+    /// compaction below the event-count threshold — confirms
+    /// `context_budget_tokens: None` preserves the pre-C3 behavior
+    /// exactly (event count is the only trigger).
+    #[tokio::test]
+    async fn without_a_configured_budget_only_event_count_triggers_compaction() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        store
+            .append(
+                &session,
+                &AgentEvent::AssistantText {
+                    text: "x".repeat(20_000),
+                },
+            )
+            .await
+            .expect("seed oversized event");
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "no budget configured: a single large event below the count threshold must not compact"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// E1 `+ablate:no-compaction` (docs/AUDITORIA-2026-07-v6.md § roadmap):
+    /// with compaction disabled, NEITHER trigger fires — here the event
+    /// count blows well past the threshold and still no
+    /// `CompactionOccurred` lands.
+    #[tokio::test]
+    async fn with_compaction_disabled_even_the_event_count_trigger_does_not_fire() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Well past DEFAULT_TACTICAL_COMPACTION_THRESHOLD (40) — and past
+        // its ×10 no-budget scaling too.
+        for i in 0..450 {
+            store
+                .append(
+                    &session,
+                    &AgentEvent::AssistantText {
+                        text: format!("evento {i}"),
+                    },
+                )
+                .await
+                .expect("seed events");
+        }
+
+        let engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_compaction_enabled(false);
+
+        engine
+            .load_messages(&session, &mut NoopObserver)
+            .await
+            .expect("load_messages should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "compaction disabled: no amount of events may trigger it"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }
