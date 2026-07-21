@@ -44,6 +44,17 @@ fn transport_retries_from_env() -> u32 {
 /// de H-19 (que aplica a saturación, no a esto).
 const TOOL_PARSE_500_RETRIES: u32 = 2;
 
+/// ¿Es un `StreamError` de la clase "error parsing tool call"? Incidente
+/// roam #17 (2026-07-20): en Ollama 0.32.1 el mismo fallo de parseo de
+/// tool-call que #1 servía como HTTP 500 al enviar puede llegar en
+/// cambio a mitad de un stream 200 (una línea NDJSON con `error`), y esa
+/// variante NO la cubría el re-muestreo de send. Se re-muestrea con el
+/// mismo criterio, pero solo si ningún evento salió aún al consumidor
+/// (`produced_output == false`) — ver `complete`.
+fn is_tool_parse_stream_error(err: &ModelError) -> bool {
+    matches!(err, ModelError::StreamError(msg) if msg.contains("error parsing tool call"))
+}
+
 fn transport_retry_backoff(attempt: u32) -> std::time::Duration {
     match attempt {
         1 => std::time::Duration::from_secs(1),
@@ -283,6 +294,18 @@ impl ModelBackend for OllamaBackend {
         // guard, igual que `send_with_retry` en Anthropic/OpenRouter —
         // el breaker observa el desenlace FINAL de la llamada, no cada
         // intento transitorio.
+        // Incidente roam #17: el bucle exterior re-muestrea el turno
+        // cuando el stream falla con "error parsing tool call" a mitad de
+        // una respuesta 200 (la variante que el 500-de-send de #1 no
+        // cubre). Solo re-muestrea si NADA salió aún al consumidor, así
+        // que replayar el primer evento es seguro y no hay salida a medio
+        // emitir. El breaker viaja adjunto SÓLO al stream final: durante
+        // el "priming" va en `None` para que un fallo re-muestreable no
+        // cuente como caída del destino, igual que el 500 de send.
+        let mut tool_parse_stream_attempts = 0u32;
+        let event_stream: Pin<
+            Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>,
+        > = 'resample: loop {
         let send_result = async {
             let max_attempts = 1 + transport_retries_from_env();
             let mut attempt = 0u32;
@@ -365,17 +388,65 @@ impl ModelBackend for OllamaBackend {
         let byte_stream = response
             .bytes_stream()
             .map(|chunk| chunk.map(|b| b.to_vec()));
+        // `breaker: None` durante el priming — se adjunta abajo solo al
+        // stream que efectivamente devolvemos.
         let ctx = StreamCtx {
             byte_stream: Box::pin(byte_stream),
             buf: Vec::new(),
             state: OllamaStreamState::new(self.num_ctx),
             pending: VecDeque::new(),
             finished: false,
-            breaker: Some(guard),
+            breaker: None,
         };
 
-        let event_stream = stream::unfold(ctx, drive_stream);
-        Ok(Box::pin(event_stream))
+        // Priming: un paso del stream, para saber si el primer desenlace
+        // es un error de tool-parse re-muestreable ANTES de entregarle
+        // nada al engine.
+        match drive_stream(ctx).await {
+            // El stream terminó limpio sin un solo evento: nada que
+            // re-muestrear, cuenta como completación OK.
+            None => {
+                guard.observe_ok();
+                break 'resample Box::pin(stream::empty::<
+                    Result<CompletionEvent, ModelError>,
+                >());
+            }
+            Some((item, mut primed)) => {
+                let retriable = matches!(&item, Err(e) if is_tool_parse_stream_error(e))
+                    && !primed.state.produced_output
+                    && tool_parse_stream_attempts < TOOL_PARSE_500_RETRIES;
+                if retriable {
+                    tool_parse_stream_attempts += 1;
+                    tracing::warn!(
+                        attempt = tool_parse_stream_attempts,
+                        "ollama mid-stream 'error parsing tool call' before any output \
+                         (incident #17); re-sampling the round"
+                    );
+                    // `primed` (y su conexión) se descarta; el breaker
+                    // nunca se le adjuntó, así que este fallo no cuenta.
+                    tokio::time::sleep(transport_retry_backoff(tool_parse_stream_attempts))
+                        .await;
+                    continue 'resample;
+                }
+                if let Err(ref err) = item {
+                    // Error no re-muestreable (tardío, de otra clase, o
+                    // reintentos agotados): reportar la caída y devolver
+                    // un stream que emite solo ese error.
+                    guard.observe_err(err);
+                    break 'resample Box::pin(stream::once(async move { item }));
+                }
+                // Primer evento real: ahora sí el breaker viaja con el
+                // stream vivo (reporta el desenlace terminal en
+                // `drive_stream`), replayamos el evento primado y seguimos.
+                primed.breaker = Some(guard);
+                break 'resample Box::pin(
+                    stream::once(async move { item })
+                        .chain(stream::unfold(primed, drive_stream)),
+                );
+            }
+        }
+        };
+        Ok(event_stream)
     }
 }
 
@@ -912,6 +983,121 @@ mod tests {
         assert!(
             matches!(last, Err(ModelError::StreamError(_))),
             "expected the stream to end with a StreamError, got {last:?}"
+        );
+    }
+
+    /// Incidente roam #17 (2026-07-20): un "error parsing tool call" a
+    /// mitad de un stream 200, ANTES de emitir nada, se re-muestrea —
+    /// misma clase que el 500 de send de #1, pero por el camino
+    /// mid-stream que aquél no cubría. El primer response falla; el
+    /// segundo (el re-sample) produce texto limpio que debe llegar.
+    #[tokio::test]
+    async fn a_mid_stream_tool_parse_error_before_output_is_resampled() {
+        let bad = "{\"error\":\"error parsing tool call: raw='{\\\"path\\\":\\\"a.rs\\\"}', err=invalid character ',' after top-level value\"}\n";
+        let good = concat!(
+            "{\"model\":\"llama3\",\"message\":{\"role\":\"assistant\",\"content\":\"recovered\"},\"done\":false}\n",
+            "{\"model\":\"llama3\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true}\n",
+        );
+        let addr = crate::test_support::spawn_sequenced_http_server(vec![
+            (200, "application/x-ndjson", bad.as_bytes().to_vec()),
+            (200, "application/x-ndjson", good.as_bytes().to_vec()),
+        ])
+        .await;
+
+        let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
+        let events: Vec<_> = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed")
+            .collect()
+            .await;
+
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                Ok(CompletionEvent::TextDelta(t)) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            text, "recovered",
+            "the resampled round's output must reach the caller, got {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Err(ModelError::StreamError(_)))),
+            "the early tool-parse error must have been resampled away, got {events:?}"
+        );
+    }
+
+    /// Contrapeso de #17: si el tool-parse error llega DESPUÉS de haber
+    /// emitido texto (`produced_output`), re-muestrear descartaría salida
+    /// ya entregada — así que NO se re-muestrea y el error se surfacea,
+    /// como antes. Un solo response en el server: un re-sample indebido
+    /// se quedaría sin segunda respuesta.
+    #[tokio::test]
+    async fn a_tool_parse_error_after_output_is_not_resampled() {
+        let body = concat!(
+            "{\"model\":\"llama3\",\"message\":{\"role\":\"assistant\",\"content\":\"partial\"},\"done\":false}\n",
+            "{\"error\":\"error parsing tool call: raw='...', err=invalid character ','\"}\n",
+        );
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "application/x-ndjson",
+            body.as_bytes().to_vec(),
+        )
+        .await;
+
+        let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
+        let events: Vec<_> = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed")
+            .collect()
+            .await;
+
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                Ok(CompletionEvent::TextDelta(t)) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "partial", "delivered output must survive, got {events:?}");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Err(ModelError::StreamError(_)))),
+            "a tool-parse error after output must still surface, got {events:?}"
+        );
+    }
+
+    /// Contrapeso de #17: un error mid-stream temprano que NO es de
+    /// tool-parse (p.ej. "model runner has crashed") NO se re-muestrea —
+    /// el guard es específico de la clase de #1/#17.
+    #[tokio::test]
+    async fn an_early_non_tool_parse_stream_error_is_not_resampled() {
+        let body = "{\"error\":\"model runner has crashed\"}\n";
+        let addr = crate::test_support::spawn_canned_http_server(
+            200,
+            "application/x-ndjson",
+            body.as_bytes().to_vec(),
+        )
+        .await;
+
+        let backend = OllamaBackend::with_base_url("llama3".to_string(), format!("http://{addr}"));
+        let events: Vec<_> = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed")
+            .collect()
+            .await;
+
+        let last = events.last().expect("expected at least the error item");
+        assert!(
+            matches!(last, Err(ModelError::StreamError(msg)) if msg.contains("model runner has crashed")),
+            "a non-tool-parse early error must surface unchanged (no resample), got {last:?}"
         );
     }
 

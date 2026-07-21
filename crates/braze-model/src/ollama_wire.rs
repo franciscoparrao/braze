@@ -476,8 +476,10 @@ pub(crate) struct OllamaStreamState {
     /// last-resort fallback — see the `done` branch.
     thinking: String,
     /// Whether this round ever produced real content or a tool call —
-    /// what decides if the buffered `thinking` is needed as a fallback.
-    produced_output: bool,
+    /// what decides if the buffered `thinking` is needed as a fallback,
+    /// and (incident roam #17) whether a mid-stream tool-parse error is
+    /// still safe to re-sample: only if nothing has been emitted yet.
+    pub(crate) produced_output: bool,
 }
 
 impl OllamaStreamState {
