@@ -1015,3 +1015,225 @@ mod dispatch_tests {
         assert!(!edit_distance_at_most_2("grep", "shell_exec"));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // P1.1 paso 7: tests de integración movidos del mod tests de
+    // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
+    use crate::engine::test_support::*;
+    use crate::engine::Engine;
+    use braze_events::NoopObserver;
+    use braze_model::CompletionEvent;
+    use braze_session::{FileSessionStore, SimpleContextCompactor};
+    use braze_types::SessionId;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+    /// Regression test for N-33 (docs/AUDITORIA-2026-07-v2.md): when
+    /// `dispatch_tool_calls`'s wait for a round's tool completions times
+    /// out, every still-pending task must be genuinely cancelled via
+    /// `TaskNotifier::abort`, not merely given up on while it keeps
+    /// running unobserved.
+    #[tokio::test]
+    async fn a_tool_completion_timeout_actually_cancels_the_still_running_task() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let completed = Arc::new(AtomicBool::new(false));
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "slow".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(SlowToolProvider::new(
+                Duration::from_millis(300),
+                Arc::clone(&completed),
+            ))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tool_completion_timeout(Duration::from_millis(20));
+
+        engine
+            .run_turn(&session, "please run the slow tool", &mut NoopObserver)
+            .await
+            .expect(
+                "turn should still converge — the timeout is treated as a \
+                 recoverable tool failure, not a hard error",
+            );
+
+        // Longer than the tool's own delay — if the background task
+        // hadn't really been cancelled, the flag would be true by now.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !completed.load(Ordering::SeqCst),
+            "the tool call kept running in the background after the engine \
+             timed out waiting for it"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// J-13 (docs/AUDITORIA-2026-07-v7.md): a tool marked untimed
+    /// (interactive — `ask_user` in production) dispatches inline and is
+    /// exempt from `tool_completion_timeout`: the same slow tool that the
+    /// N-33 test above proves gets CANCELLED under the 20ms clock must
+    /// here run to completion and deliver its real result — a human
+    /// answering slowly is not a hung tool.
+    #[tokio::test]
+    async fn an_untimed_tool_outlives_the_completion_timeout_and_delivers_its_result() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let completed = Arc::new(AtomicBool::new(false));
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "slow".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(SlowToolProvider::new(
+                Duration::from_millis(300),
+                Arc::clone(&completed),
+            ))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tool_completion_timeout(Duration::from_millis(20))
+        .with_untimed_tool("slow");
+
+        engine
+            .run_turn(&session, "please run the slow tool", &mut NoopObserver)
+            .await
+            .expect("turn must converge with the tool's real result");
+
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "the untimed tool must have actually run to completion"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let result = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { result, .. } => Some(result),
+                _ => None,
+            })
+            .expect("the tool completion must be persisted");
+        assert!(!result.is_error, "got: {}", result.content);
+        assert_eq!(result.content, "done");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-14.
+    ///
+    /// Nothing previously checked that a `ToolCallRequested`'s id was
+    /// unique before persisting it as an `AssistantToolCall` — a model
+    /// that (accidentally or via a buggy backend's synthetic-id fallback)
+    /// issues two calls sharing one id would get two `tool_use`/
+    /// `tool_result` pairs with the same id in the append-only log,
+    /// which Anthropic rejects permanently on every future request.
+    #[tokio::test]
+    async fn duplicate_tool_use_ids_in_one_round_are_renamed_to_stay_unique() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ProtocolValidatingModel::new(ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "a" }),
+                },
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "b" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]));
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo two things", &mut NoopObserver)
+            .await
+            .expect(
+                "turn should succeed despite the duplicate id — and every \
+                     request built along the way must still pass protocol validation",
+            );
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            2,
+            "both calls have different arguments, so both must dispatch \
+             (not be treated as an identical repeated call)"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let tool_use_ids: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::AssistantToolCall { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tool_use_ids.len(), 2);
+        assert_ne!(
+            tool_use_ids[0], tool_use_ids[1],
+            "the second call's id must have been renamed to stay unique"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+}

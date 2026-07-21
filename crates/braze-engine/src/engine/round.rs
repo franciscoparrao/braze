@@ -519,3 +519,92 @@ fn candidate_signature(outcome: &RoundOutcome) -> Vec<(String, String)> {
     signature.sort();
     signature
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // P1.1 paso 7: tests de integración movidos del mod tests de
+    // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
+    use crate::engine::test_support::*;
+    use crate::engine::Engine;
+    use braze_events::NoopObserver;
+    use braze_model::CompletionEvent;
+    use braze_session::{FileSessionStore, SimpleContextCompactor};
+    use braze_types::SessionId;
+    use std::sync::atomic::AtomicU32;
+
+    /// Regression test for N-13 (docs/AUDITORIA-2026-07-v2.md): a
+    /// transient error on one best-of-n candidate must not discard the
+    /// other candidates already generated and fail the whole round —
+    /// the turn must still converge by voting among the survivors.
+    #[tokio::test]
+    async fn best_of_n_votes_among_successful_candidates_when_one_attempt_errors() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = FlakyBestOfNModel {
+            fail_on_attempt: 1,
+            calls: AtomicU32::new(0),
+            good_round: vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        };
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(3);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should still succeed despite one candidate erroring");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { text } if text == "done")),
+            "expected the winning candidate's text to be persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-13: if *every* best-of-n candidate fails,
+    /// the round must still propagate an error — voting among survivors
+    /// must not mask a genuine total failure as success.
+    #[tokio::test]
+    async fn best_of_n_fails_the_round_only_when_every_candidate_fails() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ErroringModel;
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(3);
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            matches!(result, Err(EngineError::Model(_))),
+            "expected every candidate to fail and the error to propagate, got {result:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+}
