@@ -640,17 +640,11 @@ mod tests {
     // el module doc de `crate::rescue`); estos dos parsers internos solo
     // los referencian tests, no la producción de este archivo.
     use crate::rescue::{parse_function_xml_tool_call, parse_glm_arg_tag_tool_call};
-    // P1.1 paso 2: ídem para los helpers de contexto e history que solo
-    // los tests referencian por nombre.
-    use super::context::{
-        NO_CONTEXT_BUDGET_SCALE_MULTIPLIER, effective_tactical_compaction_threshold,
-        effective_tactical_full_observations, estimate_dropped_tokens,
-        full_observations_byte_budget, tactical_cap_scale,
-    };
-    // P1.1 paso 3: ídem para los helpers de planner/fallback.
+    // P1.1 paso 5: los tests unitarios de context/planner viven ahora en
+    // sus módulos; queda el helper de compaction-threshold que los tests
+    // de integración de este archivo aún referencian, y el de fallback.
+    use super::context::effective_tactical_compaction_threshold;
     use super::fallback::strip_leaked_tool_call_shapes;
-    use super::planner::count_numbered_steps;
-    use crate::history::{MAX_FULL_OBSERVATIONS_TOTAL_CHARS, TACTICAL_FULL_OBSERVATIONS};
     use std::pin::Pin;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -2569,20 +2563,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
-    /// Iteración pre-registrada del planner (2026-07-10): the numbered-
-    /// step counting rule the single-step discard keys on — `N.`/`N)`
-    /// after optional indentation; prose without numbers counts zero.
-    #[test]
-    fn count_numbered_steps_recognizes_dot_and_paren_forms_and_ignores_prose() {
-        assert_eq!(count_numbered_steps("1. leer\n2. editar\n3. verificar"), 3);
-        assert_eq!(count_numbered_steps("  1) leer\n  2) editar"), 2);
-        assert_eq!(count_numbered_steps("1. único paso"), 1);
-        assert_eq!(
-            count_numbered_steps("primero leo el archivo y después respondo"),
-            0
-        );
-        assert_eq!(count_numbered_steps("10. paso\n11. otro"), 2);
-    }
 
     /// A single-step plan is discarded, not persisted — the executor's
     /// first round covers a trivial request without paying the
@@ -4052,134 +4032,21 @@ mod tests {
     // --- full_observations_byte_budget (hallazgo U-17,
     // docs/usability-log-2026-07-07-si2.md) ---
 
-    #[test]
-    fn a_configured_context_budget_keeps_the_original_protective_default() {
-        assert_eq!(
-            full_observations_byte_budget(Some(8192)),
-            MAX_FULL_OBSERVATIONS_TOTAL_CHARS
-        );
-    }
 
-    #[test]
-    fn no_configured_context_budget_gets_a_wider_default() {
-        assert_eq!(
-            full_observations_byte_budget(None),
-            MAX_FULL_OBSERVATIONS_TOTAL_CHARS * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
-        );
-        assert!(full_observations_byte_budget(None) > full_observations_byte_budget(Some(8192)));
-    }
 
-    #[test]
-    fn a_configured_context_budget_keeps_the_compaction_threshold_unchanged() {
-        assert_eq!(
-            effective_tactical_compaction_threshold(40, Some(8192)),
-            40
-        );
-    }
 
-    #[test]
-    fn no_configured_context_budget_widens_the_compaction_threshold() {
-        assert_eq!(
-            effective_tactical_compaction_threshold(DEFAULT_TACTICAL_COMPACTION_THRESHOLD, None),
-            DEFAULT_TACTICAL_COMPACTION_THRESHOLD * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
-        );
-    }
 
-    /// Regression test for the ablation-corruption risk documented on
-    /// `effective_tactical_compaction_threshold`'s own doc comment: an
-    /// explicit override (e.g. `+ablate:tactical-threshold=8`) must
-    /// survive verbatim even with no context budget configured — only the
-    /// untouched default gets scaled.
-    #[test]
-    fn an_explicit_non_default_compaction_threshold_is_never_scaled() {
-        assert_eq!(effective_tactical_compaction_threshold(8, None), 8);
-    }
 
     // --- tactical_cap_scale (I-2, docs/AUDITORIA-2026-07-v6.md): the
     // caps scale with the budget's VALUE, not its mere presence ---
 
-    /// The anchor the whole formula hangs on: at the historical 8K-ctx
-    /// reference budget the scale is exactly 1 — byte-identical behavior
-    /// for the small local models the defaults were tuned on.
-    #[test]
-    fn the_reference_budget_scales_by_exactly_one() {
-        assert_eq!(tactical_cap_scale(Some(6_000)), 1);
-        assert_eq!(tactical_cap_scale(Some(8_192)), 1);
-    }
 
-    /// A 32K-ctx local model (budget ≈ 30K tokens) gets proportionally
-    /// wider caps — the exact population (qwen3.5-coder on Nitro) for
-    /// which the U-17 re-read collapse was still alive under the binary
-    /// Some/None logic.
-    #[test]
-    fn a_large_local_budget_scales_all_three_caps_proportionally() {
-        let budget = Some(30_000);
-        assert_eq!(tactical_cap_scale(budget), 5);
-        assert_eq!(
-            full_observations_byte_budget(budget),
-            MAX_FULL_OBSERVATIONS_TOTAL_CHARS * 5
-        );
-        assert_eq!(
-            effective_tactical_compaction_threshold(DEFAULT_TACTICAL_COMPACTION_THRESHOLD, budget),
-            DEFAULT_TACTICAL_COMPACTION_THRESHOLD * 5
-        );
-        assert_eq!(
-            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, budget),
-            TACTICAL_FULL_OBSERVATIONS * 5
-        );
-    }
 
-    /// A tiny budget never shrinks the caps below the tuned defaults —
-    /// they're the protective minimum, not a starting point to scale down.
-    #[test]
-    fn a_tiny_budget_floors_at_the_tuned_defaults() {
-        assert_eq!(tactical_cap_scale(Some(1_000)), 1);
-        assert_eq!(
-            full_observations_byte_budget(Some(1_000)),
-            MAX_FULL_OBSERVATIONS_TOTAL_CHARS
-        );
-    }
 
-    /// A huge local budget caps at the same ×10 cloud backends get — a
-    /// 128K-context local model shouldn't out-scale cloud.
-    #[test]
-    fn a_huge_local_budget_caps_at_the_cloud_multiplier() {
-        assert_eq!(
-            tactical_cap_scale(Some(500_000)),
-            NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
-        );
-    }
 
-    /// The ablation guard survives the I-2 change: an explicit override
-    /// is never scaled no matter how large the budget is.
-    #[test]
-    fn an_explicit_override_is_never_scaled_even_with_a_large_budget() {
-        assert_eq!(effective_tactical_compaction_threshold(8, Some(30_000)), 8);
-        assert_eq!(effective_tactical_full_observations(2, Some(30_000)), 2);
-    }
 
-    #[test]
-    fn a_configured_context_budget_keeps_full_observations_unchanged() {
-        assert_eq!(
-            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, Some(8192)),
-            TACTICAL_FULL_OBSERVATIONS
-        );
-    }
 
-    #[test]
-    fn no_configured_context_budget_widens_full_observations() {
-        assert_eq!(
-            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, None),
-            TACTICAL_FULL_OBSERVATIONS * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
-        );
-    }
 
-    /// Same regression as `an_explicit_non_default_compaction_threshold_is_never_scaled`,
-    /// for `+ablate:full-observations=N`.
-    #[test]
-    fn an_explicit_non_default_full_observations_is_never_scaled() {
-        assert_eq!(effective_tactical_full_observations(1, None), 1);
-    }
 
     /// Without a configured budget, a large event does NOT trigger
     /// compaction below the event-count threshold — confirms
@@ -6409,28 +6276,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
-    /// Regression test for the "estimador de tokens sobre Debug repr"
-    /// bajo (docs/AUDITORIA-2026-07-v2.md): the estimate must scale with
-    /// the event's actual user-visible text, not its `Debug` dump —
-    /// field names and enum punctuation must not count as "content".
-    #[test]
-    fn estimate_dropped_tokens_counts_visible_text_not_debug_repr() {
-        let text = "hola".repeat(20); // 80 chars of real content
-        let events = vec![AgentEvent::UserMessage { text: text.clone() }];
-
-        let debug_repr_chars = format!("{:?}", events[0]).len();
-        assert!(
-            debug_repr_chars > text.len(),
-            "sanity: the Debug form should be longer than the raw text itself"
-        );
-
-        let estimate = estimate_dropped_tokens(&events);
-        assert_eq!(
-            estimate,
-            (text.len() / 4) as u32,
-            "expected the estimate to scale with the raw text length, not the (longer) Debug form"
-        );
-    }
 
     /// Confirms the generic permissive schema `braze-model` sends to the
     /// model today (`{"type":"object","additionalProperties":true}`) would

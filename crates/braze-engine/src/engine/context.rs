@@ -852,6 +852,9 @@ fn render_events_for_lead_summary(events: &[AgentEvent]) -> String {
 mod tests {
     use super::*;
     use braze_types::ToolResult;
+    // P1.1 paso 5: tests movidos del mod tests de engine/mod.rs — usan
+    // las constantes de history directamente.
+    use crate::history::{MAX_FULL_OBSERVATIONS_TOTAL_CHARS, TACTICAL_FULL_OBSERVATIONS};
 
     /// El transcript capea cada ítem con marcador visible, nunca corta
     /// mid-char, y ante exceso total conserva los eventos MÁS NUEVOS
@@ -893,5 +896,154 @@ mod tests {
             "se conservan los MÁS NUEVOS"
         );
         assert!(!transcript.contains("evento 0:"), "los más viejos se omiten");
+    }
+
+    #[test]
+    fn a_configured_context_budget_keeps_the_original_protective_default() {
+        assert_eq!(
+            full_observations_byte_budget(Some(8192)),
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS
+        );
+    }
+
+    #[test]
+    fn no_configured_context_budget_gets_a_wider_default() {
+        assert_eq!(
+            full_observations_byte_budget(None),
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+        );
+        assert!(full_observations_byte_budget(None) > full_observations_byte_budget(Some(8192)));
+    }
+
+    #[test]
+    fn a_configured_context_budget_keeps_the_compaction_threshold_unchanged() {
+        assert_eq!(
+            effective_tactical_compaction_threshold(40, Some(8192)),
+            40
+        );
+    }
+
+    #[test]
+    fn no_configured_context_budget_widens_the_compaction_threshold() {
+        assert_eq!(
+            effective_tactical_compaction_threshold(DEFAULT_TACTICAL_COMPACTION_THRESHOLD, None),
+            DEFAULT_TACTICAL_COMPACTION_THRESHOLD * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+        );
+    }
+
+    /// Regression test for the ablation-corruption risk documented on
+    /// `effective_tactical_compaction_threshold`'s own doc comment: an
+    /// explicit override (e.g. `+ablate:tactical-threshold=8`) must
+    /// survive verbatim even with no context budget configured — only the
+    /// untouched default gets scaled.
+    #[test]
+    fn an_explicit_non_default_compaction_threshold_is_never_scaled() {
+        assert_eq!(effective_tactical_compaction_threshold(8, None), 8);
+    }
+
+    /// The anchor the whole formula hangs on: at the historical 8K-ctx
+    /// reference budget the scale is exactly 1 — byte-identical behavior
+    /// for the small local models the defaults were tuned on.
+    #[test]
+    fn the_reference_budget_scales_by_exactly_one() {
+        assert_eq!(tactical_cap_scale(Some(6_000)), 1);
+        assert_eq!(tactical_cap_scale(Some(8_192)), 1);
+    }
+
+    /// A 32K-ctx local model (budget ≈ 30K tokens) gets proportionally
+    /// wider caps — the exact population (qwen3.5-coder on Nitro) for
+    /// which the U-17 re-read collapse was still alive under the binary
+    /// Some/None logic.
+    #[test]
+    fn a_large_local_budget_scales_all_three_caps_proportionally() {
+        let budget = Some(30_000);
+        assert_eq!(tactical_cap_scale(budget), 5);
+        assert_eq!(
+            full_observations_byte_budget(budget),
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS * 5
+        );
+        assert_eq!(
+            effective_tactical_compaction_threshold(DEFAULT_TACTICAL_COMPACTION_THRESHOLD, budget),
+            DEFAULT_TACTICAL_COMPACTION_THRESHOLD * 5
+        );
+        assert_eq!(
+            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, budget),
+            TACTICAL_FULL_OBSERVATIONS * 5
+        );
+    }
+
+    /// A tiny budget never shrinks the caps below the tuned defaults —
+    /// they're the protective minimum, not a starting point to scale down.
+    #[test]
+    fn a_tiny_budget_floors_at_the_tuned_defaults() {
+        assert_eq!(tactical_cap_scale(Some(1_000)), 1);
+        assert_eq!(
+            full_observations_byte_budget(Some(1_000)),
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS
+        );
+    }
+
+    /// A huge local budget caps at the same ×10 cloud backends get — a
+    /// 128K-context local model shouldn't out-scale cloud.
+    #[test]
+    fn a_huge_local_budget_caps_at_the_cloud_multiplier() {
+        assert_eq!(
+            tactical_cap_scale(Some(500_000)),
+            NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+        );
+    }
+
+    /// The ablation guard survives the I-2 change: an explicit override
+    /// is never scaled no matter how large the budget is.
+    #[test]
+    fn an_explicit_override_is_never_scaled_even_with_a_large_budget() {
+        assert_eq!(effective_tactical_compaction_threshold(8, Some(30_000)), 8);
+        assert_eq!(effective_tactical_full_observations(2, Some(30_000)), 2);
+    }
+
+    #[test]
+    fn a_configured_context_budget_keeps_full_observations_unchanged() {
+        assert_eq!(
+            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, Some(8192)),
+            TACTICAL_FULL_OBSERVATIONS
+        );
+    }
+
+    #[test]
+    fn no_configured_context_budget_widens_full_observations() {
+        assert_eq!(
+            effective_tactical_full_observations(TACTICAL_FULL_OBSERVATIONS, None),
+            TACTICAL_FULL_OBSERVATIONS * NO_CONTEXT_BUDGET_SCALE_MULTIPLIER
+        );
+    }
+
+    /// Same regression as `an_explicit_non_default_compaction_threshold_is_never_scaled`,
+    /// for `+ablate:full-observations=N`.
+    #[test]
+    fn an_explicit_non_default_full_observations_is_never_scaled() {
+        assert_eq!(effective_tactical_full_observations(1, None), 1);
+    }
+
+    /// Regression test for the "estimador de tokens sobre Debug repr"
+    /// bajo (docs/AUDITORIA-2026-07-v2.md): the estimate must scale with
+    /// the event's actual user-visible text, not its `Debug` dump —
+    /// field names and enum punctuation must not count as "content".
+    #[test]
+    fn estimate_dropped_tokens_counts_visible_text_not_debug_repr() {
+        let text = "hola".repeat(20); // 80 chars of real content
+        let events = vec![AgentEvent::UserMessage { text: text.clone() }];
+
+        let debug_repr_chars = format!("{:?}", events[0]).len();
+        assert!(
+            debug_repr_chars > text.len(),
+            "sanity: the Debug form should be longer than the raw text itself"
+        );
+
+        let estimate = estimate_dropped_tokens(&events);
+        assert_eq!(
+            estimate,
+            (text.len() / 4) as u32,
+            "expected the estimate to scale with the raw text length, not the (longer) Debug form"
+        );
     }
 }

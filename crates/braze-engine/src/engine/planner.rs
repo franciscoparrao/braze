@@ -183,3 +183,23 @@ fn planning_system_prompt(base: &str, stubs: &[ToolStub]) -> String {
          Available tools:\n{tools_list}"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Iteración pre-registrada del planner (2026-07-10): the numbered-
+    /// step counting rule the single-step discard keys on — `N.`/`N)`
+    /// after optional indentation; prose without numbers counts zero.
+    #[test]
+    fn count_numbered_steps_recognizes_dot_and_paren_forms_and_ignores_prose() {
+        assert_eq!(count_numbered_steps("1. leer\n2. editar\n3. verificar"), 3);
+        assert_eq!(count_numbered_steps("  1) leer\n  2) editar"), 2);
+        assert_eq!(count_numbered_steps("1. único paso"), 1);
+        assert_eq!(
+            count_numbered_steps("primero leo el archivo y después respondo"),
+            0
+        );
+        assert_eq!(count_numbered_steps("10. paso\n11. otro"), 2);
+    }
+}
