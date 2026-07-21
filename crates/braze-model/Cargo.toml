@@ -27,3 +27,8 @@ encoding_rs = { version = "0.8", optional = true }
 
 [features]
 local = ["dep:llama-cpp-2", "dep:encoding_rs"]
+# `cuda` = local + offload GPU (llama.cpp compilado con CUDA). Requiere
+# el CUDA toolkit (nvcc) en el host de build. Se usa en Nitro (RTX 3050);
+# la máquina de trabajo sin GPU compila solo `local` (CPU). Ver
+# docs/local-backend-design-2026-07-20.md § Fase 2.
+cuda = ["local", "llama-cpp-2/cuda"]

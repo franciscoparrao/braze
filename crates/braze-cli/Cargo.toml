@@ -40,3 +40,5 @@ serde_json = { workspace = true }
 # Backend local (llama.cpp in-process, reusa los GGUF de Ollama). Off por
 # default — compila llama.cpp. Ver docs/local-backend-design-2026-07-20.md.
 local = ["braze-model/local"]
+# GPU/CUDA en Nitro (ver braze-model/cuda). Build CPU usa `local`.
+local-cuda = ["local", "braze-model/cuda"]
