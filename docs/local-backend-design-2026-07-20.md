@@ -357,9 +357,17 @@ con greedy (stateless), fatal con gramática (el stack GBNF avanzaba dos
 veces → `GGML_ASSERT(!stacks.empty())`, SIGABRT). La gramática fue lo
 que lo hizo visible.
 
-**A/B pendiente (el publicable):** sweep con `BRAZE_LOCAL_GRAMMAR`
-on/off sobre la misma suite — hipótesis: `schema_fail + rescues → 0` en
-el brazo con gramática, mismo o mejor pass rate.
+**A/B ejecutado (2026-07-21, `docs/sweep-stencil-ab-2026-07-21.md`):**
+41/57 vs 40/57, McNemar p=1.0 — sin diferencia de pass rate y **sin
+constraint tax**. La hipótesis "schema_fail+rescues→0" resultó mal
+planteada: rescues cuenta la extracción normal (no puede ser 0) y el
+schema_fail del bench es conformidad de args, que el envelope no ataca
+(y cuya clase de envelope el preámbulo de Fase 1 ya había vaciado). El
+valor demostrado es la garantía por construcción a costo cero; el
+próximo paso con señal esperable es la gramática **derivada del
+schema** (json-schema → GBNF por tool). El proceso destapó y corrigió 3
+bugs latentes de Fase 1 (double-accept, prompt>n_batch, token de
+control espurio) — ver el doc del sweep.
 
 ## Referencias
 

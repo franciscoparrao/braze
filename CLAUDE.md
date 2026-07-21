@@ -205,10 +205,17 @@ construcción. Detalle completo y recetas en
   `BRAZE_LOCAL_GRAMMAR=off` (brazo de ablación). Verificado en vivo en
   ambas familias. Bug depurado: double-accept del sampler (latente desde
   Fase 1, fatal solo con gramática). Ver design doc § Fase 3.
-- Pendiente de la línea: **el A/B publicable** (sweep
-  `BRAZE_LOCAL_GRAMMAR` on/off, hipótesis schema_fail+rescues→0),
-  instalar el binario CUDA estable en Nitro (hoy `target/debug` +
-  `LD_LIBRARY_PATH`), y paridad GPU vs Ollama sobre qwen2.5:3b.
+- **A/B del stencil ejecutado** (2026-07-21,
+  `docs/sweep-stencil-ab-2026-07-21.md`): 41/57 vs 40/57, McNemar
+  p=1.0 — sin ganancia de pass rate pero **sin constraint tax**; la
+  garantía por construcción sale gratis. El residual son args
+  no-conformes al schema (4-7 por brazo) → el próximo paso con señal
+  esperable es la gramática **derivada del schema** (json-schema→GBNF
+  por tool). El proceso destapó 3 bugs latentes de Fase 1, corregidos
+  (double-accept, prompt>n_batch=abort, token de control espurio).
+- Pendiente de la línea: gramática schema-derivada, instalar el binario
+  CUDA estable en Nitro (hoy `target/debug` + `LD_LIBRARY_PATH`), y
+  paridad GPU vs Ollama sobre qwen2.5:3b.
 
 ## Próximos pasos al retomar
 
