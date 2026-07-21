@@ -1651,6 +1651,53 @@ we tested --- the harness-side rescue ladder remains the tradeoff that
 does not require decoder access, and having decoder access, even used
 more precisely, did not settle the comparison in its favor.
 
+\paragraph{An independent in-process replication.} The result above
+could still be an artifact of its mechanism: Ollama's structured-output
+constraint is server-side, all-or-nothing (the whole completion is
+forced into the envelope schema), and outside our control. After this
+paper's main evidence was collected we built the opposite
+implementation --- an in-process backend linking \texttt{llama.cpp}
+directly, where a GBNF grammar masks logits at the \emph{sampler} and a
+manually-lazy activation engages the constraint exactly when a tool
+call begins (a literal trigger in the token stream) and releases it
+when the call's envelope completes, leaving all surrounding text
+unconstrained. We tested both an envelope-level grammar (valid JSON,
+tool name restricted to the turn's real inventory, closing tag
+guaranteed) and a stricter per-tool grammar derived from each tool's
+input schema (required fields forced, in declared order; undeclared
+arguments unproducible), with the hypothesis declared in-repo before
+each run (git-only registry, \S\ref{sec:setup}). Across three paired
+sweeps on \texttt{qwen2.5:3b} (19 tasks $\times$ 3 repetitions per arm,
+greedy decoding, exact McNemar on task-repetition pairs), pass rate was
+statistically indistinguishable every time (41/57 vs.\ 40/57, 41 vs.\
+40, 40 vs.\ 40; $p{=}1.0$ in each) --- and, unlike the server-side
+variant, with \emph{no} capability tax: constraining cost nothing. The
+mechanism explanation is the more instructive half: the engine's own
+downstream repair loop (schema-validation failures are returned to the
+model with a corrective message and retried) already absorbs the
+residual failure class --- in the final sweep, \emph{every} run that
+recorded a schema-validation failure still passed, in both arms. The
+syntactic guarantee is real and free, but on this suite there is no
+failure class left for it to kill: harness-level recovery downstream
+had already covered it. Two implementations at opposite ends of the
+decoder-access spectrum thus converge on the same conclusion for
+different reasons --- one hurt, one was neutral; neither paid.
+
+\paragraph{A methodological yield.} The in-process replication also
+demonstrates why we insist on live verification over test suites
+(\S\ref{sec:threats}): wiring the grammar into the sampler surfaced
+three latent decoder-integration bugs --- a double-accept advancing the
+grammar automaton twice per token (harmless under stateless greedy
+sampling, fatal under any stateful sampler), a prompt exceeding the
+decode batch size aborting the whole process from C++, and an
+unrenderable control token killing the completion stream --- none of
+which the workspace's $\sim$1{,}000 unit tests or prior smoke tests had
+exposed, and one of which asymmetrically contaminated the first paired
+sweep (its three baseline-arm failures were backend crashes, not model
+errors) and forced the re-run we report. Constrained decoding did not
+improve the model's reliability, but \emph{measuring} it improved the
+harness's.
+
 % =====================================================================
 \section{Discussion}\label{sec:discussion}
 
@@ -1951,7 +1998,17 @@ family-wise correction (\S\ref{sec:setup}). The pre-registered
 criteria bound researcher degrees of freedom on the adopt/reject
 decisions they govern, but any individual interval cited outside those
 criteria --- including the per-skill contrasts --- should be read as
-uncorrected.
+uncorrected. A related asymmetry postdates most of the evidence: the
+harness's benchmark reporter now computes exact paired McNemar tests
+with Holm correction against a designated baseline arm (and the
+$\text{pass}^k$ reliability statistic of $\tau$-bench), and the
+in-process constrained-decoding replication (\S\ref{sec:constrained})
+uses that paired machinery; the earlier sweeps in
+Table~\ref{tab:sweeps} were compared with unpaired
+Newcombe intervals on independent proportions, which is conservative
+for the shared-task design (tasks are identical across arms) --- a
+paired re-analysis of the archived JSONs is possible from the released
+artifacts and would, if anything, narrow those intervals.
 
 \paragraph{Mechanism claims (construct validity).} Two mechanism
 claims rest on probes of a single harness-and-serving stack. The
@@ -2035,7 +2092,7 @@ interests.
 \section{Sweep inventory}\label{app:sweeps}
 
 Table~\ref{tab:sweeps} lists every sweep cited in this paper, in the
-order they appear: 7{,}197 total runs across 20 sweep files (the
+order they appear: 7{,}425 total runs across 24 sweep files (the
 SWE-bench anchor's row spans its three per-arm driver files; a
 further entry, the 3B task-list re-run of \S\ref{sec:planner}, is a
 partial re-run of 95 further runs replacing a contaminated arm, not a
@@ -2046,7 +2103,12 @@ marks a disclosed metadata artifact: that sweep's binary predates its
 recorded commit --- the commit was captured when the JSON was written,
 at the end of a multi-hour sweep during which HEAD advanced (the
 harness now captures sweep identity at start, a fix this very sweep
-motivated). Each
+motivated). The $\ddagger$ rows ran on an inference node holding a
+git-less rsync copy of the named commit's tree, so their JSONs carry no
+embedded commit; the recorded commit is the synced tree state, noted
+manually --- and their first, discarded attempt (contaminated by a
+backend bug, \S\ref{sec:constrained}) is disclosed there rather than
+counted here. Each
 row's commit is the \texttt{braze\_git\_commit} embedded in that
 sweep's own JSON metadata at the time it was written, not necessarily
 the HEAD commit at time of writing this paper; where a later
@@ -2081,6 +2143,8 @@ bfcl-anchor & 2026-07-18/19 & \texttt{bc30a80} & 1{,}500 & \ref{sec:bfcl} \\
 rerun-block1 (1B plan+lead) & 2026-07-19 & \texttt{7528841} & 190 & \ref{sec:curve} \\
 rerun-block2 (coder arms) & 2026-07-19 & \texttt{70c2072}$^{\dagger}$ & 285 & \ref{sec:planner} \\
 swebench-lite-anchor (3 arms) & 2026-07-19 & \texttt{010f501} & 120 & \ref{sec:swebench} \\
+stencil-ab-v2 (envelope GBNF) & 2026-07-21 & \texttt{916c0f1}$^{\ddagger}$ & 114 & \ref{sec:constrained} \\
+stencil-ab-v3 (schema-derived) & 2026-07-21 & \texttt{82dcd70}$^{\ddagger}$ & 114 & \ref{sec:constrained} \\
 \bottomrule
 \end{tabular}
 \end{table}
