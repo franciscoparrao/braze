@@ -177,10 +177,11 @@ mismo día.)
 - **Ancla BFCL**: análisis post-sweep (transporte 2% → grader → E1-E4,
   `docs/bfcl-anchor-RESUME.md`) e integración al paper; luego re-runs
   bloques 1-2 y probe Parte B (diseños pre-registrados).
-- **A/B Gemma4**: actualizar Ollama de Nitro a ≥0.32.1 (fix de tool
-  calling del 16-jul) y re-correr e4b vs gpt-oss:20b con el MISMO
-  digest (`c6eb396dbd59` — el stealth refresh del 15-jul aún no llega
-  al registry); vigilar el cambio de digest para el A/B de pesos.
+- **A/B Gemma4**: Ollama de Nitro **ya actualizado a 0.32.1** (2026-07-20,
+  era 0.30.7 — el fix de tool calling del 16-jul ya está en el nodo);
+  falta re-correr e4b vs gpt-oss:20b con el MISMO digest (`c6eb396dbd59`
+  — el stealth refresh del 15-jul aún no llega al registry); vigilar el
+  cambio de digest para el A/B de pesos.
 - **A/Bs nuevos de la cola de Nitro**: lead-summary (con `num_ctx`
   chico para que compacte de verdad) y TTC (`qwen2.5:3b` vs
   `+ablate:ttc=3`, cruzado con pass^k).
@@ -218,11 +219,21 @@ Nota Gemma 4 (2026-07-18): Google publicó un *stealth refresh* el
 15-jul (fixes de tool calling, τ²-Airline +8pp en E4B) pero los pesos
 NO están en el registry de Ollama todavía (`gemma4:e4b` sigue en digest
 `c6eb396dbd59`, el mismo del sweep del 13-jul — re-pullear es no-op).
-La palanca accionable es **Ollama ≥0.32.1** (16-jul, fix propio de tool
-calling Gemma 4); el A/B de runtime está en "Próximos pasos". pass^k
+La palanca accionable era **Ollama ≥0.32.1** (16-jul, fix propio de tool
+calling Gemma 4), y Nitro **ya está en 0.32.1** (actualizado 2026-07-20);
+el A/B de runtime queda listo para correr, en "Próximos pasos". pass^k
 mostró que los 3 fallos de e4b son sistemáticos (una tarea de
 `single_tool`), no flakiness — si el fix los repara, e4b salta a
 pass^5=100% y desafía a gpt-oss:20b como default por RAM.
+
+Nota infra (2026-07-20): Nitro corre **Ollama 0.32.1** (era 0.30.7). El
+upgrade resolvió además la recurrencia del incidente #1 del testbed roam
+(HTTP 500 "error parsing tool call": Ollama 0.30.7 parseaba el canal
+harmony de gpt-oss server-side y reventaba cuando el razonamiento se
+filtraba — aunque el request no declarara tools). A/B confirmatorio: el
+mismo guion multi-turno a 8192 daba HTTP 500 en 0.30.7 y **cero** en
+0.32.1, y con el 500 fuera la cadena de 3 turnos completó por primera
+vez. Detalle en `docs/bitacora-harness-modelo.html`.
 
 `qwen3.5-coder` sigue siendo un modelo local sólido (sweep 2026-07-06,
 `docs/sweep-nitro-sampling-2026-07-06/`: 6/6 en `g10-weak-skills` a temp
