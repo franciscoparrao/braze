@@ -487,19 +487,47 @@ fn generate_blocking(
     };
     let input_tokens = tokens.len() as u32;
 
-    let mut batch = LlamaBatch::new(tokens.len().max(512), 1);
-    let last = tokens.len() as i32 - 1;
-    for (i, tok) in tokens.into_iter().enumerate() {
-        if let Err(e) = batch.add(tok, i as i32, &[0], i as i32 == last) {
-            bail!("local: batch.add falló: {e}");
-        }
+    // Guard explícito: un prompt que no cabe en el contexto debe ser un
+    // error legible del backend, no un assert C++ que mata el proceso.
+    let ctx_limit = n_ctx.map_or(256, std::num::NonZeroU32::get) as usize;
+    if tokens.len() >= ctx_limit {
+        bail!(
+            "local: el prompt ({} tokens) no cabe en n_ctx ({ctx_limit}) — \
+             la compactación del engine debería haber actuado antes",
+            tokens.len()
+        );
     }
-    if let Err(e) = ctx.decode(&mut batch) {
-        bail!("local: decode del prompt falló: {e}");
+
+    // El prompt se decodifica en chunks de n_batch: llama.cpp aborta el
+    // proceso entero (GGML_ASSERT n_tokens_all <= n_batch) si un decode
+    // excede el batch. Latente desde Fase 1 — los smokes usan prompts
+    // cortos; lo expuso una tarea multi-ronda del sweep A/B del stencil
+    // cuyo prompt de ronda superó los 2048 tokens (2026-07-21).
+    const N_BATCH: usize = 2048; // default de llama_context_default_params
+    let mut batch = LlamaBatch::new(N_BATCH, 1);
+    let total = tokens.len();
+    let mut fed = 0usize;
+    while fed < total {
+        batch.clear();
+        let end = (fed + N_BATCH).min(total);
+        for (i, tok) in tokens[fed..end].iter().enumerate() {
+            let pos = fed + i;
+            // Solo el último token del prompt pide logits.
+            if let Err(e) = batch.add(*tok, pos as i32, &[0], pos + 1 == total) {
+                bail!("local: batch.add falló: {e}");
+            }
+        }
+        if let Err(e) = ctx.decode(&mut batch) {
+            bail!("local: decode del prompt falló: {e}");
+        }
+        fed = end;
     }
 
     let mut sampler = LlamaSampler::greedy();
-    let mut n_cur = batch.n_tokens();
+    // Posición del próximo token en el KV cache: el total del prompt
+    // (no `batch.n_tokens()`, que tras el decode en chunks es solo el
+    // tamaño del último chunk).
+    let mut n_cur = total as i32;
     let mut output_tokens = 0u32;
     let budget = max_tokens.max(1);
     // Decoder UTF-8 persistente: un carácter multi-byte puede repartirse
