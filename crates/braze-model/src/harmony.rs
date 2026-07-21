@@ -527,6 +527,13 @@ impl HarmonyParser {
     pub(crate) fn tool_call_in_progress(&self) -> bool {
         self.recipient.is_some()
     }
+
+    /// El destinatario de la call en curso (`to=functions.<name>` ya
+    /// parseado del header) — el stencil lo usa para seleccionar la
+    /// gramática de args derivada del schema de esa tool.
+    pub(crate) fn pending_tool_name(&self) -> Option<&str> {
+        self.recipient.as_deref()
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -863,9 +870,10 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_in_progress_reports_pending_call() {
+    fn tool_call_in_progress_reports_pending_call_and_name() {
         let mut p = HarmonyParser::new();
         assert!(!p.tool_call_in_progress());
+        assert_eq!(p.pending_tool_name(), None);
         feed(
             &mut p,
             &[
@@ -876,6 +884,8 @@ mod tests {
             ],
         );
         assert!(p.tool_call_in_progress());
+        // El stencil selecciona la gramática de args con este nombre.
+        assert_eq!(p.pending_tool_name(), Some("write_file"));
     }
 
     #[test]

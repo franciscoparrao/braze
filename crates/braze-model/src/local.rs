@@ -39,7 +39,7 @@ use crate::args_repair::{parse_arguments_with_repair, ArgumentsOutcome};
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
 use crate::harmony::{build_harmony_prompt, utc_date_string, HarmonyEvent, HarmonyMarker, HarmonyParser};
-use crate::stencil::{harmony_args_grammar, qwen_call_grammar, JsonCursor};
+use crate::stencil::{harmony_args_grammar, qwen_call_grammar, JsonCursor, ToolGrammarSpec};
 
 /// Addendum de tools reproduciendo el **preámbulo nativo de qwen2.5** —
 /// el formato con el que el modelo fue entrenado (sección `# Tools`,
@@ -382,12 +382,17 @@ fn render_blocks(blocks: &[ContentBlock]) -> String {
 static TOOL_CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Lo que el hilo de generación necesita saber de la familia del modelo:
-/// los ids de marcadores (Harmony) o el inventario de tools para el
-/// envelope del stencil (ChatML/qwen). Agrupa lo que antes eran
+/// los ids de marcadores (Harmony) y el inventario de tools con sus
+/// schemas para las gramáticas del stencil. Agrupa lo que antes eran
 /// parámetros sueltos de `generate_blocking`.
 enum FamilyRuntime {
-    ChatMl { tool_names: Vec<String> },
-    Harmony(HarmonyTokenIds),
+    ChatMl {
+        tools: Vec<ToolGrammarSpec>,
+    },
+    Harmony {
+        ids: HarmonyTokenIds,
+        tools: Vec<ToolGrammarSpec>,
+    },
 }
 
 /// Construye el sampler estencilado: gramática GBNF + greedy encadenados
@@ -456,9 +461,9 @@ fn generate_blocking(
     family: &FamilyRuntime,
     tx: &tokio::sync::mpsc::Sender<Result<CompletionEvent, ModelError>>,
 ) {
-    let harmony = match family {
-        FamilyRuntime::Harmony(ids) => Some(ids),
-        FamilyRuntime::ChatMl { .. } => None,
+    let (harmony, tools) = match family {
+        FamilyRuntime::Harmony { ids, tools } => (Some(ids), tools.as_slice()),
+        FamilyRuntime::ChatMl { tools } => (None, tools.as_slice()),
     };
     macro_rules! bail {
         ($($arg:tt)*) => {{
@@ -553,9 +558,10 @@ fn generate_blocking(
     // tools. Caveat compartido con la escalera de rescate: un
     // `<tool_call>` literal citado en texto libre (p.ej. dentro de un
     // fence) también gatilla — mismo trade-off, y el kill-switch cubre.
-    let qwen_grammar = match family {
-        FamilyRuntime::ChatMl { tool_names } if grammar_enabled => qwen_call_grammar(tool_names),
-        _ => None,
+    let qwen_grammar = if harmony.is_none() && grammar_enabled {
+        qwen_call_grammar(tools)
+    } else {
+        None
     };
     let mut constrained = false;
     let mut args_cursor = JsonCursor::new();
@@ -611,13 +617,19 @@ fn generate_blocking(
             if grammar_enabled {
                 match m {
                     // El header fijó destinatario: lo que viene son los
-                    // args — estencilarlos a JSON válido.
+                    // args — estencilarlos con la gramática derivada del
+                    // schema de ESA tool (fallback: objeto JSON genérico).
                     HarmonyMarker::Message if parser.tool_call_in_progress() && !constrained => {
-                        if let Some(s) = constrained_sampler(model, &harmony_args_grammar()) {
+                        let tool = parser.pending_tool_name().unwrap_or_default();
+                        let grammar = harmony_args_grammar(tool, tools);
+                        if let Some(s) = constrained_sampler(model, &grammar) {
                             sampler = s;
                             constrained = true;
                             args_cursor = JsonCursor::new();
-                            tracing::info!("stencil: constraint de args harmony activado");
+                            tracing::info!(
+                                tool,
+                                "stencil: constraint de args harmony activado"
+                            );
                         }
                     }
                     // Cierre de mensaje con el constraint aún puesto
@@ -772,13 +784,22 @@ impl ModelBackend for LocalBackend {
         let model = Arc::clone(&self.model);
         let n_ctx = self.n_ctx;
         let max_tokens = req.max_tokens;
-        // Para el envelope del stencil (gramática qwen: nombre de tool
-        // restringido al inventario real del turno).
+        // Para las gramáticas del stencil: nombre + input_schema de cada
+        // tool del turno (los schemas derivan las gramáticas de args).
+        let tools: Vec<ToolGrammarSpec> = req
+            .tool_stubs
+            .iter()
+            .map(|s| ToolGrammarSpec {
+                name: s.name.clone(),
+                schema: s.input_schema.clone(),
+            })
+            .collect();
         let family_rt = match &self.harmony {
-            Some(ids) => FamilyRuntime::Harmony(ids.clone()),
-            None => FamilyRuntime::ChatMl {
-                tool_names: req.tool_stubs.iter().map(|s| s.name.clone()).collect(),
+            Some(ids) => FamilyRuntime::Harmony {
+                ids: ids.clone(),
+                tools,
             },
+            None => FamilyRuntime::ChatMl { tools },
         };
 
         // Canal acotado: la generación bloqueante empuja, el stream async
