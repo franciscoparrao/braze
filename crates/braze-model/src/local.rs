@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use braze_types::{ContentBlock, Role};
@@ -80,6 +80,25 @@ pub struct LocalBackend {
     n_ctx: u32,
 }
 
+/// `LlamaBackend::init()` inicializa estado GLOBAL de llama.cpp y sólo
+/// puede llamarse UNA vez por proceso (un segundo intento da
+/// `BackendAlreadyInitialized`). braze-bench crea un `LocalBackend` nuevo
+/// por tarea, así que la inicialización debe ser un singleton compartido.
+/// El `Mutex` serializa la primera init; luego todos clonan el `Arc`.
+fn shared_llama_backend() -> Result<Arc<LlamaBackend>, ModelError> {
+    static BACKEND: Mutex<Option<Arc<LlamaBackend>>> = Mutex::new(None);
+    let mut guard = BACKEND.lock().unwrap();
+    if let Some(existing) = guard.as_ref() {
+        return Ok(Arc::clone(existing));
+    }
+    let backend = Arc::new(
+        LlamaBackend::init()
+            .map_err(|e| ModelError::Request(format!("llama backend init failed: {e}")))?,
+    );
+    *guard = Some(Arc::clone(&backend));
+    Ok(backend)
+}
+
 impl LocalBackend {
     /// Carga un GGUF desde una ruta directa a `.gguf` o al blob de Ollama.
     /// `model_label` es solo para `name()`/trazas (precio local = $0).
@@ -88,8 +107,7 @@ impl LocalBackend {
         model_label: impl Into<String>,
         n_ctx: u32,
     ) -> Result<Self, ModelError> {
-        let backend = LlamaBackend::init()
-            .map_err(|e| ModelError::Request(format!("llama backend init failed: {e}")))?;
+        let backend = shared_llama_backend()?;
         let params = LlamaModelParams::default(); // n_gpu_layers = 0 (CPU, fase 1)
         let model = LlamaModel::load_from_file(&backend, gguf.as_ref(), &params).map_err(|e| {
             ModelError::Request(format!(
@@ -98,7 +116,7 @@ impl LocalBackend {
             ))
         })?;
         Ok(Self {
-            backend: Arc::new(backend),
+            backend,
             model: Arc::new(model),
             model_label: model_label.into(),
             n_ctx,
