@@ -1,6 +1,6 @@
 # Diseño: `LocalBackend` — inferencia in-process sobre `llama-cpp-2`
 
-> **Estado (2026-07-21):** **Fase 1 CERRADA** (funcional + paridad
+> **Estado (2026-07-21):** **Fase 1 CERRADA + Fase 2 GPU CONSEGUIDA** (funcional + paridad
 > medida). El `LocalBackend` (quinto `impl ModelBackend`, feature
 > `local`) carga el GGUF de Ollama in-process y hace loops agénticos
 > completos sobre qwen2.5:3b sin Ollama (commits `9329283`, `f0094e9`).
@@ -237,6 +237,53 @@ Dos caminos honestos:
 En cualquiera de los dos, el spike y este documento son el punto de
 partida real, no teórico — a diferencia del cierre de 2026-07-13, que se
 apoyaba en mistral.rs sin validar.
+
+## Fase 2 — GPU en Nitro: CONSEGUIDA (2026-07-21)
+
+El LocalBackend compilado con CUDA corre en la GPU de Nitro (RTX 3050
+6GB). Verificado en vivo: `BRAZE_LOCAL_GPU_LAYERS=999` con qwen2.5:3b →
+**`offloaded 37/37 layers to GPU`** (modelo entero en VRAM) + loop
+agéntico completo y correcto. Falta para gpt-oss:20b: el preámbulo/
+plantilla **harmony** (independiente del build) y ver el offload parcial
+en 6GB (como Ollama).
+
+### Receta de build CUDA en Nitro (Ubuntu 26.04) — costó descubrirla
+
+Prerrequisitos (una vez):
+- `rustup` (user-level) **y** `rustup component add rustfmt` (el
+  `--profile minimal` lo omite; el `build.rs` de llama-cpp-sys lo usa).
+- CUDA toolkit: `sudo apt install nvidia-cuda-toolkit` (da `nvcc`; el
+  distro trae las libs **dinámicas** de CUDA, no las estáticas).
+- **`sudo apt install libclang-18-dev`** — clave: **NO usar libclang-21**,
+  cuya detección de *resource dir* está rota en Nitro (bindgen no
+  encuentra `stdbool.h` por más que se le apunte). La 18 funciona.
+
+Build:
+```
+cd ~/braze
+env CUDACXX=/usr/bin/nvcc \
+    CMAKE_CUDA_ARCHITECTURES=86 \
+    LIBCLANG_PATH=/usr/lib/llvm-18/lib \
+    LLAMA_BUILD_SHARED_LIBS=1 \
+    cargo build -p braze-cli --features local-cuda
+```
+- `LLAMA_BUILD_SHARED_LIBS=1` (valor **`1`**, no `ON`) → linkeo dinámico:
+  el distro no trae `cublas_static`/`culibos`, así que el linkeo estático
+  default falla; shared usa las `.so` que sí existen.
+- `CMAKE_CUDA_ARCHITECTURES=86` = compute capability del RTX 3050.
+
+Runtime:
+```
+LD_LIBRARY_PATH=~/braze/target/debug/build/llama-cpp-sys-2-*/out/build/bin \
+BRAZE_LOCAL_GPU_LAYERS=999 \
+BRAZE_OLLAMA_MODELS_ROOT=/usr/share/ollama/.ollama \
+  braze run --backend local --model qwen2.5:3b "..."
+```
+
+Trampa depurada: un proceso `build-script` colgado de un intento previo
+(con libclang-21) mantenía cacheada la falla de bindgen; matarlo + build
+limpio fue lo que destrabó. Si bindgen falla con `stdbool.h` pese a
+libclang-18, matar procesos `cargo`/`build-script` viejos y `cargo clean`.
 
 ## Referencias
 
