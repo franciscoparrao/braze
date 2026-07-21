@@ -189,6 +189,11 @@ fn shared_llama_backend() -> Result<Arc<LlamaBackend>, ModelError> {
     if let Some(existing) = guard.as_ref() {
         return Ok(Arc::clone(existing));
     }
+    // llama.cpp/ggml loggean a stderr por default — en la TUI eso pisa el
+    // viewport de ratatui (verificado en vivo, qwen2.5:3b GPU 2026-07-21).
+    // Rutearlos a `tracing` (cubre llama_log_set + ggml_log_set) los pone
+    // bajo el mismo control de RUST_LOG que el resto del workspace.
+    llama_cpp_2::send_logs_to_tracing(llama_cpp_2::LogOptions::default());
     let backend = Arc::new(
         LlamaBackend::init()
             .map_err(|e| ModelError::Request(format!("llama backend init failed: {e}")))?,
