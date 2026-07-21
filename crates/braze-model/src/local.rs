@@ -39,10 +39,13 @@ use crate::error::ModelError;
 /// (`extract_tagged_tool_calls` + `parse_tool_call_json`) captura ese
 /// `<tool_call>{json}</tool_call>`.
 ///
-/// Los `ToolStub` sólo traen nombre+summary (schemas diferidos), así que
-/// se emite una firma mínima `{"name":…,"description":…}` — suficiente
-/// para que qwen decida y llame por nombre. Fase 1 asume familia qwen;
-/// harmony (gpt-oss) es fase 2.
+/// Cuando el `ToolStub` trae `input_schema` (los built-ins locales lo
+/// tienen resuelto), se incluye como `parameters` — el schema de
+/// argumentos que qwen necesita para producir args bien formados. Sin él
+/// (tools diferidos/MCP aún sin resolver) cae a nombre+summary. La
+/// paridad de Fase 1 mostró que la ausencia del schema era el "format
+/// tax" (schema_fail alto en tareas multi-ronda). Fase 1 asume familia
+/// qwen; harmony (gpt-oss) es fase 2.
 fn render_local_tools_prompt(stubs: &[ToolStub]) -> String {
     let mut s = String::from(
         "\n\n# Tools\n\n\
@@ -51,10 +54,14 @@ fn render_local_tools_prompt(stubs: &[ToolStub]) -> String {
          <tools>\n",
     );
     for stub in stubs {
-        let sig = serde_json::json!({
-            "type": "function",
-            "function": { "name": stub.name, "description": stub.summary },
+        let mut function = serde_json::json!({
+            "name": stub.name,
+            "description": stub.summary,
         });
+        if let Some(schema) = &stub.input_schema {
+            function["parameters"] = schema.clone();
+        }
+        let sig = serde_json::json!({ "type": "function", "function": function });
         s.push_str(&sig.to_string());
         s.push('\n');
     }
