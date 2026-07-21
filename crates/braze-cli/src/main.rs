@@ -342,8 +342,34 @@ fn build_model_backend(
                 .with_prompt_caching_enabled(config.enable_prompt_caching),
             ))
         }
+        #[cfg(feature = "local")]
+        "local" => {
+            // Inferencia in-process sobre llama.cpp, reusando los GGUF de
+            // Ollama (docs/local-backend-design-2026-07-20.md). El "modelo"
+            // es o bien una ref de Ollama (`qwen2.5:3b`, resuelta desde los
+            // blobs) o una ruta directa a un `.gguf`.
+            let model_ref = model_override
+                .map(str::to_string)
+                .unwrap_or_else(|| config.ollama_model.clone());
+            let n_ctx = config.ollama_num_ctx;
+            let backend = if model_ref.contains('/') || model_ref.ends_with(".gguf") {
+                braze_model::LocalBackend::from_gguf_path(&model_ref, &model_ref, n_ctx)
+            } else {
+                let root = std::env::var("BRAZE_OLLAMA_MODELS_ROOT")
+                    .unwrap_or_else(|_| "/usr/share/ollama/.ollama".to_string());
+                braze_model::LocalBackend::from_ollama_model(&root, &model_ref, &model_ref, n_ctx)
+            }
+            .map_err(|e| CliError::Startup(format!("backend local: {e}")))?;
+            Ok(Box::new(backend))
+        }
+        #[cfg(not(feature = "local"))]
+        "local" => Err(CliError::Startup(
+            "el backend 'local' requiere compilar con `--features local` \
+             (compila llama.cpp; ver docs/local-backend-design-2026-07-20.md)"
+                .to_string(),
+        )),
         other => Err(CliError::Startup(format!(
-            "unknown backend '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
+            "unknown backend '{other}' (expected 'anthropic', 'ollama', 'openrouter', or 'local')"
         ))),
     }
 }
@@ -368,8 +394,14 @@ fn model_override_for(
             openrouter_model: Some(model.to_string()),
             ..Default::default()
         }),
+        // El backend local reusa el campo `ollama_model` como ref del
+        // modelo (resuelta desde los blobs de Ollama, o ruta a un .gguf).
+        "local" => Ok(braze_config::ConfigOverrides {
+            ollama_model: Some(model.to_string()),
+            ..Default::default()
+        }),
         other => Err(CliError::Startup(format!(
-            "unknown backend '{other}' (expected 'anthropic', 'ollama', or 'openrouter')"
+            "unknown backend '{other}' (expected 'anthropic', 'ollama', 'openrouter', or 'local')"
         ))),
     }
 }

@@ -17,3 +17,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+# LocalBackend (feature `local`): inferencia in-process sobre llama.cpp,
+# reusando los GGUF de Ollama. Opcional y off por default — compila
+# llama.cpp (C++), pesado, no debe entrar en el build normal del
+# workspace. Ver docs/local-backend-design-2026-07-20.md.
+llama-cpp-2 = { version = "0.1", optional = true }
+encoding_rs = { version = "0.8", optional = true }
+
+[features]
+local = ["dep:llama-cpp-2", "dep:encoding_rs"]
