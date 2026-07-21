@@ -1,5 +1,12 @@
 # Diseño: `LocalBackend` in-process + `stencil` (constrained decoding nativo)
 
+> **REABIERTO sobre otra justificación (2026-07-20):** este documento
+> cerró el eje de *capacidad*. La decisión se reabrió por *robustez de
+> runtime + control del decoder* (los hallazgos #1/#17 del testbed son
+> bugs del runtime de Ollama, no del harness) — exactamente la condición
+> que el cierre de abajo anticipó. Ver `docs/local-backend-design-2026-07-20.md`,
+> respaldado por un spike de factibilidad exitoso.
+
 Fecha: 2026-07-12/13
 Estado: **CERRADO (2026-07-13) — `stencil` DESCARTADO;
 `LocalBackend`-por-CAPACIDAD prerrequisito RESUELTO y el documento
