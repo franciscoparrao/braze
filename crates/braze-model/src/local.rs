@@ -692,7 +692,18 @@ fn generate_blocking(
                         }
                     }
                 }
-                Err(e) => bail!("local: token_to_piece falló: {e}"),
+                Err(e) => {
+                    // Un token de control no renderizable (p.ej. un
+                    // `<|im_start|>` espurio: el modelo intentando abrir
+                    // otro turno) terminaba el stream con error duro — 3
+                    // fallos del brazo OFF del sweep A/B del stencil
+                    // (2026-07-21). Es fin-de-turno de facto, no un error
+                    // del backend: los stacks de chat suelen listar
+                    // `<|im_start|>` como stop string. Cerrar limpio.
+                    tracing::debug!(error = %e, "local: token no renderizable — fin de turno");
+                    stop_reason = "stop";
+                    break;
+                }
             }
         }
         batch.clear();
