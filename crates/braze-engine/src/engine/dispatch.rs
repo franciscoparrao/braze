@@ -412,6 +412,20 @@ impl Engine {
                         *attempt_counter += 1;
                         let attempt = *attempt_counter;
 
+                        // Trazar el fallo con los args: sin esto, una
+                        // corrida de bench con schema_fail alto es
+                        // indiagnosticable post-hoc (el error solo viaja
+                        // al modelo como tool result). Lo pidió la
+                        // anomalía del A/B v3 del stencil (2026-07-21:
+                        // 8 fallos en una trayectoria que no reprodujo).
+                        tracing::info!(
+                            tool = %call.name,
+                            attempt,
+                            error = %validation_err,
+                            arguments = %call.arguments,
+                            "tool call failed schema validation"
+                        );
+
                         let repair_message = if attempt == 1 {
                             format!(
                                 "Tool call '{}' failed schema validation: {validation_err}. \

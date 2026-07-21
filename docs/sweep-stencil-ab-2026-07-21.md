@@ -75,13 +75,45 @@ Los tres latentes desde Fase 1, invisibles a los smokes, corregidos:
 La primera pasada (v1, `sweep-stencil-{on,off}.json` en Nitro) queda
 como procedencia: ON 41 / OFF 40 con la contaminación del bug 3.
 
-## Próximo paso que estos datos señalan
+## v3 — gramática schema-derivada (mismo día)
 
-**Gramática derivada del schema** (json-schema → GBNF por tool, la
-Fase 3 "deluxe"): el residual real es args no-conformes (4-7 por
-brazo), exactamente la clase que una gramática por-tool con campos
-requeridos ataca. Con eso sí es esperable `schema_fail → 0` por
-construcción. Segundo candidato: repetir el A/B sobre gpt-oss:20b
-harmony (donde el header + args estencilados cubren más superficie) y
-sobre una suite con más tareas (el pareo con n=19 tareas no tiene poder
-para deltas chicos).
+Se implementó la gramática derivada del `input_schema` por tool
+(conversor en `stencil.rs`: requeridos forzados en el orden de la lista
+`required`, tipos/enums cerrados, `additionalProperties` cerrado;
+envelope qwen brancheado por tool, selección por destinatario en
+harmony) y se repitió el A/B (`sweep-stencil-{on,off}-v3.json`):
+
+| métrica | ON (schema-derivada) | OFF |
+|---|---|---|
+| pass rate | 40/57 | 40/57 |
+| McNemar | solo-ON=4, solo-OFF=4, p=1.0 | — |
+| schema_fail | 9 | 3 |
+| rescues | 63 | 56 |
+
+**Dos lecturas importantes y una anomalía honesta:**
+
+1. **El loop de reparación del engine ya absorbe los schema_fail**: en
+   v3, TODAS las corridas con schema_fail (ambos brazos) terminaron en
+   pass. `schema_fail → 0` no compra pass rate en esta suite — a lo más
+   rondas/tokens. La palanca del stencil compite contra un harness que
+   ya tiene la clase cubierta río abajo (repair message + retry).
+2. **Pass rate empatado por tercera vez** (41/40, 41/40, 40/40): el
+   resultado robusto del A/B es "sin ganancia, sin constraint tax".
+3. **Anomalía no resuelta**: el schema_fail del brazo ON (9) está
+   concentrado en UNA trayectoria degenerada (`edit_file_function_body`
+   rep1: 8 fallos en un loop de 9 edit_file, igual pasó) que NO
+   reproduce en aislamiento (5/5 limpio con sesiones preservadas) y
+   cuyo mecanismo quedó indiagnosticable porque el engine no trazaba
+   los fallos de validación — corregido (dispatch ahora loguea tool +
+   args + error), la próxima ocurrencia será inspeccionable. Hipótesis
+   abierta: la gramática convierte fallos de *parseo* (invisibles al
+   contador) en calls bien formadas que llegan a validación, moviendo
+   fallos de un contador a otro sin cambiar el resultado.
+
+**Veredicto de la Fase 3 tras tres A/Bs:** el stencil es correcto,
+gratis en capacidad, y su garantía es real — pero en `default.toml` con
+qwen2.5:3b el harness existente (preámbulo con schema + escalera de
+rescate + retry de validación) ya deja al stencil sin clase de error
+que matar. El A/B que queda con señal esperable: modelos/suites donde
+el baseline NO está saturado (p.ej. gemma4:e4b y sus 3 fallos
+sistemáticos de single_tool, o una suite adversarial de escaping).

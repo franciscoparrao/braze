@@ -33,59 +33,16 @@ use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 
-use braze_types::ToolStub;
-
 use crate::args_repair::{parse_arguments_with_repair, ArgumentsOutcome};
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
+use crate::gemma::{build_gemma_prompt, render_tools_preamble};
 use crate::harmony::{build_harmony_prompt, utc_date_string, HarmonyEvent, HarmonyMarker, HarmonyParser};
 use crate::stencil::{harmony_args_grammar, qwen_call_grammar, JsonCursor, ToolGrammarSpec};
 
-/// Addendum de tools reproduciendo el **preámbulo nativo de qwen2.5** —
-/// el formato con el que el modelo fue entrenado (sección `# Tools`,
-/// firmas dentro de `<tools></tools>`, y salida en `<tool_call>{json}
-/// </tool_call>`). Emitir el formato entrenado, en vez de una
-/// instrucción ad-hoc, es lo que hace el tool-calling confiable (el
-/// "format tax" del design doc). La escalera de rescate del engine
-/// (`extract_tagged_tool_calls` + `parse_tool_call_json`) captura ese
-/// `<tool_call>{json}</tool_call>`.
-///
-/// Cuando el `ToolStub` trae `input_schema` (los built-ins locales lo
-/// tienen resuelto), se incluye como `parameters` — el schema de
-/// argumentos que qwen necesita para producir args bien formados. Sin él
-/// (tools diferidos/MCP aún sin resolver) cae a nombre+summary. La
-/// paridad de Fase 1 mostró que la ausencia del schema era el "format
-/// tax" (schema_fail alto en tareas multi-ronda). Fase 1 asume familia
-/// qwen; harmony (gpt-oss) es fase 2.
-fn render_local_tools_prompt(stubs: &[ToolStub]) -> String {
-    let mut s = String::from(
-        "\n\n# Tools\n\n\
-         You may call one or more functions to assist with the user query.\n\n\
-         You are provided with function signatures within <tools></tools> XML tags:\n\
-         <tools>\n",
-    );
-    for stub in stubs {
-        let mut function = serde_json::json!({
-            "name": stub.name,
-            "description": stub.summary,
-        });
-        if let Some(schema) = &stub.input_schema {
-            function["parameters"] = schema.clone();
-        }
-        let sig = serde_json::json!({ "type": "function", "function": function });
-        s.push_str(&sig.to_string());
-        s.push('\n');
-    }
-    s.push_str(
-        "</tools>\n\n\
-         For each function call, return a json object with function name and \
-         arguments within <tool_call></tool_call> XML tags:\n\
-         <tool_call>\n\
-         {\"name\": <function-name>, \"arguments\": <args-json-object>}\n\
-         </tool_call>",
-    );
-    s
-}
+// El preámbulo de tools de las familias textuales (formato nativo de
+// qwen2.5, reusado como convención instruida para Gemma) vive en
+// `gemma::render_tools_preamble` — módulo puro, compartido y testeado.
 
 /// Familia de plantilla de chat del modelo cargado. Decide qué prompt se
 /// arma y cómo se interpreta la salida (texto plano + rescate del engine
@@ -97,6 +54,10 @@ enum ChatFamily {
     /// Harmony (gpt-oss): system/developer canónicos, canales
     /// analysis/commentary/final, tool calls por token especial.
     Harmony,
+    /// Gemma (`<start_of_turn>`, gemma2/3/4): system plegado al primer
+    /// turno user, misma convención textual de tools que ChatML (el
+    /// GGUF de Ollama es compatible con llama.cpp — arch `gemma4`).
+    Gemma,
 }
 
 /// Detecta la familia: override explícito por `BRAZE_LOCAL_FAMILY`
@@ -107,6 +68,7 @@ fn detect_family(model: &LlamaModel, label: &str) -> ChatFamily {
     match std::env::var("BRAZE_LOCAL_FAMILY").ok().as_deref() {
         Some("harmony") => return ChatFamily::Harmony,
         Some("chatml") => return ChatFamily::ChatMl,
+        Some("gemma") => return ChatFamily::Gemma,
         Some(other) => {
             tracing::warn!(family = other, "BRAZE_LOCAL_FAMILY desconocida; autodetectando");
         }
@@ -117,6 +79,8 @@ fn detect_family(model: &LlamaModel, label: &str) -> ChatFamily {
         .unwrap_or_default();
     if arch.replace('-', "") == "gptoss" || label.contains("gpt-oss") {
         ChatFamily::Harmony
+    } else if arch.starts_with("gemma") || label.contains("gemma") {
+        ChatFamily::Gemma
     } else {
         ChatFamily::ChatMl
     }
@@ -232,7 +196,7 @@ impl LocalBackend {
         let family = detect_family(&model, &model_label);
         let harmony = match family {
             ChatFamily::Harmony => Some(HarmonyTokenIds::resolve(&model)?),
-            ChatFamily::ChatMl => None,
+            ChatFamily::ChatMl | ChatFamily::Gemma => None,
         };
         tracing::info!(model = %model_label, ?family, "local backend loaded");
         Ok(Self {
@@ -313,7 +277,7 @@ fn build_chatml_prompt(req: &CompletionRequest) -> String {
 
     let mut system = req.system_prompt.clone();
     if !req.tool_stubs.is_empty() {
-        let addendum = render_local_tools_prompt(&req.tool_stubs);
+        let addendum = render_tools_preamble(&req.tool_stubs);
         if system.is_empty() {
             system = addendum;
         } else {
@@ -759,6 +723,7 @@ impl ModelBackend for LocalBackend {
     {
         let prompt = match self.family {
             ChatFamily::ChatMl => build_chatml_prompt(&req),
+            ChatFamily::Gemma => build_gemma_prompt(&req),
             ChatFamily::Harmony => {
                 // Esfuerzo de razonamiento del system message de gpt-oss.
                 // Default `medium` = el default del template de Ollama

@@ -205,17 +205,29 @@ construcción. Detalle completo y recetas en
   `BRAZE_LOCAL_GRAMMAR=off` (brazo de ablación). Verificado en vivo en
   ambas familias. Bug depurado: double-accept del sampler (latente desde
   Fase 1, fatal solo con gramática). Ver design doc § Fase 3.
-- **A/B del stencil ejecutado** (2026-07-21,
-  `docs/sweep-stencil-ab-2026-07-21.md`): 41/57 vs 40/57, McNemar
-  p=1.0 — sin ganancia de pass rate pero **sin constraint tax**; la
-  garantía por construcción sale gratis. El residual son args
-  no-conformes al schema (4-7 por brazo) → el próximo paso con señal
-  esperable es la gramática **derivada del schema** (json-schema→GBNF
-  por tool). El proceso destapó 3 bugs latentes de Fase 1, corregidos
-  (double-accept, prompt>n_batch=abort, token de control espurio).
-- Pendiente de la línea: gramática schema-derivada, instalar el binario
-  CUDA estable en Nitro (hoy `target/debug` + `LD_LIBRARY_PATH`), y
-  paridad GPU vs Ollama sobre qwen2.5:3b.
+- **A/B del stencil: 3 pasadas, veredicto estable** (2026-07-21,
+  `docs/sweep-stencil-ab-2026-07-21.md`): pass rate empatado las tres
+  veces (envelope y schema-derivada) — **sin ganancia, sin constraint
+  tax**. Insight clave: el loop de reparación del engine (repair
+  message + retry) ya absorbe los schema_fail (todas las corridas con
+  schema_fail pasaron igual) — el stencil compite contra un harness que
+  ya cubre la clase río abajo. Su A/B con señal esperable: modelos no
+  saturados (gemma4:e4b) o suites adversariales. El proceso destapó 3
+  bugs latentes de Fase 1, corregidos (double-accept, prompt>n_batch=
+  abort, token de control espurio) + dispatch ahora traza fallos de
+  validación con args.
+- **Familia Gemma (2026-07-21)**: tercera plantilla del LocalBackend
+  (`gemma.rs`: `<start_of_turn>`, system plegado al primer turno user,
+  convención textual compartida → escalera de rescate y stencil
+  funcionan gratis). **Ningún blob Gemma de Ollama carga en llama.cpp**
+  (gemma3: metadata faltante; gemma4:e4b: layout de tensores del engine
+  propio — 720 vs 2131) — regla: qwen reusa blobs de Ollama; gpt-oss y
+  Gemma necesitan GGUF canónico (gemma4:e4b QAT de unsloth en
+  `~/models/`, verificado en vivo con tool call estencilada).
+- Pendiente de la línea: A/B stencil sobre gemma4:e4b (sus 3 fallos
+  sistemáticos de single_tool son la clase donde el envelope muerde),
+  instalar el binario CUDA estable en Nitro, y paridad GPU vs Ollama
+  sobre qwen2.5:3b.
 
 ## Próximos pasos al retomar
 
