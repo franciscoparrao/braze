@@ -241,3 +241,16 @@ Nitro (un solo arm, $n{=}95$, misma suite que ya corre en ~10-15 min
 por arm según los sweeps previos) más el tiempo de crear la
 registration en OSF. Es el ítem más barato del plan de resolución de
 issues — por eso es el primero.
+
+## Corrección de procedencia (2026-07-21)
+
+Auditoría post-hoc del repo: el "criterio ya committeado en git" que
+este documento afirma más arriba es **incorrecto** — el primer commit
+de este archivo es `fedbc3e` (2026-07-18), cinco días DESPUÉS del sweep
+de decisión (2026-07-13). El documento existía en el working tree antes
+del sweep, pero git no puede probarlo. El criterio queda como
+*declarado*, no probadamente pre-registrado; el paper lo divulga así
+(§ Registry mechanism) y la OSF Registration lleva la cadena real en su
+nota de procedencia. Esta corrección no reescribe el texto original
+(queda arriba, tal cual); la motivación del gate registrar-antes-de-
+correr para todo criterio futuro sale exactamente de aquí.

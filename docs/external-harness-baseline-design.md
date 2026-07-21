@@ -322,3 +322,16 @@ se quiere la versión más fuerte de esta comparación en una iteración
 futura del paper, implementando `ExternalHarness` para un
 `PiSubprocessHarness` que shell-outea al binario `pi` en modo print/JSON
 dentro del sandbox de cada tarea.
+
+## Corrección de procedencia (2026-07-21)
+
+Auditoría post-hoc del repo: el "criterio ya committeado en git" que
+este documento afirma más arriba es **incorrecto** — el primer commit
+de este archivo es `fedbc3e` (2026-07-18), cinco días DESPUÉS del sweep
+de decisión (2026-07-13). El documento existía en el working tree antes
+del sweep, pero git no puede probarlo. El criterio queda como
+*declarado*, no probadamente pre-registrado; el paper lo divulga así
+(§ Registry mechanism) y la OSF Registration lleva la cadena real en su
+nota de procedencia. Esta corrección no reescribe el texto original
+(queda arriba, tal cual); la motivación del gate registrar-antes-de-
+correr para todo criterio futuro sale exactamente de aquí.

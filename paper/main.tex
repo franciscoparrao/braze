@@ -704,15 +704,30 @@ analysis-plan text as the corresponding design document
 externo (OSF)'' in each). \todo{OSF registration IDs: paste both links
 here once created at osf.io/registries --- the text is already
 prepared in the two design documents above, this is a manual step
-pending at submission.} Both sweeps ran on the git-committed criterion
-without waiting for the external registration to close, for the same
-reason noted in each design document: neither measurement adopts an
-irreversible harness change or carries an iteration clause, so we judged
-the self-hosted commit sufficient to proceed and treated the OSF entry
-as a parallel strengthening step rather than a gate. We report this
-mechanism honestly rather than let the presence of an OSF link on two
-results imply a registry discipline the paper's earlier criteria did
-not have.
+pending at submission.} Both sweeps ran without waiting for the
+external registration to close, for the reason noted in each design
+document (neither measurement adopts an irreversible harness change or
+carries an iteration clause). A post-hoc audit of the repository,
+however, found that for these two criteria even the self-hosted
+mechanism fails to demonstrate precedence: the design documents were
+authored in the working tree before the runs, but their first commit
+(\texttt{fedbc3e}, 2026-07-18) postdates the deciding sweeps
+(2026-07-13) --- the criterion text entered version control five days
+after the results it governs, in a batch commit. Unlike the three
+appendix criteria, whose commits verifiably precede their sweeps, these
+two are therefore \emph{declared} rather than provably pre-registered,
+and readers should treat their pre-registration label as unverifiable.
+Two mitigating observations, offered as context rather than proof: both
+measurements concluded \emph{against} the paper's original thesis (the
+solo baseline and the bare-loop baseline are what forced the
+framing revision and the present title), which is the direction
+post-hoc framing would be least tempted to produce; and the criterion
+structure (hypothesis, arms, analysis plan) matches the pattern of the
+three verifiably-ordered earlier criteria. The OSF registrations
+archive the same text under an independent timestamp that also
+postdates the runs and states so explicitly. This audit --- which we
+ran on ourselves and disclose here --- is the concrete argument for the
+register-before-run gate the project adopts for all future criteria.
 
 % =====================================================================
 \section{Results}\label{sec:results}

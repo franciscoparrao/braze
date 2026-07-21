@@ -14,11 +14,17 @@ que ya vivía en git, y debe decirlo.
 (braze harness-vs-scale paper)
 
 **Provenance note (incluir en la registration)**: This registration
-archives, with an independent timestamp, a criterion committed to the
-project's git history on 2026-07-13 (first commit of
-docs/gemma4-e4b-solo-baseline-design.md: fedbc3e) before the deciding
-sweep was run. It is an archival of a git-committed criterion, not a
-prospective registration.
+archives, with an independent timestamp, a criterion whose design
+document (docs/gemma4-e4b-solo-baseline-design.md) is dated 2026-07-13 in
+its content but whose FIRST git commit (fedbc3e) is 2026-07-18 --- five
+days AFTER the deciding sweep ran (2026-07-13). Neither this
+registration's timestamp nor the git history can demonstrate that the
+criterion preceded the results; the criterion is declared, not provably
+pre-registered. Mitigating context, not proof: the measurement
+concluded against the paper's original thesis and forced its framing
+revision. This registration exists to archive the text verbatim and to
+mark the project's adoption of a register-before-run gate for all
+future criteria.
 
 **Hypothesis**:
 
@@ -100,11 +106,17 @@ reporta y se usa para calibrar el framing, no se itera.
 criterion (braze harness-vs-scale paper)
 
 **Provenance note (incluir en la registration)**: This registration
-archives, with an independent timestamp, a criterion committed to the
-project's git history on 2026-07-13 (first commit of
-docs/external-harness-baseline-design.md: fedbc3e) before the deciding
-sweep was run. It is an archival of a git-committed criterion, not a
-prospective registration.
+archives, with an independent timestamp, a criterion whose design
+document (docs/external-harness-baseline-design.md) is dated 2026-07-13 in
+its content but whose FIRST git commit (fedbc3e) is 2026-07-18 --- five
+days AFTER the deciding sweep ran (2026-07-13). Neither this
+registration's timestamp nor the git history can demonstrate that the
+criterion preceded the results; the criterion is declared, not provably
+pre-registered. Mitigating context, not proof: the measurement
+concluded against the paper's original thesis and forced its framing
+revision. This registration exists to archive the text verbatim and to
+mark the project's adoption of a register-before-run gate for all
+future criteria.
 
 **Hypothesis**:
 
