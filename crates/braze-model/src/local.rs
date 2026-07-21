@@ -30,29 +30,41 @@ use braze_types::ToolStub;
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
 
-/// Addendum de tools para el prompt del backend local. Instruye el
-/// formato `<tool_call>{"name":…,"arguments":…}</tool_call>` — el que la
-/// escalera de rescate del engine (`extract_tagged_tool_calls` +
-/// `parse_tool_call_json`) captura. Deliberadamente NO es el envelope
-/// `{"action":…}` de `render_prompt_tools_addendum` (ese sólo lo parsea
-/// el engine en modo constrained-Ollama; el local pasa por la escalera).
+/// Addendum de tools reproduciendo el **preámbulo nativo de qwen2.5** —
+/// el formato con el que el modelo fue entrenado (sección `# Tools`,
+/// firmas dentro de `<tools></tools>`, y salida en `<tool_call>{json}
+/// </tool_call>`). Emitir el formato entrenado, en vez de una
+/// instrucción ad-hoc, es lo que hace el tool-calling confiable (el
+/// "format tax" del design doc). La escalera de rescate del engine
+/// (`extract_tagged_tool_calls` + `parse_tool_call_json`) captura ese
+/// `<tool_call>{json}</tool_call>`.
+///
+/// Los `ToolStub` sólo traen nombre+summary (schemas diferidos), así que
+/// se emite una firma mínima `{"name":…,"description":…}` — suficiente
+/// para que qwen decida y llame por nombre. Fase 1 asume familia qwen;
+/// harmony (gpt-oss) es fase 2.
 fn render_local_tools_prompt(stubs: &[ToolStub]) -> String {
     let mut s = String::from(
-        "You have access to the following tools. To call one, emit a line \
-         with EXACTLY this shape and nothing else:\n\
-         <tool_call>{\"name\": \"<tool>\", \"arguments\": {<args>}}</tool_call>\n\n\
-         Available tools:\n",
+        "\n\n# Tools\n\n\
+         You may call one or more functions to assist with the user query.\n\n\
+         You are provided with function signatures within <tools></tools> XML tags:\n\
+         <tools>\n",
     );
     for stub in stubs {
-        s.push_str("- ");
-        s.push_str(&stub.name);
-        s.push_str(": ");
-        s.push_str(&stub.summary);
+        let sig = serde_json::json!({
+            "type": "function",
+            "function": { "name": stub.name, "description": stub.summary },
+        });
+        s.push_str(&sig.to_string());
         s.push('\n');
     }
     s.push_str(
-        "\nCall a tool only when you need it. When you have the final answer, \
-         reply in plain text without any tool_call.",
+        "</tools>\n\n\
+         For each function call, return a json object with function name and \
+         arguments within <tool_call></tool_call> XML tags:\n\
+         <tool_call>\n\
+         {\"name\": <function-name>, \"arguments\": <args-json-object>}\n\
+         </tool_call>",
     );
     s
 }
@@ -203,17 +215,21 @@ fn render_blocks(blocks: &[ContentBlock]) -> String {
         match block {
             ContentBlock::Text { text } => s.push_str(text),
             ContentBlock::ToolUse { name, input, .. } => {
+                // Formato de qwen2.5 (saltos de línea incluidos).
                 s.push_str(&format!(
-                    "<tool_call>{{\"name\": \"{name}\", \"arguments\": {input}}}</tool_call>"
+                    "<tool_call>\n{{\"name\": \"{name}\", \"arguments\": {input}}}\n</tool_call>"
                 ));
             }
             ContentBlock::ToolResult {
                 content, is_error, ..
             } => {
+                // qwen espera los resultados dentro de <tool_response>.
+                s.push_str("<tool_response>\n");
                 if *is_error {
                     s.push_str("[tool error] ");
                 }
                 s.push_str(content);
+                s.push_str("\n</tool_response>");
             }
         }
         s.push('\n');
