@@ -1,15 +1,16 @@
 # Diseño: `LocalBackend` — inferencia in-process sobre `llama-cpp-2`
 
-> **Estado (2026-07-21):** EN CONSTRUCCIÓN — Fase 1 arrancada. El
-> `LocalBackend` (quinto `impl ModelBackend`, feature `local`) ya carga
-> el GGUF de Ollama in-process, infiere y streamea end-to-end por el
-> engine real (commit `9329283`). Falta el tool-calling confiable
-> (§ Plan, fase 1): qwen2.5:3b no sigue el formato con el prompt
-> hand-rolled — el "format tax" previsto. Próximo: aplicar el chat
-> template embebido del GGUF (o GBNF de fase 3) + paridad de bench.
-> Historial: spike exitoso (§ "Qué probó el spike"); reabre la decisión
-> de 2026-07-13 (`docs/local-backend-stencil-design.md`) sobre la
-> justificación nueva que aquel cierre anticipó.
+> **Estado (2026-07-21):** EN CONSTRUCCIÓN — **Fase 1 funcional**. El
+> `LocalBackend` (quinto `impl ModelBackend`, feature `local`) carga el
+> GGUF de Ollama in-process y hace el **loop agéntico completo** sobre
+> qwen2.5:3b sin Ollama: tool call → ejecución → respuesta (commits
+> `9329283`, `f0094e9`). El "format tax" se resolvió reproduciendo el
+> preámbulo de tools NATIVO de qwen (no el chat template embebido —
+> `apply_chat_template` de llama-cpp-2 0.1.151 no soporta tools). Falta
+> para cerrar Fase 1: paridad de bench vs `OllamaBackend` sobre
+> qwen2.5:3b (`g10-weak-skills`) + sampling. Fase 2: GPU/CUDA + harmony
+> (gpt-oss:20b). Historial: spike exitoso; reabre la decisión de
+> 2026-07-13 sobre la justificación nueva que aquel cierre anticipó.
 
 ## Por qué se reabre (justificación nueva, no la vieja)
 
