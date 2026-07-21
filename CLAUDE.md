@@ -168,11 +168,47 @@ compactación) — braze-bench instala subscriber de tracing.
   ProjectMemory sin `objective`/`notes` en el render y con campos
   sanitizados, reparación N-5 bajo el lock N-27.
 
+## LocalBackend (2026-07-20/21) — quinto `ModelBackend`, cerrado hasta Fase 2b
+
+Inferencia **in-process** sobre llama.cpp (`llama-cpp-2`, feature
+`local` / `local-cuda`), sin server — el harness dueño desde los tokens:
+la clase de bug #1/#17 (parser server-side de Ollama) es imposible por
+construcción. Detalle completo y recetas en
+`docs/local-backend-design-2026-07-20.md`.
+
+- **Fase 1 (CPU + ChatML/qwen)**: paridad medida vs OllamaBackend
+  (McNemar p=0.22 n.s.; schema en preámbulo dejó schema_fail 17→0).
+- **Fase 2 (GPU)**: build CUDA en Nitro (receta en el design doc —
+  libclang-18, `LLAMA_BUILD_SHARED_LIBS=1`); `BRAZE_LOCAL_GPU_LAYERS`.
+  qwen2.5:3b entero en la RTX 3050 (37/37 capas).
+- **Fase 2b (Harmony/gpt-oss, 2026-07-21)**: `harmony.rs` en braze-model
+  (plantilla canónica + `HarmonyParser`; módulo puro, 17 tests corren
+  sin el feature). Los marcadores Harmony son tokens especiales → el
+  parsing vive en el backend (emite `ToolCallRequested` directo), la
+  escalera del engine queda de red de seguridad. Familia autodetectada
+  (arch GGUF/label/`BRAZE_LOCAL_FAMILY`); `BRAZE_LOCAL_REASONING`
+  (default medium); `stop_reason` honesto (`tool_use`/`stop`/`length`).
+  **Verificado en vivo** (2026-07-21): loop agéntico completo de
+  gpt-oss:20b en Nitro, CPU (~15s/ronda) y GPU parcial 8/24 capas
+  (~10s/ronda), canal analysis suprimido, stdout limpio.
+- **Hallazgo**: el blob gpt-oss de Ollama NO es GGUF de llama.cpp (arch
+  `gptoss`, tensores `attn_out` vs `attn_output` — es del engine propio
+  de Ollama). Para gpt-oss el LocalBackend usa el GGUF canónico
+  `ggml-org/gpt-oss-20b-GGUF` en `nitro:~/models/` por ruta directa
+  (`--model ~/models/gpt-oss-20b-MXFP4.gguf`). "Reusar GGUF de Ollama"
+  vale para qwen, no para gpt-oss.
+- Logs de llama.cpp/ggml ruteados a `tracing` (sin eso la TUI se rompe —
+  verificado y arreglado 2026-07-21).
+- Pendiente de la línea: instalar el binario CUDA estable en Nitro (hoy
+  `target/debug` + `LD_LIBRARY_PATH`), paridad GPU vs Ollama sobre
+  qwen2.5:3b, y Fase 3 GBNF/llguidance (constrained decoding,
+  schema_fail=0 por construcción — el A/B publicable).
+
 ## Próximos pasos al retomar
 
 (Actualizado 2026-07-18 tras ejecutar la auditoría v8 — Paquetes 0-3
 completos y el top-6 S/M del Paquete 4 en main; el sweep BFCL corrió el
-mismo día.)
+mismo día. El arco LocalBackend de 2026-07-20/21 está en su § arriba.)
 
 - **Ancla BFCL**: análisis post-sweep (transporte 2% → grader → E1-E4,
   `docs/bfcl-anchor-RESUME.md`) e integración al paper; luego re-runs
