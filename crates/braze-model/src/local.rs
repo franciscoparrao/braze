@@ -8,11 +8,18 @@
 //! calls — igual que el modo prompt-tools de Ollama, pero total. Por eso
 //! la clase de bug #1/#17 (parser harmony de Ollama) no puede ocurrir.
 //!
-//! Fase 1 (este archivo): CPU, plantilla ChatML, streaming, `Usage` $0.
-//! GPU/CUDA y gpt-oss/harmony son fase 2.
+//! Fase 1: CPU, plantilla ChatML (familia qwen), streaming, `Usage` $0.
+//! Fase 2: GPU/CUDA (`BRAZE_LOCAL_GPU_LAYERS`) + familia **Harmony**
+//! (gpt-oss): plantilla nativa y parser de canales en `harmony.rs`. Los
+//! marcadores de Harmony son tokens especiales que no sobreviven
+//! `token_to_piece(special=false)`, así que a diferencia de qwen las
+//! tool calls se parsean acá (por id de token) y se emiten como
+//! `ToolCallRequested` — la escalera de rescate del engine queda de red
+//! de seguridad para el texto visible.
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -24,11 +31,14 @@ use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::token::LlamaToken;
 
 use braze_types::ToolStub;
 
+use crate::args_repair::{parse_arguments_with_repair, ArgumentsOutcome};
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
+use crate::harmony::{build_harmony_prompt, utc_date_string, HarmonyEvent, HarmonyMarker, HarmonyParser};
 
 /// Addendum de tools reproduciendo el **preámbulo nativo de qwen2.5** —
 /// el formato con el que el modelo fue entrenado (sección `# Tools`,
@@ -76,6 +86,84 @@ fn render_local_tools_prompt(stubs: &[ToolStub]) -> String {
     s
 }
 
+/// Familia de plantilla de chat del modelo cargado. Decide qué prompt se
+/// arma y cómo se interpreta la salida (texto plano + rescate del engine
+/// para ChatML; parser de canales en el backend para Harmony).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatFamily {
+    /// ChatML + preámbulo de tools de qwen2.5 (Fase 1). Default.
+    ChatMl,
+    /// Harmony (gpt-oss): system/developer canónicos, canales
+    /// analysis/commentary/final, tool calls por token especial.
+    Harmony,
+}
+
+/// Detecta la familia: override explícito por `BRAZE_LOCAL_FAMILY`
+/// (`harmony`/`chatml`), si no la arquitectura del GGUF
+/// (`general.architecture == "gpt-oss"`), si no el label del modelo
+/// (`gpt-oss:20b` viene del ref de Ollama).
+fn detect_family(model: &LlamaModel, label: &str) -> ChatFamily {
+    match std::env::var("BRAZE_LOCAL_FAMILY").ok().as_deref() {
+        Some("harmony") => return ChatFamily::Harmony,
+        Some("chatml") => return ChatFamily::ChatMl,
+        Some(other) => {
+            tracing::warn!(family = other, "BRAZE_LOCAL_FAMILY desconocida; autodetectando");
+        }
+        None => {}
+    }
+    let arch = model
+        .meta_val_str("general.architecture")
+        .unwrap_or_default();
+    if arch.replace('-', "") == "gptoss" || label.contains("gpt-oss") {
+        ChatFamily::Harmony
+    } else {
+        ChatFamily::ChatMl
+    }
+}
+
+/// Ids de los tokens especiales de Harmony en el vocabulario del GGUF
+/// cargado, resueltos una vez al construir el backend (tokenizar cada
+/// literal debe dar exactamente un token — si no, el GGUF no es harmony
+/// y el error temprano evita un run entero de salida ilegible).
+#[derive(Clone)]
+struct HarmonyTokenIds {
+    pairs: Vec<(LlamaToken, HarmonyMarker)>,
+}
+
+impl HarmonyTokenIds {
+    fn resolve(model: &LlamaModel) -> Result<Self, ModelError> {
+        let mut pairs = Vec::with_capacity(HarmonyMarker::ALL.len());
+        for marker in HarmonyMarker::ALL {
+            let tokens = model
+                .str_to_token(marker.literal(), AddBos::Never)
+                .map_err(|e| {
+                    ModelError::Request(format!(
+                        "harmony: no se pudo tokenizar '{}': {e}",
+                        marker.literal()
+                    ))
+                })?;
+            let [token] = tokens.as_slice() else {
+                return Err(ModelError::Request(format!(
+                    "harmony: '{}' no es un token especial único en este vocabulario \
+                     ({} tokens) — ¿el GGUF es realmente gpt-oss? \
+                     (override: BRAZE_LOCAL_FAMILY=chatml)",
+                    marker.literal(),
+                    tokens.len()
+                )));
+            };
+            pairs.push((*token, marker));
+        }
+        Ok(Self { pairs })
+    }
+
+    fn marker_of(&self, token: LlamaToken) -> Option<HarmonyMarker> {
+        self.pairs
+            .iter()
+            .find(|(t, _)| *t == token)
+            .map(|(_, m)| *m)
+    }
+}
+
 /// Inferencia local sobre un GGUF cargado en el proceso. El modelo
 /// (read-only) se comparte por `Arc`; cada `complete()` crea su propio
 /// contexto en un hilo bloqueante (la inferencia de llama.cpp es
@@ -85,6 +173,9 @@ pub struct LocalBackend {
     model: Arc<LlamaModel>,
     model_label: String,
     n_ctx: u32,
+    family: ChatFamily,
+    /// `Some` sólo para la familia Harmony.
+    harmony: Option<HarmonyTokenIds>,
 }
 
 /// `LlamaBackend::init()` inicializa estado GLOBAL de llama.cpp y sólo
@@ -131,11 +222,20 @@ impl LocalBackend {
                 gguf.as_ref().display()
             ))
         })?;
+        let model_label = model_label.into();
+        let family = detect_family(&model, &model_label);
+        let harmony = match family {
+            ChatFamily::Harmony => Some(HarmonyTokenIds::resolve(&model)?),
+            ChatFamily::ChatMl => None,
+        };
+        tracing::info!(model = %model_label, ?family, "local backend loaded");
         Ok(Self {
             backend,
             model: Arc::new(model),
-            model_label: model_label.into(),
+            model_label,
             n_ctx,
+            family,
+            harmony,
         })
     }
 
@@ -271,15 +371,60 @@ fn render_blocks(blocks: &[ContentBlock]) -> String {
     s
 }
 
+/// Contador de tool calls emitidas por el proceso, para ids sintéticos
+/// únicos (mismo esquema nonce+contador que los wires de Ollama/OpenRouter).
+static TOOL_CALL_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Traduce un [`HarmonyEvent`] del parser a su `CompletionEvent` y lo
+/// empuja. Devuelve `false` si el consumidor abandonó (cancelación).
+fn emit_harmony_event(
+    event: HarmonyEvent,
+    tx: &tokio::sync::mpsc::Sender<Result<CompletionEvent, ModelError>>,
+) -> bool {
+    match event {
+        HarmonyEvent::Visible(text) => tx
+            .blocking_send(Ok(CompletionEvent::TextDelta(text)))
+            .is_ok(),
+        HarmonyEvent::ToolCall { name, raw_args } => {
+            let (arguments, outcome) = parse_arguments_with_repair(&raw_args);
+            if !matches!(outcome, ArgumentsOutcome::Parsed) {
+                tracing::warn!(
+                    tool = %name,
+                    ?outcome,
+                    "harmony: argumentos de tool call reparados/colapsados"
+                );
+            }
+            let id = format!(
+                "local-tool-call-{}-{}",
+                crate::synth_id::process_nonce(),
+                TOOL_CALL_COUNTER.fetch_add(1, Ordering::Relaxed)
+            );
+            tx.blocking_send(Ok(CompletionEvent::ToolCallRequested {
+                id,
+                name,
+                arguments,
+            }))
+            .is_ok()
+        }
+    }
+}
+
 /// Genera de forma bloqueante y empuja eventos por `tx`. Corre en un hilo
 /// de `spawn_blocking`. Convención de error: cualquier fallo se manda
 /// como `Err` por el canal (el stream lo propaga como `StreamError`).
+///
+/// Con `harmony: Some(_)` la salida se interpreta como mensajes Harmony:
+/// los tokens especiales se matchean por id (nunca se renderizan), el
+/// canal `final` fluye como `TextDelta`, `analysis` se traza y suprime, y
+/// `<|call|>`/`<|return|>` cierran el turno con su `stop_reason` honesto
+/// (`tool_use`/`stop`; presupuesto agotado = `length`).
 fn generate_blocking(
     backend: &LlamaBackend,
     model: &LlamaModel,
     prompt: &str,
     n_ctx: u32,
     max_tokens: u32,
+    harmony: Option<&HarmonyTokenIds>,
     tx: &tokio::sync::mpsc::Sender<Result<CompletionEvent, ModelError>>,
 ) {
     macro_rules! bail {
@@ -296,7 +441,14 @@ fn generate_blocking(
         Err(e) => bail!("local: no se pudo crear el contexto: {e}"),
     };
 
-    let tokens = match model.str_to_token(prompt, AddBos::Always) {
+    // Harmony no lleva BOS: la conversación arranca directo en
+    // `<|start|>system` (los GGUF de gpt-oss no definen add_bos).
+    let add_bos = if harmony.is_some() {
+        AddBos::Never
+    } else {
+        AddBos::Always
+    };
+    let tokens = match model.str_to_token(prompt, add_bos) {
         Ok(t) => t,
         Err(e) => bail!("local: tokenización falló: {e}"),
     };
@@ -321,6 +473,12 @@ fn generate_blocking(
     // entre tokens, y un decoder fresco por token lo rompería.
     let mut decoder = encoding_rs::UTF_8.new_decoder();
 
+    let mut parser = HarmonyParser::new();
+    // Presupuesto agotado sin cierre = "length" (mismo diagnóstico que
+    // los wires: una tool call cortada por max_tokens no debe parecer un
+    // stop limpio).
+    let mut stop_reason = "length";
+
     // `n_cur` es la posición en el KV-cache, no un mero contador de
     // iteraciones (arranca en `batch.n_tokens()` y sólo avanza en tokens
     // que continúan la generación) — de ahí el allow.
@@ -328,25 +486,65 @@ fn generate_blocking(
     for _ in 0..budget {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
         sampler.accept(token);
-        if model.is_eog_token(token) {
-            break;
-        }
-        // `special = false`: no renderizar tokens especiales de plantilla
-        // (p.ej. `<|im_end|>`) como texto — no deben filtrarse a la salida.
-        match model.token_to_piece(token, &mut decoder, false, None) {
-            Ok(piece) => {
-                output_tokens += 1;
-                if piece.is_empty() {
-                    // token especial no-EOG o fragmento UTF-8 pendiente:
-                    // sigue generando, no emite nada.
-                } else if tx
-                    .blocking_send(Ok(CompletionEvent::TextDelta(piece)))
-                    .is_err()
-                {
+        let marker = harmony.and_then(|ids| ids.marker_of(token));
+        if let Some(m @ (HarmonyMarker::Call | HarmonyMarker::Return)) = marker {
+            // Cierre del turno harmony (ambos son además EOG en el GGUF
+            // de gpt-oss; el match por id decide el stop_reason honesto).
+            output_tokens += 1;
+            stop_reason = "stop";
+            if let Some(event) = parser.feed_marker(m) {
+                let is_call = matches!(event, HarmonyEvent::ToolCall { .. });
+                if !emit_harmony_event(event, tx) {
                     return; // el consumidor abandonó (cancelación)
                 }
+                if is_call {
+                    stop_reason = "tool_use";
+                }
             }
-            Err(e) => bail!("local: token_to_piece falló: {e}"),
+            break;
+        }
+        if marker.is_none() && model.is_eog_token(token) {
+            stop_reason = "stop";
+            break;
+        }
+        output_tokens += 1;
+        if let Some(m) = marker {
+            // Marcador estructural intra-turno (<|channel|>, <|message|>,
+            // <|end|>…): nunca se renderiza; puede cerrar una tool call
+            // off-spec (lenidad de <|end|>) y la generación continúa —
+            // eso habilita turnos multi-call.
+            if let Some(event) = parser.feed_marker(m) {
+                if matches!(event, HarmonyEvent::ToolCall { .. }) {
+                    stop_reason = "tool_use";
+                }
+                if !emit_harmony_event(event, tx) {
+                    return;
+                }
+            }
+        } else {
+            // `special = false`: no renderizar tokens especiales de
+            // plantilla (p.ej. `<|im_end|>`) como texto — no deben
+            // filtrarse a la salida.
+            match model.token_to_piece(token, &mut decoder, false, None) {
+                Ok(piece) => {
+                    if piece.is_empty() {
+                        // token especial no-EOG o fragmento UTF-8
+                        // pendiente: sigue generando, no emite nada.
+                    } else if harmony.is_some() {
+                        if let Some(event) = parser.feed_text(&piece)
+                            && !emit_harmony_event(event, tx)
+                        {
+                            return;
+                        }
+                    } else if tx
+                        .blocking_send(Ok(CompletionEvent::TextDelta(piece)))
+                        .is_err()
+                    {
+                        return; // el consumidor abandonó (cancelación)
+                    }
+                }
+                Err(e) => bail!("local: token_to_piece falló: {e}"),
+            }
         }
         batch.clear();
         if let Err(e) = batch.add(token, n_cur, &[0], true) {
@@ -358,10 +556,17 @@ fn generate_blocking(
         }
     }
 
+    if stop_reason == "length" && parser.tool_call_in_progress() {
+        tracing::warn!(
+            "harmony: presupuesto de tokens agotado a mitad de una tool call — \
+             la call se descarta (subir max_tokens)"
+        );
+    }
+
     let _ = tx.blocking_send(Ok(CompletionEvent::Usage {
         input_tokens,
         output_tokens,
-        stop_reason: Some("stop".to_string()),
+        stop_reason: Some(stop_reason.to_string()),
         cache_read_tokens: None,
         cache_write_tokens: None,
         escalation_trigger: None,
@@ -380,10 +585,25 @@ impl ModelBackend for LocalBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let prompt = build_chatml_prompt(&req);
+        let prompt = match self.family {
+            ChatFamily::ChatMl => build_chatml_prompt(&req),
+            ChatFamily::Harmony => {
+                // Esfuerzo de razonamiento del system message de gpt-oss.
+                // Default `medium` = el default del template de Ollama
+                // (paridad del A/B); override por env para el bench.
+                let reasoning = std::env::var("BRAZE_LOCAL_REASONING")
+                    .unwrap_or_else(|_| "medium".to_string());
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| i64::try_from(d.as_secs()).unwrap_or(0))
+                    .unwrap_or(0);
+                build_harmony_prompt(&req, &reasoning, Some(&utc_date_string(now)))
+            }
+        };
         tracing::info!(
             model = %self.model_label,
             n_ctx = self.n_ctx,
+            family = ?self.family,
             prompt_chars = prompt.len(),
             "starting local (llama.cpp) completion turn"
         );
@@ -392,13 +612,22 @@ impl ModelBackend for LocalBackend {
         let model = Arc::clone(&self.model);
         let n_ctx = self.n_ctx;
         let max_tokens = req.max_tokens;
+        let harmony = self.harmony.clone();
 
         // Canal acotado: la generación bloqueante empuja, el stream async
         // consume. Si el consumidor abandona, `blocking_send` falla y la
         // generación corta (cancelación cooperativa).
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<CompletionEvent, ModelError>>(32);
         tokio::task::spawn_blocking(move || {
-            generate_blocking(&backend, &model, &prompt, n_ctx, max_tokens, &tx);
+            generate_blocking(
+                &backend,
+                &model,
+                &prompt,
+                n_ctx,
+                max_tokens,
+                harmony.as_ref(),
+                &tx,
+            );
         });
 
         let stream = futures::stream::unfold(rx, |mut rx| async move {

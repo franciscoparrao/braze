@@ -13,6 +13,11 @@ mod backend;
 mod circuit_breaker;
 mod error;
 mod escalation;
+// Compilado también sin el feature `local` (bajo `test`): el módulo es
+// puro (sin llama.cpp) y así sus tests corren en el `cargo test` normal
+// del workspace, donde `local` no se compila.
+#[cfg(any(feature = "local", test))]
+mod harmony;
 mod http_client;
 mod http_error;
 #[cfg(feature = "local")]

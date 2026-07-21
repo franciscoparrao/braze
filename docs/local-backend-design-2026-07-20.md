@@ -247,6 +247,49 @@ agéntico completo y correcto. Falta para gpt-oss:20b: el preámbulo/
 plantilla **harmony** (independiente del build) y ver el offload parcial
 en 6GB (como Ollama).
 
+## Fase 2b — Harmony para gpt-oss (2026-07-21)
+
+Implementado en `braze-model`: `harmony.rs` (módulo **puro**, compila y
+testea sin el feature `local`) + integración en `local.rs`.
+
+- **Plantilla**: system canónico de Harmony (identidad "You are
+  ChatGPT" — cambiarla es format tax —, cutoff, fecha, `Reasoning:` con
+  default `medium` y override `BRAZE_LOCAL_REASONING`, canales válidos),
+  developer message (`# Instructions` = system prompt de braze +
+  `# Tools` como namespace TypeScript generado del `input_schema`),
+  historial mapeado por bloque (ToolUse → `commentary
+  to=functions.<name>`; ToolResult → mensaje del rol
+  `functions.<name>`, con el nombre recuperado del id), y
+  `<|start|>assistant` abierto. Sin BOS (`add_bos=false` en el GGUF).
+- **Parsing en el backend, no en el engine**: los marcadores de Harmony
+  (`<|channel|>`, `<|message|>`, `<|call|>`, `<|return|>`, …) son tokens
+  **especiales** — no sobreviven `token_to_piece(special=false)` y la
+  escalera de rescate del engine jamás los vería. `local.rs` resuelve
+  sus ids en el vocabulario al cargar (error temprano si el GGUF no es
+  harmony) y una máquina de estados (`HarmonyParser`) interpreta el
+  stream: `final` y `commentary` sin destinatario fluyen como
+  `TextDelta`, `analysis` se suprime, `commentary to=functions.X` se
+  acumula y emite como `ToolCallRequested` (args por la escalera de
+  reparación compartida, ids sintéticos nonce+contador como los wires).
+  `stop_reason` honesto: `tool_use`/`stop`/`length`. Degradación
+  elegante: un modelo que ignore Harmony fluye como texto y el rescate
+  del engine sigue aplicando río arriba.
+- **Detección de familia**: `general.architecture` del GGUF (`gptoss` /
+  `gpt-oss`) o el label del modelo; override `BRAZE_LOCAL_FAMILY=
+  harmony|chatml`.
+
+**Hallazgo: el blob gpt-oss de Ollama NO es un GGUF de llama.cpp.**
+"Reusar los GGUF de Ollama" vale para qwen (Fase 1) pero no para
+gpt-oss: Ollama convirtió gpt-oss para su engine propio — el blob
+declara `general.architecture = "gptoss"` (llama.cpp espera
+`"gpt-oss"`), prefija la metadata como `gptoss.*` y nombra tensores
+distinto (p.ej. `blk.N.attn_out` vs. el `blk.N.attn_output` de
+llama.cpp). llama.cpp lo rechaza con `unknown model architecture:
+'gptoss'`. Parchear el blob exigiría reescribir los 13GB (strings
+length-prefixed) — frágil. Salida adoptada: el GGUF canónico
+`ggml-org/gpt-oss-20b-GGUF` (MXFP4, ~12GB, `~/models/` en Nitro) por la
+ruta directa `.gguf` que el LocalBackend ya soporta.
+
 ### Receta de build CUDA en Nitro (Ubuntu 26.04) — costó descubrirla
 
 Prerrequisitos (una vez):
