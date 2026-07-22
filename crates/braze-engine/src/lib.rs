@@ -19,7 +19,9 @@ mod history;
 mod protocol_check;
 mod rescue;
 
-pub use engine::{DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine, synthesize_orphan_repairs};
+pub use engine::{
+    DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine, VerificationConfig, synthesize_orphan_repairs,
+};
 pub use hooks::{EngineHook, PromptBudgetAuditHook};
 pub use project_memory_hook::ProjectMemoryHook;
 pub use error::EngineError;

@@ -336,6 +336,32 @@ pub struct Engine {
     /// [`Engine::with_compaction_summarizer`] y
     /// `Engine::attempt_lead_summary` (engine/context.rs).
     summarizer: Option<Box<dyn ModelBackend>>,
+    /// End-of-turn verification gate (first H2 hook,
+    /// docs/verification-lever-design-2026-07-22.md). `Some` runs the
+    /// configured command when the model produces a final answer after a
+    /// turn that dispatched tool calls; a non-zero exit injects the
+    /// captured output back as an observation and grants the model up to
+    /// `max_rounds` more rounds instead of accepting the unverified
+    /// claim of success (finding #15). `None` (the default) = zero
+    /// behavior change. Set via [`Engine::with_verification`].
+    verification: Option<VerificationConfig>,
+}
+
+/// Configuration for the end-of-turn verification gate
+/// (docs/verification-lever-design-2026-07-22.md).
+#[derive(Debug, Clone)]
+pub struct VerificationConfig {
+    /// Argv of the verification command, e.g. `["cargo", "test"]`. Run in
+    /// the engine's working directory. Exit 0 = verified; non-zero =
+    /// failed (its output is fed back). A missing binary or a timeout is
+    /// treated as "skip" (never blocks a legitimate turn) — the same
+    /// failure posture as the post-edit check.
+    pub command: Vec<String>,
+    /// Per-run wall-clock ceiling for the command.
+    pub timeout: Duration,
+    /// How many extra rounds the model gets to fix a verification failure
+    /// before the turn ends anyway (marked unverified). Bounds the loop.
+    pub max_rounds: usize,
 }
 
 
@@ -395,6 +421,7 @@ impl Engine {
             envelope_parsing_enabled: false,
             planner: None,
             summarizer: None,
+            verification: None,
         }
     }
 
@@ -518,6 +545,15 @@ impl Engine {
     /// shape as [`Engine::with_context_budget`].
     pub fn with_textual_rescue_enabled(mut self, enabled: bool) -> Self {
         self.textual_rescue_enabled = enabled;
+        self
+    }
+
+    /// Enables the end-of-turn verification gate (H2,
+    /// docs/verification-lever-design-2026-07-22.md). Chainable, same
+    /// shape as [`Engine::with_context_budget`]; `None` semantics are the
+    /// default (no gate).
+    pub fn with_verification(mut self, config: VerificationConfig) -> Self {
+        self.verification = Some(config);
         self
     }
 

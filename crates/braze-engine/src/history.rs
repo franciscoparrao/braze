@@ -412,6 +412,22 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
                 ),
             },
         )),
+        // Verification gate (H2, docs/verification-lever-design-2026-07-22.md):
+        // the model claimed the task done, but the configured verification
+        // command failed. Render as USER-role context (like the plan) —
+        // something the model must act on, not something it already said —
+        // so the next round sees the real failure instead of the model's
+        // unverified claim of success (finding #15).
+        AgentEvent::VerificationFailed { output } => Some((
+            Role::User,
+            ContentBlock::Text {
+                text: format!(
+                    "The task is NOT done: your answer was accepted but the project's \
+                     verification command then FAILED. This is the real output — fix what \
+                     it reports, do not just repeat that it passes:\n{output}"
+                ),
+            },
+        )),
         AgentEvent::AssistantToolCall {
             id,
             name,

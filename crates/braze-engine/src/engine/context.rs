@@ -203,6 +203,7 @@ pub(crate) fn event_text_len(event: &AgentEvent) -> usize {
             name, arguments, ..
         } => name.len() + arguments.to_string().len(),
         AgentEvent::ToolCallCompleted { result, .. } => result.content.len(),
+        AgentEvent::VerificationFailed { output } => output.len(),
         AgentEvent::CompactionOccurred { summary, .. } => summary.len(),
         AgentEvent::PermissionRequested { action, .. }
         | AgentEvent::PermissionDecided { action, .. } => action.len(),
@@ -820,6 +821,9 @@ fn render_events_for_lead_summary(events: &[AgentEvent]) -> String {
                 if result.is_error { " (ERROR)" } else { "" },
                 cap(&result.content)
             )),
+            AgentEvent::VerificationFailed { output } => {
+                Some(format!("verification (FAILED): {}", cap(output)))
+            }
             AgentEvent::PlanCreated { plan } => Some(format!("plan: {}", cap(plan))),
             AgentEvent::CompactionOccurred { summary, .. } => {
                 Some(format!("earlier summary: {}", cap(summary)))

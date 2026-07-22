@@ -205,6 +205,10 @@ impl Engine {
         // later round must NOT count as "narration only" just because its
         // *last* round happened to have no tool calls.
         let mut any_tool_calls_this_turn = false;
+        // Verification gate (H2): extra rounds this turn has spent letting
+        // the model fix a verification failure, bounded by
+        // `VerificationConfig::max_rounds`.
+        let mut verify_rounds_used = 0usize;
         // v4 P0.2: cumulative input+output across this turn's rounds —
         // the quantity `max_turn_total_tokens` breaks on. Local to the
         // call, like `any_tool_calls_this_turn`.
@@ -578,6 +582,38 @@ impl Engine {
                     observer,
                 )
                 .await?;
+
+                // Verification gate (H2,
+                // docs/verification-lever-design-2026-07-22.md): before
+                // accepting this claimed-done turn, run the configured
+                // verification command. On failure, inject the real output
+                // as an observation and give the model another round —
+                // moving verification from the model's discretion (which
+                // finding #15 shows it fakes) to the harness's guarantee.
+                // Only for turns that actually dispatched tool calls (a
+                // pure Q&A turn has nothing to verify), and bounded by
+                // `max_rounds`. A command that is missing or times out
+                // skips silently (see `run_verification`) — never blocks a
+                // legitimate turn.
+                if let Some(v) = self.verification.as_ref().filter(|v| {
+                    any_tool_calls_this_turn && verify_rounds_used < v.max_rounds
+                }) && let Err(output) = run_verification(v).await
+                {
+                    tracing::warn!(
+                        round,
+                        verify_round = verify_rounds_used + 1,
+                        "verification gate failed after the model claimed done; \
+                         injecting the real output and granting another round"
+                    );
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::VerificationFailed { output },
+                        observer,
+                    )
+                    .await?;
+                    verify_rounds_used += 1;
+                    continue;
+                }
                 // D5: only a turn that *never* dispatched a tool call
                 // (not just "this round didn't") counts toward the streak.
                 if any_tool_calls_this_turn {
@@ -923,5 +959,230 @@ impl Engine {
             }
         }
         Ok(())
+    }
+}
+
+/// Runs the verification gate's command (H2,
+/// docs/verification-lever-design-2026-07-22.md). `Ok(())` = verified
+/// (exit 0), or a "skip" case that must never block a legitimate turn:
+/// the binary is missing, or the command times out (both trace-level,
+/// same failure posture as the post-edit check). `Err(output)` = the
+/// command ran and FAILED (exit ≠ 0); the string is its combined
+/// stdout+stderr, length-capped, ready to inject as an observation.
+async fn run_verification(config: &VerificationConfig) -> Result<(), String> {
+    /// Cap on injected verifier output — enough for the first failures,
+    /// not an unbounded dump that would blow up the tactical window.
+    const OUTPUT_CAP: usize = 2000;
+
+    let Some((program, args)) = config.command.split_first() else {
+        return Ok(()); // empty command = nothing to verify
+    };
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+
+    let run = cmd.output();
+    let output = match tokio::time::timeout(config.timeout, run).await {
+        Ok(Ok(output)) => output,
+        // Timed out: skip (don't block the turn), like post-edit check.
+        Err(_elapsed) => {
+            tracing::warn!(command = ?config.command, "verification command timed out — skipping gate");
+            return Ok(());
+        }
+        // Couldn't launch (missing binary, permission): skip.
+        Ok(Err(e)) => {
+            tracing::warn!(command = ?config.command, error = %e, "verification command failed to launch — skipping gate");
+            return Ok(());
+        }
+    };
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    // Failed: combine stdout+stderr (tests print to both), cap, return.
+    let mut combined = String::new();
+    combined.push_str(&String::from_utf8_lossy(&output.stdout));
+    if !output.stderr.is_empty() {
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    }
+    let combined = combined.trim();
+    let capped = if combined.len() > OUTPUT_CAP {
+        // Keep the TAIL — a test runner's verdict ("test result: FAILED")
+        // and the failing assertions are at the end, not the top.
+        let start = combined.len() - OUTPUT_CAP;
+        let start = (start..combined.len())
+            .find(|i| combined.is_char_boundary(*i))
+            .unwrap_or(combined.len());
+        format!("[…output truncated to last {OUTPUT_CAP} chars…]\n{}", &combined[start..])
+    } else {
+        combined.to_string()
+    };
+    Err(capped)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
+    use std::time::Duration;
+
+    use braze_events::{AgentEvent, NoopObserver};
+    use braze_model::CompletionEvent;
+    use braze_session::{FileSessionStore, SessionStore, SimpleContextCompactor};
+    use braze_types::SessionId;
+    use braze_tools_core::ToolRegistry;
+
+    use super::VerificationConfig;
+    use crate::engine::Engine;
+    use crate::engine::test_support::*;
+
+    fn tool_call_then_done(name: &str) -> Vec<CompletionEvent> {
+        vec![
+            CompletionEvent::ToolCallRequested {
+                id: "call-1".to_string(),
+                name: name.to_string(),
+                arguments: serde_json::json!({ "text": "x" }),
+            },
+            CompletionEvent::Done,
+        ]
+    }
+
+    fn final_text(text: &str) -> Vec<CompletionEvent> {
+        vec![
+            CompletionEvent::TextDelta(text.to_string()),
+            CompletionEvent::Done,
+        ]
+    }
+
+    fn verify(command: &[&str], max_rounds: usize) -> VerificationConfig {
+        VerificationConfig {
+            command: command.iter().map(|s| s.to_string()).collect(),
+            timeout: Duration::from_secs(10),
+            max_rounds,
+        }
+    }
+
+    /// The gate fires: the model claims done after a tool-call turn, the
+    /// verification command FAILS, so a `VerificationFailed` observation is
+    /// injected and the model gets another round — its second final answer
+    /// is what ends the turn (max_rounds=1 stops the loop).
+    #[tokio::test]
+    async fn a_failing_verification_injects_an_observation_and_grants_another_round() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let model = ScriptedModel::new(vec![
+            tool_call_then_done("echo"),
+            final_text("all tests pass"),   // the confabulated claim
+            final_text("ok now really fixed"),
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(AtomicU32::new(0))))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_verification(verify(&["sh", "-c", "echo boom >&2; exit 1"], 1));
+
+        engine
+            .run_turn(&session, "haz la tarea", &mut NoopObserver)
+            .await
+            .expect("turn should end (unverified) after exhausting verify rounds");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load");
+        let vf: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::VerificationFailed { output } => Some(output.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(vf.len(), 1, "gate should fire exactly once (max_rounds=1)");
+        assert!(vf[0].contains("boom"), "injected output carries the real verifier output");
+        // The model's SECOND answer (post-injection round) is persisted —
+        // proof it got the extra round the gate granted.
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::AssistantText { text } if text.contains("really fixed"))),
+            "the post-verification round should have run"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The gate passes: verification command succeeds, so no observation is
+    /// injected and the turn ends on the model's first final answer.
+    #[tokio::test]
+    async fn a_passing_verification_does_not_inject_or_add_a_round() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let model = ScriptedModel::new(vec![
+            tool_call_then_done("echo"),
+            final_text("done"),
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(AtomicU32::new(0))))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_verification(verify(&["true"], 2));
+
+        engine
+            .run_turn(&session, "haz la tarea", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load");
+        assert!(
+            !events.iter().any(|e| matches!(e, AgentEvent::VerificationFailed { .. })),
+            "a passing verification must not inject a failure"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// No verification configured = byte-identical to before: a tool-call
+    /// turn ending in text just ends, no gate, no extra rounds.
+    #[tokio::test]
+    async fn without_verification_the_gate_is_inert() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let model = ScriptedModel::new(vec![
+            tool_call_then_done("echo"),
+            final_text("done"),
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(AtomicU32::new(0))))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+        engine
+            .run_turn(&session, "haz la tarea", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load");
+        assert!(!events.iter().any(|e| matches!(e, AgentEvent::VerificationFailed { .. })));
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

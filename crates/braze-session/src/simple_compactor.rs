@@ -321,6 +321,14 @@ impl ContextCompactor for SimpleContextCompactor {
                 AgentEvent::PlanCreated { plan } => {
                     last_plan = Some(truncate_words(plan, 40));
                 }
+                // The verification gate's failure is an observation, not
+                // audit noise: if it gets folded before the model resolves
+                // it, the digest must still say the task was left
+                // unverified (no silent drop of an error signal — same
+                // treatment as a failed tool call above).
+                AgentEvent::VerificationFailed { output } => {
+                    tool_errors.push(format!("verification -> {}", truncate_words(output, 12)));
+                }
                 AgentEvent::ToolCallCompleted { .. }
                 | AgentEvent::ToolCallStarted { .. }
                 | AgentEvent::CompactionOccurred { .. }

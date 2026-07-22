@@ -257,6 +257,21 @@ pub enum AgentEvent {
     TaskCompleted {
         description: String,
     },
+    /// The end-of-turn verification gate (first H2 hook,
+    /// docs/verification-lever-design-2026-07-22.md) ran its configured
+    /// command after the model produced a final answer and the command
+    /// FAILED (exit ≠ 0). `output` is the captured, length-capped
+    /// verifier output that gets injected back into the conversation as a
+    /// user-role observation (see `event_to_block`) so the model gets a
+    /// round to fix what it claimed was done. Persisted so the bench can
+    /// count how often the gate fired (and, cross-referenced with the
+    /// grader's final verdict, how often the model then recovered — the
+    /// pre-registered mechanism check). Only emitted when the
+    /// verification lever is configured; absent entirely in the control
+    /// arm and in every session that runs without a verification command.
+    VerificationFailed {
+        output: String,
+    },
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only
