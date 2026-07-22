@@ -67,3 +67,6 @@ Consultas típicas:
 
 ## [2026-07-22 06:30] patron | Palanca de verificación H2: POSITIVO subpotenciado — la primera de confiabilidad que sube pass rate local
 - Gate de fin de turno (corre cargo check, inyecta el fallo, da ronda de arreglo). A/B: qwen2.5:3b 3/18->6/18 (+16pp), gemma4:e4b 12/18->17/18 (+27pp), 0 reversiones, McNemar marginal (gemma p=0.062, n=18). Responde la pregunta profunda del #15: el modelo SÍ actúa sobre el fallo inyectado (gemma recupera 5/6, qwen 3/15 — escala con la capacidad de usar el feedback). Costo <=1.5x rondas. Contrasta con el nulo del stencil. Primer hook H2 (muta el turno). docs/sweep-verification-lever-ab-2026-07-22.md
+
+## [2026-07-22 09:00] patron | Palanca de verificación H2: el piloto POSITIVO era falso positivo — potenciado da NULO (REJECT)
+- Piloto n=18: +16/+27pp, 0 reversiones, "prometedor subpotenciado". Potenciado n=60 (20 bugs Rust distintos x3): qwen 17/60 vs 16/60 (p=1.0), gemma 55/60 vs 53/60 (p=0.73) — NULO. El gate recupera tantos fallos como rompe (qwen recupera 9 rompe 10). La ronda extra es arma de doble filo (roam #16). Se une al stencil como nulo, refuerza "not all scaffolding helps". VALIDA no meterla al paper 1 (habría sido falso positivo publicado). docs/sweep-verification-lever-ab-powered-2026-07-22.md
