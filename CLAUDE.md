@@ -13,9 +13,12 @@
 > ejecutado**: `engine.rs` (11.4k líneas) partido en 9 módulos
 > (`engine/` + `rescue.rs`), queda solo repartir su `mod tests`;
 > evidencia experimental del paper completa, manuscrito en `paper/`, y
-> el ancla BFCL corrida el 2026-07-18 (análisis en curso). Creado
-> 2026-07-03. Ver `PLAN.md` para la arquitectura y verificación por
-> incremento.
+> el ancla BFCL corrida el 2026-07-18 (análisis en curso); y el
+> **LocalBackend completo** (2026-07-20/21: inferencia in-process
+> llama.cpp, 3 familias de plantilla, stencil GBNF — ver su § abajo;
+> gpt-oss:20b por el camino Harmony logró 57/57, el mejor número del
+> proyecto). Creado 2026-07-03. Ver `PLAN.md` para la arquitectura y
+> verificación por incremento.
 
 **Wiki de referencia**: ver `wiki/index.md`
 
@@ -168,13 +171,42 @@ compactación) — braze-bench instala subscriber de tracing.
   ProjectMemory sin `objective`/`notes` en el render y con campos
   sanitizados, reparación N-5 bajo el lock N-27.
 
-## LocalBackend (2026-07-20/21) — quinto `ModelBackend`, cerrado hasta Fase 2b
+## LocalBackend (2026-07-20/21) — quinto `ModelBackend`, Fases 1-3 completas
 
 Inferencia **in-process** sobre llama.cpp (`llama-cpp-2`, feature
 `local` / `local-cuda`), sin server — el harness dueño desde los tokens:
 la clase de bug #1/#17 (parser server-side de Ollama) es imposible por
 construcción. Detalle completo y recetas en
 `docs/local-backend-design-2026-07-20.md`.
+
+**Resultado cumbre (2026-07-21): gpt-oss:20b por el camino Harmony =
+57/57 (100%), pass^3=100%** en `default.toml` — la primera corrida de
+suite completa del LocalBackend Harmony, cero flakiness, `rescues=0`
+por diseño (el parser del backend emite las calls directo), y el mejor
+número que el proyecto ha producido en su suite (el mismo modelo vía
+Ollama: 98.9%, n=95, 13-jul). CPU puro, 41s/tarea promedio.
+Datos: `nitro:~/sweep-rank-oss.json`.
+
+**Lectura estratégica de la independencia de Ollama** (2026-07-21):
+importa en tres ejes — (1) elimina la clase de fallo server-side por
+estructura (evidenciado por el 100% de arriba); (2) es la capacidad
+experimental que ningún harness API-bound tiene (sampler access →
+stencil, ablaciones por token); (3) el ecosistema se bifurcó: Ollama
+convirtió gpt-oss y TODA la familia Gemma para su engine propio
+(blobs incompatibles con llama.cpp), así que el LocalBackend alinea a
+braze con el ecosistema GGUF abierto en vez de un runtime amurallado.
+El precio: mantener plantillas por familia (3: ChatML, Harmony,
+Gemma), bajar GGUFs canónicos, y la fragilidad del build FFI. Para
+braze-como-herramienta es un seguro; para braze-como-laboratorio, el
+activo central.
+
+**Familias soportadas** (plantilla + detección por arch GGUF/label/
+`BRAZE_LOCAL_FAMILY`): ChatML/qwen (reusa blobs de Ollama), Harmony/
+gpt-oss y Gemma 2/3/4 (requieren GGUF canónico — en `~/models/` de
+ambos nodos: `gpt-oss-20b-MXFP4`, `gemma-4-E4B-it-qat`,
+`gemma-4-12B-it-qat`). El stencil y la escalera de rescate funcionan
+para las tres (operan sobre la convención textual o el parser propio,
+no sobre la plantilla).
 
 - **Fase 1 (CPU + ChatML/qwen)**: paridad medida vs OllamaBackend
   (McNemar p=0.22 n.s.; schema en preámbulo dejó schema_fail 17→0).
@@ -224,10 +256,22 @@ construcción. Detalle completo y recetas en
   propio — 720 vs 2131) — regla: qwen reusa blobs de Ollama; gpt-oss y
   Gemma necesitan GGUF canónico (gemma4:e4b QAT de unsloth en
   `~/models/`, verificado en vivo con tool call estencilada).
-- Pendiente de la línea: A/B stencil sobre gemma4:e4b (sus 3 fallos
-  sistemáticos de single_tool son la clase donde el envelope muerde),
-  instalar el binario CUDA estable en Nitro, y paridad GPU vs Ollama
-  sobre qwen2.5:3b.
+- **gemma-4-12B por LocalBackend** (2026-07-21): capacidad
+  prometedora, throughput limitante — primer sweep censurado por
+  timeout (29/57 timeouts a 180s con 12 capas GPU; **93% condicional
+  entre las corridas que terminaron**, 26/28, con schema_fail=0).
+  Re-run con 14 capas + 360s en curso al cierre de esta nota. Mapa de
+  la línea Gemma 4 en Nitro (16GB): 12B cabe cómodo (6.7GB QAT),
+  26B-A4B (MoE 4B activos, rival directo de gpt-oss:20b) solo en
+  IQ4_XS 13.6GB apretado — ES el argumento para subir Nitro a 32GB;
+  31B fuera de alcance.
+- Pendiente de la línea: veredicto del ranking 12B vs gpt-oss (re-run
+  en curso), A/B stencil sobre gemma4:e4b (sus 3 fallos sistemáticos
+  de single_tool son la clase donde el envelope muerde), instalar el
+  binario CUDA estable en Nitro (dos tropiezos por binarios
+  desincronizados el 21-jul — subió de prioridad), fail-fast de brazo
+  en el bench (57 fallos instantáneos de carga no deben quemar un
+  brazo en silencio), y paridad GPU vs Ollama sobre qwen2.5:3b.
 
 ## Próximos pasos al retomar
 
@@ -262,7 +306,10 @@ mismo día. El arco LocalBackend de 2026-07-20/21 está en su § arriba.)
 ## Modelos locales recomendados (Ollama)
 
 **El mejor modelo local del proyecto es `gpt-oss:20b` corriendo en
-Nitro** (sweep de capacidad 2026-07-13,
+Nitro** — y desde el 2026-07-21, **la mejor forma de correrlo es el
+LocalBackend** (camino Harmony: 57/57 y pass^3=100% en `default.toml`,
+vs 98.9% del mismo modelo vía Ollama; ver § LocalBackend). La
+recomendación original vía Ollama (sweep de capacidad 2026-07-13,
 `docs/sweep-capacity-hardware-2026-07-13.md` +
 `docs/sweep-g10-weak-skills-gptoss20b-2026-07-13.json`) — reemplaza a
 `qwen3.5-coder` en esta recomendación. MoE ~3.6B activos, corre en los
