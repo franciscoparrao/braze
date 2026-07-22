@@ -121,8 +121,11 @@ Los 15 crates tienen lógica real y verificada. `cargo build/test/clippy
 `engine/` (mod.rs solo struct+builders+tests, más `context`, `turn`,
 `round`, `dispatch`, `planner`, `fallback`, `hooks_dispatch`) y la
 escalera de rescate en `src/rescue.rs` — extracción verbatim, tests
-verdes tras cada paso; queda solo repartir el `mod tests` (~7.100
-líneas) entre módulos destino. J-20 (symlinks): aceptación MVP
+verdes tras cada paso. Reparto del `mod tests` en curso (pasos 4-7,
+2026-07-21): fixtures compartidas en `engine/test_support.rs` y los
+clusters de context/planner/compactación/best-of-n/dispatch ya en sus
+módulos (`mod.rs` 8.704→6.680 líneas); queda el cluster grande de
+`run_turn_*`/summary-round (~50 tests) → `turn.rs`. J-20 (symlinks): aceptación MVP
 **ratificada** por el autor el 2026-07-18. La
 convención de verificación del proyecto: cada incremento se prueba
 también **en vivo** (pty scripteado contra el binario real para la TUI,
