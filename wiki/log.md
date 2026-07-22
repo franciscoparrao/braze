@@ -64,3 +64,6 @@ Consultas típicas:
 
 ## [2026-07-21 21:30] patron | Ranking SML: parámetros activos > parámetros totales en hardware modesto
 - gpt-oss:20b (MoE 3.6B activos, CPU) 57/57 pass^3=100% vs gemma-4-12B (denso, GPU 14/48 capas) 30/57 con 26 timeouts PERO 97% condicional — capacidad casi empatada, throughput decide (McNemar p=1.5e-08). El 57/57 es el mejor número del proyecto y la primera suite completa del camino Harmony del LocalBackend. docs/sweep-ranking-12b-vs-gptoss-2026-07-21.md
+
+## [2026-07-22 06:30] patron | Palanca de verificación H2: POSITIVO subpotenciado — la primera de confiabilidad que sube pass rate local
+- Gate de fin de turno (corre cargo check, inyecta el fallo, da ronda de arreglo). A/B: qwen2.5:3b 3/18->6/18 (+16pp), gemma4:e4b 12/18->17/18 (+27pp), 0 reversiones, McNemar marginal (gemma p=0.062, n=18). Responde la pregunta profunda del #15: el modelo SÍ actúa sobre el fallo inyectado (gemma recupera 5/6, qwen 3/15 — escala con la capacidad de usar el feedback). Costo <=1.5x rondas. Contrasta con el nulo del stencil. Primer hook H2 (muta el turno). docs/sweep-verification-lever-ab-2026-07-22.md
