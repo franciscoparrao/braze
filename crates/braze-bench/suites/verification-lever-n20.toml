@@ -1,0 +1,203 @@
+# Suite del A/B potenciado de la palanca de verificación (H2).
+# docs/verification-lever-design-2026-07-22.md. 20 bugs de compilación
+# Rust verificados; criterio de pass = cargo check (expect_cargo_check).
+
+[[tasks]]
+id = "rust_borrow_after_use"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Store {\n    items: Vec<String>,\n}\n\nimpl Store {\n    pub fn new(items: Vec<String>) -> Self { Self { items } }\n    pub fn push_and_first(&mut self, value: String) -> Option<String> {\n        let first = self.items.first();\n        self.items.push(value);\n        first.cloned()\n    }\n}\n"
+
+[[tasks]]
+id = "rust_mutate_while_iter"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct WordBank {\n    words: Vec<String>,\n    suffix: String,\n}\n\nimpl WordBank {\n    pub fn new(words: Vec<String>, suffix: String) -> Self { Self { words, suffix } }\n    pub fn expand(&mut self, max_len: usize) {\n        for word in &self.words {\n            if word.len() <= max_len {\n                let mut e = word.clone();\n                e.push_str(&self.suffix);\n                self.words.push(e);\n            }\n        }\n    }\n}\n"
+
+[[tasks]]
+id = "rust_use_after_move"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Batch {\n    items: Vec<String>,\n}\n\nimpl Batch {\n    pub fn new(items: Vec<String>) -> Self { Self { items } }\n    pub fn consume(self) -> (usize, usize) {\n        let owned = self.items;\n        (owned.len(), self.items.len())\n    }\n}\n"
+
+[[tasks]]
+id = "rust_type_mismatch_return"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Counter { total: usize }\n\nimpl Counter {\n    pub fn new() -> Self { Self { total: 0 } }\n    pub fn label(&self) -> String { \"count\" }\n}\n"
+
+[[tasks]]
+id = "rust_needs_mut_self"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Log { lines: Vec<String> }\n\nimpl Log {\n    pub fn new() -> Self { Self { lines: Vec::new() } }\n    pub fn record(&self, line: String) { self.lines.push(line); }\n}\n"
+
+[[tasks]]
+id = "rust_missing_field_init"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Config { name: String, retries: u32 }\n\nimpl Config {\n    pub fn new(name: String) -> Self { Self { name } }\n    pub fn retries(&self) -> u32 { self.retries }\n}\n"
+
+[[tasks]]
+id = "rust_int_type_mismatch"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Sizes { a: u32, b: usize }\n\nimpl Sizes {\n    pub fn new(a: u32, b: usize) -> Self { Self { a, b } }\n    pub fn total(&self) -> usize { self.a + self.b }\n}\n"
+
+[[tasks]]
+id = "rust_immutable_reassign"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn accumulate(values: &[i32]) -> i32 {\n    let sum = 0;\n    for v in values { sum = sum + v; }\n    sum\n}\n"
+
+[[tasks]]
+id = "rust_option_unwrapped_return"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Cache { last: Option<String> }\n\nimpl Cache {\n    pub fn new() -> Self { Self { last: None } }\n    pub fn get(&self) -> String { self.last.clone() }\n}\n"
+
+[[tasks]]
+id = "rust_ref_vs_value_cmp"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn count_matches(items: &[i32], target: i32) -> usize {\n    let mut n = 0;\n    for item in items { if item == target { n += 1; } }\n    n\n}\n"
+
+[[tasks]]
+id = "rust_index_wrong_type"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn nth(items: &[String], i: i32) -> String {\n    items[i].clone()\n}\n"
+
+[[tasks]]
+id = "rust_return_local_ref"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn label() -> &str {\n    let s = String::from(\"hi\");\n    &s\n}\n"
+
+[[tasks]]
+id = "rust_match_arms_mismatch"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn describe(n: i32) -> String {\n    match n {\n        0 => \"zero\",\n        _ => String::from(\"other\"),\n    }\n}\n"
+
+[[tasks]]
+id = "rust_missing_tail_value"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn double(x: usize) -> usize {\n    let y = x * 2;\n}\n"
+
+[[tasks]]
+id = "rust_move_in_closure"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn run(name: String) -> impl Fn() -> usize {\n    let f = move || name.len();\n    let g = move || name.len();\n    move || f() + g()\n}\n"
+
+[[tasks]]
+id = "rust_borrow_mut_twice"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Pair { a: Vec<i32>, b: Vec<i32> }\n\nimpl Pair {\n    pub fn new() -> Self { Self { a: vec![], b: vec![] } }\n    pub fn shuffle(&mut self) {\n        let first = self.a.first_mut();\n        let second = self.a.last_mut();\n        if let (Some(x), Some(y)) = (first, second) { std::mem::swap(x, y); }\n    }\n}\n"
+
+[[tasks]]
+id = "rust_wrong_arg_type"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn greet(name: &str) -> String { format!(\"hi {name}\") }\n\npub fn run() -> String {\n    let owned = String::from(\"ana\");\n    greet(owned)\n}\n"
+
+[[tasks]]
+id = "rust_missing_semicolon_stmt"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn setup() -> Vec<i32> {\n    let mut v = Vec::new()\n    v.push(1);\n    v\n}\n"
+
+[[tasks]]
+id = "rust_unknown_method"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub fn first_word(s: &str) -> String {\n    s.split_whitespace().first().unwrap().to_string()\n}\n"
+
+[[tasks]]
+id = "rust_field_privacy_move"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Holder { value: String }\n\nimpl Holder {\n    pub fn new(value: String) -> Self { Self { value } }\n    pub fn len_twice(&self) -> usize {\n        let v = self.value;\n        v.len() + self.value.len()\n    }\n}\n"

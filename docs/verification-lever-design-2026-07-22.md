@@ -110,6 +110,20 @@ pareado por (tarea, rep).
 > registra ANTES del sweep para no repetir la falla de procedencia del
 > 21-jul (criterios que entraron a git DESPUÉS de sus datos).
 
+> **RUN CONFIRMATORIO POTENCIADO (2026-07-22, ANTES de correr).** El
+> primer A/B (n=18 = 6 tareas × 3 reps por brazo,
+> `docs/sweep-verification-lever-ab-2026-07-22.md`) mostró dirección
+> impecable (0 reversiones en 8 movimientos) pero significancia marginal
+> (gemma p=0.062). No es p-hacking correr con más n: la dirección y el
+> tamaño de efecto YA están establecidos por el piloto; esto fija un
+> **n adecuado de una vez** — 20 bugs de compilación Rust distintos ×
+> 3 reps = **60 pares por ejecutor** (suite
+> `verification-lever-n20.toml`) — como el test potenciado del MISMO
+> criterio pre-registrado. n comprometido ANTES de correr (no "correr
+> hasta p<0.05"); se reporta el resultado sea cual sea, incluido un
+> efecto que se encoja. El piloto n=18 queda como piloto; ESTE es el
+> test.
+
 - **Control:** fin de turno actual (`turn.rs:414` sin cambios).
 - **Treatment:** gate de verificación con `MAX_VERIFY_ROUNDS = 2` y el
   comando `expect_cargo_check` de cada tarea como verificación.
