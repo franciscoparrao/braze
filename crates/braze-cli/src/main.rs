@@ -779,6 +779,27 @@ async fn build_engine(
         engine = engine.with_compaction_summarizer(summarizer);
     }
 
+    // Verification gate (H2, docs/verification-lever-design-2026-07-22.md):
+    // `BRAZE_VERIFY_COMMAND` (space-separated argv, e.g. "cargo test")
+    // turns it on for this session; `BRAZE_VERIFY_MAX_ROUNDS` (default 2)
+    // bounds the fix loop. Env-driven on purpose — it composes with the
+    // `braze-oss`/`braze-flash` wrappers and keeps the lever out of the
+    // config contract while it is still an experiment.
+    if let Ok(cmd) = std::env::var("BRAZE_VERIFY_COMMAND") {
+        let command: Vec<String> = cmd.split_whitespace().map(str::to_string).collect();
+        if !command.is_empty() {
+            let max_rounds = std::env::var("BRAZE_VERIFY_MAX_ROUNDS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2);
+            engine = engine.with_verification(braze_engine::VerificationConfig {
+                command,
+                timeout: std::time::Duration::from_secs(300),
+                max_rounds,
+            });
+        }
+    }
+
     Ok((engine, status_line, project_memory_hook))
 }
 
