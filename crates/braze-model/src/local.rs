@@ -175,6 +175,16 @@ impl LocalBackend {
         model_label: impl Into<String>,
         n_ctx: u32,
     ) -> Result<Self, ModelError> {
+        // llama-cpp-2 panickea (no devuelve Err) si la ruta no existe —
+        // chequear antes convierte el panic en el error legible del
+        // backend (papercut encontrado armando el wrapper braze-oss,
+        // 2026-07-21).
+        if !gguf.as_ref().exists() {
+            return Err(ModelError::Request(format!(
+                "el GGUF no existe: {}",
+                gguf.as_ref().display()
+            )));
+        }
         let backend = shared_llama_backend()?;
         // n_gpu_layers: 0 = CPU puro (default). Con el binario compilado
         // con el feature `cuda` y una GPU disponible,
