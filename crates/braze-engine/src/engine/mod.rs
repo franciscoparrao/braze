@@ -362,6 +362,12 @@ pub struct VerificationConfig {
     /// How many extra rounds the model gets to fix a verification failure
     /// before the turn ends anyway (marked unverified). Bounds the loop.
     pub max_rounds: usize,
+    /// Directory to run the command in. `None` = the process's current
+    /// directory (the interactive case: `braze` was invoked where the
+    /// user wants it verified). `Some` is required in the bench, whose
+    /// tasks run in throwaway sandbox dirs that are NOT the process cwd —
+    /// the command must run where the model's edits actually landed.
+    pub working_dir: Option<std::path::PathBuf>,
 }
 
 

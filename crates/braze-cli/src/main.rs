@@ -796,6 +796,7 @@ async fn build_engine(
                 command,
                 timeout: std::time::Duration::from_secs(300),
                 max_rounds,
+                working_dir: None,
             });
         }
     }

@@ -439,6 +439,7 @@ pub async fn run_task(
             command: vec!["cargo".to_string(), "check".to_string()],
             timeout: std::time::Duration::from_secs(300),
             max_rounds,
+            working_dir: Some(sandbox.path().to_path_buf()),
         });
     }
 

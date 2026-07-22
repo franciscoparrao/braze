@@ -981,6 +981,12 @@ async fn run_verification(config: &VerificationConfig) -> Result<(), String> {
     cmd.args(args)
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
+    // Run where the model's edits landed — the process cwd interactively,
+    // an explicit sandbox dir in the bench (its tasks are NOT the process
+    // cwd, so without this the command would verify the wrong tree).
+    if let Some(dir) = &config.working_dir {
+        cmd.current_dir(dir);
+    }
 
     let run = cmd.output();
     let output = match tokio::time::timeout(config.timeout, run).await {
@@ -1064,6 +1070,7 @@ mod tests {
             command: command.iter().map(|s| s.to_string()).collect(),
             timeout: Duration::from_secs(10),
             max_rounds,
+            working_dir: None,
         }
     }
 
