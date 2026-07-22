@@ -1,0 +1,76 @@
+# Suite del A/B de la palanca de verificación de fin de turno (H2).
+# docs/verification-lever-design-2026-07-22.md.
+#
+# Población: errores de compilación de Rust que un ejecutor débil
+# (qwen2.5:3b, gemma4:e4b) debe arreglar para que `cargo check` pase —
+# la clase donde el modelo edita, deja el código roto, y declara "listo"
+# (finding #15). El criterio de pass es EXCLUSIVAMENTE `cargo check`
+# (expect_cargo_check), no un fix específico: cualquier código que
+# compile pasa. El brazo treatment (`+ablate:verify-gate`) corre ese
+# mismo `cargo check` en el gate de fin de turno y le da al modelo una
+# ronda para arreglar lo que dijo terminado; el control no.
+#
+# Desviación pre-registrada del design doc original (que apuntaba a
+# default.toml): default.toml no tiene NINGUNA tarea cargo-verificable
+# (sus tareas de "código" editan .txt/.py), así que no puede medir esta
+# palanca. Documentado y commiteado ANTES de correr el sweep.
+
+[[tasks]]
+id = "rust_borrow_after_use"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Store {\n    items: Vec<String>,\n}\n\nimpl Store {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn push_and_first(&mut self, value: String) -> Option<String> {\n        let first = self.items.first();\n        self.items.push(value);\n        first.cloned()\n    }\n}\n"
+
+[[tasks]]
+id = "rust_mutate_while_iter"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct WordBank {\n    words: Vec<String>,\n    suffix: String,\n}\n\nimpl WordBank {\n    pub fn new(words: Vec<String>, suffix: String) -> Self {\n        Self { words, suffix }\n    }\n\n    pub fn expand_short_words(&mut self, max_len: usize) {\n        for word in &self.words {\n            if word.len() <= max_len {\n                let mut expanded = word.clone();\n                expanded.push_str(&self.suffix);\n                self.words.push(expanded);\n            }\n        }\n    }\n}\n"
+
+[[tasks]]
+id = "rust_use_after_move"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Batch {\n    items: Vec<String>,\n}\n\nimpl Batch {\n    pub fn new(items: Vec<String>) -> Self {\n        Self { items }\n    }\n\n    pub fn consume_and_count(self) -> (usize, usize) {\n        let owned = self.items;\n        let sorted_len = owned.len();\n        (sorted_len, self.items.len())\n    }\n}\n"
+
+[[tasks]]
+id = "rust_type_mismatch_return"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Counter {\n    total: usize,\n}\n\nimpl Counter {\n    pub fn new() -> Self {\n        Self { total: 0 }\n    }\n\n    pub fn label(&self) -> String {\n        \"count\"\n    }\n}\n"
+
+[[tasks]]
+id = "rust_needs_mut_self"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Log {\n    lines: Vec<String>,\n}\n\nimpl Log {\n    pub fn new() -> Self {\n        Self { lines: Vec::new() }\n    }\n\n    pub fn record(&self, line: String) {\n        self.lines.push(line);\n    }\n}\n"
+
+[[tasks]]
+id = "rust_missing_field_init"
+skill = "verify"
+prompt = "Fix src/lib.rs so cargo check passes. Keep the public function names unchanged."
+expect_cargo_check = true
+
+[tasks.setup_files]
+"Cargo.toml" = "[package]\nname = \"vfix\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n"
+"src/lib.rs" = "pub struct Config {\n    name: String,\n    retries: u32,\n}\n\nimpl Config {\n    pub fn new(name: String) -> Self {\n        Self { name }\n    }\n\n    pub fn retries(&self) -> u32 {\n        self.retries\n    }\n}\n"

@@ -738,6 +738,12 @@ pub struct AblationOverrides {
     /// a n× el costo? — la palanca más natural cuando la inferencia es
     /// local y los tokens casi gratis. `None`/`Some(1)` = fila normal.
     pub ttc_rollouts: Option<u32>,
+    /// `+ablate:verify-gate[=N]` — el gate de verificación de fin de
+    /// turno (H2, docs/verification-lever-design-2026-07-22.md). `Some(N)`
+    /// lo prende con `max_rounds=N` (bare `verify-gate` = 2) usando
+    /// `cargo check` como comando en las tareas con `expect_cargo_check`.
+    /// `None` (el default) = brazo control, sin gate.
+    pub verify_gate: Option<usize>,
 }
 
 impl AblationOverrides {
@@ -750,7 +756,7 @@ impl AblationOverrides {
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
-         task-list, explore, prompt-tools, constrained-tools, project-memory, lead-summary, ttc=N, best-of-n=N, \
+         task-list, explore, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
          tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N";
 
@@ -795,6 +801,15 @@ impl AblationOverrides {
                 "lead-turns" => out.lead_turns = Some(Self::parse_usize(key, value)?),
                 "lead-threshold" => {
                     out.lead_failure_threshold = Some(Self::parse_usize(key, value)?)
+                }
+                "verify-gate" => {
+                    // Bare `verify-gate` = max_rounds 2 (the pre-registered
+                    // treatment); `verify-gate=N` overrides.
+                    let n = match value {
+                        None => 2,
+                        Some(_) => Self::parse_usize(key, value)?,
+                    };
+                    out.verify_gate = Some(n);
                 }
                 "task-list" => out.enable_task_list = true,
                 "explore" => out.enable_exploration = true,

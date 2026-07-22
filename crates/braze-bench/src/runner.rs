@@ -426,6 +426,22 @@ pub async fn run_task(
         engine = engine.with_tactical_full_observations(full_observations);
     }
 
+    // Verification gate (H2, docs/verification-lever-design-2026-07-22.md):
+    // the treatment arm (`+ablate:verify-gate`) runs `cargo check` at
+    // turn end on tasks that declare `expect_cargo_check` (the same
+    // command the grader uses post-run), so the model gets a round to fix
+    // what it claimed was done. Tasks without a cargo check have nothing
+    // to verify — the gate is a no-op there even in the treatment arm.
+    if let Some(max_rounds) = ablation.verify_gate
+        && task.expect_cargo_check
+    {
+        engine = engine.with_verification(braze_engine::VerificationConfig {
+            command: vec!["cargo".to_string(), "check".to_string()],
+            timeout: std::time::Duration::from_secs(300),
+            max_rounds,
+        });
+    }
+
     if let Some(budget) = ollama_budget {
         engine = engine.with_context_budget(budget);
     }

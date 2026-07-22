@@ -88,11 +88,27 @@ respuesta final. Antes de aceptarla:
 
 ## Criterio pre-registrado (COMMITEAR ANTES DE CORRER)
 
-**Diseño:** A/B pareado sobre la suite `default.toml`, ejecutores
-locales débiles donde el falso-éxito/parada-prematura ocurre de verdad
-(`qwen2.5:3b` y `gemma4:e4b` — NO gpt-oss:20b, que satura a pass^k=100%
-y no deja headroom). `reps=3`, seed fijo, McNemar exacto pareado por
-(tarea, rep).
+**Diseño:** A/B pareado sobre la suite `verification-lever.toml` (ver
+la ENMIENDA abajo — el design original decía `default.toml`),
+ejecutores locales débiles donde el falso-éxito/parada-prematura ocurre
+de verdad (`qwen2.5:3b` y `gemma4:e4b` — NO gpt-oss:20b, que satura a
+pass^k=100% y no deja headroom). `reps=3`, seed fijo, McNemar exacto
+pareado por (tarea, rep).
+
+> **ENMIENDA DE SUITE (2026-07-22, ANTES de correr — commiteada con el
+> cableado del bench y la suite nueva).** El design original apuntaba a
+> `default.toml`, pero al cablear el bench se descubrió que
+> `default.toml` tiene **cero** tareas cargo-verificables (sus tareas de
+> "código" editan `.txt`/`.py`), así que no puede medir esta palanca: el
+> gate nunca dispararía. Se sustituye por
+> `crates/braze-bench/suites/verification-lever.toml` — 6 errores de
+> compilación de Rust (borrow/move/tipo/mut) que un ejecutor débil deja
+> roto al declarar "listo", con `expect_cargo_check` como criterio de
+> pass y `cargo check` como comando del gate. Es una corrección de
+> instrumento (la suite no puede medir lo que el criterio pide), no un
+> ajuste del criterio de adopción — ese queda intacto. Esta enmienda se
+> registra ANTES del sweep para no repetir la falla de procedencia del
+> 21-jul (criterios que entraron a git DESPUÉS de sus datos).
 
 - **Control:** fin de turno actual (`turn.rs:414` sin cambios).
 - **Treatment:** gate de verificación con `MAX_VERIFY_ROUNDS = 2` y el
