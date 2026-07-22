@@ -61,3 +61,6 @@ Consultas típicas:
 
 ## [2026-07-21 17:30] patron | 3 bugs latentes de Fase 1 solo visibles bajo constrained decoding
 - Double-accept del sampler (sample() ya acepta; fatal solo con gramática GBNF), prompt>n_batch=abort C++ del proceso entero, token de control espurio=error duro de stream. Los tres invisibles a smokes y tests; los destapó el A/B en vivo. Refuerza la convención "compilar ≠ funcionar" como método, no eslogan.
+
+## [2026-07-21 21:30] patron | Ranking SML: parámetros activos > parámetros totales en hardware modesto
+- gpt-oss:20b (MoE 3.6B activos, CPU) 57/57 pass^3=100% vs gemma-4-12B (denso, GPU 14/48 capas) 30/57 con 26 timeouts PERO 97% condicional — capacidad casi empatada, throughput decide (McNemar p=1.5e-08). El 57/57 es el mejor número del proyecto y la primera suite completa del camino Harmony del LocalBackend. docs/sweep-ranking-12b-vs-gptoss-2026-07-21.md
