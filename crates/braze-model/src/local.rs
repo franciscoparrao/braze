@@ -446,8 +446,46 @@ fn generate_blocking(
         }};
     }
 
-    let n_ctx = std::num::NonZeroU32::new(n_ctx.max(256));
-    let ctx_params = LlamaContextParams::default().with_n_ctx(n_ctx);
+    let n_batch_max = n_ctx.max(256);
+    let n_ctx = std::num::NonZeroU32::new(n_batch_max);
+    let mut ctx_params = LlamaContextParams::default().with_n_ctx(n_ctx);
+    // Offload parcial a GPU: mantener el KV cache en el HOST (RAM), no en la
+    // VRAM. Sin esto, el KV de las capas offloadeadas crece con el contexto y
+    // revienta la VRAM a mitad de una sesión agéntica (OOM en la 2ª ronda,
+    // observado con gpt-oss:20b en la RTX 3050 de 6GB). Ollama hace justo
+    // esto —VRAM plana ~4,7GB a cualquier num_ctx— por eso corre el mismo
+    // modelo en la misma máquina sin crashear. Kill-switch
+    // `BRAZE_LOCAL_KV_OFFLOAD=gpu` restaura el default de llama.cpp (KV en
+    // VRAM) para quien tenga VRAM de sobra y quiera el KV en GPU.
+    let gpu_layers = std::env::var("BRAZE_LOCAL_GPU_LAYERS")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+    if gpu_layers > 0 && std::env::var("BRAZE_LOCAL_KV_OFFLOAD").as_deref() != Ok("gpu") {
+        ctx_params = ctx_params.with_offload_kqv(false);
+        // Compute buffer chico. El buffer de prompt-processing lo dimensiona
+        // `n_ubatch` (el batch FÍSICO) × contexto, y vive en VRAM; con el
+        // default (n_ubatch=512) crece hasta reventar los 6GB cuando el
+        // contexto se llena (aborta a mitad de una sesión agéntica, aun con el
+        // KV ya en host). Ollama usa micro-batches chicos —por eso su VRAM
+        // queda plana a cualquier num_ctx— y lo replicamos. `n_batch` (el batch
+        // LÓGICO) queda en `n_ctx`: braze decodifica el prompt entero de una,
+        // así que debe cubrirlo (si no, `GGML_ASSERT(n_tokens_all <= n_batch)`).
+        // `BRAZE_LOCAL_UBATCH` ajusta el físico.
+        let ubatch = std::env::var("BRAZE_LOCAL_UBATCH")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .filter(|&u| u > 0)
+            .unwrap_or(128);
+        ctx_params = ctx_params
+            .with_n_ubatch(ubatch)
+            .with_n_batch(n_batch_max.max(ubatch));
+        tracing::info!(
+            gpu_layers,
+            ubatch,
+            "local: KV en host + micro-batch chico para mantener la VRAM plana"
+        );
+    }
     let mut ctx = match model.new_context(backend, ctx_params) {
         Ok(c) => c,
         Err(e) => bail!("local: no se pudo crear el contexto: {e}"),
