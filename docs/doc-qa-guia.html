@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asistente de documentación local — Guía para correrlo</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1f2328; --muted:#5b6470; --line:#e6e8eb;
+    --card:#f7f8fa; --accent:#2563eb; --code-bg:#0f172a; --code-fg:#e2e8f0;
+    --ok:#15803d; --warn:#b45309;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f1115; --fg:#e6e8eb; --muted:#9aa4b2; --line:#242a33;
+           --card:#161a20; --accent:#5b9bff; --code-bg:#0b0e13; --code-fg:#dbe4ee; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6}
+  .wrap{max-width:820px;margin:0 auto;padding:32px 20px 80px}
+  h1{font-size:1.9rem;line-height:1.2;margin:.2em 0 .1em}
+  h2{font-size:1.3rem;margin:2em 0 .5em;padding-top:.6em;border-top:1px solid var(--line)}
+  h3{font-size:1.05rem;margin:1.4em 0 .3em}
+  p,li{color:var(--fg)}
+  .sub{color:var(--muted);font-size:1.05rem;margin-top:0}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;
+       background:var(--card);padding:.1em .35em;border-radius:5px}
+  pre{background:var(--code-bg);color:var(--code-fg);padding:14px 16px;border-radius:10px;
+      overflow-x:auto;font-size:.86rem;line-height:1.5}
+  pre code{background:none;padding:0;color:inherit}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:16px 18px;margin:16px 0}
+  .step{display:flex;gap:14px;align-items:flex-start;margin:22px 0}
+  .num{flex:0 0 32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;
+       display:flex;align-items:center;justify-content:center;font-weight:700}
+  .step > div{flex:1;min-width:0}
+  .note{border-left:3px solid var(--accent);padding:.4em 0 .4em 14px;margin:14px 0;color:var(--muted)}
+  .ok{color:var(--ok);font-weight:600}
+  .warn{color:var(--warn);font-weight:600}
+  a{color:var(--accent)}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+  th{background:var(--card)}
+  .tag{display:inline-block;background:var(--card);border:1px solid var(--line);
+       border-radius:999px;padding:.1em .7em;font-size:.8rem;color:var(--muted);margin-right:6px}
+  footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Asistente de documentación local</h1>
+  <p class="sub">Un chatbot que responde preguntas sobre tu documentación, corriendo
+  100&nbsp;% en tu computador. Sin internet, sin cuentas, sin llaves de ningún servicio.</p>
+  <p>
+    <span class="tag">offline</span>
+    <span class="tag">liviano</span>
+    <span class="tag">sin GPU</span>
+    <span class="tag">i7 basta</span>
+  </p>
+
+  <div class="card">
+    <strong>Qué hace:</strong> le das una carpeta con tu documentación (o tu banco de
+    preguntas frecuentes), levanta una página de chat en tu navegador, y responde las
+    preguntas de los usuarios <em>usando solo tu documentación</em> — citando de dónde
+    sacó cada respuesta. Si algo no está en tus documentos, lo dice en vez de inventarlo.
+  </div>
+
+  <h2>Antes de empezar: por qué esto sí corre en tu máquina</h2>
+  <p>No necesitas "la media máquina" ni una GPU. Este asistente hace una tarea
+  <strong>simple de generación</strong>: busca el fragmento correcto de tu documentación y
+  lo re-redacta. El trabajo pesado lo hace la <em>búsqueda</em>, no el modelo — por eso un
+  modelo chico (qwen2.5:3b, ~2&nbsp;GB de RAM) alcanza y sobra. En un i7 reciente sin GPU
+  responde en unos pocos segundos.</p>
+
+  <h2>Lo que vas a instalar</h2>
+  <table>
+    <tr><th>Pieza</th><th>Para qué</th></tr>
+    <tr><td><strong>Ollama</strong></td><td>Corre el modelo de lenguaje localmente.</td></tr>
+    <tr><td><strong>qwen2.5:3b</strong></td><td>El modelo recomendado (chico, rápido, buen español).</td></tr>
+    <tr><td><strong>braze</strong> (el binario <code>braze</code>)</td><td>El asistente en sí: indexa tu documentación y sirve el chat.</td></tr>
+  </table>
+
+  <h2>Pasos</h2>
+
+  <div class="step"><div class="num">1</div><div>
+    <h3>Instala Ollama y baja el modelo</h3>
+    <p>Descarga Ollama de <a href="https://ollama.com">ollama.com</a> e instálalo. Luego, en
+    una terminal:</p>
+    <pre><code>ollama pull qwen2.5:3b</code></pre>
+    <p class="note">Esto baja el modelo una sola vez (~2&nbsp;GB). Queda en tu disco; después
+    todo funciona sin internet.</p>
+  </div></div>
+
+  <div class="step"><div class="num">2</div><div>
+    <h3>Consigue el binario <code>braze</code></h3>
+    <p>Si Francisco te pasa el binario ya compilado, sáltate esto y déjalo en una carpeta a mano.
+    Si prefieres compilarlo tú (necesitas <a href="https://rustup.rs">Rust</a>):</p>
+    <pre><code>cd braze
+cargo build --release -p braze-cli
+# el binario queda en: target/release/braze</code></pre>
+    <p class="note">Con Ollama no necesitas nada más. (Existe además un modo
+    <code>--backend local</code> que corre el modelo <em>dentro</em> de braze sin Ollama;
+    ese requiere compilar con <code>--features local</code>. Para empezar, Ollama es lo simple.)</p>
+  </div></div>
+
+  <div class="step"><div class="num">3</div><div>
+    <h3>Prepara tu documentación como carpeta de Markdown</h3>
+    <p>braze lee una carpeta con archivos <code>.md</code>. La clave para que responda bien:
+    <strong>cada pregunta o tema es un título</strong> (<code>##</code>), y la respuesta va debajo.</p>
+    <pre><code># Proceso de Admisión
+
+## ¿Hasta qué fecha puedo inscribirme a la PAES?
+
+La inscripción regular comienza el 10 de junio; la fecha exacta de
+cierre la publica el DEMRE en su calendario oficial cada año.
+
+## ¿Qué puntaje se necesita para postular?
+
+Se requiere 458 puntos promedio entre Comprensión Lectora y
+Matemáticas 1. Cada carrera fija además su puntaje ponderado mínimo.</code></pre>
+    <p>Si tu banco de preguntas está en un <strong>JSON</strong> (como el de admisión), este
+    script lo convierte a Markdown por categoría:</p>
+    <pre><code>python3 convertir.py preguntas.json ./mi-wiki</code></pre>
+    <details>
+      <summary>Ver <code>convertir.py</code></summary>
+      <pre><code>import json, sys, re, os, collections
+data = json.load(open(sys.argv[1])); wiki = sys.argv[2]
+os.makedirs(wiki, exist_ok=True)
+def slug(s):
+    s = re.sub(r'[^\w\s-]', '', s, flags=re.UNICODE).strip().lower()
+    return re.sub(r'\s+', '-', s)[:60] or "cat"
+# dedup: una entrada por pregunta, la respuesta más completa
+best = {}
+for e in data:
+    q = re.sub(r'\s+', ' ', (e.get("question") or "").strip())
+    a = (e.get("answer") or "").strip()
+    if q and a and (q.lower() not in best or len(a) > len(best[q.lower()][1])):
+        best[q.lower()] = (q, a, (e.get("category") or "General").strip())
+by_cat = collections.defaultdict(list)
+for q, a, cat in best.values():
+    by_cat[cat].append((q, a))
+for cat, qas in by_cat.items():
+    with open(os.path.join(wiki, slug(cat) + ".md"), "w") as f:
+        f.write(f"# {cat}\n\n")
+        for q, a in qas:
+            f.write(f"## {q}\n\n{a}\n\n")
+print("listo:", sum(len(v) for v in by_cat.values()), "preguntas")</code></pre>
+    </details>
+    <p class="note">Ese script además <strong>deduplica</strong>: si una pregunta aparece
+    repetida, se queda con la respuesta más completa. (Tu banco de admisión tenía 167
+    repetidas de 2331 — conviene limpiarlas.)</p>
+  </div></div>
+
+  <div class="step"><div class="num">4</div><div>
+    <h3>Levanta el asistente</h3>
+    <pre><code>./braze docs --serve --dir ./mi-wiki --backend ollama --model qwen2.5:3b</code></pre>
+    <p>Verás algo como <code>server en http://127.0.0.1:8080</code>. Abre esa dirección en tu
+    navegador y listo: <span class="ok">ya tienes tu chat de documentación</span>.</p>
+    <p class="note">La primera pregunta puede tardar un poco (Ollama carga el modelo); de ahí
+    en adelante queda caliente y responde rápido.</p>
+  </div></div>
+
+  <h2>Cómo se usa</h2>
+  <p>Escribe una pregunta como la haría un usuario ("¿qué becas hay?", "¿medicina tiene
+  especialidades?"), presiona Enter, y el asistente responde con la información de tu
+  documentación y muestra las <strong>fuentes</strong> abajo. Si no encuentra la respuesta,
+  dice <em>"No lo encuentro en la documentación"</em> en vez de inventar.</p>
+
+  <h2>Opciones útiles</h2>
+  <table>
+    <tr><th>Opción</th><th>Qué hace</th></tr>
+    <tr><td><code>--port 9000</code></td><td>Cambia el puerto (por defecto 8080).</td></tr>
+    <tr><td><code>--top-k 5</code></td><td>Cuántos fragmentos recupera por pregunta (por defecto 5).</td></tr>
+    <tr><td><code>--max-tokens 1024</code></td><td>Largo máximo de la respuesta.</td></tr>
+    <tr><td><code>--model gpt-oss:20b</code></td><td>Modelo más potente (necesita ~16&nbsp;GB de RAM; mejor calidad, más lento).</td></tr>
+  </table>
+  <p>Para responder <strong>una sola pregunta</strong> desde la terminal (sin abrir el navegador):</p>
+  <pre><code>./braze docs --dir ./mi-wiki --backend ollama --model qwen2.5:3b "¿qué becas hay?"</code></pre>
+
+  <h2>Para que responda mejor</h2>
+  <ul>
+    <li><strong>Títulos que suenen a la pregunta del usuario.</strong> El buscador matchea la
+      pregunta contra los títulos <code>##</code>. Mientras más se parezca el título a cómo
+      preguntan las personas, mejor recupera.</li>
+    <li><strong>Deduplica y evita respuestas contradictorias.</strong> Si dos secciones dicen
+      cosas distintas para la misma pregunta, el asistente puede mezclarlas. Una respuesta
+      clara por tema.</li>
+    <li><strong>Preguntas específicas &gt; vagas.</strong> "¿Cuánto cuesta la matrícula?"
+      funciona mejor que "cuéntame del sistema": una pregunta con una palabra distintiva le da
+      al buscador de dónde agarrarse.</li>
+  </ul>
+
+  <h2>Si algo no anda</h2>
+  <table>
+    <tr><th>Síntoma</th><th>Probable causa</th></tr>
+    <tr><td>Dice "No lo encuentro" para algo que sí está</td><td>El título de esa sección no se
+      parece a cómo preguntaste, o la respuesta está en otra carpeta. Revisa el título.</td></tr>
+    <tr><td>Responde lento</td><td>La primera pregunta carga el modelo. Si sigue lento, tu
+      máquina está con poca RAM libre — cierra otras cosas.</td></tr>
+    <tr><td><code>error: does not support tools</code> u otro de Ollama</td><td>Asegúrate de
+      haber hecho <code>ollama pull qwen2.5:3b</code> y que Ollama esté corriendo.</td></tr>
+    <tr><td>Respuestas raras o cortadas</td><td>Sube <code>--max-tokens</code> o prueba
+      <code>--model gpt-oss:20b</code> si tienes RAM.</td></tr>
+  </table>
+
+  <footer>
+    Asistente de documentación local — construido sobre <strong>braze</strong>
+    (motor agéntico en Rust). Todo corre en tu máquina: tu documentación no sale de tu
+    computador. Guía preparada para el caso del banco de preguntas de admisión USACH,
+    pero sirve para cualquier documentación en Markdown.
+  </footer>
+
+</div>
+</body>
+</html>
