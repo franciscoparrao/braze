@@ -93,15 +93,19 @@
   </div></div>
 
   <div class="step"><div class="num">2</div><div>
-    <h3>Consigue el binario <code>braze</code></h3>
-    <p>Si Francisco te pasa el binario ya compilado, sáltate esto y déjalo en una carpeta a mano.
-    Si prefieres compilarlo tú (necesitas <a href="https://rustup.rs">Rust</a>):</p>
+    <h3>Compila <code>braze</code> desde el código fuente</h3>
+    <p>No hay un binario para descargar, y es a propósito: se compila del código, y así
+    funciona igual en <strong>Windows, Mac o Linux</strong> (un binario compilado en otra
+    máquina no te serviría). Francisco te pasará el código —un repositorio Git o un
+    <code>.zip</code>—. Necesitas <a href="https://rustup.rs">Rust</a> instalado. Luego:</p>
     <pre><code>cd braze
-cargo build --release -p braze-cli
-# el binario queda en: target/release/braze</code></pre>
-    <p class="note">Con Ollama no necesitas nada más. (Existe además un modo
-    <code>--backend local</code> que corre el modelo <em>dentro</em> de braze sin Ollama;
-    ese requiere compilar con <code>--features local</code>. Para empezar, Ollama es lo simple.)</p>
+cargo build --release -p braze-cli</code></pre>
+    <p>El programa queda en <code>target/release/braze</code>
+    (en Windows: <code>target\release\braze.exe</code>).</p>
+    <p class="note">Con el backend Ollama no necesitas nada más: es Rust puro y compila sin
+    complicaciones en Windows. (Existe un modo <code>--backend local</code> que mete el modelo
+    <em>dentro</em> de braze sin Ollama, pero requiere compilar C++ y es engorroso en Windows;
+    para empezar, usa Ollama.)</p>
   </div></div>
 
   <div class="step"><div class="num">3</div><div>
