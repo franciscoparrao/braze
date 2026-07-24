@@ -14,8 +14,11 @@
 > de las capturas de Claudio ("pasos UJR aprobar/rechazar heredero")
 > sobre una mini-wiki SPE dio una respuesta sintetizada limpia de 5 pasos
 > + 5 fuentes citadas — el contraste directo con su "modo degradado".
-> Falta: probarlo con `--backend local` (offline total, sin Ollama) y la
-> UI "cara de GPT". Nace de un
+> **Offline total confirmado** (2026-07-23): la misma corrida con
+> `--backend local` (llama.cpp in-process, sin Ollama ni ningún
+> servicio) dio la misma respuesta limpia + fuentes — valida el
+> requisito literal de Claudio ("ninguna llave de servicio"). Falta solo
+> la UI "cara de GPT". Nace de un
 > caso de uso externo (Claudio Álvarez, conversación 2026-07-23): un
 > chatbot **liviano, 100% offline (sin ninguna llave de servicio),
 > sobre documentación**, para usuarios de soporte con hardware modesto y

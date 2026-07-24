@@ -318,7 +318,9 @@ mismo día. El arco LocalBackend de 2026-07-20/21 está en su § arriba.)
   prompt-mínimo→backend→respuesta citada, despachado como `run_docs` en
   main.rs). 26 tests verdes, clippy limpio, verificado en vivo offline
   (ollama qwen2.5:3b) con la pregunta real de Claudio → 5 pasos limpios +
-  fuentes. Falta: `--backend local` (offline total) y la UI.
+  fuentes. **`--backend local` (offline TOTAL, llama.cpp in-process sin
+  Ollama) también verificado en vivo** — misma respuesta limpia, valida
+  el requisito "ninguna llave de servicio" de Claudio. Falta solo la UI.
 - **P1.1 resto**: repartir el `mod tests` de `engine/mod.rs`.
 - **v8 restantes**: Paquete 4 L (Landlock write-only, subagente
   Viewer/Editor, background trans-ronda), P0.2 (costo USD/walltime por
