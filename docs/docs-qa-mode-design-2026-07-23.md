@@ -330,6 +330,23 @@ en el corpus"); es la interacción (corpus × retriever-sin-IDF × elección
 de fragmento del modelo). Refuerza que la calidad del doc-QA depende del
 sistema completo, no solo del modelo.
 
+### Bug del tokenizer (2026-07-23): la puntuación rompía el match
+
+Probando el server, "¿Cómo funciona search_tools?" —una pregunta *buena*,
+con término discriminante— devolvió "No lo encuentro" con fuentes
+irrelevantes. Causa: el tokenizer (heredado de `search_stubs`) partía por
+espacios sin limpiar puntuación, así que `search_tools?` (con el `?` de la
+pregunta pegado) **no matcheaba** `search_tools` en los docs → el término
+que anclaba se perdía y solo quedaba "funciona" (ruido). Toda pregunta
+natural trae `¿`/`?`/`.`, así que rompía el caso normal. Arreglo:
+`tokenize()` limpia la puntuación de los **bordes** conservando la interna
+(`search_tools`, `gpt-oss:20b`, `co-simulation` siguen siendo un término).
+Verificado en vivo: la misma pregunta con signos ahora recupera el doc
+correcto de #1 y el server responde bien. **Lección metodológica:** el
+smoke sintético no lo agarró porque se tipeó sin signos; el test *en vivo*
+sí — otra instancia de "compilar ≠ funcionar" del proyecto. Se agregó un
+unit test de regresión con la query puntuada.
+
 ## La interfaz "cara de GPT" — RESUELTA con `braze docs --serve`
 
 Claudio quiere "parecido a un GPT como interfaz". La `braze-tui` es

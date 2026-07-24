@@ -84,13 +84,26 @@ impl LexicalIndex {
     }
 }
 
+/// Parte una query en términos en minúsculas, **limpiando la puntuación
+/// de los bordes** (deja intacta la interna). Sin esto, una pregunta
+/// natural —que siempre trae `¿`/`?`/`.`— glue la puntuación al término
+/// (`search_tools?`) y el `contains` no matchea el término real en los
+/// docs. La interna se preserva a propósito: `search_tools`,
+/// `gpt-oss:20b`, `co-simulation` siguen siendo un solo término.
+fn tokenize(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .map(|t| {
+            t.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
 impl Retriever for LexicalIndex {
     fn top_k(&self, query: &str, k: usize) -> Vec<&DocChunk> {
-        let terms: Vec<String> = query
-            .split_whitespace()
-            .map(|t| t.to_lowercase())
-            .filter(|t| !t.is_empty())
-            .collect();
+        let terms: Vec<String> = tokenize(query);
         if terms.is_empty() {
             return Vec::new();
         }
@@ -193,6 +206,28 @@ mod tests {
     fn case_insensitive_matching() {
         let index = LexicalIndex::new(vec![chunk(0, "Herederos", "Aprobar o Rechazar")]);
         assert_eq!(index.top_k("HEREDEROS rechazar", 5).len(), 1);
+    }
+
+    /// Regresión en vivo (2026-07-23): una pregunta natural trae `¿`/`?`
+    /// pegados a los términos; sin limpiar la puntuación de los bordes,
+    /// "search_tools?" no matchea "search_tools" y el término
+    /// discriminante se pierde. La interna (`_`, `:`) se conserva.
+    #[test]
+    fn punctuation_does_not_break_natural_questions() {
+        let index = LexicalIndex::new(vec![
+            chunk(0, "search_tools", "el meta-tool de búsqueda diferida"),
+            chunk(1, "otro tema", "nada que ver aquí"),
+        ]);
+        let hits = index.top_k("¿Cómo funciona search_tools?", 5);
+        assert!(!hits.is_empty(), "la puntuación no debe romper el match");
+        assert_eq!(hits[0].id, 0);
+    }
+
+    #[test]
+    fn tokenize_trims_edges_keeps_internal() {
+        assert_eq!(tokenize("¿Cómo funciona search_tools?"), ["cómo", "funciona", "search_tools"]);
+        assert_eq!(tokenize("gpt-oss:20b."), ["gpt-oss:20b"]);
+        assert_eq!(tokenize("  «hola»  "), ["hola"]);
     }
 
     /// El arreglo de fondo: cuando un término es ubicuo ("braze" en todos
