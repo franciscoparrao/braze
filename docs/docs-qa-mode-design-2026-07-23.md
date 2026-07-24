@@ -294,6 +294,42 @@ Embeddings quedan como **upgrade opcional detrás del mismo trait
 `Retriever`**, no en el MVP. El trait existe precisamente para que ese
 cambio no toque el chunker, el prompt ni el loop.
 
+### IDF (2026-07-23): el port de `search_stubs` necesitaba peso por rareza
+
+Probando el server en vivo, "¿qué es Braze?" sobre los `docs/` del
+propio proyecto dio una respuesta mala (confundió Braze con solo el
+`SessionStore`). El diagnóstico destapó **tres capas** de causa, y vale
+como taxonomía limpia de modos de falla del RAG léxico:
+
+1. **Scope del corpus** — el overview canónico ("qué es braze") vive en
+   `CLAUDE.md`/`PLAN.md`/`wiki/index.md`, **fuera de `docs/`**. Contribuye
+   pero *no es la causa dominante*: meter esos archivos al corpus **no
+   cambió** el top del ranking (refutado empíricamente).
+2. **Retriever sin IDF** — el port original de `search_stubs` no pesaba
+   por rareza. "braze" aparece en **69/77** docs: sin IDF suma +3 a
+   cualquier heading tangencial y *distorsiona* en vez de discriminar. Se
+   agregó **IDF (BM25 suavizado)** al `LexicalIndex`, default on,
+   kill-switch `BRAZE_DOCS_IDF=off` (brazo de ablación). Medición
+   before/after sobre el corpus real: **neutro en queries con término
+   discriminante** ("localbackend", "search_tools" — mismo top, sin
+   regresión) y **mejora en queries que mezclan término ubicuo + raro**
+   (un unit test lo fija: sin IDF el chunk relevante queda último, con
+   IDF va primero). Pero para "qué es braze" el IDF re-rankeó #2–#5 sin
+   arreglarlo del todo: **es el peor caso del léxico** — la query no tiene
+   *ningún* término discriminante ("qué"/"es" son ruido, "braze" es
+   ubicuo), así que no hay señal que rankear. Ahí el arreglo de fondo es
+   embeddings (match semántico) o curación del corpus (una página titulada
+   exactamente "Qué es el sistema", sin headings que compitan).
+3. **Síntesis del modelo** — el hit #1 ("Braze es un loop agéntico de
+   tool-calling estilo Claude Code…") *era* una definición decente en
+   ambos modos; gpt-oss igual eligió sintetizar desde un fragmento peor
+   (SessionStore). Parte de la falla es del modelo, no del retrieval.
+
+Lectura para el paper: el modo de falla **no es el intuitivo** ("no está
+en el corpus"); es la interacción (corpus × retriever-sin-IDF × elección
+de fragmento del modelo). Refuerza que la calidad del doc-QA depende del
+sistema completo, no solo del modelo.
+
 ## La interfaz "cara de GPT" — RESUELTA con `braze docs --serve`
 
 Claudio quiere "parecido a un GPT como interfaz". La `braze-tui` es

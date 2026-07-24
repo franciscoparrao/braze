@@ -890,11 +890,14 @@ async fn run_docs(command: &Command, config: &braze_config::Config) -> Result<()
             dir.display()
         )));
     }
-    let index = braze_docs::LexicalIndex::new(chunks);
+    // Kill-switch `BRAZE_DOCS_IDF=off` = brazo de ablación (scoring plano).
+    let use_idf = std::env::var("BRAZE_DOCS_IDF").as_deref() != Ok("off");
+    let index = braze_docs::LexicalIndex::with_idf(chunks, use_idf);
     eprintln!(
-        "[doc-QA] {} fragmentos indexados de {}",
+        "[doc-QA] {} fragmentos indexados de {} (idf={})",
         index.len(),
-        dir.display()
+        dir.display(),
+        if use_idf { "on" } else { "off" }
     );
 
     // Construir el backend una sola vez (con `--backend local` = offline total).

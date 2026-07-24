@@ -32,7 +32,10 @@ fn main() {
         return;
     }
 
-    let index = LexicalIndex::new(chunks);
+    // `BRAZE_DOCS_IDF=off` compara el brazo de ablación (scoring plano).
+    let use_idf = std::env::var("BRAZE_DOCS_IDF").as_deref() != Ok("off");
+    println!("(idf={})", if use_idf { "on" } else { "off" });
+    let index = LexicalIndex::with_idf(chunks, use_idf);
     let hits = index.top_k(&query, 5);
     println!("\ntop {} para «{query}»:\n", hits.len());
     for (rank, chunk) in hits.iter().enumerate() {
