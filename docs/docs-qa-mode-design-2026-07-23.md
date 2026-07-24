@@ -17,8 +17,16 @@
 > **Offline total confirmado** (2026-07-23): la misma corrida con
 > `--backend local` (llama.cpp in-process, sin Ollama ni ningún
 > servicio) dio la misma respuesta limpia + fuentes — valida el
-> requisito literal de Claudio ("ninguna llave de servicio"). Falta solo
-> la UI "cara de GPT". Nace de un
+> requisito literal de Claudio ("ninguna llave de servicio"). **UI
+> EJECUTADA** (2026-07-23): `braze docs --serve [--port N]` — server HTTP
+> mínimo hecho a mano (sin framework web, sobre `tokio::net`, `+net` en
+> tokio) que carga índice+modelo UNA vez (quedan calientes) y sirve una
+> página de chat autocontenida. `GET /` → la página; `POST /ask
+> {question}` → `{answer, sources}`; acceso al modelo serializado con un
+> Mutex. Verificado en vivo offline (`--backend local`, qwen2.5:3b): GET
+> / sirve el HTML, POST /ask devuelve la respuesta de 5 pasos + 5
+> fuentes. El MVP de la línea está completo; el resto es propuesta. Nace
+> de un
 > caso de uso externo (Claudio Álvarez, conversación 2026-07-23): un
 > chatbot **liviano, 100% offline (sin ninguna llave de servicio),
 > sobre documentación**, para usuarios de soporte con hardware modesto y
@@ -286,21 +294,52 @@ Embeddings quedan como **upgrade opcional detrás del mismo trait
 `Retriever`**, no en el MVP. El trait existe precisamente para que ese
 cambio no toque el chunker, el prompt ni el loop.
 
-## El gap honesto: la interfaz "cara de GPT"
+## La interfaz "cara de GPT" — RESUELTA con `braze docs --serve`
 
 Claudio quiere "parecido a un GPT como interfaz". La `braze-tui` es
 **terminal** — para un usuario de soporte no técnico eso no es "cara de
-GPT". Es la única pieza que braze **no** regala barata. Caminos, de menos
-a más trabajo:
+GPT". Era la única pieza que braze no regalaba barata.
 
-- **`braze run --output-format json` como backend** detrás de una web UI
-  mínima (un `<textarea>` + `fetch` a un servidorcito local). Es lo más
-  rápido para un prototipo demostrable; la UI es HTML plano.
-- **Un modo servidor chico en braze** (HTTP local que sirve el loop
-  doc-QA). Más trabajo, más producto.
+**Insight que fijó el diseño:** una UI de chat necesita que el **modelo
+quede caliente**. La CLI one-shot carga el modelo por pregunta (los
+~minutos de CPU que medimos) — inaceptable para uso interactivo. Así que
+la UI no es "un HTML", es un **server chico** que carga índice+modelo una
+vez y atiende muchas preguntas. Eso descartó la opción "HTML estático +
+CLI por pregunta" (recargaría el modelo cada vez).
 
-Se marca explícito para no prometerle a Claudio como listo algo que hoy
-es terminal-only.
+**Lo construido** (`braze docs --serve`, `run_docs`/`serve_docs` en
+`main.rs`):
+
+- Server HTTP/1.1 **mínimo hecho a mano** — sin framework web, sobre
+  `tokio::net::TcpListener` (solo `+net` en las features de tokio). En el
+  espíritu del proyecto (el engine agéntico también es from-scratch); un
+  parser de request de ~un puñado de líneas, `Connection: close`, una
+  request por conexión.
+- Carga el `LexicalIndex` y el backend **una vez** en `DocsServerState`;
+  el acceso al modelo se **serializa con un `Mutex`** (el contexto
+  llama.cpp no es seguro para decodes concurrentes; para un usuario en
+  localhost, atender de a una es lo correcto).
+- `GET /` sirve una **página de chat autocontenida** (HTML+CSS+JS inline,
+  sin recursos externos): burbujas usuario/bot, caja de texto, indicador
+  "Pensando…", y las **fuentes citadas** debajo de cada respuesta
+  (rendered con nodos DOM/`textContent`, no `innerHTML`, para no inyectar
+  desde un heading). `POST /ask {question}` → `{answer, sources}`.
+- Empaquetado para Claudio: un solo binario + `--dir <wiki>`; el usuario
+  abre `http://localhost:8080`. Offline total con `--backend local`.
+
+**Verificado en vivo** (offline, `--backend local`, qwen2.5:3b): GET /
+sirve el HTML (HTTP 200), POST /ask con la pregunta real del caso →
+respuesta de 5 pasos + 5 fuentes. Observación de mecanismo: una query
+telegráfica ("cómo rechazo un heredero") produjo una respuesta
+degenerada (solo la cita `[1]`) — es la fragilidad de modelo chico ante
+prompts pobres, sensible a la query, no un bug del server. Refuerza que
+la calidad depende del par (modelo, redacción de la pregunta), lo que
+conecta con la pregunta de hardware/modelo pendiente para Claudio.
+
+Sigue como propuesta (no construido): multi-turno con historial (hoy cada
+`/ask` es independiente), el escalón RAG agéntico (`DocsProvider`), y
+streaming token-a-token a la página (hoy el server colecta y responde
+completo).
 
 ## Ruta de menor esfuerzo hasta un prototipo demostrable
 

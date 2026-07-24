@@ -858,20 +858,20 @@ Si la respuesta no está en los fragmentos, di exactamente: \"No lo encuentro en
 Cita la fuente con el número del fragmento entre corchetes, por ejemplo [1]. \
 Sé breve y directo.";
 
+/// Una fuente citada: `(source, heading)` del `DocChunk` recuperado.
+type DocSource = (String, String);
+
 /// Doc-QA (`docs/docs-qa-mode-design-2026-07-23.md`): pipeline
-/// retrieve-then-answer. Indexa la wiki con `braze-docs`, recupera los
-/// fragmentos más relevantes por solape léxico, los inyecta en un prompt
-/// mínimo, y hace UNA generación del backend (sin tools, sin loop
-/// agéntico). El modelo nunca ve la wiki entera ni decide nada — es lo
-/// que mata el "modo degradado" que el design doc identifica.
+/// retrieve-then-answer. Indexa la wiki con `braze-docs`, construye el
+/// backend UNA vez, y luego responde — o una sola pregunta (one-shot), o
+/// muchas vía el server `--serve`. El modelo nunca ve la wiki entera ni
+/// decide nada; es lo que mata el "modo degradado" que el design doc
+/// identifica.
 async fn run_docs(command: &Command, config: &braze_config::Config) -> Result<(), CliError> {
-    use std::io::Write as _;
-
-    use braze_docs::Retriever as _;
-    use futures::StreamExt as _;
-
     let Command::Docs {
         question,
+        serve,
+        port,
         dir,
         top_k,
         max_tokens,
@@ -881,7 +881,7 @@ async fn run_docs(command: &Command, config: &braze_config::Config) -> Result<()
         unreachable!("run_docs solo se invoca con Command::Docs");
     };
 
-    // 1. Indexar la wiki.
+    // Indexar la wiki (compartido por ambos modos).
     let chunks = braze_docs::chunk_wiki(dir)
         .map_err(|e| CliError::Startup(format!("indexando la documentación: {e}")))?;
     if chunks.is_empty() {
@@ -897,16 +897,56 @@ async fn run_docs(command: &Command, config: &braze_config::Config) -> Result<()
         dir.display()
     );
 
-    // 2. Recuperar los fragmentos relevantes.
-    let hits = index.top_k(question, *top_k);
-    if hits.is_empty() {
-        // Grounding sin gastar una llamada al modelo: si el retrieval no
-        // trae nada, la respuesta honesta ya está decidida.
-        println!("No lo encuentro en la documentación.");
-        return Ok(());
+    // Construir el backend una sola vez (con `--backend local` = offline total).
+    let backend = build_model_backend(config, &config.default_backend, None)?;
+
+    if *serve {
+        return serve_docs(backend, index, *port, *top_k, *max_tokens).await;
     }
 
-    // 3. Armar el prompt mínimo con los fragmentos citables.
+    // One-shot: requiere la pregunta posicional.
+    let question = question.as_deref().ok_or_else(|| {
+        CliError::Startup(
+            "se requiere una <pregunta> (o usa --serve para el modo interactivo)".to_string(),
+        )
+    })?;
+    let (answer, sources) =
+        answer_from_docs(backend.as_ref(), &index, question, *top_k, *max_tokens).await?;
+    println!("{answer}");
+    if !sources.is_empty() {
+        println!("\nFuentes:");
+        for (i, (source, heading)) in sources.iter().enumerate() {
+            let suffix = if heading.is_empty() {
+                String::new()
+            } else {
+                format!(" — {heading}")
+            };
+            println!("  [{}] {}{}", i + 1, source, suffix);
+        }
+    }
+    Ok(())
+}
+
+/// Recupera los fragmentos relevantes, arma el prompt mínimo, genera una
+/// respuesta y devuelve `(respuesta, fuentes citadas)`. Compartido por el
+/// one-shot y el server para que la lógica de grounding sea idéntica en
+/// ambos. Si el retrieval no trae nada, corta con la respuesta honesta
+/// sin gastar una llamada al modelo.
+async fn answer_from_docs(
+    backend: &dyn braze_model::ModelBackend,
+    index: &braze_docs::LexicalIndex,
+    question: &str,
+    top_k: usize,
+    max_tokens: u32,
+) -> Result<(String, Vec<DocSource>), CliError> {
+    use braze_docs::Retriever as _;
+    use futures::StreamExt as _;
+
+    let hits = index.top_k(question, top_k);
+    if hits.is_empty() {
+        return Ok(("No lo encuentro en la documentación.".to_string(), Vec::new()));
+    }
+
     let mut context = String::from("Fragmentos de documentación:\n\n");
     for (i, chunk) in hits.iter().enumerate() {
         let heading = if chunk.heading.is_empty() {
@@ -928,44 +968,319 @@ async fn run_docs(command: &Command, config: &braze_config::Config) -> Result<()
         messages: vec![braze_types::Message::text(braze_types::Role::User, context)],
         tool_stubs: Vec::new(),
         system_prompt: DOCS_SYSTEM_PROMPT.to_string(),
-        max_tokens: *max_tokens,
+        max_tokens,
     };
 
-    // 4. Una sola generación del backend (offline con `--backend local`).
-    let backend = build_model_backend(config, &config.default_backend, None)?;
     let mut stream = backend
         .complete(req)
         .await
         .map_err(|e| CliError::Startup(format!("backend '{}': {e}", backend.name())))?;
-
-    let mut stdout = std::io::stdout();
+    let mut answer = String::new();
     while let Some(event) = stream.next().await {
         match event.map_err(|e| CliError::Startup(format!("stream del modelo: {e}")))? {
-            braze_model::CompletionEvent::TextDelta(delta) => {
-                print!("{delta}");
-                let _ = stdout.flush();
-            }
+            braze_model::CompletionEvent::TextDelta(delta) => answer.push_str(&delta),
             braze_model::CompletionEvent::Done => break,
-            // Sin tools en el request → no esperamos ToolCallRequested; Usage
-            // se ignora (este modo no reporta costos).
             _ => {}
         }
     }
-    println!();
 
-    // 5. Listar las fuentes consultadas (la procedencia que el chunker ancló).
-    println!("\nFuentes:");
-    for (i, chunk) in hits.iter().enumerate() {
-        let heading = if chunk.heading.is_empty() {
-            String::new()
-        } else {
-            format!(" — {}", chunk.heading)
+    let sources = hits
+        .iter()
+        .map(|c| (c.source.clone(), c.heading.clone()))
+        .collect();
+    Ok((answer, sources))
+}
+
+/// Estado compartido del server doc-QA. `model_lock` serializa el acceso
+/// al backend: la inferencia in-process (LocalBackend) usa un contexto
+/// llama.cpp que no es seguro para decodes concurrentes — para un tool
+/// de un usuario en localhost, atender las preguntas de a una es lo
+/// correcto y lo simple.
+struct DocsServerState {
+    backend: Box<dyn braze_model::ModelBackend>,
+    index: braze_docs::LexicalIndex,
+    top_k: usize,
+    max_tokens: u32,
+    model_lock: tokio::sync::Mutex<()>,
+}
+
+/// `braze docs --serve`: la "cara de GPT" offline. Un server HTTP mínimo
+/// hecho a mano (sin framework web) que carga índice+modelo una vez y
+/// atiende una página de chat autocontenida. `GET /` sirve la página;
+/// `POST /ask {question}` devuelve `{answer, sources}`.
+async fn serve_docs(
+    backend: Box<dyn braze_model::ModelBackend>,
+    index: braze_docs::LexicalIndex,
+    port: u16,
+    top_k: usize,
+    max_tokens: u32,
+) -> Result<(), CliError> {
+    use std::sync::Arc;
+
+    use tokio::net::TcpListener;
+
+    let state = Arc::new(DocsServerState {
+        backend,
+        index,
+        top_k,
+        max_tokens,
+        model_lock: tokio::sync::Mutex::new(()),
+    });
+
+    let addr = format!("127.0.0.1:{port}");
+    let listener = TcpListener::bind(&addr)
+        .await
+        .map_err(|e| CliError::Startup(format!("no se pudo abrir {addr}: {e}")))?;
+    eprintln!("[doc-QA] server en http://{addr}  (Ctrl-C para salir)");
+
+    loop {
+        let (mut socket, _peer) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(e) => {
+                tracing::warn!(error = %e, "accept falló");
+                continue;
+            }
         };
-        println!("  [{}] {}{}", i + 1, chunk.source, heading);
+        let state = Arc::clone(&state);
+        tokio::spawn(async move {
+            if let Err(e) = handle_docs_connection(&mut socket, &state).await {
+                tracing::warn!(error = %e, "conexión doc-QA falló");
+            }
+        });
+    }
+}
+
+/// Parser HTTP/1.1 mínimo: lee headers hasta `\r\n\r\n`, saca método,
+/// ruta y `Content-Length`, lee el body, rutea, y responde con
+/// `Connection: close` (sin keep-alive, una request por conexión).
+async fn handle_docs_connection(
+    socket: &mut tokio::net::TcpStream,
+    state: &DocsServerState,
+) -> std::io::Result<()> {
+    use tokio::io::AsyncReadExt as _;
+
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 4096];
+    let header_end = loop {
+        let n = socket.read(&mut tmp).await?;
+        if n == 0 {
+            return Ok(()); // el cliente cerró antes de mandar la request
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if let Some(pos) = find_subslice(&buf, b"\r\n\r\n") {
+            break pos + 4;
+        }
+        if buf.len() > 64 * 1024 {
+            return write_http(socket, 431, "text/plain; charset=utf-8", b"headers too large").await;
+        }
+    };
+
+    let header_text = String::from_utf8_lossy(&buf[..header_end]).into_owned();
+    let mut lines = header_text.lines();
+    let request_line = lines.next().unwrap_or_default();
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let path = parts.next().unwrap_or_default();
+
+    let mut content_length = 0usize;
+    for line in lines {
+        if let Some((key, value)) = line.split_once(':')
+            && key.trim().eq_ignore_ascii_case("content-length")
+        {
+            content_length = value.trim().parse().unwrap_or(0);
+        }
     }
 
-    Ok(())
+    let mut body = buf[header_end..].to_vec();
+    while body.len() < content_length {
+        let n = socket.read(&mut tmp).await?;
+        if n == 0 {
+            break;
+        }
+        body.extend_from_slice(&tmp[..n]);
+    }
+    body.truncate(content_length);
+
+    match (method, path) {
+        ("GET", "/") => {
+            write_http(socket, 200, "text/html; charset=utf-8", DOCS_HTML.as_bytes()).await
+        }
+        ("POST", "/ask") => {
+            let question = serde_json::from_slice::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| {
+                    v.get("question")
+                        .and_then(|q| q.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_default();
+            if question.trim().is_empty() {
+                let err = serde_json::json!({ "error": "pregunta vacía" });
+                return write_http(socket, 400, "application/json", err.to_string().as_bytes())
+                    .await;
+            }
+
+            // Serializar el acceso al modelo (un decode a la vez).
+            let payload = {
+                let _guard = state.model_lock.lock().await;
+                match answer_from_docs(
+                    state.backend.as_ref(),
+                    &state.index,
+                    &question,
+                    state.top_k,
+                    state.max_tokens,
+                )
+                .await
+                {
+                    Ok((answer, sources)) => {
+                        let srcs: Vec<_> = sources
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (source, heading))| {
+                                serde_json::json!({ "n": i + 1, "source": source, "heading": heading })
+                            })
+                            .collect();
+                        serde_json::json!({ "answer": answer, "sources": srcs })
+                    }
+                    Err(e) => serde_json::json!({ "error": e.to_string() }),
+                }
+            };
+            write_http(socket, 200, "application/json", payload.to_string().as_bytes()).await
+        }
+        _ => write_http(socket, 404, "text/plain; charset=utf-8", b"not found").await,
+    }
 }
+
+/// Escribe una respuesta HTTP/1.1 completa y cierra (`Connection: close`).
+async fn write_http(
+    socket: &mut tokio::net::TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let reason = match status {
+        200 => "OK",
+        400 => "Bad Request",
+        404 => "Not Found",
+        431 => "Request Header Fields Too Large",
+        _ => "OK",
+    };
+    let head = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    socket.write_all(head.as_bytes()).await?;
+    socket.write_all(body).await?;
+    socket.flush().await
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// Página de chat autocontenida (HTML+CSS+JS inline, sin recursos
+/// externos). Estilo "cara de GPT" liviano: lista de mensajes, caja de
+/// texto, y las fuentes citadas debajo de cada respuesta.
+const DOCS_HTML: &str = r#"<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asistente de documentación</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#1f2328; --muted:#6b7280; --user:#2563eb; --bot:#ffffff; --line:#e5e7eb; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background:var(--bg); color:var(--fg); height:100vh; display:flex; flex-direction:column; }
+  header { padding:14px 18px; border-bottom:1px solid var(--line); background:#fff; font-weight:600; }
+  header small { color:var(--muted); font-weight:400; margin-left:8px; }
+  #chat { flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:14px; }
+  .msg { max-width:720px; padding:11px 14px; border-radius:12px; line-height:1.5; white-space:pre-wrap; }
+  .user { align-self:flex-end; background:var(--user); color:#fff; border-bottom-right-radius:3px; }
+  .bot  { align-self:flex-start; background:var(--bot); border:1px solid var(--line); border-bottom-left-radius:3px; }
+  .bot .sources { margin-top:9px; padding-top:8px; border-top:1px solid var(--line);
+                  font-size:12px; color:var(--muted); }
+  .bot .sources b { color:var(--fg); font-weight:600; }
+  .thinking { color:var(--muted); font-style:italic; }
+  form { display:flex; gap:8px; padding:14px 18px; border-top:1px solid var(--line); background:#fff; }
+  #q { flex:1; padding:11px 13px; border:1px solid var(--line); border-radius:10px; font-size:15px; }
+  button { padding:0 18px; border:0; border-radius:10px; background:var(--user); color:#fff;
+           font-size:15px; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+</style>
+</head>
+<body>
+<header>Asistente de documentación <small>respuestas desde la wiki, offline</small></header>
+<div id="chat"></div>
+<form id="f">
+  <input id="q" autocomplete="off" placeholder="Escribe tu pregunta…" autofocus>
+  <button id="send" type="submit">Enviar</button>
+</form>
+<script>
+  const chat = document.getElementById('chat');
+  const form = document.getElementById('f');
+  const input = document.getElementById('q');
+  const send = document.getElementById('send');
+
+  function bubble(cls, text) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + cls;
+    d.textContent = text;
+    chat.appendChild(d);
+    chat.scrollTop = chat.scrollHeight;
+    return d;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+    bubble('user', question);
+    input.value = '';
+    send.disabled = true;
+    const pending = bubble('bot thinking', 'Pensando…');
+    try {
+      const r = await fetch('/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question })
+      });
+      const data = await r.json();
+      pending.classList.remove('thinking');
+      if (data.error) {
+        pending.textContent = 'Error: ' + data.error;
+      } else {
+        pending.textContent = data.answer || '(sin respuesta)';
+        if (data.sources && data.sources.length) {
+          const s = document.createElement('div');
+          s.className = 'sources';
+          const title = document.createElement('b');
+          title.textContent = 'Fuentes';
+          s.appendChild(title);
+          data.sources.forEach(x => {
+            s.appendChild(document.createElement('br'));
+            s.appendChild(document.createTextNode(
+              '[' + x.n + '] ' + x.source + (x.heading ? ' — ' + x.heading : '')
+            ));
+          });
+          pending.appendChild(s);
+        }
+      }
+    } catch (err) {
+      pending.classList.remove('thinking');
+      pending.textContent = 'Error de red: ' + err;
+    } finally {
+      send.disabled = false;
+      input.focus();
+    }
+  });
+</script>
+</body>
+</html>"#;
 
 async fn run() -> Result<(), CliError> {
     let cli = Cli::parse();

@@ -30,7 +30,7 @@ futures = { workspace = true }
 # "io-std" on top of the workspace-wide tokio features: needed for
 # `tokio::io::stdin()` (the interactive `chat` loop and the terminal y/n
 # confirmation prompt both read real process stdin).
-tokio = { workspace = true, features = ["io-std"] }
+tokio = { workspace = true, features = ["io-std", "net"] }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

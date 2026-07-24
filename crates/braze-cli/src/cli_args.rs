@@ -149,8 +149,18 @@ pub enum Command {
     /// docs/docs-qa-mode-design-2026-07-23.md). Pensado para el backend
     /// `local` (sin ninguna llave de servicio); funciona con cualquiera.
     Docs {
-        /// La pregunta a responder desde la documentación.
-        question: String,
+        /// La pregunta a responder desde la documentación. Opcional con
+        /// `--serve` (el server la recibe por HTTP); requerida sin él.
+        question: Option<String>,
+        /// Levanta un server HTTP local con una interfaz de chat en vez de
+        /// responder una sola pregunta y salir. Carga el índice y el
+        /// modelo UNA vez (quedan calientes) y atiende muchas preguntas —
+        /// la "cara de GPT" offline. Ver docs/docs-qa-mode-design-2026-07-23.md.
+        #[arg(long)]
+        serve: bool,
+        /// Puerto del server `--serve`.
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
         /// Directorio raíz de la wiki markdown (se indexa recursivamente).
         #[arg(long)]
         dir: PathBuf,

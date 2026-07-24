@@ -320,7 +320,14 @@ mismo día. El arco LocalBackend de 2026-07-20/21 está en su § arriba.)
   (ollama qwen2.5:3b) con la pregunta real de Claudio → 5 pasos limpios +
   fuentes. **`--backend local` (offline TOTAL, llama.cpp in-process sin
   Ollama) también verificado en vivo** — misma respuesta limpia, valida
-  el requisito "ninguna llave de servicio" de Claudio. Falta solo la UI.
+  el requisito "ninguna llave de servicio" de Claudio. **UI construida
+  (paso 4): `braze docs --serve` — server HTTP mínimo hecho a mano (sin
+  framework, sobre tokio::net) que carga índice+modelo una vez (calientes)
+  y sirve una página de chat autocontenida; GET / + POST /ask, modelo
+  serializado con Mutex. Verificado en vivo offline (GET / HTML, POST
+  /ask → 5 pasos + fuentes).** MVP de la línea doc-QA COMPLETO. Pendiente
+  (propuesta): multi-turno, streaming a la página, RAG agéntico, y la
+  pregunta de hardware a Claudio (decide el modelo).
 - **P1.1 resto**: repartir el `mod tests` de `engine/mod.rs`.
 - **v8 restantes**: Paquete 4 L (Landlock write-only, subagente
   Viewer/Editor, background trans-ronda), P0.2 (costo USD/walltime por
