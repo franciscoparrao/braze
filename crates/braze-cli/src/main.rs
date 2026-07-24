@@ -847,6 +847,126 @@ async fn run_permissions(
     Ok(())
 }
 
+/// System prompt del modo doc-QA. Minimalista a propósito (doctrina
+/// contexto-chico, `docs/docs-qa-mode-design-2026-07-23.md`): una sola
+/// regla dura —el grounding anti-alucinación— más la instrucción de
+/// citar la fuente. Cada regla extra le resta razonamiento a un modelo
+/// chico; el objetivo es síntesis limpia Y citada, no vistosidad.
+const DOCS_SYSTEM_PROMPT: &str = "Eres un asistente que responde preguntas sobre la documentación de un sistema. \
+Responde SOLO con la información de los fragmentos entregados abajo. \
+Si la respuesta no está en los fragmentos, di exactamente: \"No lo encuentro en la documentación.\" \
+Cita la fuente con el número del fragmento entre corchetes, por ejemplo [1]. \
+Sé breve y directo.";
+
+/// Doc-QA (`docs/docs-qa-mode-design-2026-07-23.md`): pipeline
+/// retrieve-then-answer. Indexa la wiki con `braze-docs`, recupera los
+/// fragmentos más relevantes por solape léxico, los inyecta en un prompt
+/// mínimo, y hace UNA generación del backend (sin tools, sin loop
+/// agéntico). El modelo nunca ve la wiki entera ni decide nada — es lo
+/// que mata el "modo degradado" que el design doc identifica.
+async fn run_docs(command: &Command, config: &braze_config::Config) -> Result<(), CliError> {
+    use std::io::Write as _;
+
+    use braze_docs::Retriever as _;
+    use futures::StreamExt as _;
+
+    let Command::Docs {
+        question,
+        dir,
+        top_k,
+        max_tokens,
+        ..
+    } = command
+    else {
+        unreachable!("run_docs solo se invoca con Command::Docs");
+    };
+
+    // 1. Indexar la wiki.
+    let chunks = braze_docs::chunk_wiki(dir)
+        .map_err(|e| CliError::Startup(format!("indexando la documentación: {e}")))?;
+    if chunks.is_empty() {
+        return Err(CliError::Startup(format!(
+            "no se encontró documentación markdown (.md) en {}",
+            dir.display()
+        )));
+    }
+    let index = braze_docs::LexicalIndex::new(chunks);
+    eprintln!(
+        "[doc-QA] {} fragmentos indexados de {}",
+        index.len(),
+        dir.display()
+    );
+
+    // 2. Recuperar los fragmentos relevantes.
+    let hits = index.top_k(question, *top_k);
+    if hits.is_empty() {
+        // Grounding sin gastar una llamada al modelo: si el retrieval no
+        // trae nada, la respuesta honesta ya está decidida.
+        println!("No lo encuentro en la documentación.");
+        return Ok(());
+    }
+
+    // 3. Armar el prompt mínimo con los fragmentos citables.
+    let mut context = String::from("Fragmentos de documentación:\n\n");
+    for (i, chunk) in hits.iter().enumerate() {
+        let heading = if chunk.heading.is_empty() {
+            "(sin encabezado)"
+        } else {
+            &chunk.heading
+        };
+        context.push_str(&format!(
+            "[{}] ({} — {})\n{}\n\n",
+            i + 1,
+            chunk.source,
+            heading,
+            chunk.text
+        ));
+    }
+    context.push_str(&format!("Pregunta: {question}"));
+
+    let req = braze_model::CompletionRequest {
+        messages: vec![braze_types::Message::text(braze_types::Role::User, context)],
+        tool_stubs: Vec::new(),
+        system_prompt: DOCS_SYSTEM_PROMPT.to_string(),
+        max_tokens: *max_tokens,
+    };
+
+    // 4. Una sola generación del backend (offline con `--backend local`).
+    let backend = build_model_backend(config, &config.default_backend, None)?;
+    let mut stream = backend
+        .complete(req)
+        .await
+        .map_err(|e| CliError::Startup(format!("backend '{}': {e}", backend.name())))?;
+
+    let mut stdout = std::io::stdout();
+    while let Some(event) = stream.next().await {
+        match event.map_err(|e| CliError::Startup(format!("stream del modelo: {e}")))? {
+            braze_model::CompletionEvent::TextDelta(delta) => {
+                print!("{delta}");
+                let _ = stdout.flush();
+            }
+            braze_model::CompletionEvent::Done => break,
+            // Sin tools en el request → no esperamos ToolCallRequested; Usage
+            // se ignora (este modo no reporta costos).
+            _ => {}
+        }
+    }
+    println!();
+
+    // 5. Listar las fuentes consultadas (la procedencia que el chunker ancló).
+    println!("\nFuentes:");
+    for (i, chunk) in hits.iter().enumerate() {
+        let heading = if chunk.heading.is_empty() {
+            String::new()
+        } else {
+            format!(" — {}", chunk.heading)
+        };
+        println!("  [{}] {}{}", i + 1, chunk.source, heading);
+    }
+
+    Ok(())
+}
+
 async fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
 
@@ -872,6 +992,11 @@ async fn run() -> Result<(), CliError> {
             .parse::<SessionId>()
             .map_err(|err| CliError::Startup(format!("invalid session id '{id_str}': {err}")))?,
         Command::Chat { resume: None, .. } => SessionId::new(),
+        // `Docs` is a stateless pipeline (no session log); it's dispatched
+        // and returned a few lines below, after the backend/model overrides
+        // are folded into `config`. This arm only exists so the match stays
+        // exhaustive — its value is never used.
+        Command::Docs { .. } => SessionId::new(),
         // `Permissions` is dispatched and returned above, before this.
         Command::Permissions { .. } => unreachable!("handled by run_permissions"),
     };
@@ -896,6 +1021,17 @@ async fn run() -> Result<(), CliError> {
             ..Default::default()
         });
     }
+
+    // Doc-QA (`docs/docs-qa-mode-design-2026-07-23.md`): a stateless
+    // retrieve-then-answer pipeline that needs a model backend but no
+    // engine, session log, tools or permission guards. Dispatched here —
+    // after the `--backend`/`--model`/`--ollama-url` overrides are folded
+    // into `config` (so `build_model_backend` sees them), before any of
+    // that heavier machinery is constructed — and returns.
+    if let Command::Docs { .. } = &cli.command {
+        return run_docs(&cli.command, &config).await;
+    }
+
     // `--prompt-tools` only ever turns the mode ON (a bare flag), so fold
     // it in only when present — never clobber a config/env `true` with the
     // flag's absent `false`.
@@ -1256,7 +1392,8 @@ async fn run() -> Result<(), CliError> {
                 println!();
             }
         }
-        // Dispatched and returned at the top of `run()`.
+        // Both dispatched and returned earlier in `run()`.
+        Command::Docs { .. } => unreachable!("handled by run_docs"),
         Command::Permissions { .. } => unreachable!("handled by run_permissions"),
     }
 

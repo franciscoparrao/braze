@@ -1,0 +1,11 @@
+[package]
+name = "braze-docs"
+description = "RAG léxico offline sobre documentación para el modo doc-QA: chunker de wiki + índice de recuperación por solape de tokens (docs/docs-qa-mode-design-2026-07-23.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }

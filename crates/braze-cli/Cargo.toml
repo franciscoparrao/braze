@@ -25,6 +25,8 @@ braze-tools-core = { workspace = true }
 braze-events = { workspace = true }
 braze-types = { workspace = true }
 braze-model = { workspace = true }
+braze-docs = { workspace = true }
+futures = { workspace = true }
 # "io-std" on top of the workspace-wide tokio features: needed for
 # `tokio::io::stdin()` (the interactive `chat` loop and the terminal y/n
 # confirmation prompt both read real process stdin).

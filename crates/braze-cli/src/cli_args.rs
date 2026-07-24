@@ -11,6 +11,8 @@
 //! crate never reimplements config loading, it only adds the final,
 //! highest-priority layer.
 
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// `braze run`'s output contract — `Plain` (default) streams text deltas
@@ -142,6 +144,32 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t = OutputFormat::Plain)]
         output_format: OutputFormat,
     },
+    /// Doc-QA: responde una pregunta desde una wiki markdown por RAG
+    /// léxico offline (pipeline retrieve-then-answer, sin tool calls —
+    /// docs/docs-qa-mode-design-2026-07-23.md). Pensado para el backend
+    /// `local` (sin ninguna llave de servicio); funciona con cualquiera.
+    Docs {
+        /// La pregunta a responder desde la documentación.
+        question: String,
+        /// Directorio raíz de la wiki markdown (se indexa recursivamente).
+        #[arg(long)]
+        dir: PathBuf,
+        /// Override del backend del modelo — para offline total, `local`.
+        #[arg(long)]
+        backend: Option<String>,
+        /// Override del nombre/ruta del modelo.
+        #[arg(long)]
+        model: Option<String>,
+        /// Override de la URL de Ollama — misma semántica que `run --ollama-url`.
+        #[arg(long = "ollama-url")]
+        ollama_url: Option<String>,
+        /// Cuántos fragmentos recuperar e inyectar al prompt.
+        #[arg(long, default_value_t = 5)]
+        top_k: usize,
+        /// Tope de tokens de la respuesta.
+        #[arg(long, default_value_t = 1024)]
+        max_tokens: u32,
+    },
     /// Inspect and reason about permission decisions across past sessions
     /// (E′ I.8, docs/harness-engineering-hooks-skills-2026-07-10.md).
     Permissions {
@@ -174,7 +202,9 @@ impl Command {
     /// The `--backend` override, if any, common to both subcommands.
     pub fn backend_override(&self) -> Option<&str> {
         match self {
-            Command::Chat { backend, .. } | Command::Run { backend, .. } => backend.as_deref(),
+            Command::Chat { backend, .. }
+            | Command::Run { backend, .. }
+            | Command::Docs { backend, .. } => backend.as_deref(),
             Command::Permissions { .. } => None,
         }
     }
@@ -182,7 +212,9 @@ impl Command {
     /// The `--model` override, if any, common to both subcommands.
     pub fn model_override(&self) -> Option<&str> {
         match self {
-            Command::Chat { model, .. } | Command::Run { model, .. } => model.as_deref(),
+            Command::Chat { model, .. }
+            | Command::Run { model, .. }
+            | Command::Docs { model, .. } => model.as_deref(),
             Command::Permissions { .. } => None,
         }
     }
@@ -190,9 +222,9 @@ impl Command {
     /// The `--ollama-url` override, if any, common to both subcommands.
     pub fn ollama_url_override(&self) -> Option<&str> {
         match self {
-            Command::Chat { ollama_url, .. } | Command::Run { ollama_url, .. } => {
-                ollama_url.as_deref()
-            }
+            Command::Chat { ollama_url, .. }
+            | Command::Run { ollama_url, .. }
+            | Command::Docs { ollama_url, .. } => ollama_url.as_deref(),
             Command::Permissions { .. } => None,
         }
     }
@@ -202,7 +234,7 @@ impl Command {
     pub fn theme_override(&self) -> Option<&str> {
         match self {
             Command::Chat { theme, .. } => theme.as_deref(),
-            Command::Run { .. } | Command::Permissions { .. } => None,
+            Command::Run { .. } | Command::Docs { .. } | Command::Permissions { .. } => None,
         }
     }
 
@@ -214,7 +246,7 @@ impl Command {
     pub fn planner_override(&self) -> Option<(&str, Option<&str>)> {
         let raw = match self {
             Command::Chat { planner, .. } | Command::Run { planner, .. } => planner.as_deref()?,
-            Command::Permissions { .. } => return None,
+            Command::Docs { .. } | Command::Permissions { .. } => return None,
         };
         Some(match raw.split_once(':') {
             Some((backend, model)) => (backend, Some(model)),
@@ -227,7 +259,7 @@ impl Command {
     pub fn lead_override(&self) -> Option<(&str, Option<&str>)> {
         let raw = match self {
             Command::Chat { lead, .. } | Command::Run { lead, .. } => lead.as_deref()?,
-            Command::Permissions { .. } => return None,
+            Command::Docs { .. } | Command::Permissions { .. } => return None,
         };
         Some(match raw.split_once(':') {
             Some((backend, model)) => (backend, Some(model)),
@@ -239,7 +271,7 @@ impl Command {
     pub fn supervised(&self) -> bool {
         match self {
             Command::Chat { supervised, .. } | Command::Run { supervised, .. } => *supervised,
-            Command::Permissions { .. } => false,
+            Command::Docs { .. } | Command::Permissions { .. } => false,
         }
     }
 
@@ -247,7 +279,7 @@ impl Command {
     pub fn prompt_tools(&self) -> bool {
         match self {
             Command::Chat { prompt_tools, .. } | Command::Run { prompt_tools, .. } => *prompt_tools,
-            Command::Permissions { .. } => false,
+            Command::Docs { .. } | Command::Permissions { .. } => false,
         }
     }
 }

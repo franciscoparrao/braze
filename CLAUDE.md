@@ -299,6 +299,26 @@ mismo día. El arco LocalBackend de 2026-07-20/21 está en su § arriba.)
 - **TUI**: verificación en vivo del overlay `ask_user` con un modelo
   que llame la tool (resto de la fase 3 verificado en vivo el
   2026-07-19); celdas de compactación (diferido explícito).
+- **Modo doc-QA (RAG léxico offline sobre LocalBackend)** — propuesta
+  del 2026-07-23 en `docs/docs-qa-mode-design-2026-07-23.md`. Nace de un
+  caso externo (Claudio Álvarez): chatbot liviano offline sobre
+  documentación (dominio SPE/Posesiones Efectivas), hardware modesto.
+  Decisión de arquitectura: **pipeline RAG (retrieve-then-answer, sin
+  tool call) como default**, agéntico (`DocsProvider`) como escalón;
+  retriever léxico reusa `tool_search::search_stubs`. Anclado a evidencia
+  (2 capturas de Claudio: su app RAG con embeddings+híbrido degrada a
+  90s/"modo degradado" — síntesis sobrecargada — vs Ollama pelado que
+  sintetiza limpio → confirma contexto-chico). Sin código aún; ruta MVP =
+  crate `braze-docs` (chunker + `LexicalIndex`) + modo `braze docs`.
+  Gaps: UI "cara de GPT" (TUI es terminal), hardware objetivo de Claudio
+  (bloquea la recomendación de modelo). Ángulo de publicación aplicado
+  ligado al Paper 1. **Pasos 1-2 del MVP EJECUTADOS (2026-07-23)**: crate
+  `braze-docs` (chunker + `LexicalIndex` port de `search_stubs`) +
+  subcomando `braze docs --dir <wiki> <pregunta>` (pipeline retrieve→
+  prompt-mínimo→backend→respuesta citada, despachado como `run_docs` en
+  main.rs). 26 tests verdes, clippy limpio, verificado en vivo offline
+  (ollama qwen2.5:3b) con la pregunta real de Claudio → 5 pasos limpios +
+  fuentes. Falta: `--backend local` (offline total) y la UI.
 - **P1.1 resto**: repartir el `mod tests` de `engine/mod.rs`.
 - **v8 restantes**: Paquete 4 L (Landlock write-only, subagente
   Viewer/Editor, background trans-ronda), P0.2 (costo USD/walltime por
