@@ -848,15 +848,20 @@ async fn run_permissions(
 }
 
 /// System prompt del modo doc-QA. Minimalista a propósito (doctrina
-/// contexto-chico, `docs/docs-qa-mode-design-2026-07-23.md`): una sola
-/// regla dura —el grounding anti-alucinación— más la instrucción de
-/// citar la fuente. Cada regla extra le resta razonamiento a un modelo
-/// chico; el objetivo es síntesis limpia Y citada, no vistosidad.
-const DOCS_SYSTEM_PROMPT: &str = "Eres un asistente que responde preguntas sobre la documentación de un sistema. \
-Responde SOLO con la información de los fragmentos entregados abajo. \
-Si la respuesta no está en los fragmentos, di exactamente: \"No lo encuentro en la documentación.\" \
-Cita la fuente con el número del fragmento entre corchetes, por ejemplo [1]. \
-Sé breve y directo.";
+/// contexto-chico, `docs/docs-qa-mode-design-2026-07-23.md`): grounding
+/// anti-alucinación como única regla dura.
+///
+/// **Sin instrucción de citar (2026-07-23):** el prompt pedía "cita la
+/// fuente con [n]", pero probando con qwen2.5:3b sobre el FAQ real el
+/// modelo colapsaba a emitir SOLO la cita ("[1] [3]", sin contenido) —
+/// un 3B late en la instrucción de citar y devuelve el marcador en vez
+/// de la respuesta. Y era redundante: la UI/CLI ya listan las fuentes
+/// aparte. Se quita, y se agrega "con palabras completas" para cerrar el
+/// modo degenerado. La procedencia sigue mostrándose, pero fuera del
+/// texto del modelo.
+const DOCS_SYSTEM_PROMPT: &str = "Eres un asistente que responde preguntas usando SOLO la información de los fragmentos de documentación entregados abajo. \
+Responde la pregunta directamente, en 1 a 3 frases y con palabras completas (nunca solo un número de fragmento). \
+Si la respuesta no está en los fragmentos, di exactamente: \"No lo encuentro en la documentación.\"";
 
 /// Una fuente citada: `(source, heading)` del `DocChunk` recuperado.
 type DocSource = (String, String);
