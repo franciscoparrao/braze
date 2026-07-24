@@ -96,12 +96,19 @@
     <h3>Compila <code>braze</code> desde el código fuente</h3>
     <p>No hay un binario para descargar, y es a propósito: se compila del código, y así
     funciona igual en <strong>Windows, Mac o Linux</strong> (un binario compilado en otra
-    máquina no te serviría). Francisco te pasará el código —un repositorio Git o un
-    <code>.zip</code>—. Necesitas <a href="https://rustup.rs">Rust</a> instalado. Luego:</p>
-    <pre><code>cd braze
+    máquina no te serviría). El código está en un repositorio <strong>privado</strong> de
+    GitHub: Francisco te invitará como colaborador — acepta la invitación que te llega al
+    correo. Necesitas <a href="https://rustup.rs">Rust</a> y <a href="https://git-scm.com">Git</a>
+    instalados. Luego:</p>
+    <pre><code>git clone https://github.com/franciscoparrao/braze.git
+cd braze
+git checkout docs-qa-mode
 cargo build --release -p braze-cli</code></pre>
     <p>El programa queda en <code>target/release/braze</code>
     (en Windows: <code>target\release\braze.exe</code>).</p>
+    <p class="note">La función de doc-QA vive en la rama <code>docs-qa-mode</code> (por eso el
+    <code>git checkout</code>). La primera vez, Git te pedirá tu usuario de GitHub para
+    autenticarte, porque el repositorio es privado.</p>
     <p class="note">Con el backend Ollama no necesitas nada más: es Rust puro y compila sin
     complicaciones en Windows. (Existe un modo <code>--backend local</code> que mete el modelo
     <em>dentro</em> de braze sin Ollama, pero requiere compilar C++ y es engorroso en Windows;
