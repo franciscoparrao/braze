@@ -477,23 +477,22 @@ fn generate_blocking(
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0);
-    if gpu_layers > 0 && std::env::var("BRAZE_LOCAL_KV_OFFLOAD").as_deref() != Ok("gpu") {
-        ctx_params = ctx_params.with_offload_kqv(false);
-        // Compute buffer chico. El buffer de prompt-processing lo dimensiona
-        // `n_ubatch` (el batch FÍSICO) × contexto, y vive en VRAM; con el
-        // default (n_ubatch=512) crece hasta reventar los 6GB cuando el
-        // contexto se llena (aborta a mitad de una sesión agéntica, aun con el
-        // KV ya en host). Ollama usa micro-batches chicos —por eso su VRAM
-        // queda plana a cualquier num_ctx— y lo replicamos. `n_batch` (el batch
-        // LÓGICO) queda en `n_ctx`: braze decodifica el prompt entero de una,
-        // así que debe cubrirlo (si no, `GGML_ASSERT(n_tokens_all <= n_batch)`).
-        // `BRAZE_LOCAL_UBATCH` ajusta el físico.
-        let ubatch = std::env::var("BRAZE_LOCAL_UBATCH")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .filter(|&u| u > 0)
-            .unwrap_or(128);
+    let kv_on_host =
+        gpu_layers > 0 && std::env::var("BRAZE_LOCAL_KV_OFFLOAD").as_deref() != Ok("gpu");
+    // Micro-batch chico (`BRAZE_LOCAL_UBATCH`): el buffer de prompt-processing
+    // lo dimensiona `n_ubatch` (batch FÍSICO) × contexto y vive en VRAM; con el
+    // default (512) crece hasta reventar los 6GB al llenarse el contexto —
+    // Ollama usa micro-batches chicos (VRAM plana) y lo replicamos. `n_batch`
+    // (batch LÓGICO) cubre el prompt entero (braze lo decodifica de una, si no
+    // `GGML_ASSERT(n_tokens_all <= n_batch)`).
+    let ubatch = std::env::var("BRAZE_LOCAL_UBATCH")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|&u| u > 0)
+        .unwrap_or(128);
+    if kv_on_host {
         ctx_params = ctx_params
+            .with_offload_kqv(false)
             .with_n_ubatch(ubatch)
             .with_n_batch(n_batch_max.max(ubatch));
         tracing::info!(
@@ -502,30 +501,44 @@ fn generate_blocking(
             "local: KV en host + micro-batch chico para mantener la VRAM plana"
         );
     }
-    // KV cache cuantizado (`BRAZE_LOCAL_KV_TYPE=q8_0|q4_0|q5_0|q5_1|q4_1`,
-    // idea #2 de `docs/inference-runtimes-audit-2026-07-25.md`): baja el
-    // footprint del KV. OJO por la interacción con el fix de VRAM de arriba:
-    // en offload parcial el KV ya vive en el HOST, así que el beneficio de
-    // VRAM es muted; donde ayuda claro es (a) en RAM host / velocidad de
-    // atención en CPU y (b) en modo `BRAZE_LOCAL_KV_OFFLOAD=gpu` (KV en VRAM →
-    // más capas caben). Default: `f16` de llama.cpp (sin cambio) — palanca
-    // opt-in que gana su default por bench, no por asunción. Flash-attn ya
-    // está en `AUTO` por el default de llama.cpp y se auto-habilita para el KV
-    // cuantizado (requisito de llama.cpp), así que no hay que tocarla.
-    if let Ok(kv) = std::env::var("BRAZE_LOCAL_KV_TYPE") {
-        match parse_kv_cache_type(&kv) {
-            Some(t) => {
-                ctx_params = ctx_params.with_type_k(t).with_type_v(t);
-                tracing::info!(kv_type = %kv, "local: KV cache cuantizado");
-            }
-            None => tracing::warn!(
-                kv_type = %kv,
-                "BRAZE_LOCAL_KV_TYPE desconocido; se ignora (KV en f16)"
-            ),
-        }
+    // KV cache cuantizado (`BRAZE_LOCAL_KV_TYPE=q8_0|q4_0|q5_0|q5_1|q4_1`, idea
+    // #2 de `docs/inference-runtimes-audit-2026-07-25.md`): baja el footprint
+    // del KV (RAM host, o VRAM con `BRAZE_LOCAL_KV_OFFLOAD=gpu` → más capas).
+    // Default `f16` — palanca opt-in que gana su default por bench. **Verificado
+    // en vivo 2026-07-25**: el KV cuantizado requiere flash-attn, que
+    // gpt-oss/Harmony NO soportan (attention sinks) → `new_context` devuelve
+    // null; qwen2.5:3b sí funciona. Por eso degradamos con gracia a f16 abajo si
+    // falla, en vez de crashear (filosofía degrade-not-crash del proyecto).
+    let requested_kv = std::env::var("BRAZE_LOCAL_KV_TYPE").ok().and_then(|kv| {
+        parse_kv_cache_type(&kv).or_else(|| {
+            tracing::warn!(kv_type = %kv, "BRAZE_LOCAL_KV_TYPE desconocido; se ignora (f16)");
+            None
+        })
+    });
+    if let Some(t) = requested_kv {
+        ctx_params = ctx_params.with_type_k(t).with_type_v(t);
+        tracing::info!("local: KV cache cuantizado solicitado");
     }
     let mut ctx = match model.new_context(backend, ctx_params) {
         Ok(c) => c,
+        Err(e) if requested_kv.is_some() => {
+            tracing::warn!(
+                error = %e,
+                "local: crear contexto con KV cuantizado falló; reintentando con f16 \
+                 (el KV cuantizado requiere flash-attn, no soportado por gpt-oss/Harmony)"
+            );
+            let mut fb = LlamaContextParams::default().with_n_ctx(n_ctx);
+            if kv_on_host {
+                fb = fb
+                    .with_offload_kqv(false)
+                    .with_n_ubatch(ubatch)
+                    .with_n_batch(n_batch_max.max(ubatch));
+            }
+            match model.new_context(backend, fb) {
+                Ok(c) => c,
+                Err(e2) => bail!("local: no se pudo crear el contexto (ni con f16): {e2}"),
+            }
+        }
         Err(e) => bail!("local: no se pudo crear el contexto: {e}"),
     };
 
