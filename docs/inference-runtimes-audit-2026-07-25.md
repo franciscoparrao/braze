@@ -35,10 +35,14 @@ que ya usamos expone los primitivos (verificado, § 7).
    caminos: mantener el `llama_context` vivo entre rondas (prefix reuse de
    KV) y/o **ContextShift** de koboldcpp (`kv_cache_seq_rm`+`shift`). Gran
    ahorro de latencia, sobre todo en CPU.
-4. **CPU: verificar `-march`/tinyBLAS** — para el caso "i7 sin GPU" de
-   Claudio. Si el build FFI compila ggml genérico sin `-march=native`,
-   dejamos **2–10× de prompt-eval** en la mesa. Y contraintuición
-   verificada: en loops prompt-heavy, **F16 puede ganarle a Q4 en walltime**.
+4. **CPU: `-march`/tinyBLAS — VERIFICADO (2026-07-25), es un no-problema.**
+   El build de `llama-cpp-sys-2` NO es ggml genérico: compila con
+   `-mavx -mavx2 -mbmi2 -mf16c -mfma -msse4` + `GGML_CPU_REPACK:ON` (el
+   sgemm/tinyBLAS). AVX512 OFF (irrelevante para el i7 Intel de Claudio,
+   fusionado apagado en 12–14ª gen) y `GGML_NATIVE:OFF` (decisión de
+   portabilidad; delta ~nulo sobre AVX2+FMA). **Sin acción de código.**
+   Queda como experimento OPCIONAL la contraintuición: en loops prompt-heavy
+   en CPU, **F16 puede ganarle a Q4 en walltime** — un A/B en braze-bench.
 5. **Speculative decoding (prompt-lookup)** — `llama-cpp-2` tiene
    `speculative.rs`. El prompt-lookup (mira el prompt, cero modelo extra)
    es ideal para el dominio de edición de código de braze (el output repite
@@ -322,10 +326,11 @@ excavación es el **prefix-reuse/ContextShift** (`llama_kv_cache_seq_*`,
 0. ~~#2 KV-quant~~ **HECHO** (rama `local-kv-quant`) — pero verificado que NO
    ayuda a gpt-oss (degrada a f16); solo a qwen/estándar. No era el acelerador
    del 6GB que se creía. Lección: el in-vivo corrigió la asunción.
-1. **#4 (verificar `-march`/tinyBLAS)** — ahora el más barato con payoff real:
-   chequeo del build FFI + A/B F16-vs-Q4 en CPU. Es el acelerador del i7 de
-   Claudio (CPU-only) y dato de paper. **El siguiente natural.**
-2. **#1 (auto-fit)** — la de mayor impacto estructural y el **verdadero
+1. ~~#4 verificar `-march`~~ **VERIFICADO — no-problema**: el build ya lleva
+   AVX2+FMA+F16C+BMI2+repack. Sin acción. (Queda opcional el A/B F16-vs-Q4 en
+   CPU como dato de paper.)
+2. **#1 (auto-fit)** — ahora el siguiente natural: la de mayor impacto y el
+   **verdadero
    acelerador de gpt-oss en 6GB** (más capas → menos CPU). Portar el greedy de
    `fit.cpp`/`tuning.rs`; cierra el OOM-que-crashea y el `BRAZE_LOCAL_GPU_LAYERS`
    adivinado. Los primitivos (`list_llama_ggml_backend_devices`,
