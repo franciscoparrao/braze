@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use braze_types::{ContentBlock, Role};
 use futures::Stream;
-use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::context::params::{KvCacheType, LlamaContextParams};
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
@@ -39,6 +39,22 @@ use crate::error::ModelError;
 use crate::gemma::{build_gemma_prompt, render_tools_preamble};
 use crate::harmony::{build_harmony_prompt, utc_date_string, HarmonyEvent, HarmonyMarker, HarmonyParser};
 use crate::stencil::{harmony_args_grammar, qwen_call_grammar, JsonCursor, ToolGrammarSpec};
+
+/// Mapea el valor de `BRAZE_LOCAL_KV_TYPE` a un [`KvCacheType`]. Solo los
+/// tipos que llama.cpp acepta para el KV cache (los k-quants por-bloque no
+/// aplican al KV); `None` = desconocido → el caller deja el default `f16`.
+fn parse_kv_cache_type(s: &str) -> Option<KvCacheType> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "f16" => Some(KvCacheType::F16),
+        "f32" => Some(KvCacheType::F32),
+        "q8_0" => Some(KvCacheType::Q8_0),
+        "q5_1" => Some(KvCacheType::Q5_1),
+        "q5_0" => Some(KvCacheType::Q5_0),
+        "q4_1" => Some(KvCacheType::Q4_1),
+        "q4_0" => Some(KvCacheType::Q4_0),
+        _ => None,
+    }
+}
 
 // El preámbulo de tools de las familias textuales (formato nativo de
 // qwen2.5, reusado como convención instruida para Gemma) vive en
@@ -486,6 +502,28 @@ fn generate_blocking(
             "local: KV en host + micro-batch chico para mantener la VRAM plana"
         );
     }
+    // KV cache cuantizado (`BRAZE_LOCAL_KV_TYPE=q8_0|q4_0|q5_0|q5_1|q4_1`,
+    // idea #2 de `docs/inference-runtimes-audit-2026-07-25.md`): baja el
+    // footprint del KV. OJO por la interacción con el fix de VRAM de arriba:
+    // en offload parcial el KV ya vive en el HOST, así que el beneficio de
+    // VRAM es muted; donde ayuda claro es (a) en RAM host / velocidad de
+    // atención en CPU y (b) en modo `BRAZE_LOCAL_KV_OFFLOAD=gpu` (KV en VRAM →
+    // más capas caben). Default: `f16` de llama.cpp (sin cambio) — palanca
+    // opt-in que gana su default por bench, no por asunción. Flash-attn ya
+    // está en `AUTO` por el default de llama.cpp y se auto-habilita para el KV
+    // cuantizado (requisito de llama.cpp), así que no hay que tocarla.
+    if let Ok(kv) = std::env::var("BRAZE_LOCAL_KV_TYPE") {
+        match parse_kv_cache_type(&kv) {
+            Some(t) => {
+                ctx_params = ctx_params.with_type_k(t).with_type_v(t);
+                tracing::info!(kv_type = %kv, "local: KV cache cuantizado");
+            }
+            None => tracing::warn!(
+                kv_type = %kv,
+                "BRAZE_LOCAL_KV_TYPE desconocido; se ignora (KV en f16)"
+            ),
+        }
+    }
     let mut ctx = match model.new_context(backend, ctx_params) {
         Ok(c) => c,
         Err(e) => bail!("local: no se pudo crear el contexto: {e}"),
@@ -827,5 +865,25 @@ impl ModelBackend for LocalBackend {
             rx.recv().await.map(|item| (item, rx))
         });
         Ok(Box::pin(stream))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kv_cache_type_parses_known_quant_types() {
+        assert_eq!(parse_kv_cache_type("q8_0"), Some(KvCacheType::Q8_0));
+        assert_eq!(parse_kv_cache_type("Q4_0"), Some(KvCacheType::Q4_0));
+        assert_eq!(parse_kv_cache_type(" f16 "), Some(KvCacheType::F16));
+        assert_eq!(parse_kv_cache_type("q5_1"), Some(KvCacheType::Q5_1));
+    }
+
+    #[test]
+    fn kv_cache_type_unknown_falls_back_to_none() {
+        assert_eq!(parse_kv_cache_type("q3_k"), None);
+        assert_eq!(parse_kv_cache_type("nonsense"), None);
+        assert_eq!(parse_kv_cache_type(""), None);
     }
 }
