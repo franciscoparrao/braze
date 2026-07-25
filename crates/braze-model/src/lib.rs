@@ -41,7 +41,7 @@ pub use backend::{CompletionEvent, CompletionRequest, ModelBackend};
 pub use error::ModelError;
 pub use escalation::EscalatingBackend;
 #[cfg(feature = "local")]
-pub use local::LocalBackend;
+pub use local::{LocalBackend, TuneReport, resolve_local_gguf, tune_model};
 pub use ollama::{
     OllamaBackend, list_ollama_models, ollama_model_digest, ollama_server_version,
     warm_up_ollama_model,

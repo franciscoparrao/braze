@@ -39,6 +39,13 @@ que ya usamos expone los primitivos (verificado, § 7).
    caminos: mantener el `llama_context` vivo entre rondas (prefix reuse de
    KV) y/o **ContextShift** de koboldcpp (`kv_cache_seq_rm`+`shift`). Gran
    ahorro de latencia, sobre todo en CPU.
+   **VERIFICADA la viabilidad (2026-07-25) — baja de prioridad, ver § 10.**
+   El diagnóstico se confirma (contexto nuevo por ronda = 100% de
+   re-prefill) y la API `seq_*` está entera, pero `LlamaContext` **no es
+   `Send`** (exige rearquitectura a hilo-dueño) y los prompts **no crecen**
+   como asume este párrafo: 5469→6827 chars en 68 rondas medidas. La
+   compactación de braze ya está conteniendo el historial que esta idea
+   quería dejar de re-enviar.
 4. **CPU: `-march`/tinyBLAS — VERIFICADO (2026-07-25), es un no-problema.**
    El build de `llama-cpp-sys-2` NO es ggml genérico: compila con
    `-mavx -mavx2 -mbmi2 -mf16c -mfma -msse4` + `GGML_CPU_REPACK:ON` (el
@@ -325,7 +332,7 @@ excavación es el **prefix-reuse/ContextShift** (`llama_kv_cache_seq_*`,
 |---|---|---|---|---|---|---|
 | 1 | ~~**Auto-fit `n_gpu_layers`**~~ **HECHO 25-jul** (`fit_params`, no hubo que portar) | mistral.rs `tuning.rs`, llama.cpp `fit.cpp` | capas manuales, OOM crashea | ✅ | ✅ **envuelve `common_fit_params` entero** | bajo (real) |
 | 2 | **KV-quant `q8_0/q4_0` + flash-attn** | todos | throughput/VRAM 6GB | ✅ | ✅ | bajo |
-| 3 | **Evitar re-prefill** (ctx vivo / ContextShift) | vLLM, mistral, kobold | latencia loop agéntico / CPU | ✅ | ⚠️ verificar `seq_*` | medio |
+| 3 | **Evitar re-prefill** (ctx vivo / ContextShift) | vLLM, mistral, kobold | latencia loop agéntico / CPU | ✅ | ✅ `seq_*` entera — pero `LlamaContext` no es `Send` | **arquitectónico** (era "medio", ver § 10) |
 | 4 | **CPU `-march`/tinyBLAS + A/B F16 vs Q4** | llamafile | i7 sin GPU (Claudio) | ✅ | build flags | bajo (verif) |
 | 5 | **Speculative (prompt-lookup)** | vLLM, llama.cpp | latencia edición de código | ✅ | ✅ (`speculative.rs`) | medio |
 | 6 | **DRY + min-p en el sampler** | kobold, mistral | degeneración modelos chicos | ✅ | vía sampler API | bajo |
@@ -362,3 +369,66 @@ provienen de lectura de fuentes reales por subagentes (marcado
 verificado/inferido en los briefs originales); la superficie de `llama-cpp-2`
 (§ 7) la verifiqué directo sobre el crate instalado. Los puntos "⚠️ verificar"
 son los únicos abiertos antes de accionar.
+
+---
+
+## 10. Idea #3 (re-prefill): verificación del 2026-07-25 — baja de prioridad
+
+Verificada mientras corría el sweep de gemma-12B. **Tres hallazgos, dos de
+ellos en contra de accionarla ahora.**
+
+**(a) El diagnóstico era correcto: hoy re-prefileamos el 100%.**
+`model.new_context(...)` vive DENTRO de `generate_blocking`, que corre una vez
+por `complete()`. Cada ronda del loop agéntico crea un `llama_context` nuevo y
+vuelve a decodificar el prompt entero. No es "probablemente": es seguro.
+
+**(b) La API está entera** — `kv_cache_seq_rm`, `_add`, `_cp`, `_div`,
+`_pos_min/_max`, `clear_kv_cache`, `seq_keep`, más `context/session.rs` para
+`state_seq_*`. El "⚠️ verificar `seq_*`" queda cerrado en ✅.
+
+**(c) Pero `LlamaContext` no es `Send`, y esto cambia el costo.** El struct es
+`LlamaContext<'a> { context: NonNull<llama_context>, model: &'a LlamaModel, … }`:
+`NonNull` no es `Send` y además toma prestado el modelo. No hay
+`unsafe impl Send` (sí lo hay para `LlamaContextParams`). Consecuencias:
+
+- No se puede guardar en `LocalBackend`, que el trait `ModelBackend` obliga a
+  ser `Send + Sync`.
+- No puede cruzar entre invocaciones de `spawn_blocking`.
+- Reusarlo exige un **hilo dueño del contexto que reciba trabajo por canal**
+  (patrón actor) o serializar el KV con `state_seq_*`. Es rearquitectura del
+  backend, no una optimización local. La tabla de § 8 decía "medio"; es
+  **arquitectónico**.
+
+**(d) El techo del beneficio es menor de lo que la idea asumía.** El § 0 dice
+"cada ronda re-envía system+tools+historial", sugiriendo crecimiento
+acumulativo. Medido sobre 68 rondas reales del sweep de gemma-12B:
+
+| | chars de prompt |
+|---|---|
+| mínimo | 5469 |
+| p50 | 5754 |
+| p90 | 6329 |
+| máximo | 6827 |
+
+Los prompts **no se disparan**: varían ~25% de punta a punta. Lo más probable
+es que la compactación diferencial y el colapso ACI de observaciones ya estén
+conteniendo justo el historial que esta idea quería dejar de re-enviar — o
+sea, **una palanca del harness ya cobró la mayor parte de este beneficio**.
+
+**(e) Y esas mismas palancas son un peligro para el reuso ingenuo.** La
+compactación y el colapso ACI **reescriben** el historial, así que el prompt
+de la ronda N+1 no es necesariamente una extensión del de la ronda N. Reusar
+el KV asumiendo prefijo compartido daría cache corrupto justo cuando compacta.
+La implementación correcta es prefijo-común-más-largo **por tokens** (lo que
+hace el server de llama.cpp), no "append y listo".
+
+**Qué queda sin medir:** la fracción de prompt efectivamente compartida entre
+rondas consecutivas. El log da longitudes, no contenido, así que cualquier
+estimación de ahorro sería inventada. Si se retoma, el primer paso barato es
+instrumentar el engine para loguear el prefijo común en tokens entre rondas —
+ese número decide si vale la rearquitectura.
+
+**Veredicto:** sigue habiendo ganancia real (con el modelo ya cacheado el
+prefill pasa a dominar tareas de una ronda: `no_tool_qa` tarda 14-20s con
+salida mínima), pero por costo/beneficio queda detrás de #5 y #6. No accionar
+sin la medición de (e).

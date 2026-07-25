@@ -148,6 +148,25 @@ pub enum Command {
         #[command(subcommand)]
         action: PermissionsAction,
     },
+    /// Resuelve con el auto-fit cuántas capas de un modelo local caben en
+    /// la GPU y reporta el resultado, sin cargar los pesos para inferencia
+    /// (idea #8 de docs/inference-runtimes-audit-2026-07-25.md, construida
+    /// sobre el auto-fit). Sirve para **fitear una vez y fijar el número**:
+    /// exportando el `BRAZE_LOCAL_GPU_LAYERS` que imprime, un sweep se
+    /// ahorra el fit por tarea y queda reproducible en vez de re-adivinado.
+    Tune {
+        /// Ruta a un `.gguf`, o una ref de Ollama (`qwen2.5:3b`) que se
+        /// resuelve contra los blobs ya descargados.
+        model: String,
+        /// Contexto contra el que fitear. El reparto depende de él: más
+        /// contexto = más KV = menos capas caben.
+        #[arg(long = "n-ctx", default_value_t = 8192)]
+        n_ctx: u32,
+        /// Escribe la config resuelta como TOML en esta ruta (`-` para
+        /// stdout). Sin el flag solo se imprime el resumen legible.
+        #[arg(long = "emit-config")]
+        emit_config: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -175,7 +194,7 @@ impl Command {
     pub fn backend_override(&self) -> Option<&str> {
         match self {
             Command::Chat { backend, .. } | Command::Run { backend, .. } => backend.as_deref(),
-            Command::Permissions { .. } => None,
+            Command::Permissions { .. } | Command::Tune { .. } => None,
         }
     }
 
@@ -183,7 +202,7 @@ impl Command {
     pub fn model_override(&self) -> Option<&str> {
         match self {
             Command::Chat { model, .. } | Command::Run { model, .. } => model.as_deref(),
-            Command::Permissions { .. } => None,
+            Command::Permissions { .. } | Command::Tune { .. } => None,
         }
     }
 
@@ -193,7 +212,7 @@ impl Command {
             Command::Chat { ollama_url, .. } | Command::Run { ollama_url, .. } => {
                 ollama_url.as_deref()
             }
-            Command::Permissions { .. } => None,
+            Command::Permissions { .. } | Command::Tune { .. } => None,
         }
     }
 
@@ -202,7 +221,7 @@ impl Command {
     pub fn theme_override(&self) -> Option<&str> {
         match self {
             Command::Chat { theme, .. } => theme.as_deref(),
-            Command::Run { .. } | Command::Permissions { .. } => None,
+            Command::Run { .. } | Command::Permissions { .. } | Command::Tune { .. } => None,
         }
     }
 
@@ -214,7 +233,7 @@ impl Command {
     pub fn planner_override(&self) -> Option<(&str, Option<&str>)> {
         let raw = match self {
             Command::Chat { planner, .. } | Command::Run { planner, .. } => planner.as_deref()?,
-            Command::Permissions { .. } => return None,
+            Command::Permissions { .. } | Command::Tune { .. } => return None,
         };
         Some(match raw.split_once(':') {
             Some((backend, model)) => (backend, Some(model)),
@@ -227,7 +246,7 @@ impl Command {
     pub fn lead_override(&self) -> Option<(&str, Option<&str>)> {
         let raw = match self {
             Command::Chat { lead, .. } | Command::Run { lead, .. } => lead.as_deref()?,
-            Command::Permissions { .. } => return None,
+            Command::Permissions { .. } | Command::Tune { .. } => return None,
         };
         Some(match raw.split_once(':') {
             Some((backend, model)) => (backend, Some(model)),
@@ -239,7 +258,7 @@ impl Command {
     pub fn supervised(&self) -> bool {
         match self {
             Command::Chat { supervised, .. } | Command::Run { supervised, .. } => *supervised,
-            Command::Permissions { .. } => false,
+            Command::Permissions { .. } | Command::Tune { .. } => false,
         }
     }
 
@@ -247,7 +266,7 @@ impl Command {
     pub fn prompt_tools(&self) -> bool {
         match self {
             Command::Chat { prompt_tools, .. } | Command::Run { prompt_tools, .. } => *prompt_tools,
-            Command::Permissions { .. } => false,
+            Command::Permissions { .. } | Command::Tune { .. } => false,
         }
     }
 }

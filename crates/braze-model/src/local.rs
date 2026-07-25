@@ -125,6 +125,14 @@ fn fit_margin_bytes() -> usize {
     mib * 1024 * 1024
 }
 
+/// ¿El binario tiene backend de GPU y hay uno disponible? Sin esto no se
+/// puede interpretar el `-1` que devuelve el fit: en un build con CUDA y
+/// tarjeta presente significa "todas las capas", y en un build CPU-only
+/// significa cero.
+fn backend_supports_gpu() -> bool {
+    shared_llama_backend().is_ok_and(|b| b.supports_gpu_offload())
+}
+
 /// `common_fit_params` **no es thread-safe** (muta el logger global de
 /// llama.cpp mientras corre). braze-bench crea un `LocalBackend` por tarea,
 /// así que serializamos los fits entre sí.
@@ -238,7 +246,18 @@ fn resolve_model_params(
         };
         match result {
             Ok(fit) => {
-                let layers = params.n_gpu_layers();
+                // Sin GPU disponible el fit no toca `n_gpu_layers` y lo deja
+                // en su default `-1`. Ese `-1` significa "todas las que
+                // quepan", que sin device es CERO — pero tomado literal hace
+                // que `kv_on_host` se active y le imponga a una corrida de
+                // CPU puro el `n_ubatch` chico pensado para cuidar VRAM, que
+                // ahí solo frena el prefill. Normalizarlo a 0 (bug cazado en
+                // vivo con `braze tune` en la máquina sin GPU, 2026-07-25).
+                let layers = if backend_supports_gpu() {
+                    params.n_gpu_layers()
+                } else {
+                    0
+                };
                 tracing::info!(
                     gpu_layers = layers,
                     fitted_n_ctx = fit.n_ctx,
@@ -408,6 +427,194 @@ fn shared_llama_backend() -> Result<Arc<LlamaBackend>, ModelError> {
     Ok(backend)
 }
 
+/// Lo que el auto-fit resolvió para un GGUF, **sin cargarlo para
+/// inferencia**. Es la salida de [`tune_model`], que alimenta `braze tune`
+/// (idea #8 de `docs/inference-runtimes-audit-2026-07-25.md`).
+#[derive(Debug, Clone)]
+pub struct TuneReport {
+    /// El GGUF que se midió, con la ruta ya canonicalizada.
+    pub gguf: PathBuf,
+    /// Contexto contra el que se fiteó — el reparto depende de él.
+    pub n_ctx: u32,
+    /// Capas a GPU (convención llama.cpp: 0 = CPU, negativo = todas).
+    pub n_gpu_layers: i32,
+    /// Cómo se llegó al número: auto-fit, env explícito, o degradación.
+    pub source: &'static str,
+    /// Margen de VRAM por device que se dejó libre.
+    pub margin_mib: usize,
+}
+
+/// Resuelve una referencia de modelo local al GGUF en disco: una ruta que
+/// termina en `.gguf` (o que contiene `/`) se toma literal; cualquier otra
+/// cosa se trata como ref de Ollama (`qwen2.5:3b`) y se busca en sus blobs.
+/// Es la misma heurística que aplica el CLI al construir el backend.
+///
+/// # Errors
+/// Devuelve error si la ref de Ollama no tiene manifest o su blob falta.
+pub fn resolve_local_gguf(
+    model_ref: &str,
+    ollama_root: impl AsRef<Path>,
+) -> Result<PathBuf, ModelError> {
+    if model_ref.contains('/') || model_ref.ends_with(".gguf") {
+        Ok(PathBuf::from(model_ref))
+    } else {
+        resolve_ollama_gguf(ollama_root.as_ref(), model_ref)
+    }
+}
+
+/// Corre el auto-fit sobre un GGUF y reporta el reparto, sin cargar los
+/// pesos para inferencia (el probe usa `no_alloc`). Sirve para **fitear una
+/// vez y fijar el número**: el sweep siguiente exporta
+/// `BRAZE_LOCAL_GPU_LAYERS` y se ahorra el fit por tarea, además de quedar
+/// reproducible en vez de re-adivinado.
+///
+/// # Errors
+/// Devuelve error si el GGUF no existe o si el backend de llama.cpp no
+/// pudo inicializarse.
+pub fn tune_model(gguf: impl AsRef<Path>, n_ctx: u32) -> Result<TuneReport, ModelError> {
+    let gguf = gguf.as_ref();
+    if !gguf.exists() {
+        return Err(ModelError::Request(format!(
+            "el GGUF no existe: {}",
+            gguf.display()
+        )));
+    }
+    // El fit carga un modelo con `no_alloc`, así que el backend global tiene
+    // que estar inicializado (y esto además rutea los logs de llama.cpp a
+    // `tracing`, para que el probe no escupa a stderr).
+    let _backend = shared_llama_backend()?;
+    let (_params, n_gpu_layers, source) = resolve_model_params(gguf, n_ctx);
+    Ok(TuneReport {
+        gguf: gguf.canonicalize().unwrap_or_else(|_| gguf.to_path_buf()),
+        n_ctx,
+        n_gpu_layers,
+        source: match source {
+            GpuLayersSource::Explicit => "explicit",
+            GpuLayersSource::AutoFit => "auto-fit",
+            GpuLayersSource::Disabled => "disabled",
+            GpuLayersSource::FitFailed => "fit-failed",
+        },
+        margin_mib: fit_margin_bytes() / (1024 * 1024),
+    })
+}
+
+impl TuneReport {
+    /// Renderiza el reporte como TOML. Los comentarios mapean cada valor a
+    /// su variable de entorno porque **esa es la vía de consumo**: braze no
+    /// lee este archivo, se pega el `export` y el reparto queda fijado.
+    #[must_use]
+    pub fn to_toml(&self) -> String {
+        format!(
+            "# Generado por `braze tune` — reparto resuelto por el auto-fit.\n\
+             # braze NO lee este archivo: es un registro reproducible del fit.\n\
+             # Para fijarlo en un sweep, exportá las variables comentadas.\n\
+             \n[local]\n\
+             model = \"{}\"\n\
+             n_ctx = {}\n\
+             n_gpu_layers = {}      # BRAZE_LOCAL_GPU_LAYERS\n\
+             vram_margin_mb = {}    # BRAZE_LOCAL_VRAM_MARGIN_MB\n\
+             source = \"{}\"\n",
+            self.gguf.display(),
+            self.n_ctx,
+            self.n_gpu_layers,
+            self.margin_mib,
+            self.source,
+        )
+    }
+}
+
+/// Identidad de un modelo YA cargado. Dos `LocalBackend` que pidan el mismo
+/// GGUF con la misma configuración de offload pueden compartir el
+/// `LlamaModel`: los pesos son read-only (por eso ya viajaban en `Arc`) y el
+/// contexto se sigue creando fresco por generación, así que reusar el modelo
+/// no comparte estado de inferencia entre tareas.
+///
+/// El entorno entra en la clave porque el auto-fit lo consulta: cambiar
+/// `BRAZE_LOCAL_GPU_LAYERS` o el margen debe forzar una recarga, no devolver
+/// el modelo repartido con la configuración anterior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModelCacheKey {
+    path: PathBuf,
+    n_ctx: u32,
+    env: Vec<Option<String>>,
+}
+
+impl ModelCacheKey {
+    fn new(gguf: &Path, n_ctx: u32) -> Self {
+        const VARS: [&str; 6] = [
+            "BRAZE_LOCAL_GPU_LAYERS",
+            "BRAZE_LOCAL_AUTOFIT",
+            "BRAZE_LOCAL_VRAM_MARGIN_MB",
+            "BRAZE_LOCAL_KV_TYPE",
+            "BRAZE_LOCAL_KV_OFFLOAD",
+            "BRAZE_LOCAL_UBATCH",
+        ];
+        Self {
+            // Canonicalizar para que `~/models/x.gguf` y una ruta relativa al
+            // mismo archivo no carguen dos veces.
+            path: gguf.canonicalize().unwrap_or_else(|_| gguf.to_path_buf()),
+            n_ctx,
+            env: VARS.iter().map(|v| std::env::var(v).ok()).collect(),
+        }
+    }
+}
+
+/// Modelo cacheado. Capacidad **1 a propósito**: braze-bench corre un backend
+/// a la vez y los modelos de esta escala pesan 6-12GB — mantener dos vivos
+/// revienta la RAM/VRAM de Nitro, que es justo el fallo que el auto-fit vino
+/// a eliminar.
+type CachedModel = (ModelCacheKey, Arc<LlamaModel>, i32, GpuLayersSource);
+static MODEL_CACHE: Mutex<Option<CachedModel>> = Mutex::new(None);
+
+/// Carga el GGUF reusando el modelo cacheado si la clave coincide.
+///
+/// **Por qué existe**: braze-bench crea un `LocalBackend` por tarea, así que
+/// un sweep de 57 tareas pagaba 57 veces el probe del auto-fit (que carga el
+/// modelo con `no_alloc`) **y** 57 recargas del GGUF entero con su re-subida
+/// de capas a la GPU — medido en vivo el 2026-07-25: la VRAM caía a ~177 MiB
+/// entre tareas y volvía a ~4.7GB en cada una.
+///
+/// **Caveat metodológico**: con el caché activo solo la primera tarea de un
+/// brazo paga la carga, así que el `wall_time_ms` promedio deja de ser
+/// comparable contra sweeps anteriores. Para reproducir números viejos está
+/// `BRAZE_LOCAL_MODEL_CACHE=off`.
+fn load_model_cached(
+    backend: &Arc<LlamaBackend>,
+    gguf: &Path,
+    n_ctx: u32,
+) -> Result<(Arc<LlamaModel>, i32, GpuLayersSource), ModelError> {
+    let load_fresh = || -> Result<(Arc<LlamaModel>, i32, GpuLayersSource), ModelError> {
+        let (params, gpu_layers, source) = resolve_model_params(gguf, n_ctx);
+        let model = LlamaModel::load_from_file(backend, gguf, &params).map_err(|e| {
+            ModelError::Request(format!("failed to load GGUF '{}': {e}", gguf.display()))
+        })?;
+        Ok((Arc::new(model), gpu_layers, source))
+    };
+
+    if std::env::var("BRAZE_LOCAL_MODEL_CACHE").as_deref() == Ok("off") {
+        return load_fresh();
+    }
+
+    let key = ModelCacheKey::new(gguf, n_ctx);
+    // El lock se sostiene durante la carga a propósito: si dos hilos piden el
+    // mismo modelo a la vez, el segundo espera y reusa en vez de cargar un
+    // duplicado de 12GB.
+    let mut guard = MODEL_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((cached_key, model, gpu_layers, source)) = guard.as_ref()
+        && *cached_key == key
+    {
+        tracing::debug!(path = %gguf.display(), "local: modelo reusado del caché");
+        return Ok((Arc::clone(model), *gpu_layers, *source));
+    }
+    // Soltar el modelo viejo ANTES de cargar el nuevo. Si algún `LocalBackend`
+    // vivo todavía tiene su `Arc`, el modelo sobrevive hasta que lo suelte —
+    // no se puede liberar lo que está en uso.
+    *guard = None;
+    let (model, gpu_layers, source) = load_fresh()?;
+    *guard = Some((key, Arc::clone(&model), gpu_layers, source));
+    Ok((model, gpu_layers, source))
+}
+
 impl LocalBackend {
     /// Carga un GGUF desde una ruta directa a `.gguf` o al blob de Ollama.
     /// `model_label` es solo para `name()`/trazas (precio local = $0).
@@ -432,13 +639,7 @@ impl LocalBackend {
         // si el usuario fija el número a mano. En un binario sin CUDA no hay
         // devices GPU que medir y el fit devuelve 0 capas → CPU puro, el
         // mismo comportamiento que antes de la palanca.
-        let (params, gpu_layers, layers_source) = resolve_model_params(gguf.as_ref(), n_ctx);
-        let model = LlamaModel::load_from_file(&backend, gguf.as_ref(), &params).map_err(|e| {
-            ModelError::Request(format!(
-                "failed to load GGUF '{}': {e}",
-                gguf.as_ref().display()
-            ))
-        })?;
+        let (model, gpu_layers, layers_source) = load_model_cached(&backend, gguf.as_ref(), n_ctx)?;
         let model_label = model_label.into();
         let family = detect_family(&model, &model_label);
         let harmony = match family {
@@ -454,7 +655,7 @@ impl LocalBackend {
         );
         Ok(Self {
             backend,
-            model: Arc::new(model),
+            model,
             model_label,
             n_ctx,
             family,
@@ -1129,6 +1330,18 @@ mod tests {
         // KV-en-host no se activa pase lo que pase con el entorno.
         assert!(!kv_on_host(0));
         assert!(build_ctx_params(2048, 0, None).offload_kqv());
+    }
+
+    #[test]
+    fn la_clave_del_cache_distingue_modelo_y_contexto() {
+        // Reusar un modelo cargado solo es correcto si la clave captura todo
+        // lo que cambiaría su carga. Ruta y n_ctx son los dos ejes obvios; el
+        // entorno entra en `ModelCacheKey::new` y no se testea acá porque
+        // mutarlo es `unsafe` en la edición 2024 y contaminaría otros tests.
+        let a = ModelCacheKey::new(Path::new("/models/x.gguf"), 8192);
+        assert_eq!(a, ModelCacheKey::new(Path::new("/models/x.gguf"), 8192));
+        assert_ne!(a, ModelCacheKey::new(Path::new("/models/x.gguf"), 4096));
+        assert_ne!(a, ModelCacheKey::new(Path::new("/models/y.gguf"), 8192));
     }
 
     #[test]

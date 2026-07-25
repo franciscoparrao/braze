@@ -174,10 +174,7 @@ fn build_environment_snapshot(cwd: &std::path::Path) -> String {
     const MAX_STATUS_LINES: usize = 10;
 
     let mut lines = Vec::new();
-    lines.push(format!(
-        "- date: {}",
-        chrono_free_date_string()
-    ));
+    lines.push(format!("- date: {}", chrono_free_date_string()));
     lines.push(format!("- os: {}", std::env::consts::OS));
 
     let git = |args: &[&str]| -> Option<String> {
@@ -186,10 +183,11 @@ fn build_environment_snapshot(cwd: &std::path::Path) -> String {
             .current_dir(cwd)
             .output()
             .ok()?;
-        output
-            .status
-            .success()
-            .then(|| String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+        output.status.success().then(|| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim_end()
+                .to_string()
+        })
     };
 
     if let Some(branch) = git(&["rev-parse", "--abbrev-ref", "HEAD"]) {
@@ -205,10 +203,7 @@ fn build_environment_snapshot(cwd: &std::path::Path) -> String {
                     rendered.push_str(&format!("\n  {line}"));
                 }
                 if total > MAX_STATUS_LINES {
-                    rendered.push_str(&format!(
-                        "\n  ... and {} more",
-                        total - MAX_STATUS_LINES
-                    ));
+                    rendered.push_str(&format!("\n  ... and {} more", total - MAX_STATUS_LINES));
                 }
                 lines.push(rendered);
             }
@@ -273,13 +268,10 @@ fn build_model_backend(
                     )
                 })?;
             Ok(Box::new(
-                braze_model::AnthropicBackend::new(
-                    api_key.expose_secret().to_string(),
-                    model_name,
-                )
-                // v8 § 5: mismo knob que el brazo OpenRouter de abajo —
-                // el caching directo de Anthropic existe desde hoy.
-                .with_prompt_caching_enabled(config.enable_prompt_caching),
+                braze_model::AnthropicBackend::new(api_key.expose_secret().to_string(), model_name)
+                    // v8 § 5: mismo knob que el brazo OpenRouter de abajo —
+                    // el caching directo de Anthropic existe desde hoy.
+                    .with_prompt_caching_enabled(config.enable_prompt_caching),
             ))
         }
         "ollama" => {
@@ -804,6 +796,66 @@ async fn build_engine(
     Ok((engine, status_line, project_memory_hook))
 }
 
+/// `braze tune <modelo>` — corre el auto-fit y reporta el reparto de capas
+/// sin cargar los pesos para inferencia. Ni engine ni backend: el probe del
+/// fit usa `no_alloc`.
+#[cfg(feature = "local")]
+fn run_tune(model: &str, n_ctx: u32, emit_config: Option<&str>) -> Result<(), CliError> {
+    let root = std::env::var("BRAZE_OLLAMA_MODELS_ROOT")
+        .unwrap_or_else(|_| "/usr/share/ollama/.ollama".to_string());
+    let gguf = braze_model::resolve_local_gguf(model, &root)
+        .map_err(|e| CliError::Startup(format!("tune: {e}")))?;
+    let report = braze_model::tune_model(&gguf, n_ctx)
+        .map_err(|e| CliError::Startup(format!("tune: {e}")))?;
+
+    println!("modelo       {}", report.gguf.display());
+    println!("n_ctx        {}", report.n_ctx);
+    println!(
+        "capas a GPU  {} ({}, margen {} MiB)",
+        report.n_gpu_layers, report.source, report.margin_mib
+    );
+    match report.n_gpu_layers {
+        0 => println!(
+            "\nCPU puro — o el binario no tiene soporte de GPU, o no entró \
+             ninguna capa en la VRAM libre."
+        ),
+        // Convención de llama.cpp: negativo = todas las capas. No se puede
+        // fijar tal cual porque BRAZE_LOCAL_GPU_LAYERS parsea un u32; un
+        // valor grande produce el mismo efecto (llama.cpp lo capa al total).
+        n if n < 0 => println!(
+            "\nEl modelo entero entró en la GPU. Para fijarlo:\n  \
+             export BRAZE_LOCAL_GPU_LAYERS=999"
+        ),
+        n => println!(
+            "\nPara fijar este reparto y saltarte el fit en cada carga:\n  \
+             export BRAZE_LOCAL_GPU_LAYERS={n}"
+        ),
+    }
+
+    if let Some(path) = emit_config {
+        let toml = report.to_toml();
+        if path == "-" {
+            println!("\n{toml}");
+        } else {
+            std::fs::write(path, &toml).map_err(|e| {
+                CliError::Startup(format!("tune: no se pudo escribir '{path}': {e}"))
+            })?;
+            println!("\nconfig escrita en {path}");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "local"))]
+#[allow(clippy::needless_pass_by_value)]
+fn run_tune(_model: &str, _n_ctx: u32, _emit_config: Option<&str>) -> Result<(), CliError> {
+    Err(CliError::Startup(
+        "`braze tune` requiere compilar con `--features local` (compila \
+         llama.cpp; ver docs/local-backend-design-2026-07-20.md)"
+            .to_string(),
+    ))
+}
+
 /// E′ I.8: `braze permissions suggest` — reads every session log under
 /// `config.session_dir`, aggregates the permission decisions, and prints
 /// the ranking. Read-only; no engine, no model.
@@ -859,6 +911,17 @@ async fn run() -> Result<(), CliError> {
         return run_permissions(action, &config).await;
     }
 
+    // `tune` tampoco necesita engine ni backend: solo corre el auto-fit
+    // contra la VRAM y reporta. Se despacha acá, antes de construir nada.
+    if let Command::Tune {
+        model,
+        n_ctx,
+        emit_config,
+    } = &cli.command
+    {
+        return run_tune(model, *n_ctx, emit_config.as_deref());
+    }
+
     // Resolved early, before the model backend/guards/tools are built, so
     // both `build_permission_guard` (for `--resume` replay) and
     // `Engine::new` can share the exact same session id and `SessionStore`
@@ -874,6 +937,8 @@ async fn run() -> Result<(), CliError> {
         Command::Chat { resume: None, .. } => SessionId::new(),
         // `Permissions` is dispatched and returned above, before this.
         Command::Permissions { .. } => unreachable!("handled by run_permissions"),
+        // Idem `Tune`: dispatched and returned above.
+        Command::Tune { .. } => unreachable!("handled by run_tune"),
     };
 
     // `--backend` is applied first so that a bare `--model` (with no
@@ -1180,9 +1245,9 @@ async fn run() -> Result<(), CliError> {
                         // Same channel the startup engine's `ask_user`
                         // sends into — the rebuilt engine's questions
                         // land in the same overlay.
-                        Some(std::sync::Arc::new(
-                            braze_tui::ChannelQuestionPrompt::new(question_tx.clone()),
-                        )),
+                        Some(std::sync::Arc::new(braze_tui::ChannelQuestionPrompt::new(
+                            question_tx.clone(),
+                        ))),
                     )
                     .await
                     // El engine reconstruido registra su propio hook de
@@ -1258,6 +1323,7 @@ async fn run() -> Result<(), CliError> {
         }
         // Dispatched and returned at the top of `run()`.
         Command::Permissions { .. } => unreachable!("handled by run_permissions"),
+        Command::Tune { .. } => unreachable!("handled by run_tune"),
     }
 
     // v8 K-8: los saves de la memoria de proyecto corren en una task en
@@ -1278,10 +1344,7 @@ mod tests {
     /// best-effort by design, never a startup failure.
     #[test]
     fn the_environment_snapshot_degrades_gracefully_without_git() {
-        let dir = std::env::temp_dir().join(format!(
-            "braze-cli-env-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("braze-cli-env-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
         let snapshot = build_environment_snapshot(&dir);

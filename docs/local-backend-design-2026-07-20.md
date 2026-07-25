@@ -444,6 +444,84 @@ con un build dir cacheado hace que `build.rs` busque `.a` donde hay `.so` y
 reviente con `assert_ne!(llama_libs.len(), 0)`, que no se parece en nada a la
 causa real.
 
+## Caché de modelo cargado (2026-07-25)
+
+Sale de una observación del sweep de gemma-12B: la VRAM caía a ~177 MiB entre
+tareas y volvía a ~4.7GB en cada una. braze-bench crea un `LocalBackend` por
+tarea, así que un sweep de 57 tareas pagaba **57 veces** el probe del auto-fit
+(que carga el modelo con `no_alloc`) **más** 57 recargas del GGUF completo con
+su re-subida de capas a la GPU.
+
+**Por qué se cachea el modelo y no el fit.** Cachear solo el resultado del fit
+no alcanza: además de `n_gpu_layers`, `fit_params` deja `tensor_split` y
+`tensor_buft_overrides` dentro del struct de params, y los overrides son
+punteros crudos a memoria que ese struct posee (son los que mandan los
+expertos MoE a RAM — lo que le dio a gpt-oss el modelo entero en GPU). No hay
+forma portable de leerlos y re-aplicarlos. Cachear el `LlamaModel` ya cargado
+resuelve las dos cosas de una, y es semánticamente seguro: los pesos son
+read-only (por eso ya viajaban en `Arc`) y el contexto se sigue creando fresco
+por generación, así que no se comparte estado de inferencia entre tareas.
+
+**Diseño**: `MODEL_CACHE` de capacidad **1**, con eviction antes de cargar el
+reemplazo — dos modelos de 6-12GB vivos a la vez revientan la RAM/VRAM de
+Nitro, que es justo el fallo que el auto-fit vino a eliminar. La clave es
+`(ruta canonicalizada, n_ctx, snapshot de las 6 env vars que el fit consulta)`:
+cambiar `BRAZE_LOCAL_GPU_LAYERS` o el margen fuerza recarga en vez de devolver
+un modelo repartido con la configuración anterior. El lock se sostiene durante
+la carga a propósito, para que dos hilos pidiendo el mismo modelo no carguen
+un duplicado. Kill-switch: `BRAZE_LOCAL_MODEL_CACHE=off`.
+
+**Caveat metodológico, importante para el bench**: con el caché activo solo la
+primera tarea de un brazo paga la carga, así que el `wall_time_ms` promedio
+**deja de ser comparable** contra sweeps anteriores. Para reproducir números
+viejos hay que pasar `BRAZE_LOCAL_MODEL_CACHE=off`.
+
+**Estado**: implementado y con tests unitarios (la clave distingue modelo y
+contexto), pero **sin verificación en vivo todavía** — requiere braze-bench con
+varias tareas en un proceso, y Nitro estaba ocupado con el sweep de gemma-12B
+cuando se escribió esto. Verificar antes de confiar en él para un sweep.
+
+## `braze tune` (2026-07-25)
+
+Idea **#8** de la auditoría, construida sobre el auto-fit: corre el fit contra
+un GGUF y reporta el reparto **sin cargar los pesos para inferencia** (el probe
+usa `no_alloc`, así que es barato). Su valor es *fitear una vez y fijar el
+número*: exportando el `BRAZE_LOCAL_GPU_LAYERS` que imprime, un sweep se ahorra
+el fit por tarea y queda reproducible en vez de re-adivinado — que era
+exactamente el dolor "reproducibilidad, re-adivinar" de la tabla.
+
+```
+braze tune ~/models/gpt-oss-20b-MXFP4.gguf --n-ctx 8192
+braze tune qwen2.5:3b --emit-config fit.toml   # ref de Ollama tambien sirve
+```
+
+`--emit-config` escribe TOML (o a stdout con `-`). **braze no lee ese
+archivo**: es un registro reproducible del fit, y los comentarios mapean cada
+valor a su variable de entorno, que es la vía de consumo real. Se decidió así
+para no meter plumbing de config nuevo por una feature cuyo valor es el número.
+
+Requiere `--features local`; sin él el subcomando existe pero devuelve el mismo
+error explicativo que el backend `local`.
+
+### Bug cazado por verificarlo en vivo
+
+La primera corrida de `tune` en la máquina **sin GPU** reportó `capas a GPU -1`
+y "el modelo entero entró en la GPU" — falso. Sin device, `common_fit_params`
+no toca `n_gpu_layers` y lo deja en su default `-1`, que significa "todas las
+que quepan"… o sea **cero** cuando no hay ninguna.
+
+El mensaje engañoso era lo de menos. `kv_on_host()` trata cualquier valor
+distinto de 0 como "hay offload", así que en CPU puro se estaba activando el
+`n_ubatch=128` y el `offload_kqv(false)` pensados para cuidar VRAM —
+**frenando el prefill en una máquina donde no hay VRAM que cuidar**, justo el
+perfil del i7 sin GPU de Claudio.
+
+Corregido normalizando el `-1` a `0` cuando `supports_gpu_offload()` es falso.
+En Nitro el `-1` de qwen2.5:3b sigue siendo legítimo (ahí sí caben todas), así
+que la normalización solo actúa donde corresponde. Es un caso de manual de por
+qué en este proyecto compilar ≠ funcionar: el bug pasó clippy, 217 tests y un
+sweep entero en GPU sin manifestarse, porque solo aparece sin GPU.
+
 ## Referencias
 
 - Spike: `scratchpad/braze-local-spike/` (throwaway, fuera del workspace).
