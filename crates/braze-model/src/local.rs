@@ -33,12 +33,14 @@ use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 
-use crate::args_repair::{parse_arguments_with_repair, ArgumentsOutcome};
+use crate::args_repair::{ArgumentsOutcome, parse_arguments_with_repair};
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
 use crate::gemma::{build_gemma_prompt, render_tools_preamble};
-use crate::harmony::{build_harmony_prompt, utc_date_string, HarmonyEvent, HarmonyMarker, HarmonyParser};
-use crate::stencil::{harmony_args_grammar, qwen_call_grammar, JsonCursor, ToolGrammarSpec};
+use crate::harmony::{
+    HarmonyEvent, HarmonyMarker, HarmonyParser, build_harmony_prompt, utc_date_string,
+};
+use crate::stencil::{JsonCursor, ToolGrammarSpec, harmony_args_grammar, qwen_call_grammar};
 
 /// Mapea el valor de `BRAZE_LOCAL_KV_TYPE` a un [`KvCacheType`]. Solo los
 /// tipos que llama.cpp acepta para el KV cache (los k-quants por-bloque no
@@ -54,6 +56,219 @@ fn parse_kv_cache_type(s: &str) -> Option<KvCacheType> {
         "q4_0" => Some(KvCacheType::Q4_0),
         _ => None,
     }
+}
+
+/// Micro-batch FÍSICO del contexto (`BRAZE_LOCAL_UBATCH`). El buffer de
+/// prompt-processing lo dimensiona `n_ubatch` × contexto y vive en VRAM; con
+/// el default de llama.cpp (512) crece hasta reventar los 6GB al llenarse el
+/// contexto. Ollama usa micro-batches chicos (VRAM plana) y lo replicamos.
+fn ubatch_setting() -> u32 {
+    std::env::var("BRAZE_LOCAL_UBATCH")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|&u| u > 0)
+        .unwrap_or(128)
+}
+
+/// ¿El KV cache vive en la RAM del host en vez de la VRAM? Sin esto, el KV
+/// de las capas offloadeadas crece con el contexto y revienta la VRAM a
+/// mitad de una sesión agéntica (OOM en la 2ª ronda, observado con
+/// gpt-oss:20b en la RTX 3050 de 6GB). Kill-switch
+/// `BRAZE_LOCAL_KV_OFFLOAD=gpu` restaura el default de llama.cpp.
+fn kv_on_host(gpu_layers: i32) -> bool {
+    gpu_layers != 0 && std::env::var("BRAZE_LOCAL_KV_OFFLOAD").as_deref() != Ok("gpu")
+}
+
+/// Arma los `LlamaContextParams` de generación. Lo usan DOS lados que deben
+/// coincidir: la creación real del contexto y el probe del auto-fit. Si el
+/// probe midiera con otros parámetros, el fit repartiría capas contra un
+/// consumo de VRAM que no es el que la generación va a tener realmente.
+fn build_ctx_params(
+    n_ctx: u32,
+    gpu_layers: i32,
+    kv_type: Option<KvCacheType>,
+) -> LlamaContextParams {
+    let n_batch_max = n_ctx.max(256);
+    let mut params =
+        LlamaContextParams::default().with_n_ctx(std::num::NonZeroU32::new(n_batch_max));
+    if kv_on_host(gpu_layers) {
+        let ubatch = ubatch_setting();
+        params = params
+            .with_offload_kqv(false)
+            .with_n_ubatch(ubatch)
+            // `n_batch` (batch LÓGICO) cubre el prompt entero (braze lo
+            // decodifica en chunks, si no `GGML_ASSERT n_tokens_all <= n_batch`).
+            .with_n_batch(n_batch_max.max(ubatch));
+    }
+    if let Some(t) = kv_type {
+        params = params.with_type_k(t).with_type_v(t);
+    }
+    params
+}
+
+/// `GGML_LOG_LEVEL_WARN`. `ggml_log_level` es un alias de `c_uint` en los
+/// bindings y `llama-cpp-2` no re-exporta el crate `-sys`, así que el nivel
+/// viaja como literal: los `LOG_INF`/`LOG_TRC` del fitting caen a debug y no
+/// ensucian la TUI (nuestra propia traza del resultado dice lo que importa).
+const FIT_LOG_LEVEL: u32 = 3;
+
+/// Margen de memoria que el auto-fit deja libre por device.
+/// Default = 1 GiB, el mismo de llama.cpp upstream (`fit_params_target`);
+/// override con `BRAZE_LOCAL_VRAM_MARGIN_MB` para exprimir o ser más
+/// conservador según la tarjeta.
+fn fit_margin_bytes() -> usize {
+    const DEFAULT_MARGIN_MIB: usize = 1024;
+    let mib = std::env::var("BRAZE_LOCAL_VRAM_MARGIN_MB")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MARGIN_MIB);
+    mib * 1024 * 1024
+}
+
+/// `common_fit_params` **no es thread-safe** (muta el logger global de
+/// llama.cpp mientras corre). braze-bench crea un `LocalBackend` por tarea,
+/// así que serializamos los fits entre sí.
+static FIT_LOCK: Mutex<()> = Mutex::new(());
+
+/// De dónde salió el `n_gpu_layers` con el que se cargó el modelo. Se traza
+/// para que un sweep pueda distinguir "el auto-fit eligió 24" de "el usuario
+/// pidió 24" sin releer el entorno.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GpuLayersSource {
+    /// `BRAZE_LOCAL_GPU_LAYERS` explícito — el usuario manda.
+    Explicit,
+    /// El auto-fit de llama.cpp repartió capas contra la VRAM libre.
+    AutoFit,
+    /// Auto-fit apagado (`BRAZE_LOCAL_AUTOFIT=off`) → CPU puro.
+    Disabled,
+    /// El auto-fit falló; se degradó a CPU en vez de crashear.
+    FitFailed,
+}
+
+/// Resuelve `n_gpu_layers` y devuelve los `LlamaModelParams` listos para
+/// cargar. El auto-fit (idea #1 de `docs/inference-runtimes-audit-2026-07-25.md`)
+/// delega en `common_fit_params` de libcommon — el MISMO algoritmo que usa
+/// `llama-cli` con `--fit` (default upstream: `fit_params = true`): mide la
+/// VRAM libre por device con un probe `no_alloc`, llena capas densas
+/// back-to-front dejando el margen, y manda los tensores MoE sobrantes a
+/// RAM vía `tensor_buft_overrides`.
+///
+/// Sustituye al `BRAZE_LOCAL_GPU_LAYERS` adivinado a mano: ese número, si se
+/// pasaba de largo, no daba un error legible sino un OOM de CUDA que mata el
+/// proceso a mitad de sweep.
+///
+/// Precedencia: env explícito > auto-fit > CPU. Cualquier fallo del fit
+/// degrada a CPU puro con un warn (filosofía degrade-not-crash del proyecto).
+fn resolve_model_params(
+    gguf: &Path,
+    n_ctx: u32,
+) -> (Pin<Box<LlamaModelParams>>, i32, GpuLayersSource) {
+    // El env explícito gana siempre: es el escape hatch y el brazo de
+    // ablación del bench.
+    if let Some(n) = std::env::var("BRAZE_LOCAL_GPU_LAYERS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+    {
+        let layers = i32::try_from(n).unwrap_or(i32::MAX);
+        let params = Box::pin(LlamaModelParams::default().with_n_gpu_layers(n));
+        tracing::info!(
+            gpu_layers = layers,
+            "local: n_gpu_layers explícito (BRAZE_LOCAL_GPU_LAYERS) — auto-fit omitido"
+        );
+        return (params, layers, GpuLayersSource::Explicit);
+    }
+
+    if std::env::var("BRAZE_LOCAL_AUTOFIT").as_deref() == Ok("off") {
+        tracing::info!("local: auto-fit desactivado (BRAZE_LOCAL_AUTOFIT=off) — CPU puro");
+        return (
+            Box::pin(LlamaModelParams::default().with_n_gpu_layers(0u32)),
+            0,
+            GpuLayersSource::Disabled,
+        );
+    }
+
+    let Some(path_str) = gguf.to_str() else {
+        tracing::warn!(
+            path = %gguf.display(),
+            "local: ruta del GGUF no es UTF-8 — auto-fit omitido, CPU puro"
+        );
+        return (
+            Box::pin(LlamaModelParams::default().with_n_gpu_layers(0u32)),
+            0,
+            GpuLayersSource::FitFailed,
+        );
+    };
+    let Ok(c_path) = std::ffi::CString::new(path_str) else {
+        tracing::warn!("local: ruta del GGUF con byte nulo — auto-fit omitido, CPU puro");
+        return (
+            Box::pin(LlamaModelParams::default().with_n_gpu_layers(0u32)),
+            0,
+            GpuLayersSource::FitFailed,
+        );
+    };
+
+    // El probe mide con los cparams REALES de generación. `gpu_layers = 1`
+    // como sonda: le dice al fit "va a haber offload", que es lo que decide
+    // si el KV vive en host. Si el fit termina asignando 0 capas la
+    // generación tampoco usará VRAM, así que la cuenta sigue siendo válida.
+    let kv_type = std::env::var("BRAZE_LOCAL_KV_TYPE")
+        .ok()
+        .and_then(|kv| parse_kv_cache_type(&kv));
+
+    // Dos intentos: con el KV pedido y, si falla, con f16. El KV cuantizado
+    // requiere flash-attn, que gpt-oss/Harmony NO soporta — sin este
+    // reintento un `BRAZE_LOCAL_KV_TYPE` no soportado haría fracasar el fit
+    // y perderíamos la GPU entera por una palanca ortogonal.
+    let attempts: &[Option<KvCacheType>] = if kv_type.is_some() {
+        &[kv_type, None]
+    } else {
+        &[None]
+    };
+
+    let margin = fit_margin_bytes();
+    for (attempt, kv) in attempts.iter().enumerate() {
+        let mut params = Box::pin(LlamaModelParams::default());
+        let mut cparams = build_ctx_params(n_ctx, 1, *kv);
+        let mut margins = vec![margin; llama_cpp_2::max_devices().max(1)];
+        let result = {
+            let _guard = FIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            params
+                .as_mut()
+                .fit_params(&c_path, &mut cparams, &mut margins, n_ctx, FIT_LOG_LEVEL)
+        };
+        match result {
+            Ok(fit) => {
+                let layers = params.n_gpu_layers();
+                tracing::info!(
+                    gpu_layers = layers,
+                    fitted_n_ctx = fit.n_ctx,
+                    margin_mib = margin / (1024 * 1024),
+                    kv_quantized = kv.is_some(),
+                    "local: auto-fit resolvió el offload a GPU contra la VRAM libre"
+                );
+                return (params, layers, GpuLayersSource::AutoFit);
+            }
+            Err(e) if attempt + 1 < attempts.len() => {
+                tracing::warn!(
+                    error = %e,
+                    "local: auto-fit falló con KV cuantizado; reintentando con f16"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "local: auto-fit falló — se carga en CPU puro (degradar, no crashear). \
+                     Forzar capas con BRAZE_LOCAL_GPU_LAYERS si la GPU sí sirve."
+                );
+            }
+        }
+    }
+
+    (
+        Box::pin(LlamaModelParams::default().with_n_gpu_layers(0u32)),
+        0,
+        GpuLayersSource::FitFailed,
+    )
 }
 
 // El preámbulo de tools de las familias textuales (formato nativo de
@@ -86,7 +301,10 @@ fn detect_family(model: &LlamaModel, label: &str) -> ChatFamily {
         Some("chatml") => return ChatFamily::ChatMl,
         Some("gemma") => return ChatFamily::Gemma,
         Some(other) => {
-            tracing::warn!(family = other, "BRAZE_LOCAL_FAMILY desconocida; autodetectando");
+            tracing::warn!(
+                family = other,
+                "BRAZE_LOCAL_FAMILY desconocida; autodetectando"
+            );
         }
         None => {}
     }
@@ -157,6 +375,13 @@ pub struct LocalBackend {
     family: ChatFamily,
     /// `Some` sólo para la familia Harmony.
     harmony: Option<HarmonyTokenIds>,
+    /// Capas offloadeadas a GPU con las que se CARGÓ el modelo (convención
+    /// de llama.cpp: 0 = CPU puro, negativo = todas). Se resuelve una vez al
+    /// cargar y viaja al hilo de generación, que necesita el mismo número
+    /// para decidir dónde vive el KV cache — releerlo del entorno ahí
+    /// permitiría que el contexto se arme contra una realidad distinta a la
+    /// que se midió al cargar.
+    gpu_layers: i32,
 }
 
 /// `LlamaBackend::init()` inicializa estado GLOBAL de llama.cpp y sólo
@@ -202,16 +427,12 @@ impl LocalBackend {
             )));
         }
         let backend = shared_llama_backend()?;
-        // n_gpu_layers: 0 = CPU puro (default). Con el binario compilado
-        // con el feature `cuda` y una GPU disponible,
-        // `BRAZE_LOCAL_GPU_LAYERS=N` offloada N capas a la GPU (un valor
-        // grande como 999 = todas las que quepan). Sin CUDA el valor se
-        // ignora silenciosamente (llama.cpp corre en CPU igual).
-        let gpu_layers = std::env::var("BRAZE_LOCAL_GPU_LAYERS")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(0);
-        let params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
+        // Cuántas capas van a la GPU lo decide `resolve_model_params`:
+        // auto-fit contra la VRAM libre por default, `BRAZE_LOCAL_GPU_LAYERS`
+        // si el usuario fija el número a mano. En un binario sin CUDA no hay
+        // devices GPU que medir y el fit devuelve 0 capas → CPU puro, el
+        // mismo comportamiento que antes de la palanca.
+        let (params, gpu_layers, layers_source) = resolve_model_params(gguf.as_ref(), n_ctx);
         let model = LlamaModel::load_from_file(&backend, gguf.as_ref(), &params).map_err(|e| {
             ModelError::Request(format!(
                 "failed to load GGUF '{}': {e}",
@@ -224,7 +445,13 @@ impl LocalBackend {
             ChatFamily::Harmony => Some(HarmonyTokenIds::resolve(&model)?),
             ChatFamily::ChatMl | ChatFamily::Gemma => None,
         };
-        tracing::info!(model = %model_label, ?family, "local backend loaded");
+        tracing::info!(
+            model = %model_label,
+            ?family,
+            gpu_layers,
+            ?layers_source,
+            "local backend loaded"
+        );
         Ok(Self {
             backend,
             model: Arc::new(model),
@@ -232,6 +459,7 @@ impl LocalBackend {
             n_ctx,
             family,
             harmony,
+            gpu_layers,
         })
     }
 
@@ -279,12 +507,12 @@ fn resolve_ollama_gguf(root: &Path, model_ref: &str) -> Result<PathBuf, ModelErr
         .and_then(|layer| layer.get("digest"))
         .and_then(|d| d.as_str())
         .ok_or_else(|| {
-            ModelError::Request(format!("el manifest de '{model_ref}' no tiene capa de modelo"))
+            ModelError::Request(format!(
+                "el manifest de '{model_ref}' no tiene capa de modelo"
+            ))
         })?;
     // Ollama nombra los blobs con `-` en vez de `:`.
-    let blob = root
-        .join("models/blobs")
-        .join(digest.replace(':', "-"));
+    let blob = root.join("models/blobs").join(digest.replace(':', "-"));
     if !blob.exists() {
         return Err(ModelError::Request(format!(
             "el blob GGUF no existe: {}",
@@ -433,6 +661,18 @@ fn emit_harmony_event(
     }
 }
 
+/// Los knobs numéricos del turno de generación. Agrupados por la misma
+/// razón que [`FamilyRuntime`]: `generate_blocking` acumulaba parámetros
+/// sueltos. `gpu_layers` viaja acá (y no se relee del entorno) para que el
+/// contexto se arme contra el MISMO reparto de capas que midió el auto-fit
+/// al cargar el modelo.
+#[derive(Debug, Clone, Copy)]
+struct GenParams {
+    n_ctx: u32,
+    max_tokens: u32,
+    gpu_layers: i32,
+}
+
 /// Genera de forma bloqueante y empuja eventos por `tx`. Corre en un hilo
 /// de `spawn_blocking`. Convención de error: cualquier fallo se manda
 /// como `Err` por el canal (el stream lo propaga como `StreamError`).
@@ -446,11 +686,15 @@ fn generate_blocking(
     backend: &LlamaBackend,
     model: &LlamaModel,
     prompt: &str,
-    n_ctx: u32,
-    max_tokens: u32,
+    gen_params: GenParams,
     family: &FamilyRuntime,
     tx: &tokio::sync::mpsc::Sender<Result<CompletionEvent, ModelError>>,
 ) {
+    let GenParams {
+        n_ctx,
+        max_tokens,
+        gpu_layers,
+    } = gen_params;
     let (harmony, tools) = match family {
         FamilyRuntime::Harmony { ids, tools } => (Some(ids), tools.as_slice()),
         FamilyRuntime::ChatMl { tools } => (None, tools.as_slice()),
@@ -462,45 +706,6 @@ fn generate_blocking(
         }};
     }
 
-    let n_batch_max = n_ctx.max(256);
-    let n_ctx = std::num::NonZeroU32::new(n_batch_max);
-    let mut ctx_params = LlamaContextParams::default().with_n_ctx(n_ctx);
-    // Offload parcial a GPU: mantener el KV cache en el HOST (RAM), no en la
-    // VRAM. Sin esto, el KV de las capas offloadeadas crece con el contexto y
-    // revienta la VRAM a mitad de una sesión agéntica (OOM en la 2ª ronda,
-    // observado con gpt-oss:20b en la RTX 3050 de 6GB). Ollama hace justo
-    // esto —VRAM plana ~4,7GB a cualquier num_ctx— por eso corre el mismo
-    // modelo en la misma máquina sin crashear. Kill-switch
-    // `BRAZE_LOCAL_KV_OFFLOAD=gpu` restaura el default de llama.cpp (KV en
-    // VRAM) para quien tenga VRAM de sobra y quiera el KV en GPU.
-    let gpu_layers = std::env::var("BRAZE_LOCAL_GPU_LAYERS")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(0);
-    let kv_on_host =
-        gpu_layers > 0 && std::env::var("BRAZE_LOCAL_KV_OFFLOAD").as_deref() != Ok("gpu");
-    // Micro-batch chico (`BRAZE_LOCAL_UBATCH`): el buffer de prompt-processing
-    // lo dimensiona `n_ubatch` (batch FÍSICO) × contexto y vive en VRAM; con el
-    // default (512) crece hasta reventar los 6GB al llenarse el contexto —
-    // Ollama usa micro-batches chicos (VRAM plana) y lo replicamos. `n_batch`
-    // (batch LÓGICO) cubre el prompt entero (braze lo decodifica de una, si no
-    // `GGML_ASSERT(n_tokens_all <= n_batch)`).
-    let ubatch = std::env::var("BRAZE_LOCAL_UBATCH")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
-        .filter(|&u| u > 0)
-        .unwrap_or(128);
-    if kv_on_host {
-        ctx_params = ctx_params
-            .with_offload_kqv(false)
-            .with_n_ubatch(ubatch)
-            .with_n_batch(n_batch_max.max(ubatch));
-        tracing::info!(
-            gpu_layers,
-            ubatch,
-            "local: KV en host + micro-batch chico para mantener la VRAM plana"
-        );
-    }
     // KV cache cuantizado (`BRAZE_LOCAL_KV_TYPE=q8_0|q4_0|q5_0|q5_1|q4_1`, idea
     // #2 de `docs/inference-runtimes-audit-2026-07-25.md`): baja el footprint
     // del KV (RAM host, o VRAM con `BRAZE_LOCAL_KV_OFFLOAD=gpu` → más capas).
@@ -515,10 +720,21 @@ fn generate_blocking(
             None
         })
     });
-    if let Some(t) = requested_kv {
-        ctx_params = ctx_params.with_type_k(t).with_type_v(t);
+    // `gpu_layers` viene resuelto de la carga (auto-fit o env explícito), NO
+    // del entorno: el contexto tiene que armarse contra el mismo reparto de
+    // capas que se midió al cargar el modelo.
+    let ctx_params = build_ctx_params(n_ctx, gpu_layers, requested_kv);
+    if kv_on_host(gpu_layers) {
+        tracing::info!(
+            gpu_layers,
+            ubatch = ubatch_setting(),
+            "local: KV en host + micro-batch chico para mantener la VRAM plana"
+        );
+    }
+    if requested_kv.is_some() {
         tracing::info!("local: KV cache cuantizado solicitado");
     }
+    let n_ctx = std::num::NonZeroU32::new(n_ctx.max(256));
     let mut ctx = match model.new_context(backend, ctx_params) {
         Ok(c) => c,
         Err(e) if requested_kv.is_some() => {
@@ -527,13 +743,11 @@ fn generate_blocking(
                 "local: crear contexto con KV cuantizado falló; reintentando con f16 \
                  (el KV cuantizado requiere flash-attn, no soportado por gpt-oss/Harmony)"
             );
-            let mut fb = LlamaContextParams::default().with_n_ctx(n_ctx);
-            if kv_on_host {
-                fb = fb
-                    .with_offload_kqv(false)
-                    .with_n_ubatch(ubatch)
-                    .with_n_batch(n_batch_max.max(ubatch));
-            }
+            let fb = build_ctx_params(
+                n_ctx.map_or(256, std::num::NonZeroU32::get),
+                gpu_layers,
+                None,
+            );
             match model.new_context(backend, fb) {
                 Ok(c) => c,
                 Err(e2) => bail!("local: no se pudo crear el contexto (ni con f16): {e2}"),
@@ -689,10 +903,7 @@ fn generate_blocking(
                             sampler = s;
                             constrained = true;
                             args_cursor = JsonCursor::new();
-                            tracing::info!(
-                                tool,
-                                "stencil: constraint de args harmony activado"
-                            );
+                            tracing::info!(tool, "stencil: constraint de args harmony activado");
                         }
                     }
                     // Cierre de mensaje con el constraint aún puesto
@@ -760,9 +971,7 @@ fn generate_blocking(
                             } else if constrained && tail.ends_with("</tool_call>") {
                                 sampler = LlamaSampler::greedy();
                                 constrained = false;
-                                tracing::info!(
-                                    "stencil: envelope cerrado — constraint liberado"
-                                );
+                                tracing::info!("stencil: envelope cerrado — constraint liberado");
                             }
                         }
                     }
@@ -827,8 +1036,8 @@ impl ModelBackend for LocalBackend {
                 // Esfuerzo de razonamiento del system message de gpt-oss.
                 // Default `medium` = el default del template de Ollama
                 // (paridad del A/B); override por env para el bench.
-                let reasoning = std::env::var("BRAZE_LOCAL_REASONING")
-                    .unwrap_or_else(|_| "medium".to_string());
+                let reasoning =
+                    std::env::var("BRAZE_LOCAL_REASONING").unwrap_or_else(|_| "medium".to_string());
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| i64::try_from(d.as_secs()).unwrap_or(0))
@@ -848,6 +1057,7 @@ impl ModelBackend for LocalBackend {
         let model = Arc::clone(&self.model);
         let n_ctx = self.n_ctx;
         let max_tokens = req.max_tokens;
+        let gpu_layers = self.gpu_layers;
         // Para las gramáticas del stencil: nombre + input_schema de cada
         // tool del turno (los schemas derivan las gramáticas de args).
         let tools: Vec<ToolGrammarSpec> = req
@@ -871,7 +1081,12 @@ impl ModelBackend for LocalBackend {
         // generación corta (cancelación cooperativa).
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<CompletionEvent, ModelError>>(32);
         tokio::task::spawn_blocking(move || {
-            generate_blocking(&backend, &model, &prompt, n_ctx, max_tokens, &family_rt, &tx);
+            let gen_params = GenParams {
+                n_ctx,
+                max_tokens,
+                gpu_layers,
+            };
+            generate_blocking(&backend, &model, &prompt, gen_params, &family_rt, &tx);
         });
 
         let stream = futures::stream::unfold(rx, |mut rx| async move {
@@ -898,5 +1113,36 @@ mod tests {
         assert_eq!(parse_kv_cache_type("q3_k"), None);
         assert_eq!(parse_kv_cache_type("nonsense"), None);
         assert_eq!(parse_kv_cache_type(""), None);
+    }
+
+    #[test]
+    fn el_contexto_respeta_el_piso_de_256_tokens() {
+        let chico = build_ctx_params(64, 0, None);
+        assert_eq!(chico.n_ctx().map(std::num::NonZeroU32::get), Some(256));
+        let normal = build_ctx_params(4096, 0, None);
+        assert_eq!(normal.n_ctx().map(std::num::NonZeroU32::get), Some(4096));
+    }
+
+    #[test]
+    fn sin_capas_en_gpu_el_kv_se_queda_donde_llama_cpp_lo_pone() {
+        // 0 capas = CPU puro: no hay VRAM que cuidar, así que la palanca de
+        // KV-en-host no se activa pase lo que pase con el entorno.
+        assert!(!kv_on_host(0));
+        assert!(build_ctx_params(2048, 0, None).offload_kqv());
+    }
+
+    #[test]
+    fn el_kv_en_host_se_activa_exactamente_cuando_hay_offload_a_gpu() {
+        // La invariante que sostiene la palanca #1: el probe del auto-fit y
+        // la creación real del contexto consultan la MISMA decisión sobre
+        // dónde vive el KV. Si divergen, el fit reparte capas contra un
+        // consumo de VRAM que no es el real y volvemos a los OOM.
+        // `-1` (todas las capas, convención de llama.cpp) cuenta como
+        // offload: el `> 0` que había antes lo dejaba pasar como CPU.
+        for layers in [0, 1, 24, -1] {
+            let params = build_ctx_params(4096, layers, None);
+            assert_eq!(params.offload_kqv(), !kv_on_host(layers), "layers={layers}");
+            assert!(params.n_batch() >= params.n_ubatch(), "layers={layers}");
+        }
     }
 }

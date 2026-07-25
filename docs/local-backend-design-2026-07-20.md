@@ -369,6 +369,81 @@ schema** (json-schema → GBNF por tool). El proceso destapó y corrigió 3
 bugs latentes de Fase 1 (double-accept, prompt>n_batch, token de
 control espurio) — ver el doc del sweep.
 
+## Auto-fit de `n_gpu_layers`: IMPLEMENTADO (2026-07-25)
+
+Palanca **#1** de `docs/inference-runtimes-audit-2026-07-25.md` — la que la
+auditoría marcó como de mayor impacto, y la única de las tres accionadas que
+efectivamente rindió (#2 KV-quant no ayuda a gpt-oss, #4 `-march` ya estaba
+resuelto).
+
+**Hallazgo que cambió el plan**: el plan era *portar* el greedy de
+`auto_device_map.rs` de mistral.rs o de `common/fit.cpp`. No hizo falta:
+`llama-cpp-2` **ya envuelve `common_fit_params`** de libcommon en
+`LlamaModelParams::fit_params` — el mismo algoritmo que corre `llama-cli
+--fit`, detrás del feature `common`, que está en los **default features** y
+por lo tanto ya venía compilado en braze. Costo de build: cero. Esto corrige
+la § 7 del doc de auditoría, que listaba solo los primitivos sueltos
+(`list_llama_ggml_backend_devices`, `buft_overrides`) y concluía "hay que
+construirlo"; en realidad el algoritmo entero está expuesto.
+
+**Qué hace** (`resolve_model_params` en `local.rs`): carga el modelo con
+`no_alloc=true` (probe sin pesos), mide VRAM libre por device, llena capas
+densas back-to-front dejando el margen, y manda los tensores MoE sobrantes a
+RAM vía `tensor_buft_overrides`.
+
+**Precedencia**: `BRAZE_LOCAL_GPU_LAYERS` explícito > auto-fit > CPU. El env
+sigue siendo el escape hatch y el brazo de ablación; `BRAZE_LOCAL_AUTOFIT=off`
+es el kill-switch. Cualquier fallo del fit degrada a CPU con un `warn`, nunca
+crashea. Margen por device configurable con `BRAZE_LOCAL_VRAM_MARGIN_MB`
+(default 1 GiB = el de llama.cpp upstream, cuyo `fit_params` también es
+`true` por default).
+
+**Verificado en vivo en Nitro (RTX 3050 6GB, 2026-07-25)**:
+
+- `qwen2.5:3b` → `gpu_layers=-1` (entero en GPU), `fitted_n_ctx=8192`.
+- `gpt-oss-20b-MXFP4` (12GB de pesos en una tarjeta de 6GB) → **25 capas**
+  (el modelo completo: 24 + output), pico de VRAM **4827 MiB de 6144**, sin
+  OOM. El valor que se venía adivinando a mano era **8/24**.
+- A/B de throughput con generación larga (el decode domina; walltime incluye
+  la carga, así que son cotas *inferiores* para el auto-fit):
+
+  | Config | Walltime | Chars | Chars/s |
+  |---|---|---|---|
+  | Auto-fit (25 capas) | 121s | 6405 | **52.9** |
+  | Manual 8 capas | 135s | 6066 | 44.9 |
+  | CPU (0 capas) | 173s | 6485 | 37.5 |
+
+  **+18% vs la adivinanza manual, +41% vs CPU.** n=1 por brazo y `chars` es
+  proxy de tokens — direccional, no un número de paper.
+
+**Dos interacciones que el diseño tuvo que cubrir** (ambas salieron de mirar
+el código, no de suponer):
+
+1. **El probe debe medir con los cparams reales.** El fit calcula contra un
+   contexto concreto; si el probe usara otros parámetros que la generación,
+   repartiría capas contra un consumo de VRAM que no es el real. Por eso
+   `build_ctx_params` es una sola función usada por ambos lados, y
+   `gpu_layers` viaja resuelto desde la carga hasta el hilo de generación en
+   `GenParams` en vez de releerse del entorno. Hay un test que fija la
+   invariante (`el_kv_en_host_se_activa_exactamente_cuando_hay_offload_a_gpu`).
+2. **KV-quant podía costar la GPU entera.** El KV cuantizado requiere
+   flash-attn, que gpt-oss/Harmony no soporta → el probe del fit falla al
+   crear su contexto. Sin cubrirlo, un `BRAZE_LOCAL_KV_TYPE` no soportado
+   hacía fracasar el fit y degradaba a CPU por una palanca ortogonal. El fit
+   reintenta con f16, igual que ya hacía la creación real del contexto.
+
+**Efecto colateral corregido**: la condición de KV-en-host era `gpu_layers >
+0` leyendo un `u32` del entorno. Con la convención de llama.cpp (`-1` = todas
+las capas) ese `> 0` trataba "todo en GPU" como CPU puro. Ahora es `!= 0`
+sobre un `i32`.
+
+**Nota de infra**: Nitro resuelve `llama-cpp-sys-2` **0.1.152** (la máquina de
+trabajo, 0.1.151); `fit_params` existe igual en ambas. El build en Nitro
+**exige** la receta completa de arriba — omitir `LLAMA_BUILD_SHARED_LIBS=1`
+con un build dir cacheado hace que `build.rs` busque `.a` donde hay `.so` y
+reviente con `assert_ne!(llama_libs.len(), 0)`, que no se parece en nada a la
+causa real.
+
 ## Referencias
 
 - Spike: `scratchpad/braze-local-spike/` (throwaway, fuera del workspace).

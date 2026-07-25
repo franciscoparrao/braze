@@ -17,10 +17,14 @@ que ya usamos expone los primitivos (verificado, § 7).
 
 1. **Auto-fit de capas GPU** — matar el `BRAZE_LOCAL_GPU_LAYERS` adivinado
    (que me costó el mis-diagnóstico de "techo de HW" y los 29/57 timeouts
-   del sweep gemma-4-12B). Existe como algoritmo greedy simple en DOS
-   fuentes: `mistralrs::tuning.rs`+`auto_device_map.rs` y
-   `llama.cpp::common/fit.cpp`. Los inputs (VRAM libre por device, bytes
-   por capa del GGUF, KV por token) los da `llama-cpp-2`. **Dolor #1.**
+   del sweep gemma-4-12B). **IMPLEMENTADO Y VERIFICADO EN VIVO (2026-07-25)**,
+   y fue **la única de las tres palancas accionadas que rindió**. No hubo que
+   portar el greedy de `mistralrs::tuning.rs` ni de `llama.cpp::common/fit.cpp`:
+   `llama-cpp-2` **ya envuelve `common_fit_params` entero** en
+   `LlamaModelParams::fit_params` (feature `common`, default → ya compilado).
+   En Nitro: gpt-oss-20b pasó de **8 capas adivinadas a 25** (modelo completo),
+   4827/6144 MiB sin OOM, **+18% de throughput vs. la adivinanza y +41% vs.
+   CPU**. **Dolor #1, cerrado.**
 2. **KV cuantizado (`q8_0`/`q4_0`)** — `with_type_k`/`with_type_v` YA están
    en `llama-cpp-2`. **IMPLEMENTADO Y VERIFICADO EN VIVO (2026-07-25, rama
    `local-kv-quant`)** vía `BRAZE_LOCAL_KV_TYPE`. **Hallazgo que corrige la
@@ -301,13 +305,25 @@ sobre el crate actual**, sin tocar el `-sys`. El único que requeriría más
 excavación es el **prefix-reuse/ContextShift** (`llama_kv_cache_seq_*`,
 `llama_state_seq_*`) — verificar su wrapper en `llama-cpp-2` antes de accionar.
 
+> **Corrección (2026-07-25, al implementar la idea #1).** Esta tabla se quedó
+> corta: lista los *primitivos* sueltos y concluye "hay que construir el
+> greedy". En realidad `llama-cpp-2` **ya envuelve el algoritmo completo** —
+> `LlamaModelParams::fit_params` es `common_fit_params` de libcommon (el mismo
+> que `llama-cli --fit`), detrás del feature `common`, que viene en los
+> **default features** y por lo tanto ya estaba compilado en braze. No hubo
+> que portar nada de mistral.rs ni de `fit.cpp`. Lección de método: la tabla
+> se armó grepeando nombres de símbolos; el wrapper de alto nivel no aparecía
+> porque estaba gateado por `#[cfg(feature = "common")]`. Implementación y
+> medición en `docs/local-backend-design-2026-07-20.md` § "Auto-fit de
+> `n_gpu_layers`".
+
 ---
 
 ## 8. Tabla maestra priorizada
 
 | # | Idea | Fuente(s) | Dolor | ¿Hoy? | ¿`llama-cpp-2` lo expone? | Esfuerzo |
 |---|---|---|---|---|---|---|
-| 1 | **Auto-fit `n_gpu_layers`** (greedy + headroom, degradar ctx/MoE) | mistral.rs `tuning.rs`, llama.cpp `fit.cpp` | capas manuales, OOM crashea | ✅ | ✅ (device mem + buft) | medio |
+| 1 | ~~**Auto-fit `n_gpu_layers`**~~ **HECHO 25-jul** (`fit_params`, no hubo que portar) | mistral.rs `tuning.rs`, llama.cpp `fit.cpp` | capas manuales, OOM crashea | ✅ | ✅ **envuelve `common_fit_params` entero** | bajo (real) |
 | 2 | **KV-quant `q8_0/q4_0` + flash-attn** | todos | throughput/VRAM 6GB | ✅ | ✅ | bajo |
 | 3 | **Evitar re-prefill** (ctx vivo / ContextShift) | vLLM, mistral, kobold | latencia loop agéntico / CPU | ✅ | ⚠️ verificar `seq_*` | medio |
 | 4 | **CPU `-march`/tinyBLAS + A/B F16 vs Q4** | llamafile | i7 sin GPU (Claudio) | ✅ | build flags | bajo (verif) |
@@ -329,12 +345,14 @@ excavación es el **prefix-reuse/ContextShift** (`llama_kv_cache_seq_*`,
 1. ~~#4 verificar `-march`~~ **VERIFICADO — no-problema**: el build ya lleva
    AVX2+FMA+F16C+BMI2+repack. Sin acción. (Queda opcional el A/B F16-vs-Q4 en
    CPU como dato de paper.)
-2. **#1 (auto-fit)** — ahora el siguiente natural: la de mayor impacto y el
-   **verdadero
-   acelerador de gpt-oss en 6GB** (más capas → menos CPU). Portar el greedy de
-   `fit.cpp`/`tuning.rs`; cierra el OOM-que-crashea y el `BRAZE_LOCAL_GPU_LAYERS`
-   adivinado. Los primitivos (`list_llama_ggml_backend_devices`,
-   `tensor_buft_overrides`) ya están en `llama-cpp-2`.
+2. ~~#1 auto-fit~~ **HECHO y verificado en vivo** (2026-07-25) — era, como se
+   esperaba, **el acelerador real de gpt-oss en 6GB**: la única de las tres
+   palancas accionadas que rindió. No hubo que portar nada: `llama-cpp-2` ya
+   envuelve `common_fit_params` (ver la corrección en § 7). En Nitro eligió
+   **25 capas** para gpt-oss-20b donde la adivinanza manual usaba 8, con pico
+   de 4827/6144 MiB y sin OOM; **+18% de throughput vs. las 8 capas, +41% vs.
+   CPU**. Cierra el OOM-que-crashea y el `BRAZE_LOCAL_GPU_LAYERS` adivinado.
+   Detalle en `docs/local-backend-design-2026-07-20.md`.
 4. **#3 (re-prefill)** — verificar primero cómo el LocalBackend maneja el
    `llama_context` entre rondas; puede ser ganancia gratis.
 5. El resto según prioridad (#5 speculative, #6 samplers, #7 rescate).
