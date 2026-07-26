@@ -32,6 +32,7 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
+use llama_cpp_2::token::logit_bias::LlamaLogitBias;
 
 use crate::args_repair::{ArgumentsOutcome, parse_arguments_with_repair};
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
@@ -1002,9 +1003,17 @@ pub struct LocalSampling {
     pub dry_base: f32,
     pub dry_allowed_length: i32,
     pub dry_penalty_last_n: i32,
-    /// Semilla del muestreo. Irrelevante con greedy.
+    /// Semilla del muestreo. El default es `LLAMA_DEFAULT_SEED`
+    /// (`0xFFFFFFFF`), que en llama.cpp significa **semilla aleatoria por
+    /// generación** — no un seed fijo. Importa: con un seed fijo, las
+    /// repeticiones de una misma tarea en un sweep producirían salidas
+    /// idénticas y `--repetitions` no mediría varianza ninguna. Fijarlo solo
+    /// para reproducir una corrida puntual. Irrelevante con greedy.
     pub seed: u32,
 }
+
+/// `LLAMA_DEFAULT_SEED` de llama.cpp: "usá una semilla aleatoria".
+const RANDOM_SEED: u32 = 0xFFFF_FFFF;
 
 impl Default for LocalSampling {
     fn default() -> Self {
@@ -1017,7 +1026,7 @@ impl Default for LocalSampling {
             dry_base: 1.75,
             dry_allowed_length: 2,
             dry_penalty_last_n: -1,
-            seed: 0,
+            seed: RANDOM_SEED,
         }
     }
 }
@@ -1047,7 +1056,11 @@ impl LocalSampling {
             dry_base: f32_var("BRAZE_LOCAL_DRY_BASE", d.dry_base),
             dry_allowed_length: i32_var("BRAZE_LOCAL_DRY_ALLOWED", d.dry_allowed_length),
             dry_penalty_last_n: i32_var("BRAZE_LOCAL_DRY_LAST_N", d.dry_penalty_last_n),
-            seed: i32_var("BRAZE_LOCAL_SEED", 0).unsigned_abs(),
+            // Sin la variable, semilla aleatoria por generación.
+            seed: std::env::var("BRAZE_LOCAL_SEED")
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(RANDOM_SEED),
         }
     }
 
@@ -1311,6 +1324,27 @@ fn generate_blocking(
         );
     }
 
+    // El KV cache guarda prompt Y generación en el mismo `n_ctx`, así que el
+    // presupuesto de tokens nuevos no puede ser el `max_tokens` pedido a
+    // secas: hay que recortarlo a lo que sobra. Sin esto, un prompt de
+    // `ctx_limit - 1` dejaba lugar para UN token y la generación moría de
+    // `NoKvCacheSlot` (visto en vivo con el refactor de roam, 2026-07-26).
+    // La guarda de arriba solo verificaba que el prompt entrara.
+    let room = ctx_limit.saturating_sub(tokens.len());
+    let budget = u32::try_from(room)
+        .unwrap_or(u32::MAX)
+        .min(max_tokens)
+        .max(1);
+    if budget < max_tokens {
+        tracing::warn!(
+            prompt_tokens = tokens.len(),
+            ctx_limit,
+            max_tokens,
+            budget,
+            "local: presupuesto de generación recortado por el contexto disponible"
+        );
+    }
+
     // El prompt se decodifica en chunks de n_batch: llama.cpp aborta el
     // proceso entero (GGML_ASSERT n_tokens_all <= n_batch) si un decode
     // excede el batch. Latente desde Fase 1 — los smokes usan prompts
@@ -1341,13 +1375,18 @@ fn generate_blocking(
     // reconstruye el sampler (ver `rebuild_free_sampler`). Con greedy queda
     // vacío: no vale la pena acumular lo que nadie va a leer.
     let mut generated: Vec<LlamaToken> = Vec::new();
+    // Tokens EOG prohibidos en la posición 0 (ver la guarda de turno vacío
+    // en el loop). Se acumulan porque un vocabulario puede tener varios
+    // (`<eos>`, `<end_of_turn>`…) y banear uno puede destapar el siguiente.
+    let mut eog_bans: Vec<LlamaLogitBias> = Vec::new();
+    const MAX_EOG_BANS: usize = 4;
     let track_generated = sampling.dry_enabled();
     // Posición del próximo token en el KV cache: el total del prompt
     // (no `batch.n_tokens()`, que tras el decode en chunks es solo el
     // tamaño del último chunk).
     let mut n_cur = total as i32;
     let mut output_tokens = 0u32;
-    let budget = max_tokens.max(1);
+    // `budget` ya se calculó arriba, recortado al contexto disponible.
     // Decoder UTF-8 persistente: un carácter multi-byte puede repartirse
     // entre tokens, y un decoder fresco por token lo rompería.
     let mut decoder = encoding_rs::UTF_8.new_decoder();
@@ -1395,6 +1434,7 @@ fn generate_blocking(
         if track_generated {
             generated.push(token);
         }
+        let banned_eog = |t: LlamaToken| eog_bans.iter().any(|b| b.token() == t);
         let marker = harmony.and_then(|ids| ids.marker_of(token));
         if let Some(m @ (HarmonyMarker::Call | HarmonyMarker::Return)) = marker {
             // Cierre del turno harmony (ambos son además EOG en el GGUF
@@ -1412,7 +1452,71 @@ fn generate_blocking(
             }
             break;
         }
+        // GUARDA DE TURNO VACÍO. Un EOG como PRIMER token deja la ronda en 0
+        // tokens y el engine la ve como "el modelo no dijo nada"
+        // (`ModelBackendError`) — no como un fin de turno legítimo. Medido en
+        // gemma4:e4b el 2026-07-26: pasa en ~9% de las rondas y **no es
+        // determinista**, porque `<eos>` empata con el token real dentro de
+        // 0.05 de logit (`"<eos>"=23.225 "<"=23.175 "The"=23.109`) y el
+        // no-determinismo de punto flotante en GPU decide el desempate. Con
+        // temperatura empeora (21%): aplana una distribución ya plana.
+        //
+        // Un empate así no es el modelo decidiendo terminar; es el modelo
+        // indeciso. Prohibir el EOG y re-muestrear devuelve el mejor token
+        // real, que es justo lo que el turno necesitaba. Solo aplica en la
+        // posición 0: a partir del primer token, un EOG es un fin de turno
+        // legítimo y se respeta.
+        if marker.is_none() && output_tokens == 0 && model.is_eog_token(token) && !banned_eog(token)
+        {
+            eog_bans.push(LlamaLogitBias::new(token, f32::NEG_INFINITY));
+            if eog_bans.len() <= MAX_EOG_BANS {
+                tracing::warn!(
+                    eog_token = token.0,
+                    intento = eog_bans.len(),
+                    "local: EOG como primer token de la ronda — prohibido y re-muestreando"
+                );
+                sampler = LlamaSampler::chain_simple([
+                    LlamaSampler::logit_bias(model.n_vocab(), &eog_bans),
+                    free_sampler(model, &sampling),
+                ]);
+                continue;
+            }
+            tracing::warn!(
+                "local: la ronda sigue eligiendo EOG tras {MAX_EOG_BANS} intentos — se cierra vacía"
+            );
+        }
         if marker.is_none() && model.is_eog_token(token) {
+            // Diagnóstico del turno vacío: si el PRIMER token muestreado ya
+            // es EOG, la ronda entera se va con 0 tokens y el engine la ve
+            // como "el modelo no dijo nada" (ModelBackendError). Pasa ~9% de
+            // las veces con gemma4:e4b y no es determinista, lo que apunta a
+            // un empate casi exacto entre EOG y el token real: el
+            // no-determinismo de punto flotante en GPU decide. Loguear los
+            // candidatos de arriba es lo único que distingue "la plantilla
+            // deja EOG arriba" de "el modelo realmente no tiene nada que
+            // decir".
+            if output_tokens == 0 {
+                let mut top: Vec<_> = ctx.candidates_ith(batch.n_tokens() - 1).collect();
+                top.sort_by(|a, b| b.logit().total_cmp(&a.logit()));
+                let top: Vec<String> = top
+                    .iter()
+                    .take(5)
+                    .map(|c| {
+                        // `special = true`: acá SÍ queremos ver los
+                        // marcadores de plantilla — son los sospechosos.
+                        let mut dec = encoding_rs::UTF_8.new_decoder();
+                        let piece = model
+                            .token_to_piece(c.id(), &mut dec, true, None)
+                            .unwrap_or_else(|_| format!("<id {}>", c.id().0));
+                        format!("{piece:?}={:.3}", c.logit())
+                    })
+                    .collect();
+                tracing::warn!(
+                    eog_token = token.0,
+                    candidatos = %top.join(" "),
+                    "local: la ronda terminó con 0 tokens — EOG salió como PRIMER token"
+                );
+            }
             stop_reason = "stop";
             break;
         }
@@ -1536,6 +1640,22 @@ fn generate_blocking(
         }
         n_cur += 1;
         if let Err(e) = ctx.decode(&mut batch) {
+            // Quedarse sin KV cache no es un fallo del backend: es el
+            // contexto lleno. Cerrar la ronda como `length` deja que el
+            // engine vea un turno truncado y compacte, que es su trabajo.
+            // Antes esto hacía `bail!` y mataba el turno entero — encontrado
+            // corriendo el refactor de `Trajectory` sobre roam (2026-07-26),
+            // donde el prompt real ronda el `n_ctx` y `default.toml` nunca
+            // llega a acercarse.
+            if matches!(e, llama_cpp_2::DecodeError::NoKvCacheSlot) {
+                tracing::warn!(
+                    n_cur,
+                    output_tokens,
+                    "local: KV cache lleno a mitad de generación — ronda cerrada como `length`"
+                );
+                stop_reason = "length";
+                break;
+            }
             bail!("local: decode (gen) falló: {e}");
         }
     }
@@ -1711,6 +1831,11 @@ mod tests {
         assert_eq!(d.temperature, 0.0);
         assert_eq!(d.min_p, 0.0);
         assert_eq!(d.top_k, 0);
+        // Semilla aleatoria por generación: con un seed fijo las
+        // repeticiones de un sweep saldrían calcadas y `--repetitions` no
+        // mediría varianza. Irrelevante mientras el default sea greedy,
+        // pero es lo que hace utilizable el brazo estocástico de un A/B.
+        assert_eq!(d.seed, RANDOM_SEED);
     }
 
     #[test]
