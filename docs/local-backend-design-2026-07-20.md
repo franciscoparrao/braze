@@ -700,9 +700,34 @@ Verificado en vivo en Nitro (gpt-oss): el camino default y el de
 `DRY=0.8 MIN_P=0.05 TEMP=0.7` generan ambos bien y producen salidas
 **distintas**, o sea que la cadena está activa y no ignorada en silencio.
 
-**Pendiente**: el A/B que le dé o le quite el default. El candidato no es
-gpt-oss (satura en 57/57, no tiene dónde mejorar) sino **gemma4:e4b**, cuyos 3
-fallos sistemáticos de `single_tool` son la clase donde la degeneración muerde.
+**Veredicto del A/B (2026-07-26): DRY no se gana el default; la temperatura
+hace daño.** Sobre gemma4:e4b, tres brazos pareados de 57 tareas:
+
+| Brazo | pass | pass^3 | output_tokens |
+|---|---|---|---|
+| greedy (control) | 51/57 | 15/19 | 284 |
+| DRY solo | 53/57 | 17/19 | 152 |
+| temp 0.7 + min-p + DRY | **43/57** | 11/19 | 173 |
+
+Medido después el **piso de ruido** (`docs/noise-floor-2026-07-26.md`): en e4b
+una diferencia de **≤5 tareas es indistinguible del ruido**. Con ese umbral:
+
+- **DRY (51 → 53) es ruido**, no "dirección positiva" como se leyó al
+  principio. Y el mecanismo que se le atribuyó —cortar output_tokens de 284 a
+  152— tampoco se sostiene: una re-corrida de greedy sin cambios dio 152 igual.
+- **La temperatura sí daña** (51 → 43, ocho tareas), y el daño está concentrado
+  donde importa: `single_tool` cae de 21/21 a 15/21. Coherente con el resultado
+  del stencil — en tool-calling, restringir gana y aleatorizar pierde.
+
+**min-p y top-k son inertes bajo greedy**: min-p filtra por `p >= min_p·p_max`,
+así que el token de máxima probabilidad siempre sobrevive y greedy elige lo
+mismo. Solo muerden con temperatura > 0. DRY sí actúa bajo greedy porque
+penaliza logits y puede mover el argmax.
+
+Nota sobre la premisa: los "3 fallos sistemáticos de `single_tool`" de
+CLAUDE.md son del sweep del 13-jul vía Ollama. Bajo el LocalBackend actual
+`single_tool` es **21/21 en el control** — el blanco al que apuntaba el
+experimento ya no existía.
 
 ### Cierre del hueco N-34 (2026-07-26)
 
