@@ -525,6 +525,8 @@ pub struct LocalBackend {
     gpu_layers: i32,
     /// Dónde vive el KV cache, resuelto contra la VRAM medida al cargar.
     kv_placement: KvPlacement,
+    /// Cómo samplea. Default greedy (ver [`LocalSampling`]).
+    sampling: LocalSampling,
 }
 
 /// `LlamaBackend::init()` inicializa estado GLOBAL de llama.cpp y sólo
@@ -806,7 +808,18 @@ impl LocalBackend {
             harmony,
             gpu_layers,
             kv_placement,
+            sampling: LocalSampling::from_env(),
         })
+    }
+
+    /// Fija el sampling programáticamente. Mismo patrón que
+    /// `AnthropicBackend::with_temperature`: el régimen vive en el backend,
+    /// no en `CompletionRequest` (que es contrato congelado). Sin llamarlo,
+    /// el backend toma [`LocalSampling::from_env`], cuyo default es greedy.
+    #[must_use]
+    pub fn with_sampling(mut self, sampling: LocalSampling) -> Self {
+        self.sampling = sampling;
+        self
     }
 
     /// Resuelve `modelo:tag` (p.ej. `qwen2.5:3b`) al blob GGUF que Ollama
@@ -959,13 +972,175 @@ enum FamilyRuntime {
     },
 }
 
-/// Construye el sampler estencilado: gramática GBNF + greedy encadenados
-/// (la gramática enmascara logits; greedy elige entre lo permitido). Una
-/// gramática inválida es bug nuestro, no del modelo — se loguea y se
-/// sigue sin constraint antes que brickear la generación.
-fn constrained_sampler(model: &LlamaModel, grammar: &str) -> Option<LlamaSampler> {
+/// Cómo samplea el `LocalBackend`.
+///
+/// **El default es greedy**, que es lo único que este backend hizo desde su
+/// Fase 1: `CompletionRequest` no lleva temperatura y `local.rs` nunca la
+/// consultó. Mantenerlo así es deliberado — todo lo medido del LocalBackend
+/// (paridad, stencil, pass^k, el 57/57 de gpt-oss) salió con greedy, y
+/// cambiar el default de entrada volvería incomparables esos números. DRY y
+/// min-p entran como **palanca opt-in que se gana su default por bench**,
+/// misma doctrina que KV-quant y el stencil.
+///
+/// Hueco conocido que esto NO tapa: `braze-bench --temperature` sigue sin
+/// llegar al LocalBackend (`build_local` ni recibe el `sampling`), así que la
+/// garantía N-34 de "un régimen de sampling por sweep" no se cumple para los
+/// brazos locales. Documentado como abierto, decisión del autor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LocalSampling {
+    /// `0.0` = greedy (default). Cualquier valor > 0 activa muestreo.
+    pub temperature: f32,
+    /// min-p: descarta lo que esté por debajo de esta fracción del token más
+    /// probable. `0.0` = apagado. Ataca la degeneración de modelos chicos
+    /// mejor que top-p porque el umbral se adapta a lo confiado que esté el
+    /// modelo en cada paso.
+    pub min_p: f32,
+    /// top-k, `0` = apagado.
+    pub top_k: i32,
+    /// DRY (anti-repetición por n-gramas). `0.0` = apagado.
+    pub dry_multiplier: f32,
+    pub dry_base: f32,
+    pub dry_allowed_length: i32,
+    pub dry_penalty_last_n: i32,
+    /// Semilla del muestreo. Irrelevante con greedy.
+    pub seed: u32,
+}
+
+impl Default for LocalSampling {
+    fn default() -> Self {
+        Self {
+            temperature: 0.0,
+            min_p: 0.0,
+            top_k: 0,
+            dry_multiplier: 0.0,
+            // Defaults de llama.cpp para cuando se activa DRY.
+            dry_base: 1.75,
+            dry_allowed_length: 2,
+            dry_penalty_last_n: -1,
+            seed: 0,
+        }
+    }
+}
+
+impl LocalSampling {
+    /// Lee las palancas del entorno. Todas opt-in: sin ninguna, greedy.
+    #[must_use]
+    pub fn from_env() -> Self {
+        fn f32_var(k: &str, default: f32) -> f32 {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default)
+        }
+        fn i32_var(k: &str, default: i32) -> i32 {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(default)
+        }
+        let d = Self::default();
+        Self {
+            temperature: f32_var("BRAZE_LOCAL_TEMP", d.temperature),
+            min_p: f32_var("BRAZE_LOCAL_MIN_P", d.min_p),
+            top_k: i32_var("BRAZE_LOCAL_TOP_K", d.top_k),
+            dry_multiplier: f32_var("BRAZE_LOCAL_DRY", d.dry_multiplier),
+            dry_base: f32_var("BRAZE_LOCAL_DRY_BASE", d.dry_base),
+            dry_allowed_length: i32_var("BRAZE_LOCAL_DRY_ALLOWED", d.dry_allowed_length),
+            dry_penalty_last_n: i32_var("BRAZE_LOCAL_DRY_LAST_N", d.dry_penalty_last_n),
+            seed: i32_var("BRAZE_LOCAL_SEED", 0).unsigned_abs(),
+        }
+    }
+
+    /// ¿Es el camino histórico (greedy puro, sin filtros)?
+    #[must_use]
+    pub fn is_greedy(&self) -> bool {
+        self.temperature <= 0.0 && self.min_p <= 0.0 && self.top_k <= 0 && !self.dry_enabled()
+    }
+
+    /// DRY lleva **estado** (la historia de n-gramas). Importa porque el
+    /// stencil reconstruye el sampler cada vez que suelta el constraint: con
+    /// greedy da igual (sin estado), con DRY habría que re-sembrarlo o
+    /// perdería su historia en cada tool call.
+    #[must_use]
+    pub fn dry_enabled(&self) -> bool {
+        self.dry_multiplier > 0.0
+    }
+}
+
+/// Arma la cadena de sampling libre (sin gramática) según la configuración.
+///
+/// Orden de la cadena, el canónico de llama.cpp: penalizaciones primero
+/// (DRY), después los filtros de candidatos (top-k, min-p), después la
+/// temperatura, y al final la extracción del token. Invertirlo cambiaría
+/// qué distribución ve cada etapa.
+fn free_sampler(model: &LlamaModel, s: &LocalSampling) -> LlamaSampler {
+    if s.is_greedy() {
+        return LlamaSampler::greedy();
+    }
+    let mut chain = Vec::new();
+    if s.dry_enabled() {
+        // seq_breakers default de llama.cpp: cortan el n-grama en límites
+        // naturales para no penalizar estructura legítima (JSON, listas).
+        chain.push(LlamaSampler::dry(
+            model,
+            s.dry_multiplier,
+            s.dry_base,
+            s.dry_allowed_length,
+            s.dry_penalty_last_n,
+            ["\n", ":", "\"", "*"],
+        ));
+    }
+    if s.top_k > 0 {
+        chain.push(LlamaSampler::top_k(s.top_k));
+    }
+    if s.min_p > 0.0 {
+        chain.push(LlamaSampler::min_p(s.min_p, 1));
+    }
+    if s.temperature > 0.0 {
+        chain.push(LlamaSampler::temp(s.temperature));
+        chain.push(LlamaSampler::dist(s.seed));
+    } else {
+        // Filtros sin temperatura: los filtros acotan el conjunto y greedy
+        // elige el más probable de lo que quedó.
+        chain.push(LlamaSampler::greedy());
+    }
+    LlamaSampler::chain_simple(chain)
+}
+
+/// Reconstruye la cadena libre **conservando el estado** que el stencil
+/// destruiría.
+///
+/// El stencil swapea el sampler cada vez que abre y cierra una tool call.
+/// Con greedy eso es inocuo (no tiene estado), pero DRY lleva la historia de
+/// n-gramas generados: un sampler nuevo la perdería en cada tool call y DRY
+/// quedaría medio apagado justo en las generaciones largas, que son las que
+/// degeneran. Re-alimentar los tokens ya emitidos lo deja donde estaba.
+///
+/// Sin DRY se salta el trabajo: `accept_many` sobre cientos de tokens no es
+/// gratis y no compra nada para samplers sin estado.
+fn rebuild_free_sampler(
+    model: &LlamaModel,
+    s: &LocalSampling,
+    generated: &[LlamaToken],
+) -> LlamaSampler {
+    let mut sampler = free_sampler(model, s);
+    if s.dry_enabled() {
+        sampler.accept_many(generated);
+    }
+    sampler
+}
+
+/// Construye el sampler estencilado: gramática GBNF + la cadena libre
+/// encadenadas (la gramática enmascara logits; la cadena elige entre lo
+/// permitido). Una gramática inválida es bug nuestro, no del modelo — se
+/// loguea y se sigue sin constraint antes que brickear la generación.
+fn constrained_sampler(
+    model: &LlamaModel,
+    grammar: &str,
+    s: &LocalSampling,
+) -> Option<LlamaSampler> {
     match LlamaSampler::grammar(model, grammar, "root") {
-        Ok(g) => Some(LlamaSampler::chain_simple([g, LlamaSampler::greedy()])),
+        Ok(g) => Some(LlamaSampler::chain_simple([g, free_sampler(model, s)])),
         Err(e) => {
             tracing::warn!(error = %e, "stencil: gramática inválida — generación sin constraint");
             None
@@ -1018,6 +1193,7 @@ struct GenParams {
     max_tokens: u32,
     gpu_layers: i32,
     placement: KvPlacement,
+    sampling: LocalSampling,
 }
 
 /// Genera de forma bloqueante y empuja eventos por `tx`. Corre en un hilo
@@ -1042,6 +1218,7 @@ fn generate_blocking(
         max_tokens,
         gpu_layers,
         placement,
+        sampling,
     } = gen_params;
     let (harmony, tools) = match family {
         FamilyRuntime::Harmony { ids, tools } => (Some(ids), tools.as_slice()),
@@ -1159,7 +1336,12 @@ fn generate_blocking(
         fed = end;
     }
 
-    let mut sampler = LlamaSampler::greedy();
+    let mut sampler = free_sampler(model, &sampling);
+    // Tokens ya generados, solo para re-sembrar DRY cuando el stencil
+    // reconstruye el sampler (ver `rebuild_free_sampler`). Con greedy queda
+    // vacío: no vale la pena acumular lo que nadie va a leer.
+    let mut generated: Vec<LlamaToken> = Vec::new();
+    let track_generated = sampling.dry_enabled();
     // Posición del próximo token en el KV cache: el total del prompt
     // (no `batch.n_tokens()`, que tras el decode en chunks es solo el
     // tamaño del último chunk).
@@ -1210,6 +1392,9 @@ fn generate_blocking(
         // veces → GGML_ASSERT(!stacks.empty()) — depurado en vivo,
         // 2026-07-21).
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
+        if track_generated {
+            generated.push(token);
+        }
         let marker = harmony.and_then(|ids| ids.marker_of(token));
         if let Some(m @ (HarmonyMarker::Call | HarmonyMarker::Return)) = marker {
             // Cierre del turno harmony (ambos son además EOG en el GGUF
@@ -1253,7 +1438,7 @@ fn generate_blocking(
                     HarmonyMarker::Message if parser.tool_call_in_progress() && !constrained => {
                         let tool = parser.pending_tool_name().unwrap_or_default();
                         let grammar = harmony_args_grammar(tool, tools);
-                        if let Some(s) = constrained_sampler(model, &grammar) {
+                        if let Some(s) = constrained_sampler(model, &grammar, &sampling) {
                             sampler = s;
                             constrained = true;
                             args_cursor = JsonCursor::new();
@@ -1263,7 +1448,7 @@ fn generate_blocking(
                     // Cierre de mensaje con el constraint aún puesto
                     // (cierre off-spec): liberar antes de seguir.
                     HarmonyMarker::End | HarmonyMarker::Start if constrained => {
-                        sampler = LlamaSampler::greedy();
+                        sampler = rebuild_free_sampler(model, &sampling, &generated);
                         constrained = false;
                     }
                     _ => {}
@@ -1290,7 +1475,7 @@ fn generate_blocking(
                         if constrained {
                             args_cursor.feed(&piece);
                             if args_cursor.complete() {
-                                sampler = LlamaSampler::greedy();
+                                sampler = rebuild_free_sampler(model, &sampling, &generated);
                                 constrained = false;
                                 tracing::info!(
                                     "stencil: args JSON completos — constraint liberado"
@@ -1317,13 +1502,14 @@ fn generate_blocking(
                                 if let Some(s) = constrained_sampler(
                                     model,
                                     qwen_grammar.as_deref().unwrap_or_default(),
+                                    &sampling,
                                 ) {
                                     sampler = s;
                                     constrained = true;
                                     tracing::info!("stencil: envelope qwen activado");
                                 }
                             } else if constrained && tail.ends_with("</tool_call>") {
-                                sampler = LlamaSampler::greedy();
+                                sampler = rebuild_free_sampler(model, &sampling, &generated);
                                 constrained = false;
                                 tracing::info!("stencil: envelope cerrado — constraint liberado");
                             }
@@ -1413,6 +1599,7 @@ impl ModelBackend for LocalBackend {
         let max_tokens = req.max_tokens;
         let gpu_layers = self.gpu_layers;
         let placement = self.kv_placement;
+        let sampling = self.sampling;
         // Para las gramáticas del stencil: nombre + input_schema de cada
         // tool del turno (los schemas derivan las gramáticas de args).
         let tools: Vec<ToolGrammarSpec> = req
@@ -1441,6 +1628,7 @@ impl ModelBackend for LocalBackend {
                 max_tokens,
                 gpu_layers,
                 placement,
+                sampling,
             };
             generate_blocking(&backend, &model, &prompt, gen_params, &family_rt, &tx);
         });
@@ -1508,6 +1696,70 @@ mod tests {
         assert_eq!(a, ModelCacheKey::new(Path::new("/models/x.gguf"), 8192));
         assert_ne!(a, ModelCacheKey::new(Path::new("/models/x.gguf"), 4096));
         assert_ne!(a, ModelCacheKey::new(Path::new("/models/y.gguf"), 8192));
+    }
+
+    #[test]
+    fn el_default_de_sampling_es_greedy() {
+        // Lo que protege este test: TODO lo medido del LocalBackend
+        // (paridad, stencil, pass^k, el 57/57 de gpt-oss) salió con greedy.
+        // Si alguien cambia el default, esos números dejan de significar lo
+        // que dicen los docs — que se rompa el test antes que la
+        // comparabilidad.
+        let d = LocalSampling::default();
+        assert!(d.is_greedy());
+        assert!(!d.dry_enabled());
+        assert_eq!(d.temperature, 0.0);
+        assert_eq!(d.min_p, 0.0);
+        assert_eq!(d.top_k, 0);
+    }
+
+    #[test]
+    fn cualquier_palanca_de_sampling_saca_del_camino_greedy() {
+        // `is_greedy` decide qué cadena se arma; si una palanca no lo
+        // sacara del camino greedy, quedaría configurada pero inerte.
+        let base = LocalSampling::default();
+        for tweak in [
+            LocalSampling {
+                temperature: 0.7,
+                ..base
+            },
+            LocalSampling {
+                min_p: 0.05,
+                ..base
+            },
+            LocalSampling { top_k: 40, ..base },
+            LocalSampling {
+                dry_multiplier: 0.8,
+                ..base
+            },
+        ] {
+            assert!(!tweak.is_greedy(), "{tweak:?} debería salir de greedy");
+        }
+    }
+
+    #[test]
+    fn solo_dry_marca_el_sampling_como_con_estado() {
+        // `dry_enabled` gobierna dos cosas caras: acumular los tokens
+        // generados y re-alimentarlos al reconstruir el sampler. Que se
+        // active de más cuesta CPU en cada tool call; de menos, DRY pierde
+        // su historia y queda medio apagado.
+        let base = LocalSampling::default();
+        assert!(
+            !LocalSampling {
+                temperature: 0.7,
+                min_p: 0.05,
+                top_k: 40,
+                ..base
+            }
+            .dry_enabled()
+        );
+        assert!(
+            LocalSampling {
+                dry_multiplier: 0.8,
+                ..base
+            }
+            .dry_enabled()
+        );
     }
 
     #[test]

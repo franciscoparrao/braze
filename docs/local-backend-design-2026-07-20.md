@@ -556,6 +556,31 @@ fit elige distinto según el régimen: gemma-12B **21 capas/Device**, gpt-oss
 **25 capas/Device** (sus overrides MoE liberan bastante VRAM para que el KV
 también quepa).
 
+### Efecto en gpt-oss:20b, el modelo default del proyecto
+
+Re-corrido con parámetros **idénticos** a `sweep-rank-oss.json` (misma suite y
+fingerprint, 3 reps, seed 42, timeout 180); la única diferencia es que aquel
+brazo fue CPU puro y este usa el reparto que decide el fit (25 capas, KV en
+VRAM):
+
+| | CPU (referencia) | GPU 25c KV-VRAM (medido) |
+|---|---|---|
+| pass rate | 57/57 | 57/57 |
+| pass^k | 19/19 | 19/19 |
+| timeouts | 0 | 0 |
+| **avg walltime** | **41.4s** | **12.1s** |
+
+**3.4× más rápido con McNemar p=1: cero pares discordantes**, las 57 tareas
+dieron exactamente el mismo resultado. El mejor número del proyecto no se
+movió; solo tarda un tercio.
+
+Dos precisiones para no sobrevender: el 3.4× es el efecto **combinado** de
+pasar a GPU *habilitado por* el auto-fit y el placement medido (antes la GPU
+exigía adivinar capas y arriesgar OOM), no la atribución limpia del placement
+—esa la dio el estudio de 5 brazos de gemma. Y el `pass^k=19/19` hay que
+leerlo junto con el hallazgo de sampling de abajo: con greedy las
+repeticiones son casi deterministas.
+
 ### Segundo bug de la misma clase, cazado en vivo
 
 Con el placement medido, una máquina **sin GPU** hacía: fit `Device` → 0 capas
@@ -612,6 +637,73 @@ En Nitro el `-1` de qwen2.5:3b sigue siendo legítimo (ahí sí caben todas), as
 que la normalización solo actúa donde corresponde. Es un caso de manual de por
 qué en este proyecto compilar ≠ funcionar: el bug pasó clippy, 217 tests y un
 sweep entero en GPU sin manifestarse, porque solo aparece sin GPU.
+
+## Sampling: DRY + min-p, y un hallazgo incómodo (2026-07-25)
+
+Ideas **#6** de la auditoría (`sampler.rs` de mistral.rs: DRY anti-repetición
+por n-gramas + min-p). Al ir a implementarlas apareció algo más grande.
+
+### El hallazgo: el LocalBackend nunca sampleó
+
+`CompletionRequest` **no lleva temperatura**, `local.rs` nunca la consultó, y
+en el bench `build_local()` **ni siquiera recibe** el parámetro `sampling` que
+sí reciben los demás backends. O sea: el LocalBackend siempre usó
+`LlamaSampler::greedy()`. Consecuencias, en orden de gravedad:
+
+1. **`braze-bench --temperature` ha sido un no-op en todo brazo local.** La
+   garantía **N-34** ("un solo régimen de sampling por sweep",
+   `backend_spec.rs:427`) no se cumple para `local`. **Hueco abierto**: se
+   decidió no taparlo en el mismo commit, porque plomarlo cambia el régimen de
+   todos los brazos locales futuros y los vuelve incomparables con lo medido.
+2. **El estudio de paridad LocalBackend vs Ollama** (McNemar p=0.22, arriba en
+   este doc) comparó **greedy contra temp 0.2** — es un confound de esa
+   conclusión, no un empate limpio.
+3. **`pass^k` en brazos locales mide menos de lo que aparenta.** Con greedy las
+   repeticiones son deterministas salvo no-determinismo de punto flotante en
+   GPU, y los seeds por repetición no hacen nada porque greedy los ignora. El
+   `pass^3=100%` de gpt-oss —que se presenta como el hallazgo de confiabilidad
+   del proyecto— es en buena parte **determinismo, no robustez**. Encaja con
+   algo que se vio sin darle importancia en el sweep de gemma: las 3 reps de
+   una tarea daban resultados casi calcados.
+
+### Lo implementado
+
+`LocalSampling` (temperatura, min-p, top-k, DRY con sus parámetros, seed),
+configurable por entorno (`BRAZE_LOCAL_TEMP`, `_MIN_P`, `_TOP_K`, `_DRY`,
+`_DRY_BASE`, `_DRY_ALLOWED`, `_DRY_LAST_N`, `_SEED`) o por
+`LocalBackend::with_sampling()`. El régimen vive en el **backend**, mismo
+patrón que `AnthropicBackend::with_temperature` — no toca `CompletionRequest`,
+que es contrato congelado.
+
+**El default sigue siendo greedy**, y hay un test que lo fija con la razón
+escrita: todo lo medido del LocalBackend salió con greedy, así que si alguien
+cambia el default debe romperse el test antes que la comparabilidad de estos
+documentos. DRY/min-p entran como palanca que **se gana su default por bench**,
+misma doctrina que KV-quant y el stencil.
+
+Orden de la cadena, el canónico de llama.cpp: **DRY → top-k → min-p →
+temperatura → `dist`**. Invertirlo cambia qué distribución ve cada etapa.
+
+### El detalle de corrección que el diseño tuvo que cubrir
+
+El stencil **swapea el sampler** cada vez que abre y cierra una tool call
+(cuatro sitios: apertura harmony, cierre harmony por marcador, cierre harmony
+por cursor de args, y cierre del envelope qwen). Con greedy es inocuo —no
+tiene estado—, pero **DRY lleva la historia de n-gramas generados**: un
+sampler nuevo la perdería en cada tool call y DRY quedaría medio apagado justo
+en las generaciones largas, que son las que degeneran.
+
+`rebuild_free_sampler()` re-alimenta los tokens ya emitidos con `accept_many`,
+y **solo cuando DRY está activo** — acumular tokens y re-aceptarlos cuesta, y
+no compra nada para samplers sin estado.
+
+Verificado en vivo en Nitro (gpt-oss): el camino default y el de
+`DRY=0.8 MIN_P=0.05 TEMP=0.7` generan ambos bien y producen salidas
+**distintas**, o sea que la cadena está activa y no ignorada en silencio.
+
+**Pendiente**: el A/B que le dé o le quite el default. El candidato no es
+gpt-oss (satura en 57/57, no tiene dónde mejorar) sino **gemma4:e4b**, cuyos 3
+fallos sistemáticos de `single_tool` son la clase donde la degeneración muerde.
 
 ## Referencias
 
