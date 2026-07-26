@@ -71,7 +71,9 @@ pub async fn read_file(args: ReadFileArgs) -> Result<String, String> {
     }
 
     let requested_page_size = args.limit.unwrap_or(DEFAULT_PAGE_LINES).max(1);
-    let requested_end = start_line.saturating_add(requested_page_size).min(total_lines);
+    let requested_end = start_line
+        .saturating_add(requested_page_size)
+        .min(total_lines);
     let end_line = clamp_to_output_budget(&lines, start_line, requested_end);
     let page = &lines[start_line..end_line];
 

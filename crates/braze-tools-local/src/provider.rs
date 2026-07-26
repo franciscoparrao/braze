@@ -207,7 +207,8 @@ impl LocalToolsProvider {
     async fn append_post_edit_feedback(&self, mut result: ToolResult, path: &str) -> ToolResult {
         if self.post_edit_check
             && !result.is_error
-            && let Some(feedback) = crate::post_edit_check::post_edit_feedback(path, &self.formatters).await
+            && let Some(feedback) =
+                crate::post_edit_check::post_edit_feedback(path, &self.formatters).await
         {
             result.content.push_str(&feedback);
         }
@@ -246,10 +247,7 @@ impl LocalToolsProvider {
                 name: call.name.clone(),
                 message: Self::denied_message(&err),
             })?;
-        Ok(self.wrap(
-            call,
-            shell_exec::shell_exec(args, &self.workdir).await,
-        ))
+        Ok(self.wrap(call, shell_exec::shell_exec(args, &self.workdir).await))
     }
 
     async fn invoke_grep(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
@@ -409,7 +407,11 @@ fn truncate_output(content: String, budget: usize, max_lines: Option<u32>) -> St
     let total_lines = content.lines().count();
 
     let (mut working, lines_omitted) = if max_lines > 0 && total_lines > max_lines {
-        let retained = content.lines().take(max_lines).collect::<Vec<_>>().join("\n");
+        let retained = content
+            .lines()
+            .take(max_lines)
+            .collect::<Vec<_>>()
+            .join("\n");
         (retained, total_lines - max_lines)
     } else {
         (content, 0)
@@ -955,13 +957,19 @@ mod tests {
     #[test]
     fn short_content_passes_through_unchanged() {
         let content = "hello world".to_string();
-        assert_eq!(truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None), content);
+        assert_eq!(
+            truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None),
+            content
+        );
     }
 
     #[test]
     fn content_at_exactly_the_cap_is_unchanged() {
         let content = "x".repeat(MAX_TOOL_OUTPUT_BYTES);
-        assert_eq!(truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None), content);
+        assert_eq!(
+            truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None),
+            content
+        );
     }
 
     #[test]
@@ -1017,18 +1025,27 @@ mod tests {
     /// over a big repo is the canonical example.
     #[test]
     fn truncate_output_caps_at_max_lines_independently_of_the_byte_budget() {
-        let content = (0..1000).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let content = (0..1000)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         // 5-char lines + newline = 6 bytes/line × 1000 = 6000 bytes — well
         // below the byte cap (8000), so without `max_lines` this passes
         // through untruncated.
         assert!(content.len() < MAX_TOOL_OUTPUT_BYTES);
         let truncated = truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, Some(5));
-        assert!(truncated.contains("output truncated"), "must trigger the trailer: {truncated}");
+        assert!(
+            truncated.contains("output truncated"),
+            "must trigger the trailer: {truncated}"
+        );
         assert!(truncated.contains("lines"));
         // The first 5 lines are retained; "line0".."line4".
         assert!(truncated.contains("line0"));
         assert!(truncated.contains("line4"));
-        assert!(!truncated.contains("line5"), "5th-line-onward must be truncated: {truncated}");
+        assert!(
+            !truncated.contains("line5"),
+            "5th-line-onward must be truncated: {truncated}"
+        );
     }
 
     /// `max_lines: None` (the default) keeps the byte-cap-only behavior —
@@ -1037,7 +1054,10 @@ mod tests {
     /// untruncated.
     #[test]
     fn truncate_output_with_no_max_lines_does_not_apply_a_line_cap() {
-        let content = (0..1000).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let content = (0..1000)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(content.len() < MAX_TOOL_OUTPUT_BYTES);
         let pass_through = truncate_output(content.clone(), MAX_TOOL_OUTPUT_BYTES, None);
         assert_eq!(pass_through, content, "max_lines=None must not truncate");
@@ -1054,11 +1074,16 @@ mod tests {
         // 5 lines of 100 bytes each = 500+ bytes retained, well over a
         // 50-byte budget — the exact "few long lines" shape the old code
         // never re-checked.
-        let content = (0..5).map(|_| long_line.clone()).collect::<Vec<_>>().join("\n");
+        let content = (0..5)
+            .map(|_| long_line.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
         let small_budget = 50usize;
         let truncated = truncate_output(content, small_budget, Some(3));
 
-        let trailer_start = truncated.find("\n\n[output truncated").expect("must be truncated");
+        let trailer_start = truncated
+            .find("\n\n[output truncated")
+            .expect("must be truncated");
         let retained = &truncated[..trailer_start];
         assert!(
             retained.len() <= small_budget,
@@ -1066,7 +1091,13 @@ mod tests {
              oversized lines: {} bytes retained, budget was {small_budget}",
             retained.len()
         );
-        assert!(truncated.contains("lines omitted"), "must report the line truncation too: {truncated}");
-        assert!(truncated.contains("bytes"), "must report the byte truncation too: {truncated}");
+        assert!(
+            truncated.contains("lines omitted"),
+            "must report the line truncation too: {truncated}"
+        );
+        assert!(
+            truncated.contains("bytes"),
+            "must report the byte truncation too: {truncated}"
+        );
     }
 }

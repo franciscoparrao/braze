@@ -254,7 +254,10 @@ impl CircuitBreaker {
                 // process) — reclaim the slot rather than waiting
                 // forever.
                 inner.half_open_claimed_at = Some(now);
-                tracing::info!(key, "circuit breaker: reclaiming an abandoned half-open probe");
+                tracing::info!(
+                    key,
+                    "circuit breaker: reclaiming an abandoned half-open probe"
+                );
                 Ok(Some(now))
             }
         }
@@ -540,7 +543,9 @@ mod tests {
             .expect("cooldown elapsed — this call is the half-open probe");
         breaker.record(Outcome::Success, "test");
 
-        breaker.check("test").expect("closed again after a healthy probe");
+        breaker
+            .check("test")
+            .expect("closed again after a healthy probe");
     }
 
     /// A probe that comes back with a deterministic 4xx proves the
@@ -555,10 +560,14 @@ mod tests {
         breaker.check("test").expect_err("open");
 
         std::thread::sleep(Duration::from_millis(5));
-        breaker.check("test").expect("half-open probe allowed through");
+        breaker
+            .check("test")
+            .expect("half-open probe allowed through");
         breaker.record(Outcome::Neutral, "test");
 
-        breaker.check("test").expect("closed — the destination answered");
+        breaker
+            .check("test")
+            .expect("closed — the destination answered");
     }
 
     /// Regression test for the 2026-07-19 re-run Bloque 2 contamination:
@@ -662,7 +671,9 @@ mod tests {
         breaker.check("test").expect_err("open");
 
         std::thread::sleep(Duration::from_millis(5));
-        breaker.check("test").expect("half-open probe allowed through");
+        breaker
+            .check("test")
+            .expect("half-open probe allowed through");
         breaker.record(Outcome::Failure, "test");
 
         let err = breaker.check("test").expect_err("must be open again");
@@ -769,14 +780,12 @@ mod tests {
         let auth = ModelError::Request("anthropic HTTP 401 Unauthorized: bad key".to_string());
         assert_eq!(classify(&auth), Outcome::Neutral);
 
-        let server = ModelError::Request(
-            "openrouter HTTP 500 Internal Server Error: upstream".to_string(),
-        );
+        let server =
+            ModelError::Request("openrouter HTTP 500 Internal Server Error: upstream".to_string());
         assert_eq!(classify(&server), Outcome::Failure);
 
-        let connect = ModelError::Request(
-            "ollama request failed: error sending request for url".to_string(),
-        );
+        let connect =
+            ModelError::Request("ollama request failed: error sending request for url".to_string());
         assert_eq!(classify(&connect), Outcome::Failure);
 
         let mid_stream = ModelError::StreamError("transport error: connection reset".to_string());

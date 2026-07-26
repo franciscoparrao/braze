@@ -153,17 +153,13 @@ impl ModelBackend for OpenRouterBackend {
         // `AnthropicBackend::complete`'s identical comment.
         let breaker_key = format!("openrouter:{url}:{}", self.model);
         let guard = crate::circuit_breaker::acquire(&breaker_key)?;
-        let send_result = crate::retry::send_with_retry(
-            "openrouter",
-            self.max_retries,
-            || {
-                self.client
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {}", self.api_key))
-                    .header("content-type", "application/json")
-                    .json(&body)
-            },
-        )
+        let send_result = crate::retry::send_with_retry("openrouter", self.max_retries, || {
+            self.client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("content-type", "application/json")
+                .json(&body)
+        })
         .await;
         let response = match send_result {
             Ok(response) => response,

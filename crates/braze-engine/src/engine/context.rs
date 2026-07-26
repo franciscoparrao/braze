@@ -21,7 +21,10 @@ use braze_session::DurableState;
 use braze_types::{ContentBlock, Message, ToolResult};
 
 use super::DEFAULT_TACTICAL_COMPACTION_THRESHOLD;
-use crate::history::{MAX_FULL_OBSERVATIONS_TOTAL_CHARS, TACTICAL_FULL_OBSERVATIONS, render_durable_events, render_tactical_events};
+use crate::history::{
+    MAX_FULL_OBSERVATIONS_TOTAL_CHARS, TACTICAL_FULL_OBSERVATIONS, render_durable_events,
+    render_tactical_events,
+};
 
 /// Ids of every `AssistantToolCall` in `events` with no matching
 /// `ToolCallCompleted` anywhere in the same slice.
@@ -172,7 +175,6 @@ pub(crate) fn merge_summary(mut durable: DurableState, summary: String) -> Durab
     }
     durable
 }
-
 
 /// Rough token estimate (~4 chars/token) for the tactical events about to
 /// be dropped from raw context by a compaction pass — mirrors the same
@@ -813,9 +815,12 @@ fn render_events_for_lead_summary(events: &[AgentEvent]) -> String {
         .filter_map(|event| match event {
             AgentEvent::UserMessage { text } => Some(format!("user: {}", cap(text))),
             AgentEvent::AssistantText { text } => Some(format!("assistant: {}", cap(text))),
-            AgentEvent::AssistantToolCall { name, arguments, .. } => {
-                Some(format!("tool call: {name}({})", cap(&arguments.to_string())))
-            }
+            AgentEvent::AssistantToolCall {
+                name, arguments, ..
+            } => Some(format!(
+                "tool call: {name}({})",
+                cap(&arguments.to_string())
+            )),
             AgentEvent::ToolCallCompleted { result, .. } => Some(format!(
                 "tool result{}: {}",
                 if result.is_error { " (ERROR)" } else { "" },
@@ -857,14 +862,14 @@ mod tests {
     use super::*;
     // P1.1 paso 6: tests de integración movidos del mod tests de
     // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
-    use crate::engine::test_support::*;
     use crate::engine::Engine;
+    use crate::engine::test_support::*;
     use braze_events::NoopObserver;
     use braze_model::CompletionEvent;
     use braze_session::{FileSessionStore, SimpleContextCompactor};
+    use braze_types::ToolResult;
     use braze_types::{ContentBlock, SessionId};
     use std::sync::atomic::{AtomicU32, Ordering};
-    use braze_types::ToolResult;
     // P1.1 paso 5: tests movidos del mod tests de engine/mod.rs — usan
     // las constantes de history directamente.
     use crate::history::{MAX_FULL_OBSERVATIONS_TOTAL_CHARS, TACTICAL_FULL_OBSERVATIONS};
@@ -876,7 +881,9 @@ mod tests {
     fn lead_summary_transcript_caps_items_and_drops_oldest_with_a_marker() {
         let long = "x".repeat(LEAD_SUMMARY_ITEM_CAP_CHARS * 2);
         let events = vec![
-            AgentEvent::UserMessage { text: "corto".to_string() },
+            AgentEvent::UserMessage {
+                text: "corto".to_string(),
+            },
             AgentEvent::ToolCallCompleted {
                 id: "c1".to_string(),
                 result: ToolResult {
@@ -888,8 +895,14 @@ mod tests {
         ];
         let transcript = render_events_for_lead_summary(&events);
         assert!(transcript.contains("user: corto"));
-        assert!(transcript.contains("[...]"), "ítem largo debe caparse con marcador");
-        assert!(transcript.len() < long.len(), "el cap por ítem debe aplicar");
+        assert!(
+            transcript.contains("[...]"),
+            "ítem largo debe caparse con marcador"
+        );
+        assert!(
+            transcript.len() < long.len(),
+            "el cap por ítem debe aplicar"
+        );
 
         // Muchos eventos → los más viejos se omiten con conteo explícito.
         let many: Vec<AgentEvent> = (0..200)
@@ -908,7 +921,10 @@ mod tests {
             transcript.contains("evento 199"),
             "se conservan los MÁS NUEVOS"
         );
-        assert!(!transcript.contains("evento 0:"), "los más viejos se omiten");
+        assert!(
+            !transcript.contains("evento 0:"),
+            "los más viejos se omiten"
+        );
     }
 
     #[test]
@@ -930,10 +946,7 @@ mod tests {
 
     #[test]
     fn a_configured_context_budget_keeps_the_compaction_threshold_unchanged() {
-        assert_eq!(
-            effective_tactical_compaction_threshold(40, Some(8192)),
-            40
-        );
+        assert_eq!(effective_tactical_compaction_threshold(40, Some(8192)), 40);
     }
 
     #[test]
@@ -1173,14 +1186,24 @@ mod tests {
         let (store, dir) = temp_store();
         let session = SessionId::new();
         store
-            .append(&session, &AgentEvent::UserMessage { text: "hola".to_string() })
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "hola".to_string(),
+                },
+            )
             .await
             .expect("seed event");
         // Suficientes eventos para superar el umbral (3) Y dejar algo
         // que dropear más allá de la cola cruda (KEEP_RAW_TAIL = 6).
         for i in 0..10 {
             store
-                .append(&session, &AgentEvent::AssistantText { text: format!("texto {i}") })
+                .append(
+                    &session,
+                    &AgentEvent::AssistantText {
+                        text: format!("texto {i}"),
+                    },
+                )
                 .await
                 .expect("seed event");
         }
@@ -1228,14 +1251,24 @@ mod tests {
         let (store, dir) = temp_store();
         let session = SessionId::new();
         store
-            .append(&session, &AgentEvent::UserMessage { text: "hola".to_string() })
+            .append(
+                &session,
+                &AgentEvent::UserMessage {
+                    text: "hola".to_string(),
+                },
+            )
             .await
             .expect("seed event");
         // Suficientes eventos para superar el umbral (3) Y dejar algo
         // que dropear más allá de la cola cruda (KEEP_RAW_TAIL = 6).
         for i in 0..10 {
             store
-                .append(&session, &AgentEvent::AssistantText { text: format!("texto {i}") })
+                .append(
+                    &session,
+                    &AgentEvent::AssistantText {
+                        text: format!("texto {i}"),
+                    },
+                )
                 .await
                 .expect("seed event");
         }
@@ -1387,10 +1420,8 @@ mod tests {
         // `DEFAULT_TACTICAL_COMPACTION_THRESHOLD` scaled up, not the raw
         // constant) with plain, non-durable-typed events (the orphan types
         // that never leave `tactical` on their own).
-        let threshold = effective_tactical_compaction_threshold(
-            DEFAULT_TACTICAL_COMPACTION_THRESHOLD,
-            None,
-        );
+        let threshold =
+            effective_tactical_compaction_threshold(DEFAULT_TACTICAL_COMPACTION_THRESHOLD, None);
         for i in 0..(threshold + 10) {
             store
                 .append(

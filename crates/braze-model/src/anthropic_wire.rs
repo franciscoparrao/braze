@@ -401,9 +401,7 @@ impl AnthropicStreamState {
         match json.get("type").and_then(Value::as_str) {
             Some("message_start") => {
                 if let Some(usage) = json.get("message").and_then(|m| m.get("usage")) {
-                    if let Some(tokens) =
-                        usage.get("input_tokens").and_then(Value::as_u64)
-                    {
+                    if let Some(tokens) = usage.get("input_tokens").and_then(Value::as_u64) {
                         self.input_tokens = tokens as u32;
                     }
                     // H-18 (docs/AUDITORIA-2026-07-v5.md): the Anthropic
@@ -707,7 +705,11 @@ mod tests {
         assert!(json["tools"][0].get("cache_control").is_none());
         assert_eq!(json["tools"][1]["cache_control"]["type"], "ephemeral");
         // Mensajes: solo el último bloque del último mensaje.
-        assert!(json["messages"][0]["content"][0].get("cache_control").is_none());
+        assert!(
+            json["messages"][0]["content"][0]
+                .get("cache_control")
+                .is_none()
+        );
         assert_eq!(
             json["messages"][1]["content"][0]["cache_control"]["type"],
             "ephemeral"

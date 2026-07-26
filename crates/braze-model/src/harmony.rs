@@ -288,8 +288,9 @@ fn ts_scalar(t: &str, schema: &serde_json::Value) -> String {
                 format!("{inner}[]")
             }
         }
-        "object" => render_props(schema)
-            .map_or_else(|| "object".to_string(), |p| format!("{{\n{p}}}")),
+        "object" => {
+            render_props(schema).map_or_else(|| "object".to_string(), |p| format!("{{\n{p}}}"))
+        }
         _ => "any".to_string(),
     }
 }
@@ -629,7 +630,9 @@ mod tests {
         req.tool_stubs = vec![stub_with_schema()];
         let prompt = build_harmony_prompt(&req, "medium", None);
 
-        assert!(prompt.contains("Calls to these tools must go to the commentary channel: 'functions'."));
+        assert!(
+            prompt.contains("Calls to these tools must go to the commentary channel: 'functions'.")
+        );
         assert!(prompt.contains("<|start|>developer<|message|># Instructions\n\nYou are braze."));
         assert!(prompt.contains("# Tools\n\n## functions\n\nnamespace functions {"));
         assert!(prompt.contains("// Write a file to disk\ntype write_file = (_: {\n"));
@@ -695,8 +698,11 @@ mod tests {
         let prompt = build_harmony_prompt(&req, "medium", None);
 
         // Texto que acompaña a la call → analysis, no final.
-        assert!(prompt
-            .contains("<|start|>assistant<|channel|>analysis<|message|>Voy a escribirlo.<|end|>"));
+        assert!(
+            prompt.contains(
+                "<|start|>assistant<|channel|>analysis<|message|>Voy a escribirlo.<|end|>"
+            )
+        );
         assert!(prompt.contains(
             "<|start|>assistant<|channel|>commentary to=functions.write_file \
              <|constrain|>json<|message|>{\"path\":\"x.txt\"}<|call|>"
@@ -731,7 +737,10 @@ mod tests {
 
     // ----- parser -----
 
-    fn feed(parser: &mut HarmonyParser, script: &[Result<&str, HarmonyMarker>]) -> Vec<HarmonyEvent> {
+    fn feed(
+        parser: &mut HarmonyParser,
+        script: &[Result<&str, HarmonyMarker>],
+    ) -> Vec<HarmonyEvent> {
         let mut events = Vec::new();
         for step in script {
             let ev = match step {
@@ -831,7 +840,9 @@ mod tests {
         );
         assert_eq!(
             events,
-            vec![HarmonyEvent::Visible("Voy a crear tres archivos.".to_string())]
+            vec![HarmonyEvent::Visible(
+                "Voy a crear tres archivos.".to_string()
+            )]
         );
     }
 
@@ -843,7 +854,9 @@ mod tests {
         let events = feed(&mut p, &[Ok("<tool_call>{...}</tool_call>")]);
         assert_eq!(
             events,
-            vec![HarmonyEvent::Visible("<tool_call>{...}</tool_call>".to_string())]
+            vec![HarmonyEvent::Visible(
+                "<tool_call>{...}</tool_call>".to_string()
+            )]
         );
     }
 
@@ -928,7 +941,10 @@ mod tests {
         let literals: HashSet<&str> = HarmonyMarker::ALL.iter().map(|m| m.literal()).collect();
         assert_eq!(literals.len(), 7);
         for lit in &literals {
-            assert!(lit.starts_with("<|") && lit.ends_with("|>"), "literal raro: {lit}");
+            assert!(
+                lit.starts_with("<|") && lit.ends_with("|>"),
+                "literal raro: {lit}"
+            );
         }
         assert!(literals.contains("<|call|>"));
         assert!(literals.contains("<|return|>"));

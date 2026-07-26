@@ -299,16 +299,15 @@ fn collapsed_observation_content(content: &str, full_observations: usize) -> Str
 
     let first_line = content.lines().next().unwrap_or("").trim_end();
     let excerpt: String = first_line.chars().take(FIRST_LINE_MAX_CHARS).collect();
-    let preserved_marker = if content.contains(POST_EDIT_CHECK_MARKER)
-        && !excerpt.contains(POST_EDIT_CHECK_MARKER)
-    {
-        // Kept compact: the classification only needs the marker's
-        // presence, and the model only needs to know the regression
-        // existed — the full compiler output stays omitted.
-        format!(" {POST_EDIT_CHECK_MARKER} (build regression in this old edit)")
-    } else {
-        String::new()
-    };
+    let preserved_marker =
+        if content.contains(POST_EDIT_CHECK_MARKER) && !excerpt.contains(POST_EDIT_CHECK_MARKER) {
+            // Kept compact: the classification only needs the marker's
+            // presence, and the model only needs to know the regression
+            // existed — the full compiler output stays omitted.
+            format!(" {POST_EDIT_CHECK_MARKER} (build regression in this old edit)")
+        } else {
+            String::new()
+        };
     let omitted = content.len().saturating_sub(excerpt.len());
     // A′.1 (docs/harness-engineering-hooks-skills-2026-07-10.md § I.1):
     // the marker states what to DO, not just what happened — a frontier
@@ -570,8 +569,12 @@ mod tests {
             text: "y ahora qué".to_string(),
         }];
 
-        let messages =
-            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS, MAX_FULL_OBSERVATIONS_TOTAL_CHARS);
+        let messages = build_messages_with_full_observations(
+            &durable,
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
+        );
 
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, Role::User);
@@ -764,8 +767,12 @@ mod tests {
             ],
         };
 
-        let messages =
-            build_messages_with_full_observations(&durable, &[], TACTICAL_FULL_OBSERVATIONS, MAX_FULL_OBSERVATIONS_TOTAL_CHARS);
+        let messages = build_messages_with_full_observations(
+            &durable,
+            &[],
+            TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
+        );
 
         // N-2 fix: a leading placeholder `User` message is now prepended
         // whenever `durable_events` is non-empty and `summary` is still
@@ -1263,8 +1270,12 @@ mod tests {
             },
         ];
 
-        let messages =
-            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS, MAX_FULL_OBSERVATIONS_TOTAL_CHARS);
+        let messages = build_messages_with_full_observations(
+            &durable,
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
+        );
 
         // [resumen, mensaje viejo, tool_use viejo, tool_result viejo
         // (cleared), mensaje reciente, respuesta reciente] — durable
@@ -1355,8 +1366,12 @@ mod tests {
             },
         ];
 
-        let messages =
-            build_messages_with_full_observations(&durable, &tactical, TACTICAL_FULL_OBSERVATIONS, MAX_FULL_OBSERVATIONS_TOTAL_CHARS);
+        let messages = build_messages_with_full_observations(
+            &durable,
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
+        );
 
         crate::protocol_check::check_anthropic_message_protocol(&messages).expect(
             "build_messages_with_full_observations must produce an Anthropic-valid sequence \

@@ -997,7 +997,11 @@ mod tests {
         assert_eq!(untouched.escalation_turns(), DEFAULT_ESCALATION_TURNS);
 
         let purely_reactive = fresh().with_configured_knobs(Some(0), Some(4), Some(2));
-        assert_eq!(purely_reactive.lead_turns(), 0, "lead_turns=0 must be expressible");
+        assert_eq!(
+            purely_reactive.lead_turns(),
+            0,
+            "lead_turns=0 must be expressible"
+        );
         assert_eq!(purely_reactive.failure_threshold(), 4);
         assert_eq!(purely_reactive.escalation_turns(), 2);
 

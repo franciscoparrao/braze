@@ -48,17 +48,18 @@ impl Engine {
     /// warn-and-continue on failure. Returns the `(id, reason)` of each
     /// hook whose failure streak crossed the disable threshold on THIS
     /// call — the caller persists those as [`AgentEvent::HookErrored`].
-    pub(super) async fn dispatch_hooks_on_event(&self, event: &AgentEvent) -> Vec<(String, String)> {
+    pub(super) async fn dispatch_hooks_on_event(
+        &self,
+        event: &AgentEvent,
+    ) -> Vec<(String, String)> {
         let mut disabled_now = Vec::new();
         for registered in &self.hooks {
             if registered.is_disabled() {
                 continue;
             }
-            let outcome = tokio::time::timeout(
-                crate::hooks::HOOK_TIMEOUT,
-                registered.hook.on_event(event),
-            )
-            .await;
+            let outcome =
+                tokio::time::timeout(crate::hooks::HOOK_TIMEOUT, registered.hook.on_event(event))
+                    .await;
             if let Some((id, reason)) =
                 Self::hook_failure(registered, crate::hooks::HookPoint::OnEvent, outcome)
             {
@@ -126,7 +127,10 @@ impl Engine {
                 point = point.as_str(),
                 "engine hook disabled after repeated failures"
             );
-            return Some((registered.hook.id().to_string(), failure.unwrap_or_default()));
+            return Some((
+                registered.hook.id().to_string(),
+                failure.unwrap_or_default(),
+            ));
         }
         None
     }

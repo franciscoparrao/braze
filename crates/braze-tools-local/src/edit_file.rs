@@ -430,7 +430,9 @@ mod tests {
             "the rejection must steer somewhere: {err}"
         );
         assert_eq!(
-            tokio::fs::read_to_string(&file_path).await.expect("read back"),
+            tokio::fs::read_to_string(&file_path)
+                .await
+                .expect("read back"),
             original,
             "the file must be untouched by a rejected edit"
         );

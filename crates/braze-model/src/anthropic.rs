@@ -141,18 +141,14 @@ impl ModelBackend for AnthropicBackend {
             self.model
         );
         let guard = crate::circuit_breaker::acquire(&breaker_key)?;
-        let send_result = crate::retry::send_with_retry(
-            "anthropic",
-            self.max_retries,
-            || {
-                self.client
-                    .post(&self.base_url)
-                    .header("x-api-key", &self.api_key)
-                    .header("anthropic-version", ANTHROPIC_VERSION)
-                    .header("content-type", "application/json")
-                    .json(&body)
-            },
-        )
+        let send_result = crate::retry::send_with_retry("anthropic", self.max_retries, || {
+            self.client
+                .post(&self.base_url)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("content-type", "application/json")
+                .json(&body)
+        })
         .await;
         let response = match send_result {
             Ok(response) => response,

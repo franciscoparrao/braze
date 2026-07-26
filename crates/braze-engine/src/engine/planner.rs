@@ -115,11 +115,7 @@ impl Engine {
         // "planner→tasks" arm of the pre-registered A/B (PLAN.md § split
         // planificador/ejecutor): same planner call, different delivery.
         if self.task_list_enabled {
-            let seeded = self
-                .task_list
-                .lock()
-                .unwrap()
-                .seed_from_numbered_plan(plan);
+            let seeded = self.task_list.lock().unwrap().seed_from_numbered_plan(plan);
             tracing::info!(
                 seeded,
                 "plan delivered as typed tasks instead of prose (task list enabled)"
@@ -148,8 +144,7 @@ pub(super) fn count_numbered_steps(plan: &str) -> usize {
         .filter(|line| {
             let trimmed = line.trim_start();
             let digit_count = trimmed.chars().take_while(char::is_ascii_digit).count();
-            digit_count > 0
-                && trimmed[digit_count..].starts_with(['.', ')'])
+            digit_count > 0 && trimmed[digit_count..].starts_with(['.', ')'])
         })
         .count()
 }
@@ -189,8 +184,8 @@ mod tests {
     use super::*;
     // P1.1 paso 6: tests de integración movidos del mod tests de
     // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
-    use crate::engine::test_support::*;
     use crate::engine::Engine;
+    use crate::engine::test_support::*;
     use braze_events::NoopObserver;
     use braze_model::CompletionEvent;
     use braze_session::{FileSessionStore, SimpleContextCompactor};

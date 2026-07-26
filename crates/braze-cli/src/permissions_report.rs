@@ -96,7 +96,11 @@ pub fn aggregate(sessions: &[Vec<AgentEvent>]) -> Vec<PermissionStat> {
         b.approved
             .cmp(&a.approved)
             .then(b.sessions.cmp(&a.sessions))
-            .then_with(|| category_and_label(&a.key).1.cmp(&category_and_label(&b.key).1))
+            .then_with(|| {
+                category_and_label(&a.key)
+                    .1
+                    .cmp(&category_and_label(&b.key).1)
+            })
     });
     stats
 }
@@ -207,9 +211,15 @@ mod tests {
         // Sorted by approved desc: cargo build (3) first.
         assert_eq!(stats[0].approved, 3);
         assert_eq!(stats[0].sessions, 2, "distinct sessions, not raw count");
-        assert_eq!(category_and_label(&stats[0].key), ("shell", "cargo build".to_string()));
+        assert_eq!(
+            category_and_label(&stats[0].key),
+            ("shell", "cargo build".to_string())
+        );
 
-        let rm = stats.iter().find(|s| matches!(&s.key, PermissionKey::Shell { command } if command[0] == "rm")).unwrap();
+        let rm = stats
+            .iter()
+            .find(|s| matches!(&s.key, PermissionKey::Shell { command } if command[0] == "rm"))
+            .unwrap();
         assert_eq!(rm.denied, 1);
         assert_eq!(rm.approved, 0);
     }

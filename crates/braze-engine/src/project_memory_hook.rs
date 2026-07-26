@@ -193,7 +193,11 @@ impl ProjectMemoryHook {
     /// Same reasoning as [`Self::record_touched_and_snapshot`].
     fn record_completed_and_snapshot(&self, description: &str) -> ProjectMemory {
         let mut memory = self.memory.lock().unwrap();
-        memory.record_completed_signal(description.to_string(), SignalSource::TaskListCompletion, Self::now());
+        memory.record_completed_signal(
+            description.to_string(),
+            SignalSource::TaskListCompletion,
+            Self::now(),
+        );
         memory.clone()
     }
 
@@ -266,14 +270,16 @@ mod tests {
     use braze_types::ToolResult;
 
     fn temp_store_path() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "braze-memory-hook-test-{:?}-{}",
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        )).join("memory.json")
+        std::env::temp_dir()
+            .join(format!(
+                "braze-memory-hook-test-{:?}-{}",
+                std::thread::current().id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .join("memory.json")
     }
 
     #[tokio::test]
@@ -413,7 +419,10 @@ mod tests {
         let second_hook = ProjectMemoryHook::new(store, "proj").await;
         let snapshot = second_hook.snapshot();
         assert_eq!(snapshot.completed_signals.len(), 1);
-        assert_eq!(snapshot.completed_signals[0].description, "first session's work");
+        assert_eq!(
+            snapshot.completed_signals[0].description,
+            "first session's work"
+        );
 
         tokio::fs::remove_dir_all(path.parent().unwrap()).await.ok();
     }
@@ -430,7 +439,11 @@ mod tests {
         // Seed the file with ANOTHER project's memory, complete with a
         // signal that must not leak across.
         let mut foreign = braze_memory::ProjectMemory::new("other-project");
-        foreign.record_completed_signal("other project's secret work", SignalSource::TaskListCompletion, "t1");
+        foreign.record_completed_signal(
+            "other project's secret work",
+            SignalSource::TaskListCompletion,
+            "t1",
+        );
         store.save(&foreign).await.unwrap();
 
         let hook = ProjectMemoryHook::new(std::sync::Arc::clone(&store), "proj").await;
@@ -470,7 +483,9 @@ mod tests {
         // `load` must surface an error internally, and `new` must
         // recover from it rather than panicking or propagating.
         let path = temp_store_path();
-        tokio::fs::create_dir_all(path.parent().unwrap()).await.unwrap();
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
         tokio::fs::write(&path, b"not valid json").await.unwrap();
 
         let store = std::sync::Arc::new(FileProjectMemoryStore::new(&path));

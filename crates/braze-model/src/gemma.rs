@@ -182,7 +182,9 @@ mod tests {
         }];
         let prompt = build_gemma_prompt(&r);
         // El preámbulo NO va en el turno model previo…
-        let model_turn = prompt.find("<start_of_turn>model\ncontexto previo").unwrap();
+        let model_turn = prompt
+            .find("<start_of_turn>model\ncontexto previo")
+            .unwrap();
         let folded = prompt.find("You are braze.").unwrap();
         assert!(folded > model_turn);
         // …sino plegado al primer turno user, antes de su contenido.
@@ -224,7 +226,9 @@ mod tests {
         assert!(prompt.contains(
             "<start_of_turn>model\n<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\":\"x.txt\"}}\n</tool_call>"
         ));
-        assert!(prompt.contains("<start_of_turn>user\n<tool_response>\ncontenido\n</tool_response>"));
+        assert!(
+            prompt.contains("<start_of_turn>user\n<tool_response>\ncontenido\n</tool_response>")
+        );
     }
 
     #[test]

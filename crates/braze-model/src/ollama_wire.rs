@@ -705,7 +705,13 @@ mod tests {
         assert_eq!(json["top_k"], 20);
         assert_eq!(json["repeat_penalty"], 1.0499999523162842); // f32 1.05
 
-        let wire = build_request(&req, "qwen2.5:3b", 8192, sampling_02(None), ToolTransport::Native);
+        let wire = build_request(
+            &req,
+            "qwen2.5:3b",
+            8192,
+            sampling_02(None),
+            ToolTransport::Native,
+        );
         let json = serde_json::to_value(wire.options).unwrap();
         assert!(json.get("top_p").is_none());
         assert!(json.get("top_k").is_none());
@@ -721,7 +727,13 @@ mod tests {
             system_prompt: "be terse".to_string(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "llama3", 8192, sampling_02(None), ToolTransport::Native);
+        let wire = build_request(
+            &req,
+            "llama3",
+            8192,
+            sampling_02(None),
+            ToolTransport::Native,
+        );
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
         assert_eq!(wire.messages[0].content, "be terse");
@@ -742,7 +754,13 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: u32::MAX,
         };
-        let wire = build_request(&req, "llama3", 8192, sampling_02(None), ToolTransport::Native);
+        let wire = build_request(
+            &req,
+            "llama3",
+            8192,
+            sampling_02(None),
+            ToolTransport::Native,
+        );
         assert_eq!(wire.options.num_predict, i32::MAX);
     }
 
@@ -757,7 +775,13 @@ mod tests {
             system_prompt: String::new(),
             max_tokens: 100,
         };
-        let wire = build_request(&req, "llama3", 8192, sampling_02(Some(42)), ToolTransport::Native);
+        let wire = build_request(
+            &req,
+            "llama3",
+            8192,
+            sampling_02(Some(42)),
+            ToolTransport::Native,
+        );
         assert_eq!(wire.options.seed, Some(42));
     }
 
@@ -839,12 +863,18 @@ mod tests {
         assert!(wire.tools.is_empty());
         assert!(wire.format.is_none());
         let json = serde_json::to_value(&wire).unwrap();
-        assert!(json.get("tools").is_none(), "empty tools must serialize to no field");
+        assert!(
+            json.get("tools").is_none(),
+            "empty tools must serialize to no field"
+        );
         assert!(json.get("format").is_none());
 
         assert_eq!(wire.messages[0].role, "system");
         let system = &wire.messages[0].content;
-        assert!(system.starts_with("be terse"), "caller's prompt must come first");
+        assert!(
+            system.starts_with("be terse"),
+            "caller's prompt must come first"
+        );
         assert!(system.contains("### read_file"));
         assert!(system.contains("### write_file"));
         assert!(system.contains("\"action\": \"tool_call\""));
@@ -1132,8 +1162,14 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(text.contains("I should create main.rs next."), "got: {text}");
-        assert!(text.contains("razonamiento"), "must be marked as reasoning: {text}");
+        assert!(
+            text.contains("I should create main.rs next."),
+            "got: {text}"
+        );
+        assert!(
+            text.contains("razonamiento"),
+            "must be marked as reasoning: {text}"
+        );
     }
 
     /// Regression test for the roam #7 incident (2026-07-20): the
@@ -1165,7 +1201,10 @@ mod tests {
             text.contains("CONCLUSION_AL_FINAL"),
             "debe conservar la COLA del razonamiento: {text}"
         );
-        assert!(text.contains("recortado"), "y marcar que se recortó: {text}");
+        assert!(
+            text.contains("recortado"),
+            "y marcar que se recortó: {text}"
+        );
     }
 
     /// The fallback must NOT fire when the round produced real content:

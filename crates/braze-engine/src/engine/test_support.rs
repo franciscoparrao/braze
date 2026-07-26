@@ -46,10 +46,8 @@ impl ModelBackend for ScriptedModel {
     async fn complete(
         &self,
         _req: CompletionRequest,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
-        ModelError,
-    > {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
         let mut rounds = self.rounds.lock().await;
         let round = rounds
             .pop_front()
@@ -72,10 +70,8 @@ impl ModelBackend for ErroringModel {
     async fn complete(
         &self,
         _req: CompletionRequest,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
-        ModelError,
-    > {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
         let items = vec![
             Ok(CompletionEvent::TextDelta(
                 "Voy a leer el archi".to_string(),
@@ -106,10 +102,8 @@ impl ModelBackend for FlakyBestOfNModel {
     async fn complete(
         &self,
         _req: CompletionRequest,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
-        ModelError,
-    > {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
         if attempt == self.fail_on_attempt {
             return Err(ModelError::Request(
@@ -140,10 +134,8 @@ impl ModelBackend for SlowModel {
     async fn complete(
         &self,
         _req: CompletionRequest,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
-        ModelError,
-    > {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
         tokio::time::sleep(self.delay).await;
         Ok(Box::pin(futures::stream::iter(
             self.round.clone().into_iter().map(Ok),
@@ -181,10 +173,8 @@ impl<M: ModelBackend> ModelBackend for ProtocolValidatingModel<M> {
     async fn complete(
         &self,
         req: CompletionRequest,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
-        ModelError,
-    > {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
         if let Err(violation) =
             crate::protocol_check::check_anthropic_message_protocol(&req.messages)
         {
@@ -217,10 +207,8 @@ impl<M: ModelBackend> ModelBackend for RequestCapturingModel<M> {
     async fn complete(
         &self,
         req: CompletionRequest,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
-        ModelError,
-    > {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
         self.requests.lock().unwrap().push(req.clone());
         self.inner.complete(req).await
     }

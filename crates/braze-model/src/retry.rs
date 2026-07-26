@@ -138,7 +138,11 @@ mod tests {
     #[tokio::test]
     async fn a_transient_429_is_absorbed_by_one_retry() {
         let addr = crate::test_support::spawn_sequenced_http_server(vec![
-            (429, "application/json", br#"{"error":"slow down"}"#.to_vec()),
+            (
+                429,
+                "application/json",
+                br#"{"error":"slow down"}"#.to_vec(),
+            ),
             (200, "application/json", br#"{"ok":true}"#.to_vec()),
         ])
         .await;
@@ -157,8 +161,16 @@ mod tests {
     #[tokio::test]
     async fn a_persistent_429_still_maps_to_rate_limited_after_retries() {
         let addr = crate::test_support::spawn_sequenced_http_server(vec![
-            (429, "application/json", br#"{"error":"slow down"}"#.to_vec()),
-            (429, "application/json", br#"{"error":"slow down"}"#.to_vec()),
+            (
+                429,
+                "application/json",
+                br#"{"error":"slow down"}"#.to_vec(),
+            ),
+            (
+                429,
+                "application/json",
+                br#"{"error":"slow down"}"#.to_vec(),
+            ),
         ])
         .await;
 

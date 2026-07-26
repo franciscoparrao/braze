@@ -97,13 +97,16 @@ impl TaskList {
     /// "done" con frecuencia, y cada duplicado emitido contaminaba
     /// `completed_signals` expulsando señales legítimas del cap de 30).
     /// `Ok(None)` también para pending/in_progress.
-    pub(crate) fn update(&mut self, id: usize, status: TaskStatus) -> Result<Option<String>, String> {
+    pub(crate) fn update(
+        &mut self,
+        id: usize,
+        status: TaskStatus,
+    ) -> Result<Option<String>, String> {
         match self.entries.iter_mut().find(|entry| entry.id == id) {
             Some(entry) => {
                 let was_done = entry.status == TaskStatus::Done;
                 entry.status = status;
-                Ok((status == TaskStatus::Done && !was_done)
-                    .then(|| entry.description.clone()))
+                Ok((status == TaskStatus::Done && !was_done).then(|| entry.description.clone()))
             }
             None => Err(format!(
                 "no task with id {id} — current ids: {}",
@@ -150,7 +153,14 @@ impl TaskList {
         let rendered: Vec<String> = self
             .entries
             .iter()
-            .map(|entry| format!("{} [{}] {}", entry.id, entry.status.as_str(), entry.description))
+            .map(|entry| {
+                format!(
+                    "{} [{}] {}",
+                    entry.id,
+                    entry.status.as_str(),
+                    entry.description
+                )
+            })
             .collect();
         format!(
             "Task list: {}. Mark progress with task_update(id, status).",
@@ -229,7 +239,10 @@ mod tests {
         assert!(err.contains("current ids: 1, 2"), "got: {err}");
 
         let summary = list.summary_line();
-        assert!(summary.contains("1 [done] leer el archivo"), "got: {summary}");
+        assert!(
+            summary.contains("1 [done] leer el archivo"),
+            "got: {summary}"
+        );
         assert!(summary.contains("2 [in_progress] editar la función"));
         assert!(list.has_open_tasks());
 
@@ -248,7 +261,10 @@ mod tests {
         list.add("leer el archivo");
 
         let to_in_progress = list.update(1, TaskStatus::InProgress).unwrap();
-        assert_eq!(to_in_progress, None, "pending -> in_progress is not a completion");
+        assert_eq!(
+            to_in_progress, None,
+            "pending -> in_progress is not a completion"
+        );
 
         let to_done = list.update(1, TaskStatus::Done).unwrap();
         assert_eq!(to_done, Some("leer el archivo".to_string()));
@@ -282,7 +298,10 @@ mod tests {
     #[test]
     fn status_parse_accepts_the_documented_forms() {
         assert_eq!(TaskStatus::parse("pending"), Some(TaskStatus::Pending));
-        assert_eq!(TaskStatus::parse("IN_PROGRESS"), Some(TaskStatus::InProgress));
+        assert_eq!(
+            TaskStatus::parse("IN_PROGRESS"),
+            Some(TaskStatus::InProgress)
+        );
         assert_eq!(TaskStatus::parse("done"), Some(TaskStatus::Done));
         assert_eq!(TaskStatus::parse("completed"), Some(TaskStatus::Done));
         assert_eq!(TaskStatus::parse("wip"), None);

@@ -115,12 +115,11 @@ fn schema_rule(schema: &serde_json::Value, rules: &mut Vec<String>, fresh: &mut 
 
 /// La regla de objeto con propiedades tipadas. Sin `properties` (o
 /// vacías) cae al `object` genérico.
-fn object_rule(
-    schema: &serde_json::Value,
-    rules: &mut Vec<String>,
-    fresh: &mut usize,
-) -> String {
-    let Some(props) = schema.get("properties").and_then(serde_json::Value::as_object) else {
+fn object_rule(schema: &serde_json::Value, rules: &mut Vec<String>, fresh: &mut usize) -> String {
+    let Some(props) = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+    else {
         return "object".to_string();
     };
     if props.is_empty() {
@@ -211,10 +210,9 @@ pub(crate) fn qwen_call_grammar(tools: &[ToolGrammarSpec]) -> Option<String> {
     let mut fresh = 0usize;
     let mut branches = Vec::new();
     for (i, tool) in tools.iter().enumerate() {
-        let args = tool
-            .schema
-            .as_ref()
-            .map_or("object".to_string(), |s| schema_rule(s, &mut rules, &mut fresh));
+        let args = tool.schema.as_ref().map_or("object".to_string(), |s| {
+            schema_rule(s, &mut rules, &mut fresh)
+        });
         let branch = format!("c{i}");
         rules.push(format!(
             "{branch} ::= \"\\\"{}\\\"\" ws \",\" ws \"\\\"arguments\\\"\" ws \":\" ws {args}",
@@ -243,7 +241,9 @@ pub(crate) fn harmony_args_grammar(tool_name: &str, tools: &[ToolGrammarSpec]) -
         .iter()
         .find(|t| t.name == tool_name)
         .and_then(|t| t.schema.as_ref())
-        .map_or("object".to_string(), |s| schema_rule(s, &mut rules, &mut fresh));
+        .map_or("object".to_string(), |s| {
+            schema_rule(s, &mut rules, &mut fresh)
+        });
     format!("root ::= ws {args}\n{}\n{JSON_RULES}", rules.join("\n"))
 }
 

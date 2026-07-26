@@ -726,7 +726,10 @@ fn strip_matching_quotes(s: &str) -> Option<String> {
 /// already sends correctly-typed JSON — so this is safe to call
 /// unconditionally before validating/dispatching any call, rescued or
 /// not.
-pub(crate) fn coerce_arguments_to_schema(arguments: &mut serde_json::Value, schema: &serde_json::Value) {
+pub(crate) fn coerce_arguments_to_schema(
+    arguments: &mut serde_json::Value,
+    schema: &serde_json::Value,
+) {
     let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) else {
         return;
     };

@@ -179,7 +179,11 @@ pub(crate) fn search_stubs<'a>(
     // Stable sort: equal scores keep catalog order — deterministic
     // results for a deterministic bench.
     scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    scored.into_iter().take(limit).map(|(_, stub)| stub).collect()
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, stub)| stub)
+        .collect()
 }
 
 #[cfg(test)]
@@ -207,10 +211,7 @@ mod tests {
         assert_eq!(inventory.visible.len(), 2);
         assert!(inventory.hidden.is_empty());
         assert!(
-            !inventory
-                .visible
-                .iter()
-                .any(|s| s.name == SEARCH_TOOL_NAME),
+            !inventory.visible.iter().any(|s| s.name == SEARCH_TOOL_NAME),
             "no search stub when nothing is hidden"
         );
     }
@@ -232,10 +233,12 @@ mod tests {
         activated.insert("gis_tool_3".to_string());
 
         let inventory = apply_deferral(stubs, 3, &activated);
-        let visible_names: Vec<&str> =
-            inventory.visible.iter().map(|s| s.name.as_str()).collect();
+        let visible_names: Vec<&str> = inventory.visible.iter().map(|s| s.name.as_str()).collect();
         assert!(visible_names.contains(&"read_file"));
-        assert!(visible_names.contains(&"gis_tool_3"), "activated resurfaces");
+        assert!(
+            visible_names.contains(&"gis_tool_3"),
+            "activated resurfaces"
+        );
         assert!(visible_names.contains(&SEARCH_TOOL_NAME));
         assert_eq!(inventory.hidden.len(), 4);
         assert!(

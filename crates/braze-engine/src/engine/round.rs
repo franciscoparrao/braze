@@ -373,7 +373,8 @@ impl Engine {
                 let mut candidate_observer = braze_events::NoopObserver;
                 (
                     attempt,
-                    self.complete_once(req, &mut candidate_observer, false).await,
+                    self.complete_once(req, &mut candidate_observer, false)
+                        .await,
                 )
             }
         }))
@@ -403,7 +404,9 @@ impl Engine {
         }
 
         if candidates.is_empty() {
-            return Err(last_error.unwrap_or(EngineError::TurnDidNotConverge(self.max_turn_iterations)));
+            return Err(
+                last_error.unwrap_or(EngineError::TurnDidNotConverge(self.max_turn_iterations))
+            );
         }
 
         let signatures: Vec<Vec<(String, String)>> =
@@ -435,7 +438,9 @@ impl Engine {
         // stay `None` unless at least one candidate reported a cache
         // token count.
         let total_cache_read_tokens = sum_optional_u32(
-            candidates.iter().filter_map(|c| c.usage.as_ref().and_then(|u| u.cache_read_tokens)),
+            candidates
+                .iter()
+                .filter_map(|c| c.usage.as_ref().and_then(|u| u.cache_read_tokens)),
         );
         let total_cache_write_tokens = sum_optional_u32(
             candidates
@@ -525,8 +530,8 @@ mod tests {
     use super::*;
     // P1.1 paso 7: tests de integración movidos del mod tests de
     // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
-    use crate::engine::test_support::*;
     use crate::engine::Engine;
+    use crate::engine::test_support::*;
     use braze_events::NoopObserver;
     use braze_model::CompletionEvent;
     use braze_session::{FileSessionStore, SimpleContextCompactor};

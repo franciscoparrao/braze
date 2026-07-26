@@ -99,13 +99,12 @@ impl ToolProvider for AskUserProvider {
     }
 
     async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let args: AskUserArgs =
-            serde_json::from_value(call.arguments.clone()).map_err(|err| {
-                ToolError::InvocationFailed {
-                    name: ASK_USER_TOOL.to_string(),
-                    message: format!("invalid ask_user arguments: {err}"),
-                }
-            })?;
+        let args: AskUserArgs = serde_json::from_value(call.arguments.clone()).map_err(|err| {
+            ToolError::InvocationFailed {
+                name: ASK_USER_TOOL.to_string(),
+                message: format!("invalid ask_user arguments: {err}"),
+            }
+        })?;
 
         // Option-count validation is a RECOVERABLE tool error (the model
         // can retry with a fixed call), not a hard InvocationFailed.
@@ -124,7 +123,10 @@ impl ToolProvider for AskUserProvider {
         let content = match self.prompt.ask(&args.question, &args.options).await {
             Some(index) => format!(
                 "The user chose: {}",
-                args.options.get(index).map(String::as_str).unwrap_or("(unknown)")
+                args.options
+                    .get(index)
+                    .map(String::as_str)
+                    .unwrap_or("(unknown)")
             ),
             None => "The user did not answer. Proceed with your best judgment or a safe \
                      default."
@@ -172,7 +174,11 @@ mod tests {
             .await
             .unwrap();
         assert!(!result.is_error);
-        assert!(result.content.contains("config.yaml"), "got: {}", result.content);
+        assert!(
+            result.content.contains("config.yaml"),
+            "got: {}",
+            result.content
+        );
     }
 
     #[tokio::test]
@@ -186,14 +192,20 @@ mod tests {
             .await
             .unwrap();
         assert!(!result.is_error);
-        assert!(result.content.contains("did not answer"), "got: {}", result.content);
+        assert!(
+            result.content.contains("did not answer"),
+            "got: {}",
+            result.content
+        );
     }
 
     #[tokio::test]
     async fn too_few_or_too_many_options_is_a_recoverable_error() {
         let provider = AskUserProvider::new(Arc::new(FixedChoice(Some(0))));
         let one = provider
-            .invoke(&call(serde_json::json!({"question": "q", "options": ["solo"]})))
+            .invoke(&call(
+                serde_json::json!({"question": "q", "options": ["solo"]}),
+            ))
             .await
             .unwrap();
         assert!(one.is_error);
@@ -215,7 +227,19 @@ mod tests {
         let stubs = provider.list_stubs().await.unwrap();
         assert_eq!(stubs.len(), 1);
         assert_eq!(stubs[0].name, ASK_USER_TOOL);
-        assert!(provider.resolve_schema(ASK_USER_TOOL).await.unwrap().is_some());
-        assert!(provider.resolve_schema("read_file").await.unwrap().is_none());
+        assert!(
+            provider
+                .resolve_schema(ASK_USER_TOOL)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            provider
+                .resolve_schema("read_file")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

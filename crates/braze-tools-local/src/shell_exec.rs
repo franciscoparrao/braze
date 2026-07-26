@@ -98,9 +98,7 @@ pub async fn shell_exec(args: ShellExecArgs, workdir: &Path) -> Result<String, S
             {
                 Ok(result) => result?,
                 Err(_) => {
-                    return Err(format!(
-                        "command timed out after {secs}s and was killed"
-                    ));
+                    return Err(format!("command timed out after {secs}s and was killed"));
                 }
             }
         }
@@ -161,7 +159,14 @@ mod tests {
 
     #[tokio::test]
     async fn empty_command_is_rejected() {
-        let result = shell_exec(ShellExecArgs { command: vec![], timeout: None }, &cwd()).await;
+        let result = shell_exec(
+            ShellExecArgs {
+                command: vec![],
+                timeout: None,
+            },
+            &cwd(),
+        )
+        .await;
         assert!(result.is_err());
     }
 

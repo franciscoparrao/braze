@@ -303,148 +303,146 @@ impl ModelBackend for OllamaBackend {
         // el "priming" va en `None` para que un fallo re-muestreable no
         // cuente como caída del destino, igual que el 500 de send.
         let mut tool_parse_stream_attempts = 0u32;
-        let event_stream: Pin<
-            Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>,
-        > = 'resample: loop {
-        let send_result = async {
-            let max_attempts = 1 + transport_retries_from_env();
-            let mut attempt = 0u32;
-            loop {
-                attempt += 1;
-                let sent = self
-                    .client
-                    .post(url.clone())
-                    .header("content-type", "application/json")
-                    .json(&body)
-                    .send()
-                    .await;
-                let response = match sent {
-                    Ok(r) => r,
-                    Err(e) if attempt < max_attempts => {
-                        let delay = transport_retry_backoff(attempt);
-                        tracing::warn!(
-                            attempt,
-                            max_attempts,
-                            delay_ms = delay.as_millis() as u64,
-                            error = %e,
-                            "ollama transport error on request send; retrying"
-                        );
-                        tokio::time::sleep(delay).await;
-                        continue;
-                    }
-                    Err(e) => {
-                        return Err(ModelError::Request(format!("ollama request failed: {e}")));
-                    }
-                };
-
-                if response.status().is_success() {
-                    return Ok(response);
-                }
-                // Incidente roam (2026-07-19, primera sesión de braze
-                // como herramienta de producción): Ollama devuelve 500
-                // "error parsing tool call" cuando el RAZONAMIENTO de un
-                // modelo harmony/thinking (gpt-oss:20b) se filtra al
-                // canal de tool-calls y su parser server-side no puede
-                // con el blob — un fallo POR-MUESTRA, no de saturación,
-                // así que el dictamen de H-19 ("no martillar un backend
-                // local saturado") no aplica: re-muestrear con el mismo
-                // request es la medicina exacta, cuesta cero bytes de
-                // stream consumidos, y convierte una muerte fatal del
-                // turno en una ronda recuperada. Acotado y siempre-on
-                // (no depende del env de transporte, que es opt-in para
-                // OTRA clase de fallo): esta clase de 500 es
-                // determinística de diagnóstico pero estocástica de
-                // ocurrencia — el próximo sample casi siempre parsea.
-                if response.status().as_u16() == 500 {
-                    let status = response.status();
-                    let body = response.text().await.unwrap_or_default();
-                    if body.contains("error parsing tool call")
-                        && attempt < 1 + TOOL_PARSE_500_RETRIES
-                    {
-                        tracing::warn!(
-                            attempt,
-                            "ollama 500 'error parsing tool call' (sample-level \
-                             parse failure); re-sampling the round"
-                        );
-                        tokio::time::sleep(transport_retry_backoff(attempt)).await;
-                        continue;
-                    }
-                    // Mismo formato que http_error_to_model_error, cuyo
-                    // body este branch ya consumió.
-                    return Err(ModelError::Request(format!("ollama HTTP {status}: {body}")));
-                }
-                return Err(http_error_to_model_error(response, "ollama").await);
-            }
-        }
-        .await;
-        let response = match send_result {
-            Ok(response) => response,
-            Err(err) => {
-                guard.observe_err(&err);
-                return Err(err);
-            }
-        };
-
-        let byte_stream = response
-            .bytes_stream()
-            .map(|chunk| chunk.map(|b| b.to_vec()));
-        // `breaker: None` durante el priming — se adjunta abajo solo al
-        // stream que efectivamente devolvemos.
-        let ctx = StreamCtx {
-            byte_stream: Box::pin(byte_stream),
-            buf: Vec::new(),
-            state: OllamaStreamState::new(self.num_ctx),
-            pending: VecDeque::new(),
-            finished: false,
-            breaker: None,
-        };
-
-        // Priming: un paso del stream, para saber si el primer desenlace
-        // es un error de tool-parse re-muestreable ANTES de entregarle
-        // nada al engine.
-        match drive_stream(ctx).await {
-            // El stream terminó limpio sin un solo evento: nada que
-            // re-muestrear, cuenta como completación OK.
-            None => {
-                guard.observe_ok();
-                break 'resample Box::pin(stream::empty::<
-                    Result<CompletionEvent, ModelError>,
-                >());
-            }
-            Some((item, mut primed)) => {
-                let retriable = matches!(&item, Err(e) if is_tool_parse_stream_error(e))
-                    && !primed.state.produced_output
-                    && tool_parse_stream_attempts < TOOL_PARSE_500_RETRIES;
-                if retriable {
-                    tool_parse_stream_attempts += 1;
-                    tracing::warn!(
-                        attempt = tool_parse_stream_attempts,
-                        "ollama mid-stream 'error parsing tool call' before any output \
-                         (incident #17); re-sampling the round"
-                    );
-                    // `primed` (y su conexión) se descarta; el breaker
-                    // nunca se le adjuntó, así que este fallo no cuenta.
-                    tokio::time::sleep(transport_retry_backoff(tool_parse_stream_attempts))
+        let event_stream: Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>> = 'resample: loop {
+            let send_result = async {
+                let max_attempts = 1 + transport_retries_from_env();
+                let mut attempt = 0u32;
+                loop {
+                    attempt += 1;
+                    let sent = self
+                        .client
+                        .post(url.clone())
+                        .header("content-type", "application/json")
+                        .json(&body)
+                        .send()
                         .await;
-                    continue 'resample;
+                    let response = match sent {
+                        Ok(r) => r,
+                        Err(e) if attempt < max_attempts => {
+                            let delay = transport_retry_backoff(attempt);
+                            tracing::warn!(
+                                attempt,
+                                max_attempts,
+                                delay_ms = delay.as_millis() as u64,
+                                error = %e,
+                                "ollama transport error on request send; retrying"
+                            );
+                            tokio::time::sleep(delay).await;
+                            continue;
+                        }
+                        Err(e) => {
+                            return Err(ModelError::Request(format!("ollama request failed: {e}")));
+                        }
+                    };
+
+                    if response.status().is_success() {
+                        return Ok(response);
+                    }
+                    // Incidente roam (2026-07-19, primera sesión de braze
+                    // como herramienta de producción): Ollama devuelve 500
+                    // "error parsing tool call" cuando el RAZONAMIENTO de un
+                    // modelo harmony/thinking (gpt-oss:20b) se filtra al
+                    // canal de tool-calls y su parser server-side no puede
+                    // con el blob — un fallo POR-MUESTRA, no de saturación,
+                    // así que el dictamen de H-19 ("no martillar un backend
+                    // local saturado") no aplica: re-muestrear con el mismo
+                    // request es la medicina exacta, cuesta cero bytes de
+                    // stream consumidos, y convierte una muerte fatal del
+                    // turno en una ronda recuperada. Acotado y siempre-on
+                    // (no depende del env de transporte, que es opt-in para
+                    // OTRA clase de fallo): esta clase de 500 es
+                    // determinística de diagnóstico pero estocástica de
+                    // ocurrencia — el próximo sample casi siempre parsea.
+                    if response.status().as_u16() == 500 {
+                        let status = response.status();
+                        let body = response.text().await.unwrap_or_default();
+                        if body.contains("error parsing tool call")
+                            && attempt < 1 + TOOL_PARSE_500_RETRIES
+                        {
+                            tracing::warn!(
+                                attempt,
+                                "ollama 500 'error parsing tool call' (sample-level \
+                             parse failure); re-sampling the round"
+                            );
+                            tokio::time::sleep(transport_retry_backoff(attempt)).await;
+                            continue;
+                        }
+                        // Mismo formato que http_error_to_model_error, cuyo
+                        // body este branch ya consumió.
+                        return Err(ModelError::Request(format!("ollama HTTP {status}: {body}")));
+                    }
+                    return Err(http_error_to_model_error(response, "ollama").await);
                 }
-                if let Err(ref err) = item {
-                    // Error no re-muestreable (tardío, de otra clase, o
-                    // reintentos agotados): reportar la caída y devolver
-                    // un stream que emite solo ese error.
-                    guard.observe_err(err);
-                    break 'resample Box::pin(stream::once(async move { item }));
-                }
-                // Primer evento real: ahora sí el breaker viaja con el
-                // stream vivo (reporta el desenlace terminal en
-                // `drive_stream`), replayamos el evento primado y seguimos.
-                primed.breaker = Some(guard);
-                break 'resample Box::pin(
-                    stream::once(async move { item })
-                        .chain(stream::unfold(primed, drive_stream)),
-                );
             }
-        }
+            .await;
+            let response = match send_result {
+                Ok(response) => response,
+                Err(err) => {
+                    guard.observe_err(&err);
+                    return Err(err);
+                }
+            };
+
+            let byte_stream = response
+                .bytes_stream()
+                .map(|chunk| chunk.map(|b| b.to_vec()));
+            // `breaker: None` durante el priming — se adjunta abajo solo al
+            // stream que efectivamente devolvemos.
+            let ctx = StreamCtx {
+                byte_stream: Box::pin(byte_stream),
+                buf: Vec::new(),
+                state: OllamaStreamState::new(self.num_ctx),
+                pending: VecDeque::new(),
+                finished: false,
+                breaker: None,
+            };
+
+            // Priming: un paso del stream, para saber si el primer desenlace
+            // es un error de tool-parse re-muestreable ANTES de entregarle
+            // nada al engine.
+            match drive_stream(ctx).await {
+                // El stream terminó limpio sin un solo evento: nada que
+                // re-muestrear, cuenta como completación OK.
+                None => {
+                    guard.observe_ok();
+                    break 'resample Box::pin(
+                        stream::empty::<Result<CompletionEvent, ModelError>>(),
+                    );
+                }
+                Some((item, mut primed)) => {
+                    let retriable = matches!(&item, Err(e) if is_tool_parse_stream_error(e))
+                        && !primed.state.produced_output
+                        && tool_parse_stream_attempts < TOOL_PARSE_500_RETRIES;
+                    if retriable {
+                        tool_parse_stream_attempts += 1;
+                        tracing::warn!(
+                            attempt = tool_parse_stream_attempts,
+                            "ollama mid-stream 'error parsing tool call' before any output \
+                         (incident #17); re-sampling the round"
+                        );
+                        // `primed` (y su conexión) se descarta; el breaker
+                        // nunca se le adjuntó, así que este fallo no cuenta.
+                        tokio::time::sleep(transport_retry_backoff(tool_parse_stream_attempts))
+                            .await;
+                        continue 'resample;
+                    }
+                    if let Err(ref err) = item {
+                        // Error no re-muestreable (tardío, de otra clase, o
+                        // reintentos agotados): reportar la caída y devolver
+                        // un stream que emite solo ese error.
+                        guard.observe_err(err);
+                        break 'resample Box::pin(stream::once(async move { item }));
+                    }
+                    // Primer evento real: ahora sí el breaker viaja con el
+                    // stream vivo (reporta el desenlace terminal en
+                    // `drive_stream`), replayamos el evento primado y seguimos.
+                    primed.breaker = Some(guard);
+                    break 'resample Box::pin(
+                        stream::once(async move { item })
+                            .chain(stream::unfold(primed, drive_stream)),
+                    );
+                }
+            }
         };
         Ok(event_stream)
     }
@@ -1064,7 +1062,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(text, "partial", "delivered output must survive, got {events:?}");
+        assert_eq!(
+            text, "partial",
+            "delivered output must survive, got {events:?}"
+        );
         assert!(
             events
                 .iter()

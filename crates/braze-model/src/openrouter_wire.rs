@@ -786,7 +786,10 @@ mod tests {
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
         assert_eq!(
-            wire.messages[0].content.as_ref().and_then(OpenRouterContent::as_text),
+            wire.messages[0]
+                .content
+                .as_ref()
+                .and_then(OpenRouterContent::as_text),
             Some("be terse")
         );
         assert_eq!(wire.messages[1].role, "user");
@@ -851,7 +854,10 @@ mod tests {
         let wire = build_request(&req, "anthropic/claude-sonnet-5", None, None, true);
 
         // Breakpoint 1: last tool.
-        assert!(wire.tools[0].cache_control.is_none(), "only the LAST tool should be marked");
+        assert!(
+            wire.tools[0].cache_control.is_none(),
+            "only the LAST tool should be marked"
+        );
         assert!(wire.tools.last().unwrap().cache_control.is_some());
 
         // Breakpoint 2: system message (always messages[0] given how
@@ -976,7 +982,10 @@ mod tests {
         let out = to_openrouter_messages(&message);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].role, "tool");
-        assert_eq!(out[0].content.as_ref().and_then(OpenRouterContent::as_text), Some("sunny, 20C"));
+        assert_eq!(
+            out[0].content.as_ref().and_then(OpenRouterContent::as_text),
+            Some("sunny, 20C")
+        );
         assert_eq!(out[0].tool_call_id.as_deref(), Some("call-1"));
     }
 
@@ -1038,7 +1047,10 @@ mod tests {
         let out = to_openrouter_messages(&message);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].role, "assistant");
-        assert_eq!(out[0].content.as_ref().and_then(OpenRouterContent::as_text), Some("Let me check."));
+        assert_eq!(
+            out[0].content.as_ref().and_then(OpenRouterContent::as_text),
+            Some("Let me check.")
+        );
         assert_eq!(out[0].tool_calls.len(), 1);
         assert_eq!(out[0].tool_calls[0].function.name, "get_weather");
     }
