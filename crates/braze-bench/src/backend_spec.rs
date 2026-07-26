@@ -260,18 +260,24 @@ impl BackendSpec {
         self.provider == Provider::Ollama
     }
 
-    /// The halves of this spec whose provider is NOT Ollama, labeled by
-    /// role (`"executor (anthropic)"`, `"lead (openrouter)"`, ...) —
-    /// empty for an all-Ollama spec. H-13
-    /// (docs/AUDITORIA-2026-07-v5.md): the Ollama-only sampling knobs
-    /// (`--top-p`/`--top-k`/`--repeat-penalty`) don't travel to the
-    /// Anthropic/OpenRouter builders, so a mixed sweep that sets them is
-    /// unbalanced in up to 3 unflagged dimensions; `main` uses this to
-    /// warn once per affected spec instead of staying silent.
+    /// Las mitades de este spec cuyo provider **ignora** los knobs de
+    /// sampling finos, etiquetadas por rol (`"executor (anthropic)"`,
+    /// `"lead (openrouter)"`, ...) — vacío si todas los honran. H-13
+    /// (docs/AUDITORIA-2026-07-v5.md): `--top-p`/`--top-k`/
+    /// `--repeat-penalty` no viajan a los builders de Anthropic/OpenRouter,
+    /// así que un sweep mixto que los fija queda desbalanceado en hasta 3
+    /// dimensiones sin marcar; `main` avisa una vez por spec afectado en
+    /// vez de callarse.
+    ///
+    /// **`local` salió de esta lista el 2026-07-26**: el LocalBackend ahora
+    /// aplica los cinco knobs (`with_sweep`), así que seguir avisando por
+    /// él sería un falso positivo. Antes de eso ignoraba `sampling`
+    /// ENTERO — incluida la temperatura, que este aviso nunca cubrió
+    /// porque se asumía universal.
     pub fn non_ollama_halves(&self) -> Vec<String> {
         let mut halves = Vec::new();
         let mut push_if_not_ollama = |role: &str, spec: &BackendSpec| {
-            if spec.provider != Provider::Ollama {
+            if !matches!(spec.provider, Provider::Ollama | Provider::Local) {
                 halves.push(format!("{role} ({})", spec.provider_name()));
             }
         };
@@ -464,8 +470,7 @@ impl BackendSpec {
                         // Misma precedencia H-2 que el brazo OpenRouter:
                         // la ablación explícita gana, si no manda config.
                         .with_prompt_caching_enabled(
-                            config.enable_prompt_caching
-                                && !self.ablation().disable_prompt_caching,
+                            config.enable_prompt_caching && !self.ablation().disable_prompt_caching,
                         ),
                 ))
             }
@@ -541,7 +546,7 @@ impl BackendSpec {
                 }
                 Ok(Box::new(backend))
             }
-            Provider::Local => self.build_local(config),
+            Provider::Local => self.build_local(config, sampling),
         }
     }
 
@@ -549,7 +554,11 @@ impl BackendSpec {
     /// como en el CLI: ref de Ollama (`qwen2.5:3b`, blob vía manifest) o
     /// ruta a un `.gguf`. Reusa `ollama_num_ctx` como `num_ctx`.
     #[cfg(feature = "local")]
-    fn build_local(&self, config: &Config) -> Result<Box<dyn ModelBackend>, BenchError> {
+    fn build_local(
+        &self,
+        config: &Config,
+        sampling: SamplingSpec,
+    ) -> Result<Box<dyn ModelBackend>, BenchError> {
         let model_ref = self
             .model_override
             .clone()
@@ -563,14 +572,30 @@ impl BackendSpec {
             braze_model::LocalBackend::from_ollama_model(&root, &model_ref, &model_ref, n_ctx)
         }
         .map_err(|e| BenchError::Startup(format!("backend local: {e}")))?;
-        Ok(Box::new(backend))
+        // N-34: hasta el 2026-07-26 el LocalBackend ignoraba `sampling`
+        // entero — `--temperature` era un no-op y todo brazo local corría
+        // greedy, así que la garantía de "un régimen por sweep" no se
+        // cumplía para `local`. `with_sweep` fusiona lo que el sweep fija
+        // sobre la base del entorno, para que min-p/DRY sigan siendo
+        // ablacionables por env dentro de un sweep.
+        let sampling = braze_model::LocalSampling::from_env().with_sweep(
+            sampling.temperature,
+            sampling.seed,
+            sampling.top_p,
+            sampling.top_k,
+            sampling.repeat_penalty,
+        );
+        Ok(Box::new(backend.with_sampling(sampling)))
     }
 
     #[cfg(not(feature = "local"))]
-    fn build_local(&self, _config: &Config) -> Result<Box<dyn ModelBackend>, BenchError> {
+    fn build_local(
+        &self,
+        _config: &Config,
+        _sampling: SamplingSpec,
+    ) -> Result<Box<dyn ModelBackend>, BenchError> {
         Err(BenchError::Startup(
-            "el backend 'local' requiere compilar braze-bench con `--features local`"
-                .to_string(),
+            "el backend 'local' requiere compilar braze-bench con `--features local`".to_string(),
         ))
     }
 }
@@ -820,9 +845,7 @@ impl AblationOverrides {
                 "tool-search-threshold" => {
                     out.tool_search_threshold = Some(Self::parse_usize(key, value)?)
                 }
-                "lead-window" => {
-                    out.lead_escalation_turns = Some(Self::parse_usize(key, value)?)
-                }
+                "lead-window" => out.lead_escalation_turns = Some(Self::parse_usize(key, value)?),
                 other => {
                     return Err(BenchError::Startup(format!(
                         "unknown '+ablate:' key '{other}' (expected one of: {})",

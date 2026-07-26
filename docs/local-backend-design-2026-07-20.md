@@ -652,9 +652,8 @@ sí reciben los demás backends. O sea: el LocalBackend siempre usó
 
 1. **`braze-bench --temperature` ha sido un no-op en todo brazo local.** La
    garantía **N-34** ("un solo régimen de sampling por sweep",
-   `backend_spec.rs:427`) no se cumple para `local`. **Hueco abierto**: se
-   decidió no taparlo en el mismo commit, porque plomarlo cambia el régimen de
-   todos los brazos locales futuros y los vuelve incomparables con lo medido.
+   `backend_spec.rs:427`) no se cumplía para `local`. **CERRADO el 2026-07-26**
+   — ver § "Cierre del hueco N-34" abajo.
 2. **El estudio de paridad LocalBackend vs Ollama** (McNemar p=0.22, arriba en
    este doc) comparó **greedy contra temp 0.2** — es un confound de esa
    conclusión, no un empate limpio.
@@ -704,6 +703,35 @@ Verificado en vivo en Nitro (gpt-oss): el camino default y el de
 **Pendiente**: el A/B que le dé o le quite el default. El candidato no es
 gpt-oss (satura en 57/57, no tiene dónde mejorar) sino **gemma4:e4b**, cuyos 3
 fallos sistemáticos de `single_tool` son la clase donde la degeneración muerde.
+
+### Cierre del hueco N-34 (2026-07-26)
+
+`build_local` ahora recibe el `SamplingSpec` del sweep y lo aplica vía
+`LocalSampling::with_sweep`. El LocalBackend honra los cinco knobs
+(temperatura, seed, top-p, top-k, repeat-penalty), así que `--temperature`
+dejó de ser mentira en brazos locales.
+
+**Fusiona en vez de reemplazar**, y es deliberado: el bench no conoce min-p ni
+DRY, así que sobrescribir todo las volvería inablacionables dentro de un
+sweep — justo como se corrió su primer A/B. El sweep manda en lo suyo, el
+entorno gobierna el resto. Un knob `None` significa "el sweep no lo fijó", no
+"apagalo".
+
+**Consecuencia declarada**: los brazos locales futuros corren al régimen del
+sweep (default `--temperature 0.2`), NO en greedy. Eso los vuelve
+**incomparables** con todo lo medido antes de esta fecha — paridad, stencil,
+pass^k, el 57/57 de gpt-oss y los cinco brazos del KV placement, todos greedy.
+Para reproducir aquellos números hay que pasar `--temperature 0`.
+
+Y ojo con lo que esto revela: el `pass^k` de brazos locales anteriores medía
+sobre todo **determinismo**, porque greedy ignora el seed por repetición. Con
+sampling real, pass^k pasa a medir robustez de verdad — y es esperable que
+baje. Ese descenso sería una medición más honesta, no una regresión.
+
+**H-13 también cambió**: `non_ollama_halves` ya no marca `local`. Antes lo
+hacía por los knobs Ollama-only, y era correcto; ahora sería falso positivo.
+Nótese que ese aviso **nunca cubrió la temperatura** — se asumía universal, y
+por eso el hueco vivió sin ser detectado.
 
 ## Referencias
 

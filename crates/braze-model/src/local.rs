@@ -998,6 +998,12 @@ pub struct LocalSampling {
     pub min_p: f32,
     /// top-k, `0` = apagado.
     pub top_k: i32,
+    /// top-p (nucleus), `0.0` = apagado.
+    pub top_p: f32,
+    /// Penalización de repetición, `1.0` = apagada.
+    pub repeat_penalty: f32,
+    /// Cuántos tokens atrás mira la penalización. `-1` = todo el contexto.
+    pub repeat_last_n: i32,
     /// DRY (anti-repetición por n-gramas). `0.0` = apagado.
     pub dry_multiplier: f32,
     pub dry_base: f32,
@@ -1021,6 +1027,9 @@ impl Default for LocalSampling {
             temperature: 0.0,
             min_p: 0.0,
             top_k: 0,
+            top_p: 0.0,
+            repeat_penalty: 1.0,
+            repeat_last_n: 64,
             dry_multiplier: 0.0,
             // Defaults de llama.cpp para cuando se activa DRY.
             dry_base: 1.75,
@@ -1052,6 +1061,9 @@ impl LocalSampling {
             temperature: f32_var("BRAZE_LOCAL_TEMP", d.temperature),
             min_p: f32_var("BRAZE_LOCAL_MIN_P", d.min_p),
             top_k: i32_var("BRAZE_LOCAL_TOP_K", d.top_k),
+            top_p: f32_var("BRAZE_LOCAL_TOP_P", d.top_p),
+            repeat_penalty: f32_var("BRAZE_LOCAL_REPEAT_PENALTY", d.repeat_penalty),
+            repeat_last_n: i32_var("BRAZE_LOCAL_REPEAT_LAST_N", d.repeat_last_n),
             dry_multiplier: f32_var("BRAZE_LOCAL_DRY", d.dry_multiplier),
             dry_base: f32_var("BRAZE_LOCAL_DRY_BASE", d.dry_base),
             dry_allowed_length: i32_var("BRAZE_LOCAL_DRY_ALLOWED", d.dry_allowed_length),
@@ -1064,10 +1076,53 @@ impl LocalSampling {
         }
     }
 
+    /// Aplica el régimen de sampling que fija un sweep **encima** de la
+    /// base del entorno.
+    ///
+    /// La fusión (en vez de reemplazo) es deliberada: el bench controla
+    /// temperatura/seed/top-p/top-k/repeat-penalty, pero no conoce min-p ni
+    /// DRY. Si sobrescribiera todo, esas dos dejarían de ser ablacionables
+    /// dentro de un sweep — que es justo como se corrió su primer A/B. Así,
+    /// el sweep manda en lo suyo y el entorno sigue gobernando el resto.
+    ///
+    /// Cierra el hueco de **N-34** para el LocalBackend: hasta el
+    /// 2026-07-26 `braze-bench --temperature` no llegaba acá y todo brazo
+    /// local corría greedy, así que la garantía de "un solo régimen de
+    /// sampling por sweep" no se cumplía.
+    #[must_use]
+    pub fn with_sweep(
+        mut self,
+        temperature: f32,
+        seed: Option<u64>,
+        top_p: Option<f32>,
+        top_k: Option<u32>,
+        repeat_penalty: Option<f32>,
+    ) -> Self {
+        self.temperature = temperature;
+        if let Some(seed) = seed {
+            self.seed = u32::try_from(seed & u64::from(u32::MAX)).unwrap_or(RANDOM_SEED);
+        }
+        if let Some(p) = top_p {
+            self.top_p = p;
+        }
+        if let Some(k) = top_k {
+            self.top_k = i32::try_from(k).unwrap_or(i32::MAX);
+        }
+        if let Some(r) = repeat_penalty {
+            self.repeat_penalty = r;
+        }
+        self
+    }
+
     /// ¿Es el camino histórico (greedy puro, sin filtros)?
     #[must_use]
     pub fn is_greedy(&self) -> bool {
-        self.temperature <= 0.0 && self.min_p <= 0.0 && self.top_k <= 0 && !self.dry_enabled()
+        self.temperature <= 0.0
+            && self.min_p <= 0.0
+            && self.top_k <= 0
+            && self.top_p <= 0.0
+            && (self.repeat_penalty - 1.0).abs() < f32::EPSILON
+            && !self.dry_enabled()
     }
 
     /// DRY lleva **estado** (la historia de n-gramas). Importa porque el
@@ -1103,8 +1158,19 @@ fn free_sampler(model: &LlamaModel, s: &LocalSampling) -> LlamaSampler {
             ["\n", ":", "\"", "*"],
         ));
     }
+    if (s.repeat_penalty - 1.0).abs() >= f32::EPSILON {
+        chain.push(LlamaSampler::penalties(
+            s.repeat_last_n,
+            s.repeat_penalty,
+            0.0,
+            0.0,
+        ));
+    }
     if s.top_k > 0 {
         chain.push(LlamaSampler::top_k(s.top_k));
+    }
+    if s.top_p > 0.0 {
+        chain.push(LlamaSampler::top_p(s.top_p, 1));
     }
     if s.min_p > 0.0 {
         chain.push(LlamaSampler::min_p(s.min_p, 1));
@@ -1860,6 +1926,51 @@ mod tests {
         ] {
             assert!(!tweak.is_greedy(), "{tweak:?} debería salir de greedy");
         }
+    }
+
+    #[test]
+    fn el_sweep_manda_en_lo_suyo_y_el_entorno_gobierna_el_resto() {
+        // N-34 para el LocalBackend: el sweep fija temperatura/seed/top-p/
+        // top-k/repeat-penalty. Pero NO conoce min-p ni DRY, así que si
+        // sobrescribiera todo, esas dos dejarían de ser ablacionables
+        // dentro de un sweep — que es exactamente como se corrió su primer
+        // A/B. Por eso fusiona en vez de reemplazar.
+        let base = LocalSampling {
+            min_p: 0.05,
+            dry_multiplier: 0.8,
+            ..LocalSampling::default()
+        };
+        let merged = base.with_sweep(0.7, Some(42), Some(0.9), Some(40), Some(1.1));
+
+        // Lo que el sweep fija, manda.
+        assert_eq!(merged.temperature, 0.7);
+        assert_eq!(merged.seed, 42);
+        assert_eq!(merged.top_p, 0.9);
+        assert_eq!(merged.top_k, 40);
+        assert_eq!(merged.repeat_penalty, 1.1);
+        // Lo que el sweep no conoce, sobrevive.
+        assert_eq!(merged.min_p, 0.05, "min-p no debe perderse");
+        assert!(merged.dry_enabled(), "DRY no debe perderse");
+    }
+
+    #[test]
+    fn un_knob_ausente_en_el_sweep_no_pisa_el_del_entorno() {
+        // `None` significa "el sweep no lo fijó", no "apagalo".
+        let base = LocalSampling {
+            top_k: 20,
+            top_p: 0.8,
+            repeat_penalty: 1.05,
+            ..LocalSampling::default()
+        };
+        let merged = base.with_sweep(0.2, None, None, None, None);
+        assert_eq!(merged.temperature, 0.2, "la temperatura siempre se aplica");
+        assert_eq!(merged.top_k, 20);
+        assert_eq!(merged.top_p, 0.8);
+        assert_eq!(merged.repeat_penalty, 1.05);
+        assert_eq!(
+            merged.seed, RANDOM_SEED,
+            "sin seed del sweep, sigue siendo aleatoria por generación"
+        );
     }
 
     #[test]

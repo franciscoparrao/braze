@@ -117,9 +117,9 @@ fn unwrap_single_shell_script(command: &[String]) -> Option<Vec<&str>> {
         return None;
     }
     if script.is_empty()
-        || !script.chars().all(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '.' | '=' | '/' | '-')
-        })
+        || !script
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '.' | '=' | '/' | '-'))
     {
         return None;
     }
@@ -132,7 +132,9 @@ fn is_plain_cargo_verify(tokens: &[&str]) -> bool {
     tokens.first() == Some(&"cargo")
         && matches!(tokens.get(1), Some(&"check" | &"build" | &"test"))
         && !tokens[2..].iter().any(|arg| {
-            arg.starts_with("--manifest-path") || arg.starts_with("--config") || arg.starts_with("-Z")
+            arg.starts_with("--manifest-path")
+                || arg.starts_with("--config")
+                || arg.starts_with("-Z")
         })
 }
 
@@ -649,8 +651,16 @@ pub async fn run_task_ttc(
         rollout_sampling.seed = sampling
             .seed
             .map(|s| s.wrapping_add(u64::from(rollout).wrapping_mul(1_000_003)));
-        match run_task(spec, config, task, repetition, timeout, rollout_sampling, preserve_root)
-            .await
+        match run_task(
+            spec,
+            config,
+            task,
+            repetition,
+            timeout,
+            rollout_sampling,
+            preserve_root,
+        )
+        .await
         {
             Ok(result) => candidates.push(result),
             Err(err) => {
@@ -758,7 +768,10 @@ async fn run_cargo_check_in_sandbox(dir: &std::path::Path) -> bool {
     match check {
         Ok(Ok(output)) => output.status.success(),
         Ok(Err(err)) => {
-            eprintln!("braze-bench: no se pudo ejecutar 'cargo check' de grading en {}: {err}", dir.display());
+            eprintln!(
+                "braze-bench: no se pudo ejecutar 'cargo check' de grading en {}: {err}",
+                dir.display()
+            );
             false
         }
         Err(_elapsed) => {
@@ -781,7 +794,11 @@ mod tests {
     /// tenga menos tokens; el costo del ganador es la SUMA de todos.
     #[test]
     fn ttc_winner_is_the_fingerprint_majority_with_summed_costs() {
-        fn candidate(fingerprint: &str, converged: bool, tokens: u32) -> crate::metrics::TaskResult {
+        fn candidate(
+            fingerprint: &str,
+            converged: bool,
+            tokens: u32,
+        ) -> crate::metrics::TaskResult {
             let mut r = crate::metrics::harness_error_result(
                 "ollama:x",
                 &crate::task::TaskDef {
@@ -859,15 +876,21 @@ mod tests {
             SessionId::new()
         ));
         tokio::fs::create_dir_all(dir.join("src")).await.unwrap();
-        tokio::fs::write(dir.join("Cargo.toml"), CARGO_TOML).await.unwrap();
+        tokio::fs::write(dir.join("Cargo.toml"), CARGO_TOML)
+            .await
+            .unwrap();
 
-        tokio::fs::write(dir.join("src/lib.rs"), BUGGY).await.unwrap();
+        tokio::fs::write(dir.join("src/lib.rs"), BUGGY)
+            .await
+            .unwrap();
         assert!(
             !run_cargo_check_in_sandbox(&dir).await,
             "el setup buggy (E0382) debe graduar false"
         );
 
-        tokio::fs::write(dir.join("src/lib.rs"), FIXED).await.unwrap();
+        tokio::fs::write(dir.join("src/lib.rs"), FIXED)
+            .await
+            .unwrap();
         assert!(
             run_cargo_check_in_sandbox(&dir).await,
             "el fix canónico debe graduar true"
@@ -959,7 +982,10 @@ mod tests {
             &["cargo", "check", "--offline"][..],
             &["cargo", "test", "--workspace"][..],
         ] {
-            assert!(is_benchable_cargo(&shell(parts)), "expected {parts:?} allowed");
+            assert!(
+                is_benchable_cargo(&shell(parts)),
+                "expected {parts:?} allowed"
+            );
         }
         for parts in [
             &["cargo", "run"][..],
@@ -972,7 +998,10 @@ mod tests {
             &["cargo", "test", "-Zunstable-options"][..],
             &["rustc", "main.rs"][..],
         ] {
-            assert!(!is_benchable_cargo(&shell(parts)), "expected {parts:?} denied");
+            assert!(
+                !is_benchable_cargo(&shell(parts)),
+                "expected {parts:?} denied"
+            );
         }
         assert!(!is_benchable_cargo(&ActionDescriptor::DeleteFile {
             path: std::path::PathBuf::from("/tmp/x"),
@@ -995,7 +1024,10 @@ mod tests {
             &["sh", "-c", "cargo build"][..],
             &["bash", "-l", "-c", "cargo check"][..],
         ] {
-            assert!(is_benchable_cargo(&shell(parts)), "expected {parts:?} allowed");
+            assert!(
+                is_benchable_cargo(&shell(parts)),
+                "expected {parts:?} allowed"
+            );
         }
         for parts in [
             // Composite/expanding shell programs — the metacharacter
@@ -1011,7 +1043,11 @@ mod tests {
             &["bash", "-lc", "ls"][..],
             // The cargo flag rules still apply through the wrapper.
             &["bash", "-lc", "cargo run"][..],
-            &["bash", "-lc", "cargo check --manifest-path=/otro/Cargo.toml"][..],
+            &[
+                "bash",
+                "-lc",
+                "cargo check --manifest-path=/otro/Cargo.toml",
+            ][..],
             // Malformed wrappers: no script, no -c, extra non-flag args,
             // or a different program.
             &["bash", "-lc"][..],
@@ -1020,7 +1056,10 @@ mod tests {
             &["zsh", "-c", "cargo check"][..],
             &["bash", "-lc", "cargo check", "extra"][..],
         ] {
-            assert!(!is_benchable_cargo(&shell(parts)), "expected {parts:?} denied");
+            assert!(
+                !is_benchable_cargo(&shell(parts)),
+                "expected {parts:?} denied"
+            );
         }
     }
 }
