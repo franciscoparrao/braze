@@ -17,11 +17,8 @@
 //! `error:` lines emitted all silently skip (trace-level only). It must
 //! never turn a good edit into a failed tool call.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-
-#[cfg(test)]
-use std::path::PathBuf;
 
 use braze_config::FormatterConfig;
 
@@ -49,8 +46,14 @@ const MAX_WARNING_CHARS: usize = 400;
 /// que compila, acota que eso NO es haber corrido tests, y anexa hasta
 /// [`MAX_WARNING_LINES`] warnings. `None` queda reservado para "el
 /// guardrail no pudo decir nada", que es información distinta de "pasó".
-pub(crate) async fn post_edit_feedback(path: &str, formatters: &[FormatterConfig]) -> Option<String> {
-    let ext = Path::new(path).extension()?.to_string_lossy().to_lowercase();
+pub(crate) async fn post_edit_feedback(
+    path: &str,
+    formatters: &[FormatterConfig],
+) -> Option<String> {
+    let ext = Path::new(path)
+        .extension()?
+        .to_string_lossy()
+        .to_lowercase();
     let fmt = formatters.iter().find(|f| {
         !f.disabled
             && f.extensions
@@ -58,7 +61,80 @@ pub(crate) async fn post_edit_feedback(path: &str, formatters: &[FormatterConfig
                 .any(|e| e.trim_start_matches('.').to_lowercase() == ext)
     })?;
     let cwd = Path::new(path).parent()?;
-    check_with_formatter(fmt, cwd).await
+    let feedback = check_with_formatter(fmt, cwd).await;
+    // El check puede pasar sobre un archivo que NADIE compila — ver
+    // `orphan_module_note`. Se anexa al final para que el "compila" no se
+    // lea como garantía de algo que no se miró.
+    match (feedback, orphan_module_note(Path::new(path))) {
+        (Some(f), Some(note)) => Some(format!("{f}\n{note}")),
+        (Some(f), None) => Some(f),
+        (None, note) => note,
+    }
+}
+
+/// Avisa cuando se escribió un `.rs` que **ningún `mod` declara**, o sea
+/// que el compilador no lo mira.
+///
+/// Por qué existe: el post-edit check corre `cargo check` sobre el crate,
+/// y un archivo de módulo recién creado todavía no forma parte del árbol
+/// de módulos — así que el check pasa **sin haberlo compilado nunca**.
+/// Medido contra roam (2026-07-26): gpt-oss escribió un `trajectory.rs`
+/// con un `format!` corrupto, el guardrail dijo `cargo passed`, y el error
+/// de sintaxis viajó dos tareas y ~30 minutos hasta que otro turno enlazó
+/// el módulo. Verde en falso en el patrón MÁS común de subdividir código:
+/// crear el archivo primero, enlazarlo después.
+///
+/// Heurística deliberadamente conservadora: solo informa, nunca falla la
+/// edición, y se calla ante los archivos que son raíz por definición.
+fn orphan_module_note(path: &Path) -> Option<String> {
+    if path.extension()?.to_string_lossy().to_lowercase() != "rs" {
+        return None;
+    }
+    let stem = path.file_stem()?.to_string_lossy().to_string();
+    // Raíces de crate y de módulo: nadie las declara con `mod`.
+    if matches!(stem.as_str(), "lib" | "main" | "mod" | "build") {
+        return None;
+    }
+    let dir = path.parent()?;
+    // Dónde puede vivir la declaración: el `mod.rs`/raíz del mismo
+    // directorio, o —estilo 2018— un `<directorio>.rs` hermano del dir.
+    let mut candidates: Vec<PathBuf> = ["mod.rs", "lib.rs", "main.rs"]
+        .iter()
+        .map(|f| dir.join(f))
+        .collect();
+    if let (Some(parent), Some(dir_name)) = (dir.parent(), dir.file_name()) {
+        candidates.push(parent.join(format!("{}.rs", dir_name.to_string_lossy())));
+    }
+    let declared = candidates
+        .iter()
+        .any(|c| std::fs::read_to_string(c).is_ok_and(|src| declares_module(&src, &stem)));
+    if declared {
+        return None;
+    }
+    Some(format!(
+        "[nota] ningún `mod {stem};` declara este archivo, así que el check de arriba \
+         NO lo compiló — para el compilador todavía no existe. Agregá `mod {stem};` \
+         (y el `pub use` que corresponda) al lib.rs/mod.rs del módulo padre; recién \
+         ahí se validará su contenido."
+    ))
+}
+
+/// ¿Alguna línea de `src` declara `mod <stem>`? Tolera `pub`/`pub(crate)`
+/// delante y tanto `mod x;` como `mod x {`.
+fn declares_module(src: &str, stem: &str) -> bool {
+    src.lines().any(|line| {
+        let mut rest = line.trim();
+        for prefix in ["pub(crate)", "pub(super)", "pub"] {
+            if let Some(stripped) = rest.strip_prefix(prefix) {
+                rest = stripped.trim_start();
+            }
+        }
+        let Some(after) = rest.strip_prefix("mod ") else {
+            return false;
+        };
+        let name = after.trim().trim_end_matches([';', '{']).trim();
+        name == stem
+    })
 }
 
 /// The legacy default entry — returned as a fresh `Vec` so it can also
@@ -83,15 +159,14 @@ pub(crate) fn default_rust_formatters() -> Vec<FormatterConfig> {
 async fn check_with_formatter(fmt: &FormatterConfig, cwd: &Path) -> Option<String> {
     let program = fmt.command.first()?;
     let args = &fmt.command[1..];
-    let output =
-        tokio::time::timeout(Duration::from_secs(fmt.timeout_secs), async {
-            tokio::process::Command::new(program)
-                .args(args)
-                .current_dir(cwd)
-                .output()
-                .await
-        })
-        .await;
+    let output = tokio::time::timeout(Duration::from_secs(fmt.timeout_secs), async {
+        tokio::process::Command::new(program)
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .await
+    })
+    .await;
 
     let output = match output {
         Ok(Ok(output)) => output,
@@ -157,8 +232,10 @@ async fn check_with_formatter(fmt: &FormatterConfig, cwd: &Path) -> Option<Strin
             cwd.display()
         );
         if !warnings.is_empty() {
-            note.push_str("\nWarnings (not errors, but often the leftovers of an \
-                           incomplete edit — unused imports, dead code):\n");
+            note.push_str(
+                "\nWarnings (not errors, but often the leftovers of an \
+                           incomplete edit — unused imports, dead code):\n",
+            );
             note.push_str(warnings.trim_end());
         }
         return Some(note);
@@ -231,6 +308,60 @@ mod tests {
         std::fs::write(dir.join("src/main.rs"), main_body).expect("write main.rs");
     }
 
+    #[test]
+    fn un_modulo_no_declarado_se_avisa_porque_el_check_no_lo_compilo() {
+        // El agujero que esto tapa: `cargo check` pasa sobre un archivo
+        // que ningún `mod` declara, porque el compilador ni lo mira. Es el
+        // patrón normal de subdividir código (crear, después enlazar), y
+        // contra roam dejó viajar un error de sintaxis ~30 minutos con el
+        // guardrail diciendo "passed".
+        let dir = temp_dir("orphan-mod");
+        std::fs::create_dir_all(dir.join("src")).expect("mkdir");
+        std::fs::write(
+            dir.join("src/lib.rs"),
+            "mod point;\npub use point::Point;\n",
+        )
+        .expect("write lib.rs");
+
+        let huerfano = dir.join("src/trajectory.rs");
+        std::fs::write(&huerfano, "pub struct Trajectory;").expect("write");
+        let note = orphan_module_note(&huerfano).expect("un módulo sin declarar debe avisar");
+        assert!(
+            note.contains("mod trajectory"),
+            "debe nombrar el mod que falta: {note}"
+        );
+        assert!(
+            note.contains("NO lo compiló"),
+            "y decir por qué el verde no valía: {note}"
+        );
+
+        // Declarado: silencio. Un aviso acá sería ruido en cada edición.
+        let declarado = dir.join("src/point.rs");
+        std::fs::write(&declarado, "pub struct Point;").expect("write");
+        assert!(orphan_module_note(&declarado).is_none());
+
+        // Las raíces no las declara nadie: nunca avisar sobre ellas.
+        for raiz in ["lib.rs", "main.rs", "mod.rs", "build.rs"] {
+            let p = dir.join("src").join(raiz);
+            std::fs::write(&p, "").expect("write");
+            assert!(orphan_module_note(&p).is_none(), "{raiz} no debería avisar");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn la_deteccion_de_mod_tolera_visibilidad_y_llaves() {
+        assert!(declares_module("mod foo;", "foo"));
+        assert!(declares_module("pub mod foo;", "foo"));
+        assert!(declares_module("pub(crate) mod foo;", "foo"));
+        assert!(declares_module("    pub(super) mod foo {", "foo"));
+        // Prefijos que NO son el módulo buscado.
+        assert!(!declares_module("mod foobar;", "foo"));
+        assert!(!declares_module("use foo;", "foo"));
+        assert!(!declares_module("// mod foo;", "foo"));
+    }
+
     #[tokio::test]
     async fn a_non_rust_file_produces_no_feedback_with_default_formatters() {
         // `.txt` matches nothing in the default Rust entry.
@@ -257,8 +388,11 @@ mod tests {
         let path = dir.join("src/suelto.rs");
         std::fs::write(&path, "fn main() {}").expect("write file");
 
-        let feedback =
-            post_edit_feedback(&path.to_string_lossy(), default_rust_formatters().as_slice()).await;
+        let feedback = post_edit_feedback(
+            &path.to_string_lossy(),
+            default_rust_formatters().as_slice(),
+        )
+        .await;
 
         assert!(
             feedback.is_some(),
@@ -282,10 +416,12 @@ mod tests {
         let dir = temp_dir("broken");
         write_project(&dir, "fn main() { let x: u32 = \"no\"; }");
 
-        let feedback =
-            post_edit_feedback(&dir.join("src/main.rs").to_string_lossy(), default_rust_formatters().as_slice())
-                .await
-                .expect("a broken crate must produce feedback");
+        let feedback = post_edit_feedback(
+            &dir.join("src/main.rs").to_string_lossy(),
+            default_rust_formatters().as_slice(),
+        )
+        .await
+        .expect("a broken crate must produce feedback");
         assert!(feedback.contains("[post-edit check]"), "got: {feedback}");
         assert!(feedback.contains("error"), "got: {feedback}");
         assert!(
@@ -376,10 +512,8 @@ mod tests {
     /// `cargo check` for `.rs`.
     #[tokio::test]
     async fn a_custom_formatter_for_a_non_rust_extension_runs_its_command() {
-        let dir = std::env::temp_dir().join(format!(
-            "braze-post-edit-custom-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("braze-post-edit-custom-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         std::fs::write(dir.join("broken.txt"), "this will error").expect("write file");
 
@@ -396,12 +530,12 @@ mod tests {
             disabled: false,
         };
 
-        let feedback =
-            post_edit_feedback(&dir.join("broken.txt").to_string_lossy(), std::slice::from_ref(
-                &exit_non_zero_with_err,
-            ))
-            .await
-            .expect("a non-zero exit + error line must produce feedback");
+        let feedback = post_edit_feedback(
+            &dir.join("broken.txt").to_string_lossy(),
+            std::slice::from_ref(&exit_non_zero_with_err),
+        )
+        .await
+        .expect("a non-zero exit + error line must produce feedback");
         assert!(feedback.contains("[post-edit check]"));
         assert!(feedback.contains("deliberately broken"));
 
@@ -412,10 +546,8 @@ mod tests {
     /// generalization's granular opt-out (per-extension).
     #[tokio::test]
     async fn a_disabled_formatter_entry_is_skipped() {
-        let dir = std::env::temp_dir().join(format!(
-            "braze-post-edit-disabled-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("braze-post-edit-disabled-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         std::fs::write(dir.join("x.rs"), "fn main() {}").expect("write file");
 
@@ -431,9 +563,10 @@ mod tests {
         };
 
         assert!(
-            post_edit_feedback(&dir.join("x.rs").to_string_lossy(), std::slice::from_ref(
-                &disabled
-            ))
+            post_edit_feedback(
+                &dir.join("x.rs").to_string_lossy(),
+                std::slice::from_ref(&disabled)
+            )
             .await
             .is_none(),
             "a disabled formatter entry must produce no feedback"

@@ -58,12 +58,20 @@ pub async fn write_file(args: WriteFileArgs) -> Result<String, String> {
         && !args.allow_shrink
     {
         return Err(format!(
+            // La redacción importa: la versión anterior decía "retry this
+            // exact write_file call with allow_shrink: true", y contra roam
+            // (2026-07-26) gpt-oss:20b hizo exactamente eso — reintentó la
+            // llamada EXACTA, sin agregar el campo, y quedó atrapado en el
+            // guard de repetición hasta abandonar el turno. La instrucción
+            // ahora es imperativa, nombra el campo como algo que hay que
+            // AGREGAR, y avisa que repetir igual vuelve a fallar.
             "refused: '{}' is {previous_size} bytes but this write would replace it with only \
              {len} bytes. Nothing was written. If you only saw a truncated or paginated \
              read_file page rather than the complete file, you would have discarded the rest. \
-             Use edit_file for a targeted change, or — if you really mean to replace the whole \
-             file with something this much smaller — retry this exact write_file call with \
-             \"allow_shrink\": true.",
+             Either use edit_file for a targeted change, or — if you really do mean to replace \
+             the whole file with something this much smaller — ADD the field \
+             \"allow_shrink\": true to this call's arguments and send it again. Sending the \
+             same arguments unchanged will be refused again.",
             path.display()
         ));
     }
@@ -78,14 +86,12 @@ pub async fn write_file(args: WriteFileArgs) -> Result<String, String> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|err| {
-                format!(
-                    "failed to create parent directory '{}': {err}",
-                    parent.display()
-                )
-            })?;
+        tokio::fs::create_dir_all(parent).await.map_err(|err| {
+            format!(
+                "failed to create parent directory '{}': {err}",
+                parent.display()
+            )
+        })?;
     }
     tokio::fs::write(&path, args.content.as_bytes())
         .await
