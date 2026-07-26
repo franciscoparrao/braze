@@ -481,6 +481,85 @@ contexto), pero **sin verificación en vivo todavía** — requiere braze-bench 
 varias tareas en un proceso, y Nitro estaba ocupado con el sweep de gemma-12B
 cuando se escribió esto. Verificar antes de confiar en él para un sweep.
 
+## KV placement por medición, no por regla (2026-07-25)
+
+Continuación directa del auto-fit, y el cambio que más rindió del día. Salió
+de investigar por qué el primer sweep de gemma-12B con auto-fit dio **más
+lento** que el sweep del 21-jul, pese a offloadear 33 capas contra 14.
+
+### La investigación (dos hipótesis mías refutadas antes de dar con la buena)
+
+1. **"El KV en host hace que más capas cuesten más round-trips PCIe"** —
+   refutada. Test controlado, mismo binario, 3 reps: con prompt de 6283 chars
+   y salida de una palabra (prefill puro), 33 capas tarda 17-18s contra 26s de
+   14 capas. Más capas ayuda en prefill **y** en decode.
+2. **"El probe del auto-fit corre por tarea y se come la ganancia"** —
+   refutada por el propio código del bench: `runner.rs` hace
+   `let started = Instant::now()` **después** de construir engine y backend,
+   así que la carga y el fit quedan fuera de `wall_time_ms`.
+
+La causa real la dio `git log -S`: el commit **`483f8e2` (23-jul)** introdujo
+`with_offload_kqv(false)` + `n_ubatch=128` como defensa contra un OOM de VRAM
+con gpt-oss, aplicándolos **siempre que hubiera offload**. El sweep del 21-jul
+corrió antes de eso. No era la librería (0.1.152) ni las capas: era la defensa.
+
+Confirmado reproduciendo la config del 21-jul con el binario de hoy — un solo
+flag, porque `kv_on_host` gateaba también el micro-batch.
+
+### El cambio
+
+`kv_on_host = gpu_layers != 0` (regla fija) pasa a `KvPlacement` resuelto por
+el fit: se prueba primero `Device` (KV en VRAM + batches default, el camino
+rápido de llama.cpp) y **solo se cae a `Host` si con el KV en VRAM no entra
+ninguna capa**. Misma jugada que la palanca #1 hizo con `n_gpu_layers`:
+cambiar un supuesto por una medición.
+
+- El placement viaja resuelto de la carga al hilo de generación (como
+  `gpu_layers`), no se relee del entorno.
+- `context_ladder()` es la red de seguridad: degrada primero el KV cuantizado
+  (necesita flash-attn), después la VRAM. Desde `Host` nunca vuelve a
+  proponer `Device` — si ya se midió que no entra, es chocar con la misma
+  pared. Cubre que la medición se quede corta **o** que las capas vengan
+  fijadas a mano por env sin medición ninguna.
+- `BRAZE_LOCAL_KV_OFFLOAD` acepta ahora `host` además de `gpu`, para ablacionar
+  sin recompilar.
+
+**Cambio de comportamiento declarado**: con `BRAZE_LOCAL_GPU_LAYERS` explícito
+ya no se fuerza `Host`; arranca en `Device` y confía en la escalera. Los brazos
+corridos con capas fijas antes de este commit necesitan
+`BRAZE_LOCAL_KV_OFFLOAD=host` para reproducirse.
+
+### Medición (5 brazos, `default.toml`, seed 42, 19 tareas comparables)
+
+Walltime sobre las **9 tareas completadas en los cinco** (comparar promedios
+crudos mete el cap de 360s como si fuera una medición):
+
+| Brazo | Walltime |
+|---|---|
+| v3 21-jul, 14 capas, KV-VRAM (pre-`483f8e2`) | 16.1s |
+| 25-jul, 33 capas, KV-host (auto-fit v1) | 20.7s |
+| 25-jul, 14 capas, KV-host (regla vieja) | 29.2s |
+| 25-jul, 14 capas, KV-VRAM (repro del v3) | 17.2s |
+| **25-jul, 21 capas, KV-VRAM (medido)** | **15.0s** |
+
+**1.38× sobre el auto-fit v1, 1.95× sobre la regla vieja**, y mejor que el
+baseline histórico. Pass rate sin cambios (9/19; timeouts 8 vs 9). En vivo el
+fit elige distinto según el régimen: gemma-12B **21 capas/Device**, gpt-oss
+**25 capas/Device** (sus overrides MoE liberan bastante VRAM para que el KV
+también quepa).
+
+### Segundo bug de la misma clase, cazado en vivo
+
+Con el placement medido, una máquina **sin GPU** hacía: fit `Device` → 0 capas
+→ probar `Host` → 0 capas → devolver **`Host`**. Es decir `offload_kqv(false)`
+y micro-batch de 128 en CPU puro: la misma regresión que se había arreglado
+horas antes normalizando el `-1`, reintroducida por otro camino. Ahora 0 capas
+siempre termina en el camino rápido.
+
+La clase de bug a vigilar: **decidir el placement sin preguntar si hay GPU**.
+Mordió dos veces el mismo día, las dos veces la destapó correr `braze tune` en
+la máquina sin GPU — nunca los tests ni un sweep en Nitro.
+
 ## `braze tune` (2026-07-25)
 
 Idea **#8** de la auditoría, construida sobre el auto-fit: corre el fit contra
@@ -494,6 +573,10 @@ exactamente el dolor "reproducibilidad, re-adivinar" de la tabla.
 braze tune ~/models/gpt-oss-20b-MXFP4.gguf --n-ctx 8192
 braze tune qwen2.5:3b --emit-config fit.toml   # ref de Ollama tambien sirve
 ```
+
+El reporte incluye el **placement del KV** además de las capas: desde que lo
+decide el fit midiendo, sin ese dato el reporte no describiría la
+configuración que realmente se va a correr.
 
 `--emit-config` escribe TOML (o a stdout con `-`). **braze no lee ese
 archivo**: es un registro reproducible del fit, y los comentarios mapean cada

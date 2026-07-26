@@ -70,13 +70,67 @@ fn ubatch_setting() -> u32 {
         .unwrap_or(128)
 }
 
-/// ¿El KV cache vive en la RAM del host en vez de la VRAM? Sin esto, el KV
-/// de las capas offloadeadas crece con el contexto y revienta la VRAM a
-/// mitad de una sesión agéntica (OOM en la 2ª ronda, observado con
-/// gpt-oss:20b en la RTX 3050 de 6GB). Kill-switch
-/// `BRAZE_LOCAL_KV_OFFLOAD=gpu` restaura el default de llama.cpp.
-fn kv_on_host(gpu_layers: i32) -> bool {
-    gpu_layers != 0 && std::env::var("BRAZE_LOCAL_KV_OFFLOAD").as_deref() != Ok("gpu")
+/// Dónde vive el KV cache (y con él, el tamaño del micro-batch).
+///
+/// **Historia, porque explica el default.** `Host` nació el 2026-07-23 como
+/// defensa contra un OOM de VRAM a mitad de sesión agéntica con gpt-oss:20b
+/// en la RTX 3050 de 6GB, y se aplicaba SIEMPRE que hubiera offload. Medido
+/// el 2026-07-25, ese incondicional costaba caro: gemma-4-12B a 14 capas
+/// usaba 2477 MiB de 6144 —el KV cabía holgado en VRAM— y aun así pagaba el
+/// camino lento. El brazo de control lo cuantificó: 29.2s por tarea contra
+/// 16.1s del sweep del 21-jul, que corrió antes de que existiera esta
+/// defensa.
+///
+/// Ahora la decisión la toma el auto-fit contra la VRAM **medida**: se
+/// intenta primero `Device` (el default de llama.cpp, el camino rápido) y
+/// solo se cae a `Host` si con el KV en VRAM no entra ninguna capa. Misma
+/// jugada que la palanca #1 hizo con `n_gpu_layers`: cambiar una regla fija
+/// por una medición.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KvPlacement {
+    /// KV en VRAM + micro-batch default. Camino rápido.
+    Device,
+    /// KV en RAM del host + micro-batch chico. Libera VRAM para offloadear
+    /// más capas, a costa de throughput.
+    Host,
+}
+
+/// Escalera de degradación para crear el contexto, en orden de preferencia.
+/// Cada escalón renuncia a una palanca: primero al KV **cuantizado**
+/// (requiere flash-attn, que gpt-oss/Harmony no soporta), después a tener el
+/// KV en **VRAM** (si no entra va al host: más lento, pero siempre cabe).
+///
+/// Es la red de seguridad de la medición del fit — cubre que se quede corta,
+/// o que las capas vengan fijadas a mano por env sin medición ninguna. Desde
+/// `Host` no se propone `Device`: si ya se midió que en VRAM no entra,
+/// reintentarlo es chocar contra la misma pared.
+fn context_ladder(
+    placement: KvPlacement,
+    requested_kv: Option<KvCacheType>,
+) -> Vec<(KvPlacement, Option<KvCacheType>)> {
+    let mut ladder = vec![(placement, requested_kv)];
+    if requested_kv.is_some() {
+        ladder.push((placement, None));
+    }
+    if placement == KvPlacement::Device {
+        if requested_kv.is_some() {
+            ladder.push((KvPlacement::Host, requested_kv));
+        }
+        ladder.push((KvPlacement::Host, None));
+    }
+    ladder
+}
+
+/// Override explícito de `BRAZE_LOCAL_KV_OFFLOAD`: `gpu` fuerza `Device`,
+/// `host` fuerza `Host`. Cualquier otra cosa (o ausencia) deja decidir al
+/// fit. El valor `host` existe para poder ablacionar la palanca sin volver
+/// a compilar.
+fn forced_kv_placement() -> Option<KvPlacement> {
+    match std::env::var("BRAZE_LOCAL_KV_OFFLOAD").as_deref() {
+        Ok("gpu") => Some(KvPlacement::Device),
+        Ok("host") => Some(KvPlacement::Host),
+        _ => None,
+    }
 }
 
 /// Arma los `LlamaContextParams` de generación. Lo usan DOS lados que deben
@@ -85,13 +139,13 @@ fn kv_on_host(gpu_layers: i32) -> bool {
 /// consumo de VRAM que no es el que la generación va a tener realmente.
 fn build_ctx_params(
     n_ctx: u32,
-    gpu_layers: i32,
+    placement: KvPlacement,
     kv_type: Option<KvCacheType>,
 ) -> LlamaContextParams {
     let n_batch_max = n_ctx.max(256);
     let mut params =
         LlamaContextParams::default().with_n_ctx(std::num::NonZeroU32::new(n_batch_max));
-    if kv_on_host(gpu_layers) {
+    if placement == KvPlacement::Host {
         let ubatch = ubatch_setting();
         params = params
             .with_offload_kqv(false)
@@ -170,7 +224,13 @@ enum GpuLayersSource {
 fn resolve_model_params(
     gguf: &Path,
     n_ctx: u32,
-) -> (Pin<Box<LlamaModelParams>>, i32, GpuLayersSource) {
+) -> (
+    Pin<Box<LlamaModelParams>>,
+    i32,
+    GpuLayersSource,
+    KvPlacement,
+) {
+    let forced = forced_kv_placement();
     // El env explícito gana siempre: es el escape hatch y el brazo de
     // ablación del bench.
     if let Some(n) = std::env::var("BRAZE_LOCAL_GPU_LAYERS")
@@ -183,7 +243,16 @@ fn resolve_model_params(
             gpu_layers = layers,
             "local: n_gpu_layers explícito (BRAZE_LOCAL_GPU_LAYERS) — auto-fit omitido"
         );
-        return (params, layers, GpuLayersSource::Explicit);
+        // Sin fit no hay medición, así que se usa el default rápido
+        // (`Device`, el de llama.cpp) salvo override. La red de seguridad es
+        // la escalera de `generate_blocking`: si el contexto no entra en
+        // VRAM, cae a `Host` sola.
+        return (
+            params,
+            layers,
+            GpuLayersSource::Explicit,
+            forced.unwrap_or(KvPlacement::Device),
+        );
     }
 
     if std::env::var("BRAZE_LOCAL_AUTOFIT").as_deref() == Ok("off") {
@@ -192,6 +261,7 @@ fn resolve_model_params(
             Box::pin(LlamaModelParams::default().with_n_gpu_layers(0u32)),
             0,
             GpuLayersSource::Disabled,
+            KvPlacement::Device,
         );
     }
 
@@ -204,6 +274,7 @@ fn resolve_model_params(
             Box::pin(LlamaModelParams::default().with_n_gpu_layers(0u32)),
             0,
             GpuLayersSource::FitFailed,
+            KvPlacement::Device,
         );
     };
     let Ok(c_path) = std::ffi::CString::new(path_str) else {
@@ -212,13 +283,10 @@ fn resolve_model_params(
             Box::pin(LlamaModelParams::default().with_n_gpu_layers(0u32)),
             0,
             GpuLayersSource::FitFailed,
+            KvPlacement::Device,
         );
     };
 
-    // El probe mide con los cparams REALES de generación. `gpu_layers = 1`
-    // como sonda: le dice al fit "va a haber offload", que es lo que decide
-    // si el KV vive en host. Si el fit termina asignando 0 capas la
-    // generación tampoco usará VRAM, así que la cuenta sigue siendo válida.
     let kv_type = std::env::var("BRAZE_LOCAL_KV_TYPE")
         .ok()
         .and_then(|kv| parse_kv_cache_type(&kv));
@@ -233,60 +301,114 @@ fn resolve_model_params(
         &[None]
     };
 
+    // Orden de placements: el camino RÁPIDO primero. `Host` solo se prueba si
+    // con el KV en VRAM no entra ninguna capa — o sea, se paga el throughput
+    // del KV en host únicamente cuando la VRAM medida obliga, no por regla.
+    let placements: &[KvPlacement] = match forced {
+        Some(p) => std::slice::from_ref(match p {
+            KvPlacement::Device => &KvPlacement::Device,
+            KvPlacement::Host => &KvPlacement::Host,
+        }),
+        None => &[KvPlacement::Device, KvPlacement::Host],
+    };
+
     let margin = fit_margin_bytes();
-    for (attempt, kv) in attempts.iter().enumerate() {
-        let mut params = Box::pin(LlamaModelParams::default());
-        let mut cparams = build_ctx_params(n_ctx, 1, *kv);
-        let mut margins = vec![margin; llama_cpp_2::max_devices().max(1)];
-        let result = {
-            let _guard = FIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-            params
-                .as_mut()
-                .fit_params(&c_path, &mut cparams, &mut margins, n_ctx, FIT_LOG_LEVEL)
-        };
-        match result {
-            Ok(fit) => {
-                // Sin GPU disponible el fit no toca `n_gpu_layers` y lo deja
-                // en su default `-1`. Ese `-1` significa "todas las que
-                // quepan", que sin device es CERO — pero tomado literal hace
-                // que `kv_on_host` se active y le imponga a una corrida de
-                // CPU puro el `n_ubatch` chico pensado para cuidar VRAM, que
-                // ahí solo frena el prefill. Normalizarlo a 0 (bug cazado en
-                // vivo con `braze tune` en la máquina sin GPU, 2026-07-25).
-                let layers = if backend_supports_gpu() {
-                    params.n_gpu_layers()
-                } else {
-                    0
-                };
-                tracing::info!(
-                    gpu_layers = layers,
-                    fitted_n_ctx = fit.n_ctx,
-                    margin_mib = margin / (1024 * 1024),
-                    kv_quantized = kv.is_some(),
-                    "local: auto-fit resolvió el offload a GPU contra la VRAM libre"
-                );
-                return (params, layers, GpuLayersSource::AutoFit);
-            }
-            Err(e) if attempt + 1 < attempts.len() => {
-                tracing::warn!(
-                    error = %e,
-                    "local: auto-fit falló con KV cuantizado; reintentando con f16"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "local: auto-fit falló — se carga en CPU puro (degradar, no crashear). \
-                     Forzar capas con BRAZE_LOCAL_GPU_LAYERS si la GPU sí sirve."
-                );
+    // Si `Device` fitea pero sin capas, se guarda antes de probar `Host`: si
+    // `Host` tampoco consigue offload, esto es CPU puro y da igual dónde viva
+    // el KV, así que se devuelve el rápido.
+    let mut device_sin_capas: Option<Pin<Box<LlamaModelParams>>> = None;
+
+    for &placement in placements {
+        for (attempt, kv) in attempts.iter().enumerate() {
+            let mut params = Box::pin(LlamaModelParams::default());
+            let mut cparams = build_ctx_params(n_ctx, placement, *kv);
+            let mut margins = vec![margin; llama_cpp_2::max_devices().max(1)];
+            let result = {
+                let _guard = FIT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                params.as_mut().fit_params(
+                    &c_path,
+                    &mut cparams,
+                    &mut margins,
+                    n_ctx,
+                    FIT_LOG_LEVEL,
+                )
+            };
+            match result {
+                Ok(fit) => {
+                    // Sin GPU disponible el fit no toca `n_gpu_layers` y lo
+                    // deja en su default `-1`. Ese `-1` significa "todas las
+                    // que quepan", que sin device es CERO — tomado literal
+                    // haría que se active el camino de VRAM en una corrida de
+                    // CPU puro (bug cazado en vivo con `braze tune` en la
+                    // máquina sin GPU, 2026-07-25).
+                    let layers = if backend_supports_gpu() {
+                        params.n_gpu_layers()
+                    } else {
+                        0
+                    };
+                    if layers == 0 {
+                        // Sin capas en GPU el placement da igual para la VRAM
+                        // (no hay nada allá) pero NO para la velocidad:
+                        // `Host` achica el micro-batch y eso frena el prefill
+                        // en CPU. Así que 0 capas SIEMPRE termina en el
+                        // camino rápido. Sin esta guarda, una máquina sin GPU
+                        // caía a `Host` y reintroducía la regresión de CPU
+                        // que se arregló normalizando el `-1` — misma clase
+                        // de bug por otro camino (cazado en vivo, 2026-07-25).
+                        if placement == KvPlacement::Device
+                            && placements.len() > 1
+                            && backend_supports_gpu()
+                        {
+                            tracing::info!(
+                                "local: con el KV en VRAM no entra ninguna capa — probando KV en host"
+                            );
+                            device_sin_capas = Some(params);
+                            break; // siguiente placement
+                        }
+                        let params = device_sin_capas.take().unwrap_or(params);
+                        tracing::info!(
+                            "local: sin offload a GPU — KV en VRAM (camino rápido) por defecto"
+                        );
+                        return (params, 0, GpuLayersSource::AutoFit, KvPlacement::Device);
+                    }
+                    tracing::info!(
+                        gpu_layers = layers,
+                        fitted_n_ctx = fit.n_ctx,
+                        margin_mib = margin / (1024 * 1024),
+                        kv_quantized = kv.is_some(),
+                        ?placement,
+                        "local: auto-fit resolvió el offload a GPU contra la VRAM libre"
+                    );
+                    return (params, layers, GpuLayersSource::AutoFit, placement);
+                }
+                Err(e) if attempt + 1 < attempts.len() => {
+                    tracing::warn!(
+                        error = %e,
+                        "local: auto-fit falló con KV cuantizado; reintentando con f16"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        ?placement,
+                        "local: auto-fit falló — se carga en CPU puro (degradar, no crashear). \
+                         Forzar capas con BRAZE_LOCAL_GPU_LAYERS si la GPU sí sirve."
+                    );
+                }
             }
         }
+    }
+
+    if let Some(params) = device_sin_capas {
+        tracing::info!("local: ni con el KV en host entra offload — CPU puro");
+        return (params, 0, GpuLayersSource::AutoFit, KvPlacement::Device);
     }
 
     (
         Box::pin(LlamaModelParams::default().with_n_gpu_layers(0u32)),
         0,
         GpuLayersSource::FitFailed,
+        KvPlacement::Device,
     )
 }
 
@@ -401,6 +523,8 @@ pub struct LocalBackend {
     /// permitiría que el contexto se arme contra una realidad distinta a la
     /// que se midió al cargar.
     gpu_layers: i32,
+    /// Dónde vive el KV cache, resuelto contra la VRAM medida al cargar.
+    kv_placement: KvPlacement,
 }
 
 /// `LlamaBackend::init()` inicializa estado GLOBAL de llama.cpp y sólo
@@ -442,6 +566,11 @@ pub struct TuneReport {
     pub source: &'static str,
     /// Margen de VRAM por device que se dejó libre.
     pub margin_mib: usize,
+    /// Dónde quedó el KV cache: `"device"` (VRAM, camino rápido) u `"host"`
+    /// (RAM, más lento pero libera VRAM para más capas). Desde 2026-07-25 lo
+    /// decide el fit midiendo, así que sin este campo el reporte no
+    /// describiría la configuración que realmente se va a correr.
+    pub kv_placement: &'static str,
 }
 
 /// Resuelve una referencia de modelo local al GGUF en disco: una ruta que
@@ -483,7 +612,7 @@ pub fn tune_model(gguf: impl AsRef<Path>, n_ctx: u32) -> Result<TuneReport, Mode
     // que estar inicializado (y esto además rutea los logs de llama.cpp a
     // `tracing`, para que el probe no escupa a stderr).
     let _backend = shared_llama_backend()?;
-    let (_params, n_gpu_layers, source) = resolve_model_params(gguf, n_ctx);
+    let (_params, n_gpu_layers, source, placement) = resolve_model_params(gguf, n_ctx);
     Ok(TuneReport {
         gguf: gguf.canonicalize().unwrap_or_else(|_| gguf.to_path_buf()),
         n_ctx,
@@ -495,6 +624,10 @@ pub fn tune_model(gguf: impl AsRef<Path>, n_ctx: u32) -> Result<TuneReport, Mode
             GpuLayersSource::FitFailed => "fit-failed",
         },
         margin_mib: fit_margin_bytes() / (1024 * 1024),
+        kv_placement: match placement {
+            KvPlacement::Device => "device",
+            KvPlacement::Host => "host",
+        },
     })
 }
 
@@ -513,11 +646,13 @@ impl TuneReport {
              n_ctx = {}\n\
              n_gpu_layers = {}      # BRAZE_LOCAL_GPU_LAYERS\n\
              vram_margin_mb = {}    # BRAZE_LOCAL_VRAM_MARGIN_MB\n\
+             kv_placement = \"{}\"   # BRAZE_LOCAL_KV_OFFLOAD=gpu|host\n\
              source = \"{}\"\n",
             self.gguf.display(),
             self.n_ctx,
             self.n_gpu_layers,
             self.margin_mib,
+            self.kv_placement,
             self.source,
         )
     }
@@ -563,7 +698,13 @@ impl ModelCacheKey {
 /// a la vez y los modelos de esta escala pesan 6-12GB — mantener dos vivos
 /// revienta la RAM/VRAM de Nitro, que es justo el fallo que el auto-fit vino
 /// a eliminar.
-type CachedModel = (ModelCacheKey, Arc<LlamaModel>, i32, GpuLayersSource);
+type CachedModel = (
+    ModelCacheKey,
+    Arc<LlamaModel>,
+    i32,
+    GpuLayersSource,
+    KvPlacement,
+);
 static MODEL_CACHE: Mutex<Option<CachedModel>> = Mutex::new(None);
 
 /// Carga el GGUF reusando el modelo cacheado si la clave coincide.
@@ -582,14 +723,15 @@ fn load_model_cached(
     backend: &Arc<LlamaBackend>,
     gguf: &Path,
     n_ctx: u32,
-) -> Result<(Arc<LlamaModel>, i32, GpuLayersSource), ModelError> {
-    let load_fresh = || -> Result<(Arc<LlamaModel>, i32, GpuLayersSource), ModelError> {
-        let (params, gpu_layers, source) = resolve_model_params(gguf, n_ctx);
-        let model = LlamaModel::load_from_file(backend, gguf, &params).map_err(|e| {
-            ModelError::Request(format!("failed to load GGUF '{}': {e}", gguf.display()))
-        })?;
-        Ok((Arc::new(model), gpu_layers, source))
-    };
+) -> Result<(Arc<LlamaModel>, i32, GpuLayersSource, KvPlacement), ModelError> {
+    let load_fresh =
+        || -> Result<(Arc<LlamaModel>, i32, GpuLayersSource, KvPlacement), ModelError> {
+            let (params, gpu_layers, source, placement) = resolve_model_params(gguf, n_ctx);
+            let model = LlamaModel::load_from_file(backend, gguf, &params).map_err(|e| {
+                ModelError::Request(format!("failed to load GGUF '{}': {e}", gguf.display()))
+            })?;
+            Ok((Arc::new(model), gpu_layers, source, placement))
+        };
 
     if std::env::var("BRAZE_LOCAL_MODEL_CACHE").as_deref() == Ok("off") {
         return load_fresh();
@@ -600,19 +742,19 @@ fn load_model_cached(
     // mismo modelo a la vez, el segundo espera y reusa en vez de cargar un
     // duplicado de 12GB.
     let mut guard = MODEL_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((cached_key, model, gpu_layers, source)) = guard.as_ref()
+    if let Some((cached_key, model, gpu_layers, source, placement)) = guard.as_ref()
         && *cached_key == key
     {
         tracing::debug!(path = %gguf.display(), "local: modelo reusado del caché");
-        return Ok((Arc::clone(model), *gpu_layers, *source));
+        return Ok((Arc::clone(model), *gpu_layers, *source, *placement));
     }
     // Soltar el modelo viejo ANTES de cargar el nuevo. Si algún `LocalBackend`
     // vivo todavía tiene su `Arc`, el modelo sobrevive hasta que lo suelte —
     // no se puede liberar lo que está en uso.
     *guard = None;
-    let (model, gpu_layers, source) = load_fresh()?;
-    *guard = Some((key, Arc::clone(&model), gpu_layers, source));
-    Ok((model, gpu_layers, source))
+    let (model, gpu_layers, source, placement) = load_fresh()?;
+    *guard = Some((key, Arc::clone(&model), gpu_layers, source, placement));
+    Ok((model, gpu_layers, source, placement))
 }
 
 impl LocalBackend {
@@ -639,7 +781,8 @@ impl LocalBackend {
         // si el usuario fija el número a mano. En un binario sin CUDA no hay
         // devices GPU que medir y el fit devuelve 0 capas → CPU puro, el
         // mismo comportamiento que antes de la palanca.
-        let (model, gpu_layers, layers_source) = load_model_cached(&backend, gguf.as_ref(), n_ctx)?;
+        let (model, gpu_layers, layers_source, kv_placement) =
+            load_model_cached(&backend, gguf.as_ref(), n_ctx)?;
         let model_label = model_label.into();
         let family = detect_family(&model, &model_label);
         let harmony = match family {
@@ -651,6 +794,7 @@ impl LocalBackend {
             ?family,
             gpu_layers,
             ?layers_source,
+            ?kv_placement,
             "local backend loaded"
         );
         Ok(Self {
@@ -661,6 +805,7 @@ impl LocalBackend {
             family,
             harmony,
             gpu_layers,
+            kv_placement,
         })
     }
 
@@ -872,6 +1017,7 @@ struct GenParams {
     n_ctx: u32,
     max_tokens: u32,
     gpu_layers: i32,
+    placement: KvPlacement,
 }
 
 /// Genera de forma bloqueante y empuja eventos por `tx`. Corre en un hilo
@@ -895,6 +1041,7 @@ fn generate_blocking(
         n_ctx,
         max_tokens,
         gpu_layers,
+        placement,
     } = gen_params;
     let (harmony, tools) = match family {
         FamilyRuntime::Harmony { ids, tools } => (Some(ids), tools.as_slice()),
@@ -921,11 +1068,11 @@ fn generate_blocking(
             None
         })
     });
-    // `gpu_layers` viene resuelto de la carga (auto-fit o env explícito), NO
-    // del entorno: el contexto tiene que armarse contra el mismo reparto de
-    // capas que se midió al cargar el modelo.
-    let ctx_params = build_ctx_params(n_ctx, gpu_layers, requested_kv);
-    if kv_on_host(gpu_layers) {
+    // `gpu_layers` y `placement` vienen resueltos de la carga (auto-fit o env
+    // explícito), NO del entorno: el contexto tiene que armarse contra el
+    // mismo reparto de capas y la misma ubicación de KV que se midieron al
+    // cargar el modelo.
+    if placement == KvPlacement::Host {
         tracing::info!(
             gpu_layers,
             ubatch = ubatch_setting(),
@@ -935,27 +1082,33 @@ fn generate_blocking(
     if requested_kv.is_some() {
         tracing::info!("local: KV cache cuantizado solicitado");
     }
-    let n_ctx = std::num::NonZeroU32::new(n_ctx.max(256));
-    let mut ctx = match model.new_context(backend, ctx_params) {
-        Ok(c) => c,
-        Err(e) if requested_kv.is_some() => {
-            tracing::warn!(
-                error = %e,
-                "local: crear contexto con KV cuantizado falló; reintentando con f16 \
-                 (el KV cuantizado requiere flash-attn, no soportado por gpt-oss/Harmony)"
-            );
-            let fb = build_ctx_params(
-                n_ctx.map_or(256, std::num::NonZeroU32::get),
-                gpu_layers,
-                None,
-            );
-            match model.new_context(backend, fb) {
-                Ok(c) => c,
-                Err(e2) => bail!("local: no se pudo crear el contexto (ni con f16): {e2}"),
+
+    let ladder = context_ladder(placement, requested_kv);
+
+    let mut ctx = 'ctx: {
+        let mut last_err = String::from("sin intentos");
+        for (i, (p, kv)) in ladder.iter().enumerate() {
+            match model.new_context(backend, build_ctx_params(n_ctx, *p, *kv)) {
+                Ok(c) => {
+                    if i > 0 {
+                        tracing::warn!(
+                            placement = ?p,
+                            kv_quantized = kv.is_some(),
+                            "local: contexto creado tras degradar (el escalón previo no entró)"
+                        );
+                    }
+                    break 'ctx c;
+                }
+                Err(e) => {
+                    last_err = e.to_string();
+                    tracing::debug!(placement = ?p, kv_quantized = kv.is_some(), error = %last_err,
+                        "local: escalón de contexto descartado");
+                }
             }
         }
-        Err(e) => bail!("local: no se pudo crear el contexto: {e}"),
+        bail!("local: no se pudo crear el contexto en ningún escalón: {last_err}")
     };
+    let n_ctx = std::num::NonZeroU32::new(n_ctx.max(256));
 
     // Harmony no lleva BOS: la conversación arranca directo en
     // `<|start|>system` (los GGUF de gpt-oss no definen add_bos).
@@ -1259,6 +1412,7 @@ impl ModelBackend for LocalBackend {
         let n_ctx = self.n_ctx;
         let max_tokens = req.max_tokens;
         let gpu_layers = self.gpu_layers;
+        let placement = self.kv_placement;
         // Para las gramáticas del stencil: nombre + input_schema de cada
         // tool del turno (los schemas derivan las gramáticas de args).
         let tools: Vec<ToolGrammarSpec> = req
@@ -1286,6 +1440,7 @@ impl ModelBackend for LocalBackend {
                 n_ctx,
                 max_tokens,
                 gpu_layers,
+                placement,
             };
             generate_blocking(&backend, &model, &prompt, gen_params, &family_rt, &tx);
         });
@@ -1318,18 +1473,29 @@ mod tests {
 
     #[test]
     fn el_contexto_respeta_el_piso_de_256_tokens() {
-        let chico = build_ctx_params(64, 0, None);
+        let chico = build_ctx_params(64, KvPlacement::Device, None);
         assert_eq!(chico.n_ctx().map(std::num::NonZeroU32::get), Some(256));
-        let normal = build_ctx_params(4096, 0, None);
+        let normal = build_ctx_params(4096, KvPlacement::Device, None);
         assert_eq!(normal.n_ctx().map(std::num::NonZeroU32::get), Some(4096));
     }
 
     #[test]
-    fn sin_capas_en_gpu_el_kv_se_queda_donde_llama_cpp_lo_pone() {
-        // 0 capas = CPU puro: no hay VRAM que cuidar, así que la palanca de
-        // KV-en-host no se activa pase lo que pase con el entorno.
-        assert!(!kv_on_host(0));
-        assert!(build_ctx_params(2048, 0, None).offload_kqv());
+    fn el_placement_del_kv_decide_offload_y_micro_batch() {
+        // `Device` es el camino rápido: KV en VRAM y los batches default de
+        // llama.cpp. `Host` es el que renuncia a throughput para liberar
+        // VRAM. Que el micro-batch viaje pegado al placement es deliberado:
+        // los dos se introdujeron juntos (483f8e2) y medirlos por separado
+        // no tendría sentido, porque el buffer de prompt-processing vive en
+        // VRAM igual que el KV.
+        let device = build_ctx_params(4096, KvPlacement::Device, None);
+        assert!(device.offload_kqv(), "Device deja el KV en VRAM");
+        let host = build_ctx_params(4096, KvPlacement::Host, None);
+        assert!(!host.offload_kqv(), "Host saca el KV de la VRAM");
+        assert!(
+            host.n_ubatch() < device.n_ubatch(),
+            "Host achica el micro-batch"
+        );
+        assert!(host.n_batch() >= host.n_ubatch());
     }
 
     #[test]
@@ -1345,17 +1511,48 @@ mod tests {
     }
 
     #[test]
-    fn el_kv_en_host_se_activa_exactamente_cuando_hay_offload_a_gpu() {
-        // La invariante que sostiene la palanca #1: el probe del auto-fit y
-        // la creación real del contexto consultan la MISMA decisión sobre
-        // dónde vive el KV. Si divergen, el fit reparte capas contra un
-        // consumo de VRAM que no es el real y volvemos a los OOM.
-        // `-1` (todas las capas, convención de llama.cpp) cuenta como
-        // offload: el `> 0` que había antes lo dejaba pasar como CPU.
-        for layers in [0, 1, 24, -1] {
-            let params = build_ctx_params(4096, layers, None);
-            assert_eq!(params.offload_kqv(), !kv_on_host(layers), "layers={layers}");
-            assert!(params.n_batch() >= params.n_ubatch(), "layers={layers}");
+    fn la_escalera_de_contexto_degrada_en_orden_y_nunca_vuelve_a_subir() {
+        // Sustituye al test del acoplamiento `kv_on_host(layers)`, que murió
+        // cuando el placement pasó a resolverse por medición en vez de por
+        // regla. Lo que importa ahora es el ORDEN de renuncias.
+        let d_quant = context_ladder(KvPlacement::Device, Some(KvCacheType::Q8_0));
+        assert_eq!(
+            d_quant,
+            vec![
+                (KvPlacement::Device, Some(KvCacheType::Q8_0)),
+                (KvPlacement::Device, None),
+                (KvPlacement::Host, Some(KvCacheType::Q8_0)),
+                (KvPlacement::Host, None),
+            ],
+            "primero se suelta el KV cuantizado, después la VRAM"
+        );
+
+        // Sin KV cuantizado pedido no hay escalón que renuncie a él.
+        assert_eq!(
+            context_ladder(KvPlacement::Device, None),
+            vec![(KvPlacement::Device, None), (KvPlacement::Host, None)]
+        );
+
+        // Desde Host no se sube a Device: si el fit ya midió que en VRAM no
+        // entra, reintentarlo sería volver a chocar contra la misma pared.
+        for kv in [None, Some(KvCacheType::Q8_0)] {
+            let ladder = context_ladder(KvPlacement::Host, kv);
+            assert!(
+                ladder.iter().all(|(p, _)| *p == KvPlacement::Host),
+                "una escalera que arranca en Host no debe proponer Device"
+            );
+        }
+
+        // En todos los casos el primer escalón es exactamente lo pedido, y
+        // el último es el más conservador.
+        for (p, kv) in [
+            (KvPlacement::Device, None),
+            (KvPlacement::Device, Some(KvCacheType::Q4_0)),
+            (KvPlacement::Host, Some(KvCacheType::Q4_0)),
+        ] {
+            let ladder = context_ladder(p, kv);
+            assert_eq!(ladder.first(), Some(&(p, kv)));
+            assert_eq!(ladder.last(), Some(&(KvPlacement::Host, None)));
         }
     }
 }

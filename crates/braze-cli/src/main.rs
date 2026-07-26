@@ -814,6 +814,13 @@ fn run_tune(model: &str, n_ctx: u32, emit_config: Option<&str>) -> Result<(), Cl
         "capas a GPU  {} ({}, margen {} MiB)",
         report.n_gpu_layers, report.source, report.margin_mib
     );
+    println!(
+        "KV cache     {}",
+        match report.kv_placement {
+            "host" => "host (RAM) — libera VRAM para más capas, a costa de throughput",
+            _ => "device (VRAM) — camino rápido",
+        }
+    );
     match report.n_gpu_layers {
         0 => println!(
             "\nCPU puro — o el binario no tiene soporte de GPU, o no entró \
