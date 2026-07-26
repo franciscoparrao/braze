@@ -7,7 +7,6 @@
 use super::*;
 
 impl Engine {
-
     /// C′.2: applies one `task_add`/`task_update` call to the in-memory
     /// list and renders the tool result the model sees — `(content,
     /// is_error, completed_description)`. Malformed arguments come back
@@ -92,6 +91,10 @@ impl Engine {
         // `MUTATING_TOOL_NAMES` without threading the name through the
         // background task machinery.
         let mut id_to_name: HashMap<String, String> = HashMap::new();
+        // Resuelve el id de una llamada completada de vuelta a su clave
+        // (nombre, argumentos), para poder guardar su resultado y servirlo
+        // si el modelo repite la llamada más adelante en el turno.
+        let mut id_to_key: HashMap<String, (String, String)> = HashMap::new();
 
         for call in tool_calls {
             // N-14 (docs/AUDITORIA-2026-07-v2.md): shadow `call` with an
@@ -179,10 +182,50 @@ impl Engine {
             // regardless of the field order the model happened to emit
             // this time. Nudge instead of re-running the tool.
             let call_key = (call.name.clone(), call.arguments.to_string());
-            if !seen_calls.insert(call_key) {
+            if let Some(previous) = seen_calls.get(&call_key) {
+                // La tool NO se re-ejecuta (esa es la intención anti-loop:
+                // sin efectos secundarios ni costo repetido), pero si
+                // tenemos el resultado anterior se lo devolvemos en vez de
+                // negarnos.
+                //
+                // Por qué: el colapso ACI de observaciones viejas puede
+                // haber borrado del contexto el resultado original, así que
+                // "usá el que ya tenés" le pide al modelo algo que el propio
+                // harness le quitó. Medido contra roam (2026-07-26):
+                // gpt-oss leyó un archivo en 3 páginas, la observación de la
+                // página 1 se colapsó, pidió releerla, y el nudge se la negó
+                // cuatro veces hasta que abandonó el turno con el plan
+                // correcto en la mano. Dos palancas correctas por separado
+                // que se traban entre sí; devolver el contenido convierte la
+                // trampa en un acierto de caché.
+                let (content, is_error) = match previous {
+                    Some(prev) => (
+                        format!(
+                            "(resultado en caché de la llamada idéntica anterior a '{}' \
+                             en este turno — la tool no se volvió a ejecutar)\n{prev}",
+                            call.name
+                        ),
+                        false,
+                    ),
+                    // Todavía sin resultado: dos llamadas idénticas en la
+                    // MISMA ronda. No hay nada que servir, así que se
+                    // mantiene el nudge original.
+                    None => (
+                        format!(
+                            "You already called '{}' with these exact arguments \
+                             earlier in this turn — the result has not changed. Do \
+                             not repeat this call; either use the result you already \
+                             have, or respond to the user with text instead of \
+                             calling a tool.",
+                            call.name
+                        ),
+                        true,
+                    ),
+                };
                 tracing::warn!(
                     tool = %call.name,
-                    "model repeated an identical tool call this turn; nudging instead of re-dispatching"
+                    servido_de_cache = !is_error,
+                    "model repeated an identical tool call this turn; not re-dispatching"
                 );
                 self.append_and_notify(
                     session,
@@ -190,15 +233,8 @@ impl Engine {
                         id: call.id.clone(),
                         result: ToolResult {
                             tool_call_id: call.id.clone(),
-                            content: format!(
-                                "You already called '{}' with these exact arguments \
-                                 earlier in this turn — the result has not changed. Do \
-                                 not repeat this call; either use the result you already \
-                                 have, or respond to the user with text instead of \
-                                 calling a tool.",
-                                call.name
-                            ),
-                            is_error: true,
+                            content,
+                            is_error,
                         },
                     },
                     observer,
@@ -206,6 +242,8 @@ impl Engine {
                 .await?;
                 continue;
             }
+            seen_calls.insert(call_key.clone(), None);
+            id_to_key.insert(call.id.clone(), call_key);
 
             // C′.1 (crate::tool_search): the `search_tools` meta-tool is
             // harness-owned — handled inline, before schema resolution
@@ -289,8 +327,7 @@ impl Engine {
                 } else {
                     self.run_exploration(&question).await
                 };
-                let child_tokens =
-                    outcome.child_input_tokens + outcome.child_output_tokens;
+                let child_tokens = outcome.child_input_tokens + outcome.child_output_tokens;
                 // The child's cost enters the rollout log twice on
                 // purpose: an aggregate Usage (so every existing token
                 // accounting — bench sums, budget audits — counts it
@@ -300,10 +337,8 @@ impl Engine {
                     self.append_and_notify(
                         session,
                         &AgentEvent::Usage {
-                            input_tokens: outcome.child_input_tokens.min(u32::MAX as u64)
-                                as u32,
-                            output_tokens: outcome.child_output_tokens.min(u32::MAX as u64)
-                                as u32,
+                            input_tokens: outcome.child_input_tokens.min(u32::MAX as u64) as u32,
+                            output_tokens: outcome.child_output_tokens.min(u32::MAX as u64) as u32,
                             stop_reason: Some("exploration_child".to_string()),
                             cache_read_tokens: None,
                             cache_write_tokens: None,
@@ -693,6 +728,15 @@ impl Engine {
                     {
                         seen_calls.clear();
                     }
+                    // Guardar el resultado para poder servirlo si el
+                    // modelo repite la llamada. Solo los exitosos: re-servir
+                    // un error no ayuda y el modelo debe poder reintentar.
+                    if !result.is_error
+                        && let Some(key) = id_to_key.get(&id)
+                        && let Some(slot) = seen_calls.get_mut(key)
+                    {
+                        *slot = Some(result.content.clone());
+                    }
                     if id_to_name
                         .get(&id)
                         .is_some_and(|name| FILE_MUTATING_TOOL_NAMES.contains(&name.as_str()))
@@ -740,7 +784,8 @@ impl Engine {
                     {
                         tracing::info!(
                             pending = pending.len(),
-                            waited_ms = (human_waited - human_wait_at_window_start).as_millis() as u64,
+                            waited_ms =
+                                (human_waited - human_wait_at_window_start).as_millis() as u64,
                             still_waiting = braze_permissions::human_is_waiting(),
                             "tool completion window elapsed while blocked on a human                              decision; extending instead of cancelling"
                         );
@@ -795,13 +840,14 @@ impl Engine {
             MAX_CHILD_ROUNDS,
         };
 
-        let failed = |rounds: u32, input: u64, output: u64| crate::exploration::ExplorationOutcome {
-            content: EXPLORATION_FAILED_RESULT.to_string(),
-            is_error: true,
-            child_rounds: rounds,
-            child_input_tokens: input,
-            child_output_tokens: output,
-        };
+        let failed =
+            |rounds: u32, input: u64, output: u64| crate::exploration::ExplorationOutcome {
+                content: EXPLORATION_FAILED_RESULT.to_string(),
+                is_error: true,
+                child_rounds: rounds,
+                child_input_tokens: input,
+                child_output_tokens: output,
+            };
 
         // The child's inventory: only the read-only subset the registry
         // actually has (a registry without `grep` just yields a smaller
@@ -993,9 +1039,19 @@ mod dispatch_tests {
     /// typo cercano sí debe resolverse.
     #[test]
     fn suggests_a_close_name_and_stays_quiet_otherwise() {
-        let tools = ["read_file", "write_file", "edit_file", "shell_exec", "grep", "glob"];
+        let tools = [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "shell_exec",
+            "grep",
+            "glob",
+        ];
         assert_eq!(did_you_mean("grepp", &tools), " Did you mean 'grep'?");
-        assert_eq!(did_you_mean("read_fil", &tools), " Did you mean 'read_file'?");
+        assert_eq!(
+            did_you_mean("read_fil", &tools),
+            " Did you mean 'read_file'?"
+        );
         // `search` no se parece a nada disponible: sin pista inventada.
         assert_eq!(did_you_mean("search", &tools), "");
     }
@@ -1021,8 +1077,8 @@ mod tests {
     use super::*;
     // P1.1 paso 7: tests de integración movidos del mod tests de
     // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
-    use crate::engine::test_support::*;
     use crate::engine::Engine;
+    use crate::engine::test_support::*;
     use braze_events::NoopObserver;
     use braze_model::CompletionEvent;
     use braze_session::{FileSessionStore, SimpleContextCompactor};

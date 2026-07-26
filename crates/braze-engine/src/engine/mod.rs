@@ -22,11 +22,11 @@ mod context;
 // planificación — métodos `impl Engine` extraídos verbatim (los
 // submódulos acceden a los campos privados de `Engine` por ser hijos
 // de este módulo; `pub(super)` marca lo que este archivo llama).
-#[cfg(test)]
-mod test_support;
 mod dispatch;
 mod fallback;
 mod planner;
+#[cfg(test)]
+mod test_support;
 // P1.1 paso 4: el loop de turno, la ronda de completion y la puerta de
 // persistencia/hooks — los últimos métodos grandes fuera de mod.rs.
 mod hooks_dispatch;
@@ -46,12 +46,12 @@ use context::ensure_unique_tool_call_id;
 use crate::error::EngineError;
 // P1.1 paso 1 (v8 § 3): la escalera de rescate vive en `crate::rescue`
 // — parsers puros extraídos verbatim de este archivo.
+use crate::history::build_messages_with_full_observations;
 use crate::rescue::{
     EnvelopeResponse, coerce_arguments_to_schema, extract_function_xml_tool_calls,
     extract_pythonic_tool_calls, extract_tagged_tool_calls, parse_envelope_response,
     try_parse_textual_tool_call,
 };
-use crate::history::build_messages_with_full_observations;
 
 /// Default number of raw tactical events above which [`Engine::run_turn`]
 /// triggers a compaction pass before building the next model request. See
@@ -370,7 +370,6 @@ pub struct VerificationConfig {
     pub working_dir: Option<std::path::PathBuf>,
 }
 
-
 impl Engine {
     /// Builds an `Engine` with [`DEFAULT_TACTICAL_COMPACTION_THRESHOLD`] as
     /// its compaction trigger. `tools` is wrapped internally in an `Arc` so
@@ -663,17 +662,7 @@ impl Engine {
         self.summarizer = Some(summarizer);
         self
     }
-
-
-
-
 }
-
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -699,7 +688,6 @@ mod tests {
     use tokio::sync::Mutex as AsyncMutex;
 
     use super::test_support::*;
-
 
     /// Regression test for A3/B4: a stream that fails mid-round (after
     /// delivering partial text) must propagate as an error from
@@ -737,10 +725,6 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
-
-
-
-
 
     /// Regression test for N-17 (docs/AUDITORIA-2026-07-v2.md): a second
     /// `run_turn` call on the same `Engine` while a first one is still in
@@ -1565,7 +1549,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
-
     /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-4.
     ///
     /// `load_messages_repairs_an_orphaned_tool_use_with_no_result` (below)
@@ -1641,14 +1624,7 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
-
-
-
-
-
     // --- oleada 2: Engine::with_planner (PLAN.md § "Split planificador/ejecutor") ---
-
-
 
     /// Degradation rule 3 (espíritu N-24): a plan truncated by the token
     /// budget is discarded — a cut-off plan can mislead mid-step — but
@@ -1713,9 +1689,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
-
-
-
     /// A single-step plan is discarded, not persisted — the executor's
     /// first round covers a trivial request without paying the
     /// plan-in-prompt cost (and without the degeneration artifact the
@@ -1770,7 +1743,6 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
-
 
     /// Records everything the engine mirrors into it, for asserting the
     /// live `TurnObserver` seam (PLAN.md § "Fase TUI — diseño", oleada 1)
@@ -2125,7 +2097,7 @@ mod tests {
     /// small/local models, which otherwise burn a round (and, in Ollama's
     /// case, real CPU time) re-running a call whose result can't change.
     #[tokio::test]
-    async fn an_identical_repeated_tool_call_is_nudged_not_re_dispatched() {
+    async fn an_identical_repeated_tool_call_is_served_from_cache_not_re_dispatched() {
         let (store, dir) = temp_store();
         let session = SessionId::new();
 
@@ -2173,20 +2145,43 @@ mod tests {
             .await
             .expect("turn should succeed");
 
-        // The real tool only ran once — the repeat was nudged, not
-        // re-dispatched.
+        // La invariante que de verdad protege esta palanca: la tool REAL
+        // corrió una sola vez. La repetición no se re-despacha (sin efectos
+        // secundarios, sin costo repetido).
         assert_eq!(invocations.load(Ordering::SeqCst), 1);
 
         let verify_store = FileSessionStore::new(dir.clone());
         let events = verify_store.load(&session).await.expect("load events");
+        let first = match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-1"))
+            .expect("expected a ToolCallCompleted for call-1")
+        {
+            AgentEvent::ToolCallCompleted { result, .. } => result.content.clone(),
+            _ => unreachable!(),
+        };
         match events
             .iter()
             .find(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-2"))
             .expect("expected a ToolCallCompleted for call-2")
         {
             AgentEvent::ToolCallCompleted { result, .. } => {
-                assert!(result.is_error);
-                assert!(result.content.contains("already called"));
+                // La repetición se responde CON el resultado anterior, no con
+                // una negativa. Negarse dejaba al modelo pidiendo algo que el
+                // colapso ACI ya le había borrado del contexto: medido contra
+                // roam (2026-07-26), gastó 4 llamadas y abandonó el turno.
+                assert!(
+                    !result.is_error,
+                    "servir el resultado cacheado no es un error"
+                );
+                assert!(
+                    result.content.contains(&first),
+                    "la repetición debe traer el contenido del resultado original"
+                );
+                assert!(
+                    result.content.contains("caché"),
+                    "y debe decir que viene de caché, para que el modelo no crea que re-ejecutó"
+                );
             }
             _ => unreachable!(),
         }
@@ -2868,8 +2863,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
-
-
     /// Regression test for docs/AUDITORIA-2026-07-v2.md hallazgo N-6.
     ///
     /// Once a large tool result has settled into `durable_events` (past
@@ -2961,22 +2954,8 @@ mod tests {
     // --- full_observations_byte_budget (hallazgo U-17,
     // docs/usability-log-2026-07-07-si2.md) ---
 
-
-
-
-
-
     // --- tactical_cap_scale (I-2, docs/AUDITORIA-2026-07-v6.md): the
     // caps scale with the budget's VALUE, not its mere presence ---
-
-
-
-
-
-
-
-
-
 
     /// v4 P0.2 (docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3): a turn
     /// whose cumulative tokens blow the budget stops at the top of the
@@ -3147,8 +3126,9 @@ mod tests {
                 ("review", "Check invariants first."),
             ],
         );
-        let registry =
-            std::sync::Arc::new(braze_skills::SkillRegistry::discover(std::slice::from_ref(&skills_dir)));
+        let registry = std::sync::Arc::new(braze_skills::SkillRegistry::discover(
+            std::slice::from_ref(&skills_dir),
+        ));
 
         let model = RequestCapturingModel {
             inner: ScriptedModel::new(vec![vec![
@@ -3221,10 +3201,15 @@ mod tests {
         let session = SessionId::new();
         let skills_dir = temp_skills_dir(
             "cap",
-            &[("uno", "body uno"), ("dos", "body dos"), ("tres", "body tres")],
+            &[
+                ("uno", "body uno"),
+                ("dos", "body dos"),
+                ("tres", "body tres"),
+            ],
         );
-        let registry =
-            std::sync::Arc::new(braze_skills::SkillRegistry::discover(std::slice::from_ref(&skills_dir)));
+        let registry = std::sync::Arc::new(braze_skills::SkillRegistry::discover(
+            std::slice::from_ref(&skills_dir),
+        ));
 
         let model = ScriptedModel::new(vec![vec![
             CompletionEvent::TextDelta("listo".to_string()),
@@ -3379,9 +3364,7 @@ mod tests {
                 CompletionEvent::Done,
             ],
             vec![
-                CompletionEvent::TextDelta(
-                    "parse_header is defined in src/header.rs.".to_string(),
-                ),
+                CompletionEvent::TextDelta("parse_header is defined in src/header.rs.".to_string()),
                 CompletionEvent::Usage {
                     input_tokens: 120,
                     output_tokens: 30,
@@ -3409,7 +3392,11 @@ mod tests {
         .with_exploration_enabled(true);
 
         engine
-            .run_turn(&session, "¿dónde se define parse_header?", &mut NoopObserver)
+            .run_turn(
+                &session,
+                "¿dónde se define parse_header?",
+                &mut NoopObserver,
+            )
             .await
             .expect("turn must converge");
 
@@ -4176,7 +4163,10 @@ mod tests {
             &self,
             _request: &braze_model::CompletionRequest,
         ) -> Result<(), String> {
-            self.log.lock().unwrap().push(format!("{}:request", self.id));
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("{}:request", self.id));
             Ok(())
         }
     }
@@ -4829,9 +4819,10 @@ mod tests {
     /// `needle` — for the J-3/J-4 request-scoping assertions below.
     fn any_message_text_contains(req: &CompletionRequest, needle: &str) -> bool {
         req.messages.iter().any(|message| {
-            message.content.iter().any(
-                |block| matches!(block, ContentBlock::Text { text } if text.contains(needle)),
-            )
+            message
+                .content
+                .iter()
+                .any(|block| matches!(block, ContentBlock::Text { text } if text.contains(needle)))
         })
     }
 
@@ -5031,7 +5022,6 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
-
     /// `+ablate:no-prune` (opencode ítem 2): with the collapse disabled,
     /// an old observation far beyond the full-observations window renders
     /// FULL — no "[old observation collapsed:" marker anywhere.
@@ -5109,7 +5099,6 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
-
 
     /// Confirms the generic permissive schema `braze-model` sends to the
     /// model today (`{"type":"object","additionalProperties":true}`) would
@@ -5571,7 +5560,10 @@ mod tests {
         let text = "<tool_call>echo<arg_key>text</arg_key><arg_value>42</arg_value><arg_key>options</arg_key><arg_value>{\"deep\": true}</arg_value></tool_call>";
         let (calls, _) = extract_tagged_tool_calls(text);
         assert_eq!(calls[0].arguments["text"], serde_json::json!("42"));
-        assert_eq!(calls[0].arguments["options"], serde_json::json!({"deep": true}));
+        assert_eq!(
+            calls[0].arguments["options"],
+            serde_json::json!({"deep": true})
+        );
     }
 
     #[test]
@@ -5703,7 +5695,8 @@ mod tests {
 
     #[test]
     fn a_leaked_tagged_call_with_no_other_text_strips_to_empty() {
-        let text = "<tool_call>read_file<arg_key>path</arg_key><arg_value>x.txt</arg_value></tool_call>";
+        let text =
+            "<tool_call>read_file<arg_key>path</arg_key><arg_value>x.txt</arg_value></tool_call>";
         assert_eq!(strip_leaked_tool_call_shapes(text), "");
     }
 
@@ -6045,8 +6038,7 @@ mod tests {
                 .is_none()
         );
         assert!(
-            parse_envelope_response(r#"{"action": "run", "name": "x", "arguments": {}}"#)
-                .is_none()
+            parse_envelope_response(r#"{"action": "run", "name": "x", "arguments": {}}"#).is_none()
         );
         assert!(parse_envelope_response("I read the file and it says 42.").is_none());
         assert!(parse_envelope_response(r#"{"action": "final_answer"}"#).is_none());
@@ -6175,7 +6167,11 @@ mod tests {
         .with_envelope_parsing_enabled(true);
 
         engine
-            .run_turn(&session, "show me the JSON for an echo call", &mut NoopObserver)
+            .run_turn(
+                &session,
+                "show me the JSON for an echo call",
+                &mut NoopObserver,
+            )
             .await
             .expect("turn should succeed");
 

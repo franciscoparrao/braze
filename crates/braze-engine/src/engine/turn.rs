@@ -14,10 +14,20 @@ pub(super) struct TurnDispatchState {
     /// Per-tool-name retry counter for the "one round of schema-repair
     /// context" mechanism in `dispatch_tool_calls`.
     pub(super) schema_retry_counts: HashMap<String, u32>,
-    /// (tool name, canonical arguments) pairs already dispatched this
-    /// turn — see `dispatch_tool_calls`'s repetition check (A5,
+    /// (tool name, argumentos canónicos) ya despachados en ESTE turno,
+    /// mapeados al contenido de su resultado exitoso — ver la verificación
+    /// de repetición en `dispatch_tool_calls` (A5,
     /// docs/AUDITORIA-2026-07.md).
-    pub(super) seen_calls: HashSet<(String, String)>,
+    ///
+    /// `None` = despachada pero todavía sin resultado (dos llamadas
+    /// idénticas en la MISMA ronda). Guardar el contenido es lo que
+    /// permite que una repetición se responda **con el resultado** en vez
+    /// de con una negativa: el colapso ACI de observaciones viejas puede
+    /// haber borrado del contexto el resultado original, y entonces
+    /// negarse deja al modelo pidiendo algo que el propio harness le quitó
+    /// (visto en vivo contra roam, 2026-07-26 — el modelo gastó 4
+    /// llamadas y abandonó el turno).
+    pub(super) seen_calls: HashMap<(String, String), Option<String>>,
     /// Every `tool_use` id already in this session's history plus every
     /// one minted so far this turn — see `ensure_unique_tool_call_id` and
     /// N-14, docs/AUDITORIA-2026-07-v2.md.
@@ -62,7 +72,6 @@ impl Drop for TurnGuard<'_> {
         self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
-
 
 impl Engine {
     /// Runs one complete turn: append the user's message, then loop
@@ -191,7 +200,7 @@ impl Engine {
         // a field on `Engine` or persists across turns.
         let mut dispatch_state = TurnDispatchState {
             schema_retry_counts: HashMap::new(),
-            seen_calls: HashSet::new(),
+            seen_calls: HashMap::new(),
             known_tool_call_ids: Self::existing_tool_call_ids(&existing_events),
             reads_by_path: HashMap::new(),
         };
@@ -595,9 +604,11 @@ impl Engine {
                 // `max_rounds`. A command that is missing or times out
                 // skips silently (see `run_verification`) — never blocks a
                 // legitimate turn.
-                if let Some(v) = self.verification.as_ref().filter(|v| {
-                    any_tool_calls_this_turn && verify_rounds_used < v.max_rounds
-                }) && let Err(output) = run_verification(v).await
+                if let Some(v) = self
+                    .verification
+                    .as_ref()
+                    .filter(|v| any_tool_calls_this_turn && verify_rounds_used < v.max_rounds)
+                    && let Err(output) = run_verification(v).await
                 {
                     tracing::warn!(
                         round,
@@ -1024,7 +1035,10 @@ async fn run_verification(config: &VerificationConfig) -> Result<(), String> {
         let start = (start..combined.len())
             .find(|i| combined.is_char_boundary(*i))
             .unwrap_or(combined.len());
-        format!("[…output truncated to last {OUTPUT_CAP} chars…]\n{}", &combined[start..])
+        format!(
+            "[…output truncated to last {OUTPUT_CAP} chars…]\n{}",
+            &combined[start..]
+        )
     } else {
         combined.to_string()
     };
@@ -1040,8 +1054,8 @@ mod tests {
     use braze_events::{AgentEvent, NoopObserver};
     use braze_model::CompletionEvent;
     use braze_session::{FileSessionStore, SessionStore, SimpleContextCompactor};
-    use braze_types::SessionId;
     use braze_tools_core::ToolRegistry;
+    use braze_types::SessionId;
 
     use super::VerificationConfig;
     use crate::engine::Engine;
@@ -1084,12 +1098,14 @@ mod tests {
         let session = SessionId::new();
         let model = ScriptedModel::new(vec![
             tool_call_then_done("echo"),
-            final_text("all tests pass"),   // the confabulated claim
+            final_text("all tests pass"), // the confabulated claim
             final_text("ok now really fixed"),
         ]);
         let engine = Engine::new(
             Box::new(model),
-            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(AtomicU32::new(0))))]),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
             Arc::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
@@ -1115,11 +1131,16 @@ mod tests {
             })
             .collect();
         assert_eq!(vf.len(), 1, "gate should fire exactly once (max_rounds=1)");
-        assert!(vf[0].contains("boom"), "injected output carries the real verifier output");
+        assert!(
+            vf[0].contains("boom"),
+            "injected output carries the real verifier output"
+        );
         // The model's SECOND answer (post-injection round) is persisted —
         // proof it got the extra round the gate granted.
         assert!(
-            events.iter().any(|e| matches!(e, AgentEvent::AssistantText { text } if text.contains("really fixed"))),
+            events.iter().any(
+                |e| matches!(e, AgentEvent::AssistantText { text } if text.contains("really fixed"))
+            ),
             "the post-verification round should have run"
         );
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -1131,13 +1152,12 @@ mod tests {
     async fn a_passing_verification_does_not_inject_or_add_a_round() {
         let (store, dir) = temp_store();
         let session = SessionId::new();
-        let model = ScriptedModel::new(vec![
-            tool_call_then_done("echo"),
-            final_text("done"),
-        ]);
+        let model = ScriptedModel::new(vec![tool_call_then_done("echo"), final_text("done")]);
         let engine = Engine::new(
             Box::new(model),
-            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(AtomicU32::new(0))))]),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
             Arc::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
@@ -1156,7 +1176,9 @@ mod tests {
             .await
             .expect("load");
         assert!(
-            !events.iter().any(|e| matches!(e, AgentEvent::VerificationFailed { .. })),
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::VerificationFailed { .. })),
             "a passing verification must not inject a failure"
         );
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -1168,13 +1190,12 @@ mod tests {
     async fn without_verification_the_gate_is_inert() {
         let (store, dir) = temp_store();
         let session = SessionId::new();
-        let model = ScriptedModel::new(vec![
-            tool_call_then_done("echo"),
-            final_text("done"),
-        ]);
+        let model = ScriptedModel::new(vec![tool_call_then_done("echo"), final_text("done")]);
         let engine = Engine::new(
             Box::new(model),
-            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(AtomicU32::new(0))))]),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
             Arc::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
@@ -1189,7 +1210,11 @@ mod tests {
             .load(&session)
             .await
             .expect("load");
-        assert!(!events.iter().any(|e| matches!(e, AgentEvent::VerificationFailed { .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::VerificationFailed { .. }))
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }
