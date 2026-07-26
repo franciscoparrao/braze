@@ -471,10 +471,18 @@ un modelo repartido con la configuración anterior. El lock se sostiene durante
 la carga a propósito, para que dos hilos pidiendo el mismo modelo no carguen
 un duplicado. Kill-switch: `BRAZE_LOCAL_MODEL_CACHE=off`.
 
-**Caveat metodológico, importante para el bench**: con el caché activo solo la
-primera tarea de un brazo paga la carga, así que el `wall_time_ms` promedio
-**deja de ser comparable** contra sweeps anteriores. Para reproducir números
-viejos hay que pasar `BRAZE_LOCAL_MODEL_CACHE=off`.
+**Corrección al caveat original (2026-07-25, mismo día).** Se anotó acá que el
+caché "rompe la comparabilidad de `wall_time_ms`" porque solo la primera tarea
+paga la carga. **Es falso**, y lo desmintió leer el bench: `runner.rs` hace
+`let started = Instant::now()` **después** de construir engine y backend, así
+que la carga del modelo y el probe del fit **nunca estuvieron dentro de la
+ventana medida**. El caché no toca `wall_time_ms` ni la comparabilidad contra
+sweeps viejos.
+
+Lo que el caché sí cambia es la **duración total** del sweep (deja de pagar
+~57 cargas de 6-12GB) — valioso, pero es tiempo de pared del operador, no una
+métrica del experimento. `BRAZE_LOCAL_MODEL_CACHE=off` sigue existiendo como
+kill-switch.
 
 **Estado**: implementado y con tests unitarios (la clave distingue modelo y
 contexto), pero **sin verificación en vivo todavía** — requiere braze-bench con
