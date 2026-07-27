@@ -89,3 +89,59 @@ Agravado por una decisión mía: el script redirigía la salida a `/dev/null`, a
 que un fracaso total se veía igual que un éxito. **Un script de experimento no
 atendido debe verificar que produjo datos y abortar si no** — el relanzamiento
 lo hace.
+
+---
+
+## Adenda (2026-07-27): la inestabilidad sigue al LARGO DE TRAYECTORIA, y con umbral
+
+Medido sobre 3 réplicas idénticas de la suite discriminante v2 (34 tareas,
+gpt-oss:20b, temp 0, tope 900s). **Costo adicional: cero** — sale de datos
+que ya estaban en disco.
+
+| Rondas de la tarea | Inestables |
+|---|---|
+| 0-3 | 0/2 (0%) |
+| 3-6 | 1/14 (7%) |
+| 6-10 | 5/7 (71%) |
+| 10+ | 6/11 (55%) |
+
+Y el contraste directo entre grupos:
+
+| | n | rondas | segundos | tokens de salida |
+|---|---|---|---|---|
+| estables | 22 | 6.3 | 132 | 1002 |
+| inestables | 12 | 11.4 | 264 | 1742 |
+
+**No es que las tareas difíciles sean más ruidosas: son las LARGAS.** Casi
+exactamente el doble en todas las dimensiones, y con un corte marcado
+alrededor de las 6 rondas — por debajo son prácticamente deterministas, por
+encima son monedas al aire. (La no-monotonía entre 71% y 55% es ruido a n=7
+y n=11; el umbral sí se sostiene.)
+
+**Mecanismo plausible, y explica por qué hay umbral y no pendiente**: cada
+ronda es una oportunidad de que un empate de logits se resuelva distinto —
+medido el mismo día, `"<eos>"=23.225 "<"=23.175 "The"=23.109`, dentro de
+0.05 — y una trayectoria que diverge **no vuelve a converger**. Es
+ramificación con estado absorbente: la probabilidad de haber divergido
+alguna vez crece rápido con el número de rondas y luego satura.
+
+### Qué implica para diseñar bancos agénticos
+
+1. **Las tareas de más de ~6 rondas exigen repeticiones; las de menos, no.**
+   Es la regla operativa más directa que sale de todo esto, y contradice la
+   intuición de replicar uniformemente: replicar tareas cortas es gastar
+   cómputo en promediar un ruido que no existe.
+2. **Reportar el largo de trayectoria junto al pass rate.** Dos bancos con
+   el mismo pass rate y distinta distribución de rondas no tienen la misma
+   varianza, y hoy nada en el reporte lo delata.
+3. **Un banco puede partirse por costo/ruido**, que es lo que motivó
+   `fast-core.toml`: 13 tareas cortas, ~15 min, 1 inestable — para trabajo
+   rutinario. La suite completa queda para medir efectos que viven en
+   trayectorias largas, donde hay que pagar repeticiones sí o sí.
+
+### Lo que NO se afirma
+
+Esto es un modelo (gpt-oss:20b), un hardware (RTX 3050 6GB) y una suite. El
+umbral concreto de ~6 rondas es de este arreglo; lo que se propone como
+general es la **forma** de la relación (inestabilidad creciente con el largo
+de trayectoria, por divergencia absorbente), no el número.
