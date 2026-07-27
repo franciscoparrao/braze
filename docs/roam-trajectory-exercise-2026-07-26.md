@@ -59,6 +59,14 @@ La secuencia real que lo destapó:
 Pero **ya no lo tenía**: la primera palanca se lo borró y la segunda se negaba
 a devolvérselo. El modelo quedó atrapado con el plan correcto en la mano.
 
+> **Alcance acotado el 2026-07-27**: se revisó el código de SWE-agent, Aider
+> y OpenHands para saber si esta trampa es del género o nuestra. **Es
+> nuestra.** La precondición sí es universal —los tres eliden o comprimen
+> observaciones viejas, y el `LastNObservations` de SWE-agent es idéntico al
+> nuestro hasta en el default de 5— pero solo OpenHands tiene además guard de
+> repetición, y el suyo **detiene el agente** en vez de negar la llamada
+> afirmando posesión. Ver `docs/lever-interaction-external-check-2026-07-27.md`.
+
 **Arreglo**: `seen_calls` pasó de `HashSet` a mapa `(nombre, args) →
 Option<contenido>`. La tool sigue sin re-ejecutarse —esa es la intención
 anti-loop— pero la repetición se responde **con el resultado anterior**,
