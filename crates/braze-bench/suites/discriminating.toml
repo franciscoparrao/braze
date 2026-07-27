@@ -48,6 +48,36 @@
 #   - BRAZE_OLLAMA_NUM_CTX=32768 y BRAZE_MAX_TOKENS=12288. Con los defaults
 #     (8192/4096) las tareas se estrangulan por presupuesto, no por
 #     capacidad — medido en el ejercicio roam del mismo dia.
+#   - --task-timeout-secs 900. NO 300. Es el requisito mas importante y se
+#     descubrio replicando el baseline 3x:
+#         tope 300s -> 7/8, 4/8, 3/8   (1-4 timeouts por corrida)
+#         tope 900s -> 6/8, 6/8, 6/8   (0 timeouts)
+#     El walltime total sigue variando 52% entre corridas identicas
+#     (1389-2111s) en AMBOS casos: el ruido no desaparecio, dejo de
+#     convertirse en pass/fail. Un tope de tiempo BINARIZA el ruido
+#     continuo de walltime y lo amplifica -- con tareas sentadas justo
+#     sobre el corte, 12% de variacion de reloj movia 3 tareas y producia
+#     oscilaciones de 50 puntos porcentuales. Es primo de la censura
+#     informativa (docs/noise-floor-2026-07-26.md) pero distinto: aquella
+#     sesga la tasa condicional, esta infla la varianza de la tasa cruda.
+#
+# PISO DE RUIDO DE ESTA SUITE (gpt-oss, tope 900s, 3 replicas):
+#   - pass rate: 6/8 las tres veces, sd = 0.
+#   - PERO la composicion varia: tres tareas fallan en 2 de 3 corridas y
+#     cual pasa cambia cada vez. La discordancia POR TAREA entre pares es
+#     ~2 de 8, y es esa la que importa para comparaciones pareadas.
+#     => una diferencia de <=2 tareas entre brazos no significa nada.
+#
+# ETIQUETA DE GRADIENTE CORREGIDA: `mover_almacen_completo` estaba marcada
+# `techo` porque agotaba los 300s. Con 900s pasa en las 3 corridas: no era
+# frontera de capacidad sino de tiempo. Se conserva la etiqueta como
+# registro del error de calibracion inicial.
+#
+# RUIDO RESTANTE, DIAGNOSTICADO: de los tres fallos que oscilan, dos son
+# `model_backend_error` -- el hermano del bug de ronda vacia (la ronda
+# genera tokens pero ninguno mapeable, solo canal analysis). No es
+# capacidad: es harness. Arreglarlo probablemente vuelva esta suite casi
+# determinista, y es el paso de mayor palanca para la calidad de medicion.
 #
 # Nota de gradiente: `tres_archivos_coordinados` (techo) paso mientras
 # `mover_item_a_modulo_nuevo` (banda) fallo. Con n=1 y sabiendo que ese
