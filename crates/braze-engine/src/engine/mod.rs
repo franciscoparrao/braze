@@ -827,6 +827,69 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    /// Una ronda vacía no siempre es el modelo rindiéndose: muchas veces
+    /// gastó la ronda entera en un canal que el harness no expone (el
+    /// `analysis` de Harmony) y cerró sin emitir nada mapeable. Medido con
+    /// gpt-oss:20b en la suite discriminante (2026-07-26), era la fuente
+    /// DOMINANTE del ruido de medición — dos de las tres tareas cuyo
+    /// resultado oscilaba entre corridas idénticas fallaban así.
+    ///
+    /// El modelo no puede corregir lo que no sabe: sin la nota, su
+    /// siguiente request es idéntico y repetir la ronda es lo esperable.
+    #[tokio::test]
+    async fn una_ronda_vacia_se_nudgea_y_el_modelo_puede_recuperarse() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            // Primera ronda: nada mapeable (todo se fue al canal oculto).
+            vec![CompletionEvent::Done],
+            // Tras el nudge, el modelo responde de verdad.
+            vec![
+                CompletionEvent::TextDelta("ahora sí, listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("el turno debe recuperarse tras el nudge, no morir en la ronda vacía");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        // La nota se persiste, para que el turno sea auditable: sin ella,
+        // el log mostraría una ronda que desaparece sin explicación.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::HarnessNote { kind, .. } if kind == "empty_round"
+            )),
+            "debe quedar registro de por qué se repitió la ronda"
+        );
+        // Y el turno termina con la respuesta real del modelo.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("ahora sí")
+            )),
+            "la respuesta posterior al nudge debe ser la que cierra el turno"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     /// Regression test for the "una completion vacía termina el turno
     /// como éxito silencioso" bajo (docs/AUDITORIA-2026-07-v2.md): a
     /// round with no text and no tool calls at all must not be treated as
@@ -879,7 +942,12 @@ mod tests {
                 CompletionEvent::Done,
             ],
             // The round right after the tool call comes back with
-            // nothing at all — no text, no further tool calls.
+            // nothing at all — no text, no further tool calls. Ahora el
+            // engine responde con un nudge y le devuelve la ronda hasta
+            // MAX_EMPTY_ROUND_RETRIES veces; este modelo insiste, que es
+            // lo que lleva a la ruta de fallback que el test verifica.
+            vec![CompletionEvent::Done],
+            vec![CompletionEvent::Done],
             vec![CompletionEvent::Done],
             // The tools-free summary attempt — reports Usage like any
             // real model round would (H-4: it used to be dropped).
@@ -1115,6 +1183,10 @@ mod tests {
                 CompletionEvent::Done,
             ],
             // Ronda 1: sin texto ni tool calls → gatilla el fallback.
+            // El engine ahora nudgea y devuelve la ronda hasta
+            // MAX_EMPTY_ROUND_RETRIES veces; el modelo insiste.
+            vec![CompletionEvent::Done],
+            vec![CompletionEvent::Done],
             vec![CompletionEvent::Done],
             // Fallback de resumen: texto NO-vacío (el razonamiento hueco).
             vec![
@@ -1303,14 +1375,20 @@ mod tests {
                         },
                         CompletionEvent::Done,
                     ],
+                    // El engine ahora nudgea y devuelve la ronda hasta
+                    // MAX_EMPTY_ROUND_RETRIES veces; el modelo insiste.
+                    vec![CompletionEvent::Done],
+                    vec![CompletionEvent::Done],
                     vec![CompletionEvent::Done],
                 ]
                 .into_iter()
                 .collect(),
             ),
-            // Call 0: tool call round. Call 1: empty round. Call 2: the
-            // summary fallback — dies at the request level.
-            fail_on_attempt: 2,
+            // Call 0: ronda con tool call. Call 1: ronda vacia. Calls 2 y
+            // 3: los dos reintentos con nudge, que el modelo tambien
+            // devuelve vacios. Call 4: el summary fallback — muere a nivel
+            // de request, que es lo que este test verifica.
+            fail_on_attempt: 4,
             calls: AtomicU32::new(0),
         };
         let invocations = Arc::new(AtomicU32::new(0));

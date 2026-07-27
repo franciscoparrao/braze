@@ -229,6 +229,13 @@ impl Engine {
         let mut budget_note_emitted = false;
         let mut convergence_note_emitted = false;
 
+        // Cuántas rondas vacías se le perdonan al modelo por turno antes
+        // de caer a las rutas de fallback/fallo. Dos: la primera nota
+        // puede llegar tarde si la ronda ya estaba en vuelo, la segunda
+        // confirma que el modelo no va a salir del pozo solo.
+        const MAX_EMPTY_ROUND_RETRIES: u32 = 2;
+        let mut empty_round_retries: u32 = 0;
+
         for round in 0..self.max_turn_iterations {
             // v4 P0.2 (docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3):
             // checked at the top of the NEXT iteration, not right after a
@@ -442,6 +449,58 @@ impl Engine {
                 // Treat it as a failure to converge for this round rather
                 // than a silent no-op success.
                 if text_buffer.is_empty() {
+                    // Antes de decidir entre el fallback y el fallo duro:
+                    // DECIRLE al modelo qué pasó y darle la ronda de vuelta.
+                    //
+                    // Una ronda vacía no siempre es el modelo rindiéndose;
+                    // muchas veces gastó la ronda entera en un canal que
+                    // este harness no expone (el `analysis` de Harmony) y
+                    // cerró el turno sin emitir nada mapeable. Medido con
+                    // gpt-oss:20b en la suite discriminante (2026-07-26):
+                    // dos de las tres tareas cuyo resultado oscilaba entre
+                    // corridas idénticas fallaban así, con rondas de ~12
+                    // tokens — o sea era la fuente dominante del ruido de
+                    // medición, y era harness, no capacidad.
+                    //
+                    // El modelo no puede corregir lo que no sabe: sin esta
+                    // nota, su siguiente request es idéntico al anterior y
+                    // repetir la misma ronda es lo esperable. Es la misma
+                    // lógica del mensaje de reparación de schema, que el
+                    // A/B del stencil mostró que absorbe fallos río abajo.
+                    //
+                    // Acotado a `MAX_EMPTY_ROUND_RETRIES` por turno: si el
+                    // modelo insiste, se cae a las rutas de siempre. Sin la
+                    // cota, un modelo que solo emite razonamiento quemaría
+                    // el turno entero en reintentos.
+                    if empty_round_retries < MAX_EMPTY_ROUND_RETRIES {
+                        empty_round_retries += 1;
+                        let text = format!(
+                            "Your last round produced no visible output: it generated \
+                             {round_output_tokens} tokens but none of them reached the \
+                             conversation — no text and no tool call. If you were \
+                             reasoning, that channel is not shown to the user and does \
+                             not count as an answer. Reply now with either a tool call \
+                             or the final text answer."
+                        );
+                        tracing::warn!(
+                            round,
+                            round_output_tokens,
+                            attempt = empty_round_retries,
+                            "round produced nothing mappable; nudging the model instead of \
+                             ending the turn"
+                        );
+                        self.append_and_notify(
+                            session,
+                            &AgentEvent::HarnessNote {
+                                kind: "empty_round".to_string(),
+                                text: text.clone(),
+                            },
+                            observer,
+                        )
+                        .await?;
+                        self.turn_harness_notes.lock().unwrap().push(text);
+                        continue;
+                    }
                     // U-1 (docs/usability-log-template.md, hallado en vivo
                     // 2026-07-07 contra qwen3.5-coder/Nitro): a real session
                     // asked for a hardware report; the model called
