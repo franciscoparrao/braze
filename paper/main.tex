@@ -2046,6 +2046,68 @@ where it verified. Compositional brittleness
 one model, corroborated --- not independently established --- by a
 5-transcript sample.
 
+\paragraph{Levers are measured individually, not in combination
+(construct validity).} \braze{}'s design switches each reliability
+lever independently per benchmark row, and this paper reports
+single-lever ablations plus four named configurations. Work on the same
+harness after these sweeps found two cases in which levers that are
+individually correct --- each with passing unit tests, each with a
+defensible ablation --- compose into a failure neither exhibits alone.
+The sharpest is between the tactical observation-collapse window and
+the repeated-call guard: the collapse elides an older tool result to a
+single line, and the guard then answers a re-request for that same call
+with a refusal (``you already called this; use the result you have''),
+so the model is denied content the harness itself removed. Observed
+live on a repository-level task, a 20B executor spent four consecutive
+calls on that exchange and abandoned the turn with a correct plan in
+hand. Nothing here invalidates a measured row --- each row is a fully
+specified configuration, and the interaction was not active in the
+cells we report --- but it bounds extrapolation: a single-lever
+ablation licenses no prediction about an unmeasured combination, and
+the additive reading that ablation tables invite is not established. A
+factorial over lever \emph{pairs}, with the interaction term as the
+estimand, is the instrument this question needs and the one we did not
+run.
+
+\paragraph{A configured guardrail can be silently inactive (internal
+validity).} The post-edit check (\S\ref{sec:harness}) runs an external
+command --- \texttt{cargo check} by default --- and its failure posture
+is deliberately quiet: a missing binary, a timeout, or an unrunnable
+command all skip without comment, so that the guardrail never turns a
+successful edit into a failed tool call. The measurement consequence is
+that in an environment where the configured command is not on the
+path, the lever is inactive while the benchmark row still reports it as
+enabled. We encountered this directly after the sweeps reported here:
+a benchmark invocation from a non-interactive shell without the Rust
+toolchain on \texttt{PATH} disabled both the guardrail and the
+compile-based grading, yielding an all-fail sweep whose signature was
+indistinguishable from model incapacity. The ablation rows involving
+this lever (\S\ref{sec:ablations}) should be read with that
+possibility in view; we have not re-verified the environment of every
+archived sweep. The corresponding harness fix is a one-time startup
+warning when a configured formatter is not executable, so that a
+degraded configuration announces itself rather than presenting as a
+result.
+
+\paragraph{Outcome grading does not verify artifact fidelity
+(construct validity).} Needle assertions and compile checks establish
+that an edit yields a compiling artifact containing the expected
+substrings; they do not establish that regions the task did not target
+were preserved. On a repository-level refactor we observed a 20B model
+silently corrupt content while copying code it had been asked to move
+verbatim. One corruption broke syntax and was caught --- by the
+compiler, two tasks and roughly thirty minutes later, because the file
+was not yet reachable from any module declaration and so had never
+been compiled. The second removed subscript characters from a
+documentation formula, leaving it mathematically wrong in a file that
+compiles, passes every test, and passes the post-edit check. Grading
+at the outcome level is therefore structurally blind to a class of
+damage confined to comments, string literals and documentation. This
+does not affect the pass rates reported here, which concern task
+completion rather than artifact fidelity, but it bounds what a passing
+run certifies: that the task's stated goal was met, not that nothing
+else changed.
+
 \section{Conclusion}\label{sec:conclusion}
 
 The harness-vs-scale curve this paper set out to measure exists, has
