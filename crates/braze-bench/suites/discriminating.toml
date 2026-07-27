@@ -1,0 +1,2084 @@
+# Suite DISCRIMINANTE — 2026-07-26
+#
+# Por que existe: `default.toml` esta SATURADO. Medido en
+# docs/noise-floor-2026-07-26.md — gpt-oss:20b saca 57/57 con CERO
+# discordantes entre corridas identicas, y en gemma4:e4b solo 5 de 57 tareas
+# son inestables (casi todas de error_recovery). Un banco donde casi todo se
+# pasa o casi todo es ruido no puede detectar ni mejora ni regresion: no
+# tiene poder de medicion para el modelo principal del proyecto.
+#
+# Calibracion (no es intuicion): el ejercicio roam del mismo dia acoto el
+# limite de gpt-oss por ambos lados — resuelve ediciones quirurgicas (dos
+# arreglos de una linea en 157s, a la primera) y falla movimientos de 216
+# lineas (dos edit_file sin match exacto, una reescritura cortada por
+# presupuesto). Las tareas que discriminan viven ENTRE esos dos puntos.
+#
+# Gradiente explicito por `skill`:
+#   piso   — deberia pasarlas; si fallan, se rompio el harness, no el modelo
+#   banda  — donde se espera resolucion de medicion real
+#   techo  — en o sobre el punto de falla conocido; define el extremo duro
+#
+# Los fixtures son crates Rust reales con `expect_cargo_check = true`: el
+# oraculo es el compilador, no un substring. Y los archivos pasan de 200
+# lineas a proposito, para forzar lecturas paginadas — que es lo que ejercita
+# el colapso ACI y la relectura, invisibles en default.toml (prompts ~1300
+# tokens que nunca se acercan al limite).
+#
+# CALIBRACION (2026-07-26, gpt-oss:20b, 1 rep, temp 0, ctx 32768/max 12288):
+#   PASS 6/8 — piso 2/2, banda 3/4, techo 1/2.
+# Compara con default.toml en el mismo modelo: 57/57 y CERO discordantes.
+# La suite tiene margen de medicion; default.toml no tenia ninguno.
+#
+# Los dos fallos, y por que importan sus firmas:
+#   - mover_almacen_completo (techo): timeout a 300s tras 14 rondas, pero
+#     con los archivos esperados YA creados y correctos — lo que faltaba era
+#     que compilara. Alcanzable en principio, fuera de presupuesto en la
+#     practica. Es el comportamiento buscado para el extremo duro.
+#   - mover_item_a_modulo_nuevo (banda): `model_backend_error` — la ronda
+#     genero 12 tokens que el harness no pudo mapear (solo canal analysis).
+#     NO mide capacidad: es un hermano del bug de ronda vacia arreglado el
+#     mismo dia (aquel era 0 tokens; este es "genero tokens pero ninguno
+#     alcanzable"). Pendiente de cubrir.
+#
+# REQUISITOS DE CORRIDA, no opcionales:
+#   - `source ~/.cargo/env` antes de lanzar. Sin `cargo` en el PATH, el
+#     grading de expect_cargo_check califica TODO como fallado y el
+#     post-edit check del harness se salta en silencio: la primera
+#     calibracion dio 0/8 por esto y no por el modelo.
+#   - BRAZE_OLLAMA_NUM_CTX=32768 y BRAZE_MAX_TOKENS=12288. Con los defaults
+#     (8192/4096) las tareas se estrangulan por presupuesto, no por
+#     capacidad — medido en el ejercicio roam del mismo dia.
+#
+# Nota de gradiente: `tres_archivos_coordinados` (techo) paso mientras
+# `mover_item_a_modulo_nuevo` (banda) fallo. Con n=1 y sabiendo que ese
+# fallo fue artefacto, no se reordena todavia: hace falta mas evidencia.
+
+[[tasks]]
+id = "fix_dos_errores_una_linea"
+skill = "piso"
+prompt = "El crate no compila. Hay exactamente dos errores en src/lib.rs, ambos de una linea: la funcion valor_total multiplica por self.sku en vez de self.cantidad, y esta_agotado compara con la cadena vacia en vez de con 0. Arregla esos dos puntos y nada mas."
+expect_cargo_check = true
+expect_file_contains = { "src/lib.rs" = ["u64::from(self.cantidad)", "self.cantidad == 0"] }
+expect_max_rounds = 10
+
+[tasks.setup_files]
+"Cargo.toml" = '''
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+'''
+"src/lib.rs" = '''
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub sku: String,
+    pub cantidad: u32,
+    pub precio_centavos: u64,
+}
+
+impl Item {
+    pub fn new(sku: &str, cantidad: u32, precio_centavos: u64) -> Self {
+        Self { sku: sku.to_string(), cantidad, precio_centavos }
+    }
+
+    /// Valor total de la linea, en centavos.
+    pub fn valor_total(&self) -> u64 {
+        self.precio_centavos * u64::from(self.sku)
+    }
+
+    pub fn esta_agotado(&self) -> bool {
+        self.cantidad == ""
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Almacen {
+    items: Vec<Item>,
+}
+
+impl Almacen {
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    pub fn agregar(&mut self, item: Item) {
+        self.items.push(item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Valor total del inventario, en centavos.
+    pub fn valor_inventario(&self) -> u64 {
+        self.items.iter().map(Item::valor_total).sum()
+    }
+
+    pub fn agotados(&self) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.esta_agotado()).collect()
+    }
+
+    pub fn buscar(&self, sku: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.sku == sku)
+    }
+}
+
+
+/// Devuelve el peso ajustado del lote 1.
+pub fn peso_lote_1(base: f64) -> f64 {
+    let ajuste = 1.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 2.
+pub fn peso_lote_2(base: f64) -> f64 {
+    let ajuste = 2.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 3.
+pub fn peso_lote_3(base: f64) -> f64 {
+    let ajuste = 3.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 4.
+pub fn peso_lote_4(base: f64) -> f64 {
+    let ajuste = 4.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 5.
+pub fn peso_lote_5(base: f64) -> f64 {
+    let ajuste = 5.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 6.
+pub fn peso_lote_6(base: f64) -> f64 {
+    let ajuste = 6.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 7.
+pub fn peso_lote_7(base: f64) -> f64 {
+    let ajuste = 7.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 8.
+pub fn peso_lote_8(base: f64) -> f64 {
+    let ajuste = 8.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 9.
+pub fn peso_lote_9(base: f64) -> f64 {
+    let ajuste = 9.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 10.
+pub fn peso_lote_10(base: f64) -> f64 {
+    let ajuste = 10.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 11.
+pub fn peso_lote_11(base: f64) -> f64 {
+    let ajuste = 11.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 12.
+pub fn peso_lote_12(base: f64) -> f64 {
+    let ajuste = 12.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 13.
+pub fn peso_lote_13(base: f64) -> f64 {
+    let ajuste = 13.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 14.
+pub fn peso_lote_14(base: f64) -> f64 {
+    let ajuste = 14.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 15.
+pub fn peso_lote_15(base: f64) -> f64 {
+    let ajuste = 15.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 16.
+pub fn peso_lote_16(base: f64) -> f64 {
+    let ajuste = 16.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 17.
+pub fn peso_lote_17(base: f64) -> f64 {
+    let ajuste = 17.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 18.
+pub fn peso_lote_18(base: f64) -> f64 {
+    let ajuste = 18.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 19.
+pub fn peso_lote_19(base: f64) -> f64 {
+    let ajuste = 19.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 20.
+pub fn peso_lote_20(base: f64) -> f64 {
+    let ajuste = 20.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 21.
+pub fn peso_lote_21(base: f64) -> f64 {
+    let ajuste = 21.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 22.
+pub fn peso_lote_22(base: f64) -> f64 {
+    let ajuste = 22.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 23.
+pub fn peso_lote_23(base: f64) -> f64 {
+    let ajuste = 23.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 24.
+pub fn peso_lote_24(base: f64) -> f64 {
+    let ajuste = 24.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 25.
+pub fn peso_lote_25(base: f64) -> f64 {
+    let ajuste = 25.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 26.
+pub fn peso_lote_26(base: f64) -> f64 {
+    let ajuste = 26.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 27.
+pub fn peso_lote_27(base: f64) -> f64 {
+    let ajuste = 27.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+'''
+
+[[tasks]]
+id = "localizar_y_editar_archivo_largo"
+skill = "piso"
+prompt = "En src/lib.rs, la funcion peso_lote_17 usa un factor de ajuste de 0.01. Cambialo a 0.02 sin tocar ninguna otra funcion peso_lote."
+expect_cargo_check = true
+expect_file_contains = { "src/lib.rs" = ["let ajuste = 17.0 * 0.02;", "let ajuste = 16.0 * 0.01;"] }
+expect_max_rounds = 10
+
+[tasks.setup_files]
+"Cargo.toml" = '''
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+'''
+"src/lib.rs" = '''
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub sku: String,
+    pub cantidad: u32,
+    pub precio_centavos: u64,
+}
+
+impl Item {
+    pub fn new(sku: &str, cantidad: u32, precio_centavos: u64) -> Self {
+        Self { sku: sku.to_string(), cantidad, precio_centavos }
+    }
+
+    /// Valor total de la linea, en centavos.
+    pub fn valor_total(&self) -> u64 {
+        self.precio_centavos * u64::from(self.cantidad)
+    }
+
+    pub fn esta_agotado(&self) -> bool {
+        self.cantidad == 0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Almacen {
+    items: Vec<Item>,
+}
+
+impl Almacen {
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    pub fn agregar(&mut self, item: Item) {
+        self.items.push(item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Valor total del inventario, en centavos.
+    pub fn valor_inventario(&self) -> u64 {
+        self.items.iter().map(Item::valor_total).sum()
+    }
+
+    pub fn agotados(&self) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.esta_agotado()).collect()
+    }
+
+    pub fn buscar(&self, sku: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.sku == sku)
+    }
+}
+
+
+/// Devuelve el peso ajustado del lote 1.
+pub fn peso_lote_1(base: f64) -> f64 {
+    let ajuste = 1.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 2.
+pub fn peso_lote_2(base: f64) -> f64 {
+    let ajuste = 2.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 3.
+pub fn peso_lote_3(base: f64) -> f64 {
+    let ajuste = 3.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 4.
+pub fn peso_lote_4(base: f64) -> f64 {
+    let ajuste = 4.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 5.
+pub fn peso_lote_5(base: f64) -> f64 {
+    let ajuste = 5.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 6.
+pub fn peso_lote_6(base: f64) -> f64 {
+    let ajuste = 6.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 7.
+pub fn peso_lote_7(base: f64) -> f64 {
+    let ajuste = 7.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 8.
+pub fn peso_lote_8(base: f64) -> f64 {
+    let ajuste = 8.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 9.
+pub fn peso_lote_9(base: f64) -> f64 {
+    let ajuste = 9.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 10.
+pub fn peso_lote_10(base: f64) -> f64 {
+    let ajuste = 10.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 11.
+pub fn peso_lote_11(base: f64) -> f64 {
+    let ajuste = 11.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 12.
+pub fn peso_lote_12(base: f64) -> f64 {
+    let ajuste = 12.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 13.
+pub fn peso_lote_13(base: f64) -> f64 {
+    let ajuste = 13.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 14.
+pub fn peso_lote_14(base: f64) -> f64 {
+    let ajuste = 14.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 15.
+pub fn peso_lote_15(base: f64) -> f64 {
+    let ajuste = 15.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 16.
+pub fn peso_lote_16(base: f64) -> f64 {
+    let ajuste = 16.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 17.
+pub fn peso_lote_17(base: f64) -> f64 {
+    let ajuste = 17.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 18.
+pub fn peso_lote_18(base: f64) -> f64 {
+    let ajuste = 18.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 19.
+pub fn peso_lote_19(base: f64) -> f64 {
+    let ajuste = 19.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 20.
+pub fn peso_lote_20(base: f64) -> f64 {
+    let ajuste = 20.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 21.
+pub fn peso_lote_21(base: f64) -> f64 {
+    let ajuste = 21.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 22.
+pub fn peso_lote_22(base: f64) -> f64 {
+    let ajuste = 22.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 23.
+pub fn peso_lote_23(base: f64) -> f64 {
+    let ajuste = 23.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 24.
+pub fn peso_lote_24(base: f64) -> f64 {
+    let ajuste = 24.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 25.
+pub fn peso_lote_25(base: f64) -> f64 {
+    let ajuste = 25.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 26.
+pub fn peso_lote_26(base: f64) -> f64 {
+    let ajuste = 26.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 27.
+pub fn peso_lote_27(base: f64) -> f64 {
+    let ajuste = 27.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+'''
+
+[[tasks]]
+id = "agregar_metodo_a_impl_existente"
+skill = "banda"
+prompt = "Agrega al impl de Almacen en src/lib.rs un metodo publico `sku_mas_caro(&self) -> Option<&Item>` que devuelva el item con mayor valor_total, o None si el almacen esta vacio. No cambies ningun metodo existente."
+expect_cargo_check = true
+expect_file_contains = { "src/lib.rs" = ["fn sku_mas_caro", "valor_inventario", "fn buscar"] }
+expect_max_rounds = 12
+
+[tasks.setup_files]
+"Cargo.toml" = '''
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+'''
+"src/lib.rs" = '''
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub sku: String,
+    pub cantidad: u32,
+    pub precio_centavos: u64,
+}
+
+impl Item {
+    pub fn new(sku: &str, cantidad: u32, precio_centavos: u64) -> Self {
+        Self { sku: sku.to_string(), cantidad, precio_centavos }
+    }
+
+    /// Valor total de la linea, en centavos.
+    pub fn valor_total(&self) -> u64 {
+        self.precio_centavos * u64::from(self.cantidad)
+    }
+
+    pub fn esta_agotado(&self) -> bool {
+        self.cantidad == 0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Almacen {
+    items: Vec<Item>,
+}
+
+impl Almacen {
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    pub fn agregar(&mut self, item: Item) {
+        self.items.push(item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Valor total del inventario, en centavos.
+    pub fn valor_inventario(&self) -> u64 {
+        self.items.iter().map(Item::valor_total).sum()
+    }
+
+    pub fn agotados(&self) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.esta_agotado()).collect()
+    }
+
+    pub fn buscar(&self, sku: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.sku == sku)
+    }
+}
+
+
+/// Devuelve el peso ajustado del lote 1.
+pub fn peso_lote_1(base: f64) -> f64 {
+    let ajuste = 1.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 2.
+pub fn peso_lote_2(base: f64) -> f64 {
+    let ajuste = 2.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 3.
+pub fn peso_lote_3(base: f64) -> f64 {
+    let ajuste = 3.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 4.
+pub fn peso_lote_4(base: f64) -> f64 {
+    let ajuste = 4.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 5.
+pub fn peso_lote_5(base: f64) -> f64 {
+    let ajuste = 5.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 6.
+pub fn peso_lote_6(base: f64) -> f64 {
+    let ajuste = 6.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 7.
+pub fn peso_lote_7(base: f64) -> f64 {
+    let ajuste = 7.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 8.
+pub fn peso_lote_8(base: f64) -> f64 {
+    let ajuste = 8.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 9.
+pub fn peso_lote_9(base: f64) -> f64 {
+    let ajuste = 9.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 10.
+pub fn peso_lote_10(base: f64) -> f64 {
+    let ajuste = 10.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 11.
+pub fn peso_lote_11(base: f64) -> f64 {
+    let ajuste = 11.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 12.
+pub fn peso_lote_12(base: f64) -> f64 {
+    let ajuste = 12.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 13.
+pub fn peso_lote_13(base: f64) -> f64 {
+    let ajuste = 13.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 14.
+pub fn peso_lote_14(base: f64) -> f64 {
+    let ajuste = 14.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 15.
+pub fn peso_lote_15(base: f64) -> f64 {
+    let ajuste = 15.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 16.
+pub fn peso_lote_16(base: f64) -> f64 {
+    let ajuste = 16.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 17.
+pub fn peso_lote_17(base: f64) -> f64 {
+    let ajuste = 17.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 18.
+pub fn peso_lote_18(base: f64) -> f64 {
+    let ajuste = 18.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 19.
+pub fn peso_lote_19(base: f64) -> f64 {
+    let ajuste = 19.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 20.
+pub fn peso_lote_20(base: f64) -> f64 {
+    let ajuste = 20.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 21.
+pub fn peso_lote_21(base: f64) -> f64 {
+    let ajuste = 21.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 22.
+pub fn peso_lote_22(base: f64) -> f64 {
+    let ajuste = 22.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 23.
+pub fn peso_lote_23(base: f64) -> f64 {
+    let ajuste = 23.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 24.
+pub fn peso_lote_24(base: f64) -> f64 {
+    let ajuste = 24.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 25.
+pub fn peso_lote_25(base: f64) -> f64 {
+    let ajuste = 25.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 26.
+pub fn peso_lote_26(base: f64) -> f64 {
+    let ajuste = 26.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 27.
+pub fn peso_lote_27(base: f64) -> f64 {
+    let ajuste = 27.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+'''
+
+[[tasks]]
+id = "mover_item_a_modulo_nuevo"
+skill = "banda"
+prompt = "Refactor sin cambiar logica: mueve la struct `Item` y todo su bloque `impl Item` desde src/lib.rs a un archivo NUEVO src/item.rs. En lib.rs deja `mod item;` y `pub use item::Item;` cerca del inicio para que Item siga siendo publico con la misma ruta. No toques Almacen ni las funciones peso_lote."
+expect_cargo_check = true
+expect_file_contains = { "src/lib.rs" = ["mod item", "pub use item::Item"], "src/item.rs" = ["pub struct Item", "fn valor_total"] }
+expect_max_rounds = 14
+
+[tasks.setup_files]
+"Cargo.toml" = '''
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+'''
+"src/lib.rs" = '''
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub sku: String,
+    pub cantidad: u32,
+    pub precio_centavos: u64,
+}
+
+impl Item {
+    pub fn new(sku: &str, cantidad: u32, precio_centavos: u64) -> Self {
+        Self { sku: sku.to_string(), cantidad, precio_centavos }
+    }
+
+    /// Valor total de la linea, en centavos.
+    pub fn valor_total(&self) -> u64 {
+        self.precio_centavos * u64::from(self.cantidad)
+    }
+
+    pub fn esta_agotado(&self) -> bool {
+        self.cantidad == 0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Almacen {
+    items: Vec<Item>,
+}
+
+impl Almacen {
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    pub fn agregar(&mut self, item: Item) {
+        self.items.push(item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Valor total del inventario, en centavos.
+    pub fn valor_inventario(&self) -> u64 {
+        self.items.iter().map(Item::valor_total).sum()
+    }
+
+    pub fn agotados(&self) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.esta_agotado()).collect()
+    }
+
+    pub fn buscar(&self, sku: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.sku == sku)
+    }
+}
+
+
+/// Devuelve el peso ajustado del lote 1.
+pub fn peso_lote_1(base: f64) -> f64 {
+    let ajuste = 1.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 2.
+pub fn peso_lote_2(base: f64) -> f64 {
+    let ajuste = 2.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 3.
+pub fn peso_lote_3(base: f64) -> f64 {
+    let ajuste = 3.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 4.
+pub fn peso_lote_4(base: f64) -> f64 {
+    let ajuste = 4.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 5.
+pub fn peso_lote_5(base: f64) -> f64 {
+    let ajuste = 5.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 6.
+pub fn peso_lote_6(base: f64) -> f64 {
+    let ajuste = 6.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 7.
+pub fn peso_lote_7(base: f64) -> f64 {
+    let ajuste = 7.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 8.
+pub fn peso_lote_8(base: f64) -> f64 {
+    let ajuste = 8.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 9.
+pub fn peso_lote_9(base: f64) -> f64 {
+    let ajuste = 9.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 10.
+pub fn peso_lote_10(base: f64) -> f64 {
+    let ajuste = 10.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 11.
+pub fn peso_lote_11(base: f64) -> f64 {
+    let ajuste = 11.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 12.
+pub fn peso_lote_12(base: f64) -> f64 {
+    let ajuste = 12.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 13.
+pub fn peso_lote_13(base: f64) -> f64 {
+    let ajuste = 13.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 14.
+pub fn peso_lote_14(base: f64) -> f64 {
+    let ajuste = 14.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 15.
+pub fn peso_lote_15(base: f64) -> f64 {
+    let ajuste = 15.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 16.
+pub fn peso_lote_16(base: f64) -> f64 {
+    let ajuste = 16.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 17.
+pub fn peso_lote_17(base: f64) -> f64 {
+    let ajuste = 17.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 18.
+pub fn peso_lote_18(base: f64) -> f64 {
+    let ajuste = 18.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 19.
+pub fn peso_lote_19(base: f64) -> f64 {
+    let ajuste = 19.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 20.
+pub fn peso_lote_20(base: f64) -> f64 {
+    let ajuste = 20.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 21.
+pub fn peso_lote_21(base: f64) -> f64 {
+    let ajuste = 21.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 22.
+pub fn peso_lote_22(base: f64) -> f64 {
+    let ajuste = 22.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 23.
+pub fn peso_lote_23(base: f64) -> f64 {
+    let ajuste = 23.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 24.
+pub fn peso_lote_24(base: f64) -> f64 {
+    let ajuste = 24.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 25.
+pub fn peso_lote_25(base: f64) -> f64 {
+    let ajuste = 25.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 26.
+pub fn peso_lote_26(base: f64) -> f64 {
+    let ajuste = 26.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 27.
+pub fn peso_lote_27(base: f64) -> f64 {
+    let ajuste = 27.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+'''
+
+[[tasks]]
+id = "cambio_coordinado_dos_archivos"
+skill = "banda"
+prompt = "El campo `precio_centavos` de Item se llamara `precio`. Renombralo en src/lib.rs y actualiza tambien src/reporte.rs, que lo usa. El crate tiene que seguir compilando."
+expect_cargo_check = true
+expect_file_contains = { "src/lib.rs" = ["pub precio: u64"], "src/reporte.rs" = ["item.precio"] }
+expect_max_rounds = 14
+
+[tasks.setup_files]
+"Cargo.toml" = '''
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+'''
+"src/lib.rs" = '''
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub sku: String,
+    pub cantidad: u32,
+    pub precio_centavos: u64,
+}
+
+impl Item {
+    pub fn new(sku: &str, cantidad: u32, precio_centavos: u64) -> Self {
+        Self { sku: sku.to_string(), cantidad, precio_centavos }
+    }
+
+    /// Valor total de la linea, en centavos.
+    pub fn valor_total(&self) -> u64 {
+        self.precio_centavos * u64::from(self.cantidad)
+    }
+
+    pub fn esta_agotado(&self) -> bool {
+        self.cantidad == 0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Almacen {
+    items: Vec<Item>,
+}
+
+impl Almacen {
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    pub fn agregar(&mut self, item: Item) {
+        self.items.push(item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Valor total del inventario, en centavos.
+    pub fn valor_inventario(&self) -> u64 {
+        self.items.iter().map(Item::valor_total).sum()
+    }
+
+    pub fn agotados(&self) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.esta_agotado()).collect()
+    }
+
+    pub fn buscar(&self, sku: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.sku == sku)
+    }
+}
+
+mod reporte;
+pub use reporte::linea_reporte;
+
+
+/// Devuelve el peso ajustado del lote 1.
+pub fn peso_lote_1(base: f64) -> f64 {
+    let ajuste = 1.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 2.
+pub fn peso_lote_2(base: f64) -> f64 {
+    let ajuste = 2.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 3.
+pub fn peso_lote_3(base: f64) -> f64 {
+    let ajuste = 3.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 4.
+pub fn peso_lote_4(base: f64) -> f64 {
+    let ajuste = 4.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 5.
+pub fn peso_lote_5(base: f64) -> f64 {
+    let ajuste = 5.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 6.
+pub fn peso_lote_6(base: f64) -> f64 {
+    let ajuste = 6.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 7.
+pub fn peso_lote_7(base: f64) -> f64 {
+    let ajuste = 7.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 8.
+pub fn peso_lote_8(base: f64) -> f64 {
+    let ajuste = 8.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 9.
+pub fn peso_lote_9(base: f64) -> f64 {
+    let ajuste = 9.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 10.
+pub fn peso_lote_10(base: f64) -> f64 {
+    let ajuste = 10.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 11.
+pub fn peso_lote_11(base: f64) -> f64 {
+    let ajuste = 11.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 12.
+pub fn peso_lote_12(base: f64) -> f64 {
+    let ajuste = 12.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 13.
+pub fn peso_lote_13(base: f64) -> f64 {
+    let ajuste = 13.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 14.
+pub fn peso_lote_14(base: f64) -> f64 {
+    let ajuste = 14.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 15.
+pub fn peso_lote_15(base: f64) -> f64 {
+    let ajuste = 15.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 16.
+pub fn peso_lote_16(base: f64) -> f64 {
+    let ajuste = 16.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 17.
+pub fn peso_lote_17(base: f64) -> f64 {
+    let ajuste = 17.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 18.
+pub fn peso_lote_18(base: f64) -> f64 {
+    let ajuste = 18.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 19.
+pub fn peso_lote_19(base: f64) -> f64 {
+    let ajuste = 19.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 20.
+pub fn peso_lote_20(base: f64) -> f64 {
+    let ajuste = 20.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 21.
+pub fn peso_lote_21(base: f64) -> f64 {
+    let ajuste = 21.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 22.
+pub fn peso_lote_22(base: f64) -> f64 {
+    let ajuste = 22.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 23.
+pub fn peso_lote_23(base: f64) -> f64 {
+    let ajuste = 23.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 24.
+pub fn peso_lote_24(base: f64) -> f64 {
+    let ajuste = 24.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 25.
+pub fn peso_lote_25(base: f64) -> f64 {
+    let ajuste = 25.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 26.
+pub fn peso_lote_26(base: f64) -> f64 {
+    let ajuste = 26.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 27.
+pub fn peso_lote_27(base: f64) -> f64 {
+    let ajuste = 27.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+'''
+"src/reporte.rs" = '''
+use super::Item;
+
+/// Una linea de reporte legible para un item.
+pub fn linea_reporte(item: &Item) -> String {
+    format!("{} x{} = {} centavos", item.sku, item.cantidad, item.precio_centavos)
+}
+'''
+
+[[tasks]]
+id = "borrar_bloque_deprecado"
+skill = "banda"
+prompt = "El crate no compila: las funciones deprecadas peso_lote_* llaman a `factor_legado()`, un helper que ya fue eliminado. Borra TODAS las funciones peso_lote_*. No toques Item ni Almacen ni agregues el helper de vuelta."
+expect_cargo_check = true
+expect_file_contains = { "src/lib.rs" = ["pub struct Item", "pub struct Almacen"] }
+expect_max_rounds = 14
+
+[tasks.setup_files]
+"Cargo.toml" = '''
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+'''
+"src/lib.rs" = '''
+// DEPRECADO: las funciones peso_lote_* se eliminan en la proxima version.
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub sku: String,
+    pub cantidad: u32,
+    pub precio_centavos: u64,
+}
+
+impl Item {
+    pub fn new(sku: &str, cantidad: u32, precio_centavos: u64) -> Self {
+        Self { sku: sku.to_string(), cantidad, precio_centavos }
+    }
+
+    /// Valor total de la linea, en centavos.
+    pub fn valor_total(&self) -> u64 {
+        self.precio_centavos * u64::from(self.cantidad)
+    }
+
+    pub fn esta_agotado(&self) -> bool {
+        self.cantidad == 0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Almacen {
+    items: Vec<Item>,
+}
+
+impl Almacen {
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    pub fn agregar(&mut self, item: Item) {
+        self.items.push(item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Valor total del inventario, en centavos.
+    pub fn valor_inventario(&self) -> u64 {
+        self.items.iter().map(Item::valor_total).sum()
+    }
+
+    pub fn agotados(&self) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.esta_agotado()).collect()
+    }
+
+    pub fn buscar(&self, sku: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.sku == sku)
+    }
+}
+
+
+/// Devuelve el peso ajustado del lote 1.
+pub fn peso_lote_1(base: f64) -> f64 {
+    let ajuste = factor_legado() * 1.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 2.
+pub fn peso_lote_2(base: f64) -> f64 {
+    let ajuste = factor_legado() * 2.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 3.
+pub fn peso_lote_3(base: f64) -> f64 {
+    let ajuste = factor_legado() * 3.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 4.
+pub fn peso_lote_4(base: f64) -> f64 {
+    let ajuste = factor_legado() * 4.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 5.
+pub fn peso_lote_5(base: f64) -> f64 {
+    let ajuste = factor_legado() * 5.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 6.
+pub fn peso_lote_6(base: f64) -> f64 {
+    let ajuste = factor_legado() * 6.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 7.
+pub fn peso_lote_7(base: f64) -> f64 {
+    let ajuste = factor_legado() * 7.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 8.
+pub fn peso_lote_8(base: f64) -> f64 {
+    let ajuste = factor_legado() * 8.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 9.
+pub fn peso_lote_9(base: f64) -> f64 {
+    let ajuste = factor_legado() * 9.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 10.
+pub fn peso_lote_10(base: f64) -> f64 {
+    let ajuste = factor_legado() * 10.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 11.
+pub fn peso_lote_11(base: f64) -> f64 {
+    let ajuste = factor_legado() * 11.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 12.
+pub fn peso_lote_12(base: f64) -> f64 {
+    let ajuste = factor_legado() * 12.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 13.
+pub fn peso_lote_13(base: f64) -> f64 {
+    let ajuste = factor_legado() * 13.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 14.
+pub fn peso_lote_14(base: f64) -> f64 {
+    let ajuste = factor_legado() * 14.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 15.
+pub fn peso_lote_15(base: f64) -> f64 {
+    let ajuste = factor_legado() * 15.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 16.
+pub fn peso_lote_16(base: f64) -> f64 {
+    let ajuste = factor_legado() * 16.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 17.
+pub fn peso_lote_17(base: f64) -> f64 {
+    let ajuste = factor_legado() * 17.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 18.
+pub fn peso_lote_18(base: f64) -> f64 {
+    let ajuste = factor_legado() * 18.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 19.
+pub fn peso_lote_19(base: f64) -> f64 {
+    let ajuste = factor_legado() * 19.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 20.
+pub fn peso_lote_20(base: f64) -> f64 {
+    let ajuste = factor_legado() * 20.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 21.
+pub fn peso_lote_21(base: f64) -> f64 {
+    let ajuste = factor_legado() * 21.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 22.
+pub fn peso_lote_22(base: f64) -> f64 {
+    let ajuste = factor_legado() * 22.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 23.
+pub fn peso_lote_23(base: f64) -> f64 {
+    let ajuste = factor_legado() * 23.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 24.
+pub fn peso_lote_24(base: f64) -> f64 {
+    let ajuste = factor_legado() * 24.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 25.
+pub fn peso_lote_25(base: f64) -> f64 {
+    let ajuste = factor_legado() * 25.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 26.
+pub fn peso_lote_26(base: f64) -> f64 {
+    let ajuste = factor_legado() * 26.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 27.
+pub fn peso_lote_27(base: f64) -> f64 {
+    let ajuste = factor_legado() * 27.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+'''
+
+[[tasks]]
+id = "mover_almacen_completo"
+skill = "techo"
+prompt = "Refactor sin cambiar logica: mueve la struct `Almacen` con TODO su bloque `impl Almacen` desde src/lib.rs a un archivo NUEVO src/almacen.rs, dejando `mod almacen;` y `pub use almacen::Almacen;` en lib.rs. Ademas mueve `Item` y su impl a src/item.rs de la misma forma. El crate tiene que seguir compilando."
+expect_cargo_check = true
+expect_file_contains = { "src/lib.rs" = ["mod almacen", "mod item"], "src/almacen.rs" = ["pub struct Almacen", "fn valor_inventario"], "src/item.rs" = ["pub struct Item"] }
+expect_max_rounds = 18
+
+[tasks.setup_files]
+"Cargo.toml" = '''
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+'''
+"src/lib.rs" = '''
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub sku: String,
+    pub cantidad: u32,
+    pub precio_centavos: u64,
+}
+
+impl Item {
+    pub fn new(sku: &str, cantidad: u32, precio_centavos: u64) -> Self {
+        Self { sku: sku.to_string(), cantidad, precio_centavos }
+    }
+
+    /// Valor total de la linea, en centavos.
+    pub fn valor_total(&self) -> u64 {
+        self.precio_centavos * u64::from(self.cantidad)
+    }
+
+    pub fn esta_agotado(&self) -> bool {
+        self.cantidad == 0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Almacen {
+    items: Vec<Item>,
+}
+
+impl Almacen {
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    pub fn agregar(&mut self, item: Item) {
+        self.items.push(item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Valor total del inventario, en centavos.
+    pub fn valor_inventario(&self) -> u64 {
+        self.items.iter().map(Item::valor_total).sum()
+    }
+
+    pub fn agotados(&self) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.esta_agotado()).collect()
+    }
+
+    pub fn buscar(&self, sku: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.sku == sku)
+    }
+}
+
+
+/// Devuelve el peso ajustado del lote 1.
+pub fn peso_lote_1(base: f64) -> f64 {
+    let ajuste = 1.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 2.
+pub fn peso_lote_2(base: f64) -> f64 {
+    let ajuste = 2.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 3.
+pub fn peso_lote_3(base: f64) -> f64 {
+    let ajuste = 3.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 4.
+pub fn peso_lote_4(base: f64) -> f64 {
+    let ajuste = 4.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 5.
+pub fn peso_lote_5(base: f64) -> f64 {
+    let ajuste = 5.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 6.
+pub fn peso_lote_6(base: f64) -> f64 {
+    let ajuste = 6.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 7.
+pub fn peso_lote_7(base: f64) -> f64 {
+    let ajuste = 7.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 8.
+pub fn peso_lote_8(base: f64) -> f64 {
+    let ajuste = 8.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 9.
+pub fn peso_lote_9(base: f64) -> f64 {
+    let ajuste = 9.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 10.
+pub fn peso_lote_10(base: f64) -> f64 {
+    let ajuste = 10.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 11.
+pub fn peso_lote_11(base: f64) -> f64 {
+    let ajuste = 11.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 12.
+pub fn peso_lote_12(base: f64) -> f64 {
+    let ajuste = 12.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 13.
+pub fn peso_lote_13(base: f64) -> f64 {
+    let ajuste = 13.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 14.
+pub fn peso_lote_14(base: f64) -> f64 {
+    let ajuste = 14.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 15.
+pub fn peso_lote_15(base: f64) -> f64 {
+    let ajuste = 15.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 16.
+pub fn peso_lote_16(base: f64) -> f64 {
+    let ajuste = 16.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 17.
+pub fn peso_lote_17(base: f64) -> f64 {
+    let ajuste = 17.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 18.
+pub fn peso_lote_18(base: f64) -> f64 {
+    let ajuste = 18.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 19.
+pub fn peso_lote_19(base: f64) -> f64 {
+    let ajuste = 19.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 20.
+pub fn peso_lote_20(base: f64) -> f64 {
+    let ajuste = 20.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 21.
+pub fn peso_lote_21(base: f64) -> f64 {
+    let ajuste = 21.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 22.
+pub fn peso_lote_22(base: f64) -> f64 {
+    let ajuste = 22.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 23.
+pub fn peso_lote_23(base: f64) -> f64 {
+    let ajuste = 23.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 24.
+pub fn peso_lote_24(base: f64) -> f64 {
+    let ajuste = 24.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 25.
+pub fn peso_lote_25(base: f64) -> f64 {
+    let ajuste = 25.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 26.
+pub fn peso_lote_26(base: f64) -> f64 {
+    let ajuste = 26.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 27.
+pub fn peso_lote_27(base: f64) -> f64 {
+    let ajuste = 27.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 28.
+pub fn peso_lote_28(base: f64) -> f64 {
+    let ajuste = 28.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 29.
+pub fn peso_lote_29(base: f64) -> f64 {
+    let ajuste = 29.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 30.
+pub fn peso_lote_30(base: f64) -> f64 {
+    let ajuste = 30.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 31.
+pub fn peso_lote_31(base: f64) -> f64 {
+    let ajuste = 31.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 32.
+pub fn peso_lote_32(base: f64) -> f64 {
+    let ajuste = 32.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 33.
+pub fn peso_lote_33(base: f64) -> f64 {
+    let ajuste = 33.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 34.
+pub fn peso_lote_34(base: f64) -> f64 {
+    let ajuste = 34.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 35.
+pub fn peso_lote_35(base: f64) -> f64 {
+    let ajuste = 35.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 36.
+pub fn peso_lote_36(base: f64) -> f64 {
+    let ajuste = 36.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 37.
+pub fn peso_lote_37(base: f64) -> f64 {
+    let ajuste = 37.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 38.
+pub fn peso_lote_38(base: f64) -> f64 {
+    let ajuste = 38.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 39.
+pub fn peso_lote_39(base: f64) -> f64 {
+    let ajuste = 39.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+'''
+
+[[tasks]]
+id = "tres_archivos_coordinados"
+skill = "techo"
+prompt = "Agrega al crate un modulo nuevo src/descuento.rs con una funcion publica `aplicar(item: &Item, porcentaje: u32) -> u64` que devuelva el valor_total del item menos ese porcentaje (redondeando hacia abajo). Declaralo en lib.rs, y usalo desde src/reporte.rs agregando una funcion publica `linea_con_descuento(item: &Item, porcentaje: u32) -> String` que muestre el valor con descuento. El crate tiene que compilar."
+expect_cargo_check = true
+expect_file_contains = { "src/lib.rs" = ["mod descuento"], "src/descuento.rs" = ["pub fn aplicar"], "src/reporte.rs" = ["linea_con_descuento"] }
+expect_max_rounds = 20
+
+[tasks.setup_files]
+"Cargo.toml" = '''
+[package]
+name = "inventory"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+'''
+"src/lib.rs" = '''
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub sku: String,
+    pub cantidad: u32,
+    pub precio_centavos: u64,
+}
+
+impl Item {
+    pub fn new(sku: &str, cantidad: u32, precio_centavos: u64) -> Self {
+        Self { sku: sku.to_string(), cantidad, precio_centavos }
+    }
+
+    /// Valor total de la linea, en centavos.
+    pub fn valor_total(&self) -> u64 {
+        self.precio_centavos * u64::from(self.cantidad)
+    }
+
+    pub fn esta_agotado(&self) -> bool {
+        self.cantidad == 0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Almacen {
+    items: Vec<Item>,
+}
+
+impl Almacen {
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    pub fn agregar(&mut self, item: Item) {
+        self.items.push(item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Valor total del inventario, en centavos.
+    pub fn valor_inventario(&self) -> u64 {
+        self.items.iter().map(Item::valor_total).sum()
+    }
+
+    pub fn agotados(&self) -> Vec<&Item> {
+        self.items.iter().filter(|i| i.esta_agotado()).collect()
+    }
+
+    pub fn buscar(&self, sku: &str) -> Option<&Item> {
+        self.items.iter().find(|i| i.sku == sku)
+    }
+}
+
+mod reporte;
+pub use reporte::linea_reporte;
+
+
+/// Devuelve el peso ajustado del lote 1.
+pub fn peso_lote_1(base: f64) -> f64 {
+    let ajuste = 1.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 2.
+pub fn peso_lote_2(base: f64) -> f64 {
+    let ajuste = 2.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 3.
+pub fn peso_lote_3(base: f64) -> f64 {
+    let ajuste = 3.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 4.
+pub fn peso_lote_4(base: f64) -> f64 {
+    let ajuste = 4.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 5.
+pub fn peso_lote_5(base: f64) -> f64 {
+    let ajuste = 5.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 6.
+pub fn peso_lote_6(base: f64) -> f64 {
+    let ajuste = 6.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 7.
+pub fn peso_lote_7(base: f64) -> f64 {
+    let ajuste = 7.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 8.
+pub fn peso_lote_8(base: f64) -> f64 {
+    let ajuste = 8.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 9.
+pub fn peso_lote_9(base: f64) -> f64 {
+    let ajuste = 9.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 10.
+pub fn peso_lote_10(base: f64) -> f64 {
+    let ajuste = 10.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 11.
+pub fn peso_lote_11(base: f64) -> f64 {
+    let ajuste = 11.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 12.
+pub fn peso_lote_12(base: f64) -> f64 {
+    let ajuste = 12.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 13.
+pub fn peso_lote_13(base: f64) -> f64 {
+    let ajuste = 13.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 14.
+pub fn peso_lote_14(base: f64) -> f64 {
+    let ajuste = 14.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 15.
+pub fn peso_lote_15(base: f64) -> f64 {
+    let ajuste = 15.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 16.
+pub fn peso_lote_16(base: f64) -> f64 {
+    let ajuste = 16.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 17.
+pub fn peso_lote_17(base: f64) -> f64 {
+    let ajuste = 17.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 18.
+pub fn peso_lote_18(base: f64) -> f64 {
+    let ajuste = 18.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 19.
+pub fn peso_lote_19(base: f64) -> f64 {
+    let ajuste = 19.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 20.
+pub fn peso_lote_20(base: f64) -> f64 {
+    let ajuste = 20.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 21.
+pub fn peso_lote_21(base: f64) -> f64 {
+    let ajuste = 21.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 22.
+pub fn peso_lote_22(base: f64) -> f64 {
+    let ajuste = 22.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 23.
+pub fn peso_lote_23(base: f64) -> f64 {
+    let ajuste = 23.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 24.
+pub fn peso_lote_24(base: f64) -> f64 {
+    let ajuste = 24.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 25.
+pub fn peso_lote_25(base: f64) -> f64 {
+    let ajuste = 25.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 26.
+pub fn peso_lote_26(base: f64) -> f64 {
+    let ajuste = 26.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+
+/// Devuelve el peso ajustado del lote 27.
+pub fn peso_lote_27(base: f64) -> f64 {
+    let ajuste = 27.0 * 0.01;
+    base * (1.0 + ajuste)
+}
+'''
+"src/reporte.rs" = '''
+use super::Item;
+
+pub fn linea_reporte(item: &Item) -> String {
+    format!("{} x{} = {} centavos", item.sku, item.cantidad, item.precio_centavos)
+}
+'''
