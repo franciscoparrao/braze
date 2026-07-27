@@ -626,7 +626,10 @@ mod tests {
         for task in &tasks {
             let skill = task.skill.as_deref().unwrap_or_default();
             let fix = canonical_fix_by_skill.get(skill).unwrap_or_else(|| {
-                panic!("task '{}' has skill '{skill}' without a canonical fixture — add one here", task.id)
+                panic!(
+                    "task '{}' has skill '{skill}' without a canonical fixture — add one here",
+                    task.id
+                )
             });
             let needles = task
                 .expect_file_contains

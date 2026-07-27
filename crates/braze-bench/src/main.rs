@@ -13,9 +13,9 @@ mod metrics;
 mod noise;
 mod preserve;
 mod report;
-mod synthetic;
 mod runner;
 mod sandbox;
+mod synthetic;
 mod task;
 
 use std::path::PathBuf;

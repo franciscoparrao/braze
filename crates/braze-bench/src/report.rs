@@ -186,8 +186,7 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
 /// (no hay estimador insesgado posible con n<k) — con repeticiones
 /// homogéneas, el caso normal de braze-bench, no se excluye nada.
 fn pass_hat_k_series(counted: &[&&TaskResult]) -> Vec<(u32, f64)> {
-    let mut by_task: std::collections::HashMap<&str, (u32, u32)> =
-        std::collections::HashMap::new();
+    let mut by_task: std::collections::HashMap<&str, (u32, u32)> = std::collections::HashMap::new();
     for row in counted {
         let entry = by_task.entry(row.task_id.as_str()).or_insert((0, 0));
         entry.0 += 1;
@@ -739,7 +738,10 @@ mod tests {
         let refs2: Vec<&&TaskResult> = refs.iter().collect();
         let series = pass_hat_k_series(&refs2);
         let k3 = series.iter().find(|(k, _)| *k == 3).unwrap().1;
-        assert!((k3 - 0.0).abs() < 1e-9, "solo 'larga' participa en k=3: {k3}");
+        assert!(
+            (k3 - 0.0).abs() < 1e-9,
+            "solo 'larga' participa en k=3: {k3}"
+        );
         // En k=2 participan ambas: (C(2,2)/C(3,2) + 1.0)/2 = (1/3 + 1)/2
         let k2 = series.iter().find(|(k, _)| *k == 2).unwrap().1;
         assert!((k2 - (1.0 / 3.0 + 1.0) / 2.0).abs() < 1e-9, "got {k2}");

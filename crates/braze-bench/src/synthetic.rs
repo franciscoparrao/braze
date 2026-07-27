@@ -124,8 +124,10 @@ mod tests {
 
     #[tokio::test]
     async fn stubs_carry_declared_schema_and_first_line_summary() {
-        let params = r#"{"type":"object","properties":{"base":{"type":"integer"}},"required":["base"]}"#;
-        let provider = SyntheticToolsProvider::new(vec![def("calculate_triangle_area", Some(params))]);
+        let params =
+            r#"{"type":"object","properties":{"base":{"type":"integer"}},"required":["base"]}"#;
+        let provider =
+            SyntheticToolsProvider::new(vec![def("calculate_triangle_area", Some(params))]);
         let stubs = provider.list_stubs().await.unwrap();
         assert_eq!(stubs.len(), 1);
         assert_eq!(stubs[0].name, "calculate_triangle_area");
@@ -137,13 +139,22 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(resolved.input_schema["properties"]["base"]["type"], "integer");
+        assert_eq!(
+            resolved.input_schema["properties"]["base"]["type"],
+            "integer"
+        );
     }
 
     #[tokio::test]
     async fn invoke_returns_canned_result_and_unknown_names_stay_unclaimed() {
         let provider = SyntheticToolsProvider::new(vec![def("t", None)]);
-        assert!(provider.resolve_schema("read_file").await.unwrap().is_none());
+        assert!(
+            provider
+                .resolve_schema("read_file")
+                .await
+                .unwrap()
+                .is_none()
+        );
         let call = ToolCall {
             id: "c1".to_string(),
             name: "t".to_string(),
