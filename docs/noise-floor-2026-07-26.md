@@ -94,6 +94,14 @@ lo hace.
 
 ## Adenda (2026-07-27): la inestabilidad sigue al LARGO DE TRAYECTORIA, y con umbral
 
+> ⚠️ **REFUTADO el 2026-07-28.** Lo que sigue describe a **gpt-oss:20b**, no
+> un fenómeno general: en gemma4:e4b la inestabilidad es ~50% incluso por
+> debajo de las 6 rondas, así que **no es función del largo sino del
+> modelo**. Se conserva porque el hallazgo acotado a gpt-oss sigue siendo
+> válido y es lo que justifica `fast-core.toml` — pero la regla operativa
+> ("replicar solo las tareas largas") solo vale para modelos con baja
+> divergencia por paso. Ver `docs/umbral-trayectoria-refutado-2026-07-28.md`.
+
 Medido sobre 3 réplicas idénticas de la suite discriminante v2 (34 tareas,
 gpt-oss:20b, temp 0, tope 900s). **Costo adicional: cero** — sale de datos
 que ya estaban en disco.
@@ -128,9 +136,10 @@ alguna vez crece rápido con el número de rondas y luego satura.
 ### Qué implica para diseñar bancos agénticos
 
 1. **Las tareas de más de ~6 rondas exigen repeticiones; las de menos, no.**
-   Es la regla operativa más directa que sale de todo esto, y contradice la
-   intuición de replicar uniformemente: replicar tareas cortas es gastar
-   cómputo en promediar un ruido que no existe.
+   ⚠️ **Acotado tras la refutación**: vale para modelos con baja divergencia
+   por paso (gpt-oss). Para uno como gemma4:e4b, donde los logits empatan
+   dentro de 0.05, hay que replicar TODO o no medir. **El presupuesto de
+   réplicas se calibra por modelo, no por intuición ni por largo de tarea.**
 2. **Reportar el largo de trayectoria junto al pass rate.** Dos bancos con
    el mismo pass rate y distinta distribución de rondas no tienen la misma
    varianza, y hoy nada en el reporte lo delata.
