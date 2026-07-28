@@ -1755,6 +1755,62 @@ is in --- a budget, a role, a structured plan --- rather than one that
 assumes it will infer that regime correctly from context alone; the
 inference itself is where small models are least reliable.
 
+\paragraph{Comprehension and faithful emission are different
+capabilities, and an agentic loop depends on the second.} A failure
+mode we did not anticipate, and which none of our gates catches, is
+that a model can read, reason about, and act on a character it cannot
+reproduce. Exercising \texttt{gpt-oss:20b} on repository-level
+refactors outside our suite (\texttt{docs/roam-metrics-memoria-2026-07-28.md}),
+the subscript \texttt{U+1D62} in a doc-comment formula was silently
+dropped in two independent copy operations two days apart --- a
+216-line block and an 89-line one --- each time leaving a
+mathematically false formula that compiles, passes the project's
+tests, and passes our own post-edit \texttt{cargo check} guardrail,
+because a doc comment is invisible to all three by construction. The
+second-order consequence is worse than the corruption. Since
+\texttt{edit\_file} matches on exact text, a region containing such a
+character becomes \emph{structurally uneditable} by the agent: asked to
+delete that block, with its exact text supplied verbatim in the prompt,
+the model produced a 91-line \texttt{old\_string} correct on every line
+but that one, then spent six attempts, the turn's full twenty-round
+budget and twenty-five minutes alternating between the unmatchable call
+and re-reading the file, never recovering the cause --- the failure
+signal (\texttt{old\_string not found}) carries no information about
+\emph{which} character is wrong. On the next module the same
+\texttt{edit\_file} failure drove the model to fall back to rewriting
+the whole file, which was worse still: the 268-line rewrite converted
+two tolerance-based float assertions into exact equalities, deleted
+\texttt{U+2248} from three derivation comments, and dropped the
+module-link edit it had been asked to make. Only the last of those is
+loud --- a missing \texttt{mod} declaration makes the test target fail
+to compile --- and reconstructing the rewritten file from the session
+log confirms that with that one repaired, the other two pass the
+project's suite 14/14. The gate that forced discovery was incidental to
+the regressions that mattered.
+
+We report this as a case observation rather than a measured rate: one
+model, one repository, no controlled sweep. But it cuts against a
+direction recent work points toward. Zhu et al.'s probe of whether
+LLM-to-LLM channels need human-readable text at all
+\citep{zhu2026babeltele} finds that instruction-tuned models can
+\emph{interpret} compressed, symbol- and emoji-dense, multilingual
+encodings whose human comprehension collapses to near chance
+(35.8\,\% versus 56.1\,\% on four-option QA against a 25\,\% floor),
+and reads this as licence to optimise intermediate representations for
+model decodability instead of readability. Their evidence concerns
+interpretation; ours concerns the dual capability. In a tool-calling
+loop the model must \emph{emit} exact strings --- paths, identifiers,
+an \texttt{old\_string} --- and emission fidelity is where we observe
+failure, on precisely the symbol classes such an encoding is built
+from, silently, and with an error message that does not name its
+cause. For an agent-computer interface the operative question is
+therefore not whether a representation is readable, but whether the
+model that has to reproduce it can. This also bounds the
+diff-review discipline we rely on elsewhere (\S\ref{sec:threats}): a
+human reading the diff is the only gate that caught any of the
+corruptions above, and it is exactly the gate a
+readability-relaxed representation would remove.
+
 \paragraph{Pre-registration functioned as an engineering safeguard, not
 a formality.} Twice in this paper's own history, a criterion committed
 before a sweep ran changed what we did with a marginal result: the

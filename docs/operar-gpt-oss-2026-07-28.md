@@ -91,9 +91,26 @@ veces y partirlo funcionó. Cada paso con oráculo objetivo (el compilador):
 Esa secuencia produjo el refactor completo: 222 líneas movidas, 14/14 tests.
 Lo que no funciona es pedir los tres juntos.
 
-**Regla general**: si la tarea no cabe en ~6 rondas, partila. No es
+**Regla general**: si la tarea no cabe en ~6 rondas, pártela. No es
 preferencia de estilo — arriba de ese umbral el resultado deja de ser
 reproducible.
+
+### Dos correcciones medidas el 28-jul
+
+Una segunda extracción de módulo en roam (`metrics`, ver
+`docs/roam-metrics-memoria-2026-07-28.md`) afinó la receta en dos puntos:
+
+- **El paso 3 se puede eliminar.** Si el paso 1 pide de una vez el cambio de
+  visibilidad que el refactor va a necesitar (`fn` → `pub(crate) fn` para lo
+  que los tests llamen desde fuera del módulo nuevo), no queda ningún error
+  de compilación que arreglar. El paso 3 no es una etapa: es la deuda de no
+  anticipar la visibilidad.
+- **En el paso 2, pásale el bloque exacto en el prompt.** Pedir "borra estas
+  cinco funciones" quemó las 20 rondas del turno y dejó el archivo a medias:
+  solo 2 rondas fueron ediciones productivas, el resto se fue en leer el
+  archivo a tientas y en alucinar una tool `search` que no existe. Reintentado
+  con el bloque literal embebido y la instrucción de no leer el archivo, salió
+  en **2m00s a la primera**. Lo caro no es borrar 40 líneas — es buscarlas.
 
 ---
 
@@ -115,10 +132,19 @@ proyecto** (`enable_project_memory`, **apagada por default**):
   cuyo `project_key` no corresponde al proyecto se descarta en vez de
   inyectar notas ajenas.
 
-Se enciende en el archivo de configuración:
+Se enciende de dos maneras. Por invocación, con la variable de entorno —lo
+más práctico para un flujo de varios pasos, porque no cambia el default de
+nada más:
 
-```toml
-enable_project_memory = true
+```bash
+export BRAZE_ENABLE_PROJECT_MEMORY=true
+```
+
+O de forma durable en el archivo de configuración, que es
+`~/.config/braze/config.json` y es **JSON**, no TOML:
+
+```json
+{ "enable_project_memory": true }
 ```
 
 Está apagada por default por política del proyecto —una palanca nueva entra
@@ -151,7 +177,7 @@ de subdividir código: crear el archivo, enlazarlo después.
 
 1. **Trabajo acotado con oráculo objetivo** — compilador o tests, no criterio
    propio.
-2. **Verificá con el diff, nunca con su resumen.** Es la única defensa contra
+2. **Verifica con el diff, nunca con su resumen.** Es la única defensa contra
    el éxito falso y la corrupción silenciosa.
 
 ---
@@ -162,6 +188,9 @@ de subdividir código: crear el archivo, enlazarlo después.
   sampling, el 3.4× de gpt-oss.
 - `docs/roam-trajectory-exercise-2026-07-26.md` — el ejercicio del que salen
   la receta de tres pasos y las corrupciones silenciosas.
+- `docs/roam-metrics-memoria-2026-07-28.md` — la segunda extracción de módulo:
+  el flujo con memoria de proyecto verificado end-to-end, y las dos
+  correcciones a la receta de § 4.
 - `docs/noise-floor-2026-07-26.md` — piso de ruido por modelo; **consultar
   antes de interpretar cualquier A/B**.
 - `docs/umbral-trayectoria-refutado-2026-07-28.md` — por qué el umbral de ~6

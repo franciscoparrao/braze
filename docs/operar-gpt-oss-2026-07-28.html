@@ -6,117 +6,259 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <title>Operar gpt-oss:20b con braze — guía práctica</title>
   <style>
-code{white-space: pre-wrap;}
-span.smallcaps{font-variant: small-caps;}
-div.columns{display: flex; gap: min(4vw, 1.5em);}
-div.column{flex: auto; overflow-x: auto;}
-div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
-
-ul.task-list[class]{list-style: none;}
-ul.task-list li input[type="checkbox"] {
-font-size: inherit;
-width: 0.8em;
-margin: 0 0.8em 0.2em -1.6em;
-vertical-align: middle;
-}
-.display.math{display: block; text-align: center; margin: 0.5rem auto;}
-
-pre > code.sourceCode { white-space: pre; position: relative; }
-pre > code.sourceCode > span { line-height: 1.25; }
-pre > code.sourceCode > span:empty { height: 1.2em; }
-.sourceCode { overflow: visible; }
-code.sourceCode > span { color: inherit; text-decoration: inherit; }
-div.sourceCode { margin: 1em 0; }
-pre.sourceCode { margin: 0; }
-@media screen {
-div.sourceCode { overflow: auto; }
-}
-@media print {
-pre > code.sourceCode { white-space: pre-wrap; }
-pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
-}
-pre.numberSource code
-{ counter-reset: source-line 0; }
-pre.numberSource code > span
-{ position: relative; left: -4em; counter-increment: source-line; }
-pre.numberSource code > span > a:first-child::before
-{ content: counter(source-line);
-position: relative; left: -1em; text-align: right; vertical-align: baseline;
-border: none; display: inline-block;
--webkit-touch-callout: none; -webkit-user-select: none;
--khtml-user-select: none; -moz-user-select: none;
--ms-user-select: none; user-select: none;
-padding: 0 4px; width: 4em;
-color: #aaaaaa;
-}
-pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
-div.sourceCode
-{ }
-@media screen {
-pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
-}
-code span.al { color: #ff0000; font-weight: bold; } 
-code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
-code span.at { color: #7d9029; } 
-code span.bn { color: #40a070; } 
-code span.bu { color: #008000; } 
-code span.cf { color: #007020; font-weight: bold; } 
-code span.ch { color: #4070a0; } 
-code span.cn { color: #880000; } 
-code span.co { color: #60a0b0; font-style: italic; } 
-code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
-code span.do { color: #ba2121; font-style: italic; } 
-code span.dt { color: #902000; } 
-code span.dv { color: #40a070; } 
-code span.er { color: #ff0000; font-weight: bold; } 
-code span.ex { } 
-code span.fl { color: #40a070; } 
-code span.fu { color: #06287e; } 
-code span.im { color: #008000; font-weight: bold; } 
-code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
-code span.kw { color: #007020; font-weight: bold; } 
-code span.op { color: #666666; } 
-code span.ot { color: #007020; } 
-code span.pp { color: #bc7a00; } 
-code span.sc { color: #4070a0; } 
-code span.ss { color: #bb6688; } 
-code span.st { color: #4070a0; } 
-code span.va { color: #19177c; } 
-code span.vs { color: #4070a0; } 
-code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
-</style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
   <style type="text/css">:root {
---bg: #fbfaf8; --fg: #1c1a17; --muted: #6b6560; --line: #e0dcd5;
---card: #ffffff; --accent: #0f6fa8; --ok: #1f7a3d; --bad: #a33232;
-}
-@media (prefers-color-scheme: dark) {
-:root { --bg: #16181a; --fg: #e8e6e3; --muted: #9a938c; --line: #2e3236;
---card: #1d2023; --accent: #5cb3e8; --ok: #5fd08a; --bad: #e88b8b; }
-}
-html { -webkit-text-size-adjust: 100%; }
-body { background: var(--bg); color: var(--fg); margin: 0 auto; padding: 2.2rem 1.2rem 4rem;
-max-width: 46rem; line-height: 1.65;
-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-h1 { font-size: 1.75rem; line-height: 1.25; margin: 0 0 .4rem; letter-spacing: -.01em; }
-h2 { font-size: 1.2rem; margin: 2.6rem 0 .8rem; padding-top: 1.1rem;
-border-top: 1px solid var(--line); letter-spacing: -.005em; }
-h3 { font-size: 1.02rem; margin: 1.8rem 0 .5rem; color: var(--muted); }
-p, li { font-size: .97rem; }
-a { color: var(--accent); }
-code { background: var(--card); border: 1px solid var(--line); border-radius: 4px;
-padding: .08em .35em; font-size: .87em; }
-pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-padding: .9rem 1rem; overflow-x: auto; }
-pre code { background: none; border: 0; padding: 0; font-size: .85rem; }
-blockquote { border-left: 3px solid var(--accent); margin: 1.2rem 0; padding: .1rem 0 .1rem 1rem;
-color: var(--muted); }
-table { border-collapse: collapse; width: 100%; margin: 1.1rem 0; display: block; overflow-x: auto; }
-th, td { border: 1px solid var(--line); padding: .48rem .7rem; text-align: left;
-font-size: .9rem; vertical-align: top; }
-th { background: var(--card); font-weight: 600; }
-hr { border: 0; border-top: 1px solid var(--line); margin: 2.4rem 0; }
-strong { font-weight: 650; }
-</style>
+  --bg: #fbfaf8; --fg: #1c1a17; --muted: #6b6560; --line: #e0dcd5;
+  --card: #ffffff; --accent: #0f6fa8; --ok: #1f7a3d; --bad: #a33232;
+  }
+  @media (prefers-color-scheme: dark) {
+  :root { --bg: #16181a; --fg: #e8e6e3; --muted: #9a938c; --line: #2e3236;
+  --card: #1d2023; --accent: #5cb3e8; --ok: #5fd08a; --bad: #e88b8b; }
+  }
+  html { -webkit-text-size-adjust: 100%; }
+  body { background: var(--bg); color: var(--fg); margin: 0 auto; padding: 2.2rem 1.2rem 4rem;
+  max-width: 46rem; line-height: 1.65;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 1.75rem; line-height: 1.25; margin: 0 0 .4rem; letter-spacing: -.01em; }
+  h2 { font-size: 1.2rem; margin: 2.6rem 0 .8rem; padding-top: 1.1rem;
+  border-top: 1px solid var(--line); letter-spacing: -.005em; }
+  h3 { font-size: 1.02rem; margin: 1.8rem 0 .5rem; color: var(--muted); }
+  p, li { font-size: .97rem; }
+  a { color: var(--accent); }
+  code { background: var(--card); border: 1px solid var(--line); border-radius: 4px;
+  padding: .08em .35em; font-size: .87em; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  padding: .9rem 1rem; overflow-x: auto; }
+  pre code { background: none; border: 0; padding: 0; font-size: .85rem; }
+  blockquote { border-left: 3px solid var(--accent); margin: 1.2rem 0; padding: .1rem 0 .1rem 1rem;
+  color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; margin: 1.1rem 0; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--line); padding: .48rem .7rem; text-align: left;
+  font-size: .9rem; vertical-align: top; }
+  th { background: var(--card); font-weight: 600; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 2.4rem 0; }
+  strong { font-weight: 650; }
+  </style>
 </head>
 <body>
 <header id="title-block-header">
@@ -124,19 +266,29 @@ strong { font-weight: 650; }
 </header>
 <nav id="TOC" role="doc-toc">
 <ul>
-<li><a href="#operar-gpt-oss20b-con-braze-guía-práctica" id="toc-operar-gpt-oss20b-con-braze-guía-práctica">Operar gpt-oss:20b
+<li><a href="#operar-gpt-oss20b-con-braze-guía-práctica"
+id="toc-operar-gpt-oss20b-con-braze-guía-práctica">Operar gpt-oss:20b
 con braze — guía práctica</a>
 <ul>
-<li><a href="#configuración-no-es-opcional" id="toc-configuración-no-es-opcional">1. Configuración: no es
+<li><a href="#configuración-no-es-opcional"
+id="toc-configuración-no-es-opcional">1. Configuración: no es
 opcional</a></li>
 <li><a href="#dónde-es-de-fiar" id="toc-dónde-es-de-fiar">2. Dónde es de
 fiar</a></li>
 <li><a href="#dónde-no" id="toc-dónde-no">3. Dónde no</a></li>
-<li><a href="#la-receta-partir-en-tres-pasos-acotados" id="toc-la-receta-partir-en-tres-pasos-acotados">4. La receta: partir en
-tres pasos acotados</a></li>
-<li><a href="#el-flujo-de-contexto-sesión-nueva-memoria-de-proyecto" id="toc-el-flujo-de-contexto-sesión-nueva-memoria-de-proyecto">5. El
+<li><a href="#la-receta-partir-en-tres-pasos-acotados"
+id="toc-la-receta-partir-en-tres-pasos-acotados">4. La receta: partir en
+tres pasos acotados</a>
+<ul>
+<li><a href="#dos-correcciones-medidas-el-28-jul"
+id="toc-dos-correcciones-medidas-el-28-jul">Dos correcciones medidas el
+28-jul</a></li>
+</ul></li>
+<li><a href="#el-flujo-de-contexto-sesión-nueva-memoria-de-proyecto"
+id="toc-el-flujo-de-contexto-sesión-nueva-memoria-de-proyecto">5. El
 flujo de contexto: sesión nueva + memoria de proyecto</a></li>
-<li><a href="#verificación-qué-caza-cada-gate" id="toc-verificación-qué-caza-cada-gate">6. Verificación: qué caza cada
+<li><a href="#verificación-qué-caza-cada-gate"
+id="toc-verificación-qué-caza-cada-gate">6. Verificación: qué caza cada
 gate</a></li>
 <li><a href="#evidencia" id="toc-evidencia">7. Evidencia</a></li>
 </ul></li>
@@ -154,7 +306,8 @@ reaprendieron a golpes dos veces en la misma semana.</p>
 <hr />
 <h2 id="configuración-no-es-opcional">1. Configuración: no es
 opcional</h2>
-<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">LD_LIBRARY_PATH</span><span class="op">=</span><span class="va">$(</span><span class="fu">ls</span> <span class="at">-d</span> ~/proyectos/braze/target/debug/build/llama-cpp-sys-2-<span class="pp">*</span>/out/build/bin <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span><span class="va">)</span></span>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">LD_LIBRARY_PATH</span><span class="op">=</span><span class="va">$(</span><span class="fu">ls</span> <span class="at">-d</span> ~/proyectos/braze/target/debug/build/llama-cpp-sys-2-<span class="pp">*</span>/out/build/bin <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span><span class="va">)</span></span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BRAZE_OLLAMA_NUM_CTX</span><span class="op">=</span>32768     <span class="co"># el default de 8192 estrangula</span></span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BRAZE_MAX_TOKENS</span><span class="op">=</span>12288         <span class="co"># el default de 4096 corta tool calls</span></span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> ~/.cargo/env                   <span class="co"># sin esto el post-edit check se apaga EN SILENCIO</span></span></code></pre></div>
@@ -263,7 +416,7 @@ compila, pasa los tests y pasa el post-edit check.</p>
 strings o documentación.</strong></p>
 <p>Tic recurrente sin consecuencia grave: alucina nombres de tools
 (<code>search</code>) y emite rutas truncadas con puntos suspensivos
-(<code>&quot;ro...&quot;</code>). El harness responde con la lista válida y el
+(<code>"ro..."</code>). El harness responde con la lista válida y el
 modelo se recupera solo.</p>
 <hr />
 <h2 id="la-receta-partir-en-tres-pasos-acotados">4. La receta: partir en
@@ -282,8 +435,29 @@ presupuesto suficiente.</li>
 <p>Esa secuencia produjo el refactor completo: 222 líneas movidas, 14/14
 tests. Lo que no funciona es pedir los tres juntos.</p>
 <p><strong>Regla general</strong>: si la tarea no cabe en ~6 rondas,
-partila. No es preferencia de estilo — arriba de ese umbral el resultado
+pártela. No es preferencia de estilo — arriba de ese umbral el resultado
 deja de ser reproducible.</p>
+<h3 id="dos-correcciones-medidas-el-28-jul">Dos correcciones medidas el
+28-jul</h3>
+<p>Una segunda extracción de módulo en roam (<code>metrics</code>, ver
+<code>docs/roam-metrics-memoria-2026-07-28.md</code>) afinó la receta en
+dos puntos:</p>
+<ul>
+<li><strong>El paso 3 se puede eliminar.</strong> Si el paso 1 pide de
+una vez el cambio de visibilidad que el refactor va a necesitar
+(<code>fn</code> → <code>pub(crate) fn</code> para lo que los tests
+llamen desde fuera del módulo nuevo), no queda ningún error de
+compilación que arreglar. El paso 3 no es una etapa: es la deuda de no
+anticipar la visibilidad.</li>
+<li><strong>En el paso 2, pásale el bloque exacto en el prompt.</strong>
+Pedir “borra estas cinco funciones” quemó las 20 rondas del turno y dejó
+el archivo a medias: solo 2 rondas fueron ediciones productivas, el
+resto se fue en leer el archivo a tientas y en alucinar una tool
+<code>search</code> que no existe. Reintentado con el bloque literal
+embebido y la instrucción de no leer el archivo, salió en <strong>2m00s
+a la primera</strong>. Lo caro no es borrar 40 líneas — es
+buscarlas.</li>
+</ul>
 <hr />
 <h2 id="el-flujo-de-contexto-sesión-nueva-memoria-de-proyecto">5. El
 flujo de contexto: sesión nueva + memoria de proyecto</h2>
@@ -305,8 +479,16 @@ herramientas de escritura y persiste en background.</li>
 arranque, y una memoria cuyo <code>project_key</code> no corresponde al
 proyecto se descarta en vez de inyectar notas ajenas.</li>
 </ul>
-<p>Se enciende en el archivo de configuración:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="dt">enable_project_memory</span> <span class="op">=</span> <span class="cn">true</span></span></code></pre></div>
+<p>Se enciende de dos maneras. Por invocación, con la variable de
+entorno —lo más práctico para un flujo de varios pasos, porque no cambia
+el default de nada más:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BRAZE_ENABLE_PROJECT_MEMORY</span><span class="op">=</span>true</span></code></pre></div>
+<p>O de forma durable en el archivo de configuración, que es
+<code>~/.config/braze/config.json</code> y es <strong>JSON</strong>, no
+TOML:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span> <span class="dt">&quot;enable_project_memory&quot;</span><span class="fu">:</span> <span class="kw">true</span> <span class="fu">}</span></span></code></pre></div>
 <p>Está apagada por default por política del proyecto —una palanca nueva
 entra apagada y se promueve solo si su propio A/B la valida— así que
 <strong>encenderla es una decisión, no el default recomendado</strong>.
@@ -363,7 +545,7 @@ código: crear el archivo, enlazarlo después.</p>
 <ol type="1">
 <li><strong>Trabajo acotado con oráculo objetivo</strong> — compilador o
 tests, no criterio propio.</li>
-<li><strong>Verificá con el diff, nunca con su resumen.</strong> Es la
+<li><strong>Verifica con el diff, nunca con su resumen.</strong> Es la
 única defensa contra el éxito falso y la corrupción silenciosa.</li>
 </ol>
 <hr />
@@ -374,6 +556,9 @@ placement medido, sampling, el 3.4× de gpt-oss.</li>
 <li><code>docs/roam-trajectory-exercise-2026-07-26.md</code> — el
 ejercicio del que salen la receta de tres pasos y las corrupciones
 silenciosas.</li>
+<li><code>docs/roam-metrics-memoria-2026-07-28.md</code> — la segunda
+extracción de módulo: el flujo con memoria de proyecto verificado
+end-to-end, y las dos correcciones a la receta de § 4.</li>
 <li><code>docs/noise-floor-2026-07-26.md</code> — piso de ruido por
 modelo; <strong>consultar antes de interpretar cualquier
 A/B</strong>.</li>
