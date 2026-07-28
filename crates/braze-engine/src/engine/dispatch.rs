@@ -997,11 +997,53 @@ impl Engine {
 /// distancia de edición 1-2 sobre nombres cortos— porque el objetivo es
 /// nombrar UN candidato evidente, no resolver búsqueda difusa. Devuelve
 /// "" cuando no hay candidato claro, para no inventar pistas.
+/// Hallucinated names that are *synonyms*, not typos — no edit-distance
+/// bound can ever catch `search` → `grep`, and containment cannot either.
+///
+/// Measured over the 12 most recent LocalBackend sessions (2026-07-28,
+/// `docs/roam-metrics-memoria-2026-07-28.md`): 11 calls to tools that do
+/// not exist, `search` ×7 and a truncated `read...` ×4. In the turn that
+/// failed, `search` alone consumed 5 of the 20 rounds — and when the
+/// model finally reached for `grep`, it found what it needed on the
+/// first try. The cost was never capability, only budget.
+///
+/// We suggest rather than silently dispatch the synonym: argument
+/// schemas differ between the invented name and the real one (the
+/// observed `search{path, pattern}` only *happens* to fit `grep`), and a
+/// remap that guesses wrong executes the wrong thing instead of
+/// returning a correctable error.
+const TOOL_NAME_SYNONYMS: &[(&str, &str)] = &[
+    ("search", "grep"),
+    ("find", "glob"),
+    ("bash", "shell_exec"),
+    ("run", "shell_exec"),
+    ("cat", "read_file"),
+    ("ls", "glob"),
+    ("str_replace", "edit_file"),
+];
+
 fn did_you_mean(requested: &str, available: &[&str]) -> String {
-    let req = requested.to_lowercase();
-    let best = available.iter().find(|name| {
-        let n = name.to_lowercase();
-        n.contains(&req) || req.contains(&n) || edit_distance_at_most_2(&req, &n)
+    // Small models emit truncated names with an ellipsis (`read...`,
+    // the same tic already documented for paths); strip it before
+    // matching, which alone lets the containment rule below resolve it.
+    let req = requested
+        .to_lowercase()
+        .trim_end_matches(['.', '…', ' '])
+        .to_string();
+    if req.is_empty() {
+        return String::new();
+    }
+
+    let synonym = TOOL_NAME_SYNONYMS
+        .iter()
+        .find(|(wrong, _)| *wrong == req)
+        .and_then(|(_, right)| available.iter().find(|n| n.eq_ignore_ascii_case(right)));
+
+    let best = synonym.or_else(|| {
+        available.iter().find(|name| {
+            let n = name.to_lowercase();
+            n.contains(&req) || req.contains(&n) || edit_distance_at_most_2(&req, &n)
+        })
     });
     match best {
         Some(name) => format!(" Did you mean '{name}'?"),
@@ -1034,9 +1076,8 @@ fn edit_distance_at_most_2(a: &str, b: &str) -> bool {
 mod dispatch_tests {
     use super::{did_you_mean, edit_distance_at_most_2};
 
-    /// El caso real: el modelo pidió `search`, existe `grep`. No hay
-    /// parecido léxico, así que la heurística NO debe inventar — pero un
-    /// typo cercano sí debe resolverse.
+    /// Typos cercanos se resuelven por distancia de edición, y un nombre
+    /// que no se parece a nada sigue sin pista inventada.
     #[test]
     fn suggests_a_close_name_and_stays_quiet_otherwise() {
         let tools = [
@@ -1052,8 +1093,40 @@ mod dispatch_tests {
             did_you_mean("read_fil", &tools),
             " Did you mean 'read_file'?"
         );
-        // `search` no se parece a nada disponible: sin pista inventada.
-        assert_eq!(did_you_mean("search", &tools), "");
+        assert_eq!(did_you_mean("xyzzy", &tools), "");
+    }
+
+    /// Reversión deliberada (2026-07-28): este test afirmaba que `search`
+    /// no debía sugerir nada, con el argumento de que no se parece
+    /// léxicamente a `grep` y la heurística no debe inventar. La medición
+    /// lo desmintió — `search` no es un parecido dudoso, es el sinónimo
+    /// que el modelo usa: 7 de las 11 llamadas a tools inexistentes en 12
+    /// sesiones, y 5 rondas de 20 en el turno que falló. Ninguna cota de
+    /// distancia de edición puede cubrirlo; hace falta la tabla.
+    #[test]
+    fn known_synonyms_resolve_even_without_lexical_similarity() {
+        let tools = ["read_file", "shell_exec", "grep", "glob", "edit_file"];
+        assert_eq!(did_you_mean("search", &tools), " Did you mean 'grep'?");
+        assert_eq!(did_you_mean("find", &tools), " Did you mean 'glob'?");
+        assert_eq!(did_you_mean("bash", &tools), " Did you mean 'shell_exec'?");
+        assert_eq!(did_you_mean("cat", &tools), " Did you mean 'read_file'?");
+
+        // El sinónimo solo se sugiere si la tool real está disponible en
+        // esta ronda — si no, mejor callar que mandar a una tool ausente.
+        assert_eq!(did_you_mean("search", &["read_file"]), "");
+    }
+
+    /// El otro tic medido: el nombre de la tool sale truncado con puntos
+    /// suspensivos (`read...`), igual que ya pasaba con las rutas. Sacar
+    /// la elipsis basta para que la regla de contención lo resuelva.
+    #[test]
+    fn truncated_tool_names_lose_their_ellipsis_before_matching() {
+        let tools = ["read_file", "grep"];
+        assert_eq!(
+            did_you_mean("read...", &tools),
+            " Did you mean 'read_file'?"
+        );
+        assert_eq!(did_you_mean("...", &tools), "");
     }
 
     /// Un nombre que CONTIENE a uno válido (o al revés) cuenta como

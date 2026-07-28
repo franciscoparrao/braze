@@ -511,6 +511,17 @@ impl HarmonyParser {
         } else if cb.starts_with("final") {
             Channel::Final
         } else {
+            // Se trata como visible más abajo, a propósito: un modelo que
+            // no emite header de canal debe producir texto, no un turno
+            // mudo. El costo es que el razonamiento se filtra a stdout
+            // cuando el header no se reconoce — observado 2026-07-28 en
+            // dos corridas. Sin el header crudo no se puede distinguir
+            // eso de un modelo que puso su análisis en `final`, así que
+            // se traza en vez de cambiar el default a ciegas.
+            tracing::debug!(
+                channel_header = %cb.chars().take(40).collect::<String>(),
+                "canal Harmony no reconocido; su texto sale visible"
+            );
             Channel::Unknown
         };
         self.recipient = self

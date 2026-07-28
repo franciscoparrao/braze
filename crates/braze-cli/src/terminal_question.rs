@@ -30,6 +30,23 @@ pub fn shared_stdin() -> SharedStdin {
     Arc::new(Mutex::new(BufReader::new(tokio::io::stdin()).lines()))
 }
 
+/// Whether there is a human on the other end of stdin.
+///
+/// Both stdin-backed prompts (this one and the y/n permission prompt)
+/// end a blocking line read only at EOF — which an inherited,
+/// still-open stdin never delivers. Measured 2026-07-28: a `braze run`
+/// invoked over ssh without a tty sat on a permission prompt
+/// indefinitely, with nobody able to answer it and no timeout to end it;
+/// the safety default was correct (deny on EOF) and simply never
+/// reached. Callers check this first and take their existing "no answer"
+/// branch instead of blocking forever.
+///
+/// Deliberately a check and not a timeout: a wrong answer here should
+/// fail closed immediately, not after an arbitrary wait.
+pub fn stdin_is_interactive() -> bool {
+    std::io::IsTerminal::is_terminal(&std::io::stdin())
+}
+
 pub struct TerminalQuestionPrompt {
     stdin: SharedStdin,
 }
@@ -62,6 +79,14 @@ impl QuestionPrompt for TerminalQuestionPrompt {
 
         let mut stdout = tokio::io::stdout();
         if stdout.write_all(menu.as_bytes()).await.is_err() || stdout.flush().await.is_err() {
+            return None;
+        }
+
+        if !stdin_is_interactive() {
+            let _ = stdout
+                .write_all(b"(sin terminal interactiva: sin respuesta)\n")
+                .await;
+            let _ = stdout.flush().await;
             return None;
         }
 

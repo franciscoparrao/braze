@@ -47,13 +47,46 @@ pub struct EditFileArgs {
     pub new_string: String,
 }
 
-/// Steering appended to matching failures — the whole-file path is the
-/// empirically better edit surface for small models (Aider's leaderboard
-/// assigns whole-file to every small model; see the module doc comment),
-/// so a model that can't reproduce the exact text gets pointed there
-/// instead of retrying the same failing shape.
-const WRITE_FILE_STEERING: &str = "If you cannot reproduce the exact current text, use \
-     write_file with the complete updated file content instead.";
+/// Above this many lines, a whole-file rewrite stops being a cheap
+/// fallback and becomes a re-transcription of everything the model was
+/// *not* asked to touch. A judgement call, not a measured threshold: the
+/// file that produced the evidence below was ~330 lines, and Aider's
+/// whole-file evidence (module doc comment) is drawn from small files.
+const WHOLE_FILE_REWRITE_LINE_LIMIT: usize = 120;
+
+/// Steering appended to matching failures, chosen by file size.
+///
+/// For small files the whole-file path is the empirically better edit
+/// surface for small models (Aider's leaderboard assigns whole-file to
+/// every small model; see the module doc comment), so a model that can't
+/// reproduce the exact text gets pointed there instead of retrying the
+/// same failing shape.
+///
+/// For large files it is a trap, and we measured it (roam, 2026-07-28,
+/// `docs/roam-metrics-memoria-2026-07-28.md`): after `edit_file` failed,
+/// gpt-oss:20b quoted this very sentence to justify rewriting a 268-line
+/// file, and the rewrite silently converted two tolerance-based float
+/// assertions into exact equality, deleted `U+2248` from three comments,
+/// and dropped the edit it had actually been asked to make. Only the
+/// last of those is loud; reconstructing the file from the session log
+/// confirms the other two pass the project's suite. The lines a
+/// whole-file rewrite damages are the ones nobody is reviewing.
+fn write_file_steering(original: &str) -> String {
+    let lines = original.lines().count();
+    if lines <= WHOLE_FILE_REWRITE_LINE_LIMIT {
+        "If you cannot reproduce the exact current text, use write_file with the \
+         complete updated file content instead."
+            .to_string()
+    } else {
+        format!(
+            "Do NOT work around this by rewriting the whole file: at {lines} lines, \
+             write_file would re-type everything you were not asked to touch, and \
+             transcription errors in those untouched lines are caught by neither the \
+             compiler nor the tests. Correct old_string, or report that you cannot \
+             reproduce it and stop."
+        )
+    }
+}
 
 /// `Ok(summary)` on success. `Err(message)` covers I/O failures and the
 /// disambiguation failures (`old_string` missing / ambiguous) — all
@@ -176,29 +209,37 @@ impl MatchFailure {
     fn into_message(self, path: &std::path::Path, original: &str, old_string: &str) -> String {
         match self {
             MatchFailure::NotFound => {
-                let hint = find_closest_line(original, old_string)
-                    .map(|(line_no, line)| {
-                        format!(
-                            " The closest match in the file is line {line_no}: `{}`.",
-                            line.trim()
-                        )
+                // `first_divergence` supersedes the closest-line hint when it
+                // fires: it names the exact character, which the hint cannot
+                // do once `old_string`'s opening lines are correct.
+                let hint = first_divergence(original, old_string)
+                    .map(|d| format!(" {d}"))
+                    .or_else(|| {
+                        find_closest_line(original, old_string).map(|(line_no, line)| {
+                            format!(
+                                " The closest match in the file is line {line_no}: `{}`.",
+                                line.trim()
+                            )
+                        })
                     })
                     .unwrap_or_default();
                 format!(
                     "old_string not found in '{}' (also tried whitespace-tolerant matching).\
-                     {hint} {WRITE_FILE_STEERING}",
-                    path.display()
+                     {hint} {}",
+                    path.display(),
+                    write_file_steering(original)
                 )
             }
             MatchFailure::Ambiguous(count, strategy) => format!(
                 "old_string is ambiguous in '{}': found {count} occurrences{}, expected \
                  exactly 1. Include more surrounding context in old_string to disambiguate. \
-                 {WRITE_FILE_STEERING}",
+                 {}",
                 path.display(),
                 match strategy {
                     MatchStrategy::Exact => "",
                     _ => " (under whitespace-tolerant matching)",
-                }
+                },
+                write_file_steering(original)
             ),
         }
     }
@@ -233,6 +274,118 @@ fn find_closest_line<'a>(original: &'a str, old_string: &str) -> Option<(usize, 
         .filter(|&(_, _, overlap)| overlap > 0)
         .max_by_key(|&(_, _, overlap)| overlap)
         .map(|(line_no, line, _)| (line_no, line))
+}
+
+/// Minimum aligned prefix before a divergence report is worth making —
+/// below this, the "alignment" is coincidence and [`find_closest_line`]
+/// is the better hint.
+const MIN_ALIGNED_PREFIX_BYTES: usize = 16;
+
+/// Names the first character where `old_string` diverges from the file,
+/// with the codepoint on each side.
+///
+/// Why this exists, and why [`find_closest_line`] was not enough: that
+/// hint anchors on `old_string`'s FIRST line, so it says nothing when
+/// that line is correct and the divergence is dozens of lines in.
+/// Measured against roam (2026-07-28,
+/// `docs/roam-metrics-memoria-2026-07-28.md`): gpt-oss:20b cannot emit
+/// `U+1D62`. Asked to delete a block whose exact text was supplied
+/// verbatim in the prompt, it produced a 91-line `old_string` correct on
+/// every line but the one carrying that character, then spent six
+/// attempts, the turn's full 20-round budget and 25 minutes re-issuing
+/// the same unmatchable call — grepping and re-reading the file without
+/// ever recovering the cause, because a bare "not found" carries no
+/// signal about WHICH character is wrong.
+///
+/// The failure class this addresses is not a typo but a capability gap:
+/// a model can read and reason about a character it cannot reproduce,
+/// and since `edit_file` matches on exact text, a region holding such a
+/// character is otherwise *structurally uneditable* by the agent with
+/// nothing in the loop able to discover why.
+fn first_divergence(original: &str, old_string: &str) -> Option<String> {
+    let (offset, common) = best_alignment(original, old_string)?;
+    if common < MIN_ALIGNED_PREFIX_BYTES {
+        return None;
+    }
+    let file_char = original[offset + common..].chars().next();
+    let old_char = old_string[common..].chars().next();
+    if file_char.is_none() && old_char.is_none() {
+        return None; // identical — cannot happen on a NotFound, but stay total.
+    }
+
+    let matched = &old_string[..common];
+    let old_line_no = matched.matches('\n').count() + 1;
+    let column = matched.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+    let file_line_no = original[..offset + common].matches('\n').count() + 1;
+
+    Some(format!(
+        "First difference: line {old_line_no}, column {column} of old_string \
+         (line {file_line_no} of the file) — the file has {} where old_string has {}.\n\
+         \x20 file:       {}\n\
+         \x20 old_string: {}\n\
+         Copy that line from the file exactly. If you cannot reproduce that character, \
+         say so and stop rather than editing around it.",
+        describe_char(file_char),
+        describe_char(old_char),
+        excerpt(line_at(original, offset + common)),
+        excerpt(line_at(old_string, common)),
+    ))
+}
+
+/// The line-start offset in `original` whose following text shares the
+/// longest prefix with `old_string`, plus that prefix's byte length.
+/// Line starts only: an edit that fails to match still almost always
+/// begins at a line boundary, and it bounds the scan.
+fn best_alignment(original: &str, old_string: &str) -> Option<(usize, usize)> {
+    std::iter::once(0)
+        .chain(original.match_indices('\n').map(|(i, _)| i + 1))
+        .map(|offset| (offset, common_prefix_bytes(&original[offset..], old_string)))
+        .filter(|&(_, common)| common > 0)
+        .max_by_key(|&(_, common)| common)
+}
+
+/// Byte length of the longest common prefix, counted on char boundaries
+/// so multi-byte characters are never split.
+fn common_prefix_bytes(a: &str, b: &str) -> usize {
+    a.char_indices()
+        .zip(b.chars())
+        .take_while(|((_, left), right)| left == right)
+        .map(|((i, left), _)| i + left.len_utf8())
+        .last()
+        .unwrap_or(0)
+}
+
+/// The whole line containing byte offset `at` — the divergence is easier
+/// to see against its own line than as a bare codepoint.
+fn line_at(text: &str, at: usize) -> &str {
+    let start = text[..at].rfind('\n').map_or(0, |i| i + 1);
+    let end = text[at..].find('\n').map_or(text.len(), |i| at + i);
+    &text[start..end]
+}
+
+/// Keeps a quoted line short enough not to crowd the message out of a
+/// small model's context.
+fn excerpt(line: &str) -> String {
+    const MAX: usize = 160;
+    let trimmed = line.trim_end();
+    if trimmed.chars().count() <= MAX {
+        return trimmed.to_string();
+    }
+    let cut: String = trimmed.chars().take(MAX).collect();
+    format!("{cut}…")
+}
+
+/// Renders a character as a codepoint plus a readable form — a bare
+/// glyph is useless here, since the whole point is that the two sides
+/// may look identical in a terminal.
+fn describe_char(c: Option<char>) -> String {
+    match c {
+        None => "end of text".to_string(),
+        Some('\n') => "U+000A (newline)".to_string(),
+        Some('\t') => "U+0009 (tab)".to_string(),
+        Some(' ') => "U+0020 (space)".to_string(),
+        Some(c) => format!("U+{:04X} ('{c}')", c as u32),
+    }
 }
 
 /// Pure core of the tool: runs the matching ladder over `original` and
@@ -736,9 +889,105 @@ mod tests {
         .await
         .expect_err("must fail: old_string isn't in the file");
 
-        assert!(err.contains("closest match"), "got: {err}");
-        assert!(err.contains("line 3"), "got: {err}");
-        assert!(err.contains("compute_total"), "got: {err}");
+        // Once `old_string` aligns with a real line, the divergence report
+        // supersedes the word-overlap hint: it names the character.
+        assert!(err.contains("First difference"), "got: {err}");
+        assert!(err.contains("line 3 of the file"), "got: {err}");
+        assert!(err.contains("U+0078 ('x')"), "got: {err}");
+        assert!(err.contains("U+0079 ('y')"), "got: {err}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The regression this whole diagnostic exists for (roam, 2026-07-28):
+    /// `old_string` is right on every line but one, and the one it gets
+    /// wrong carries a character the model cannot emit. The old message
+    /// ("not found", plus a closest-line hint anchored on the *first*
+    /// line, which is correct here) gave the model nothing to act on and
+    /// it burned a whole turn re-issuing the same call.
+    #[tokio::test]
+    async fn first_divergence_names_the_codepoint_the_model_could_not_emit() {
+        let dir = unique_temp_dir("edit-file-unemittable-char");
+        let original = "impl T {\n\
+                        \x20   /// At each cell center:\n\
+                        \x20   ///   d(x,y) = k * \u{3a3}\u{1d62} exp(-0.5 * (x-x\u{1d62})\u{b2})\n\
+                        \x20   /// Note: planar space.\n\
+                        \x20   pub fn kde(&self) {}\n\
+                        }\n";
+        let file_path = fixture_file(&dir, original).await;
+
+        // Byte-identical to the file except that U+1D62 is dropped — the
+        // exact corruption gpt-oss:20b produced, twice.
+        let old_string = "    /// At each cell center:\n\
+                          \x20   ///   d(x,y) = k * \u{3a3} exp(-0.5 * (x-x)\u{b2})\n\
+                          \x20   /// Note: planar space.\n";
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: old_string.to_string(),
+            new_string: String::new(),
+        })
+        .await
+        .expect_err("must fail: the subscript is missing from old_string");
+
+        assert!(err.contains("First difference"), "got: {err}");
+        // Second line of old_string, third line of the file.
+        assert!(err.contains("line 2, column"), "got: {err}");
+        assert!(err.contains("line 3 of the file"), "got: {err}");
+        // The whole point: the offending codepoint is named on both sides.
+        assert!(err.contains("U+1D62"), "got: {err}");
+        assert!(
+            err.contains("cannot reproduce that character"),
+            "must offer stopping as the correct move: {err}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Below the line limit the whole-file fallback stays on offer
+    /// (Aider's small-model evidence, see `write_file_steering`).
+    #[tokio::test]
+    async fn small_files_still_steer_to_whole_file_rewrite() {
+        let dir = unique_temp_dir("edit-file-small-steering");
+        let file_path = fixture_file(&dir, "hello world\n").await;
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: "totally unrelated content".to_string(),
+            new_string: "x".to_string(),
+        })
+        .await
+        .expect_err("must fail");
+
+        assert!(err.contains("use write_file"), "got: {err}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Above it the steering inverts: a whole-file rewrite of a large file
+    /// re-types every untouched line, which is how the roam damage
+    /// happened (`write_file_steering`'s doc comment).
+    #[tokio::test]
+    async fn large_files_steer_away_from_whole_file_rewrite() {
+        let dir = unique_temp_dir("edit-file-large-steering");
+        let original: String = (0..WHOLE_FILE_REWRITE_LINE_LIMIT + 40)
+            .map(|i| format!("let v{i} = {i};\n"))
+            .collect();
+        let file_path = fixture_file(&dir, &original).await;
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: "zzz absent zzz".to_string(),
+            new_string: "x".to_string(),
+        })
+        .await
+        .expect_err("must fail");
+
+        assert!(err.contains("Do NOT work around this"), "got: {err}");
+        assert!(
+            !err.contains("use write_file with the complete"),
+            "the small-file steering must not also appear: {err}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

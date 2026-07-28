@@ -252,20 +252,65 @@ Era la única ocurrencia de U+1D62 en el repo. Se normalizó porque un carácter
 que el modelo no puede escribir convierte esa región en no editable por un
 agente para siempre; el significado de la fórmula no cambia.
 
-## 8. Qué queda
+## 8. Los cinco arreglos, y la verificación en vivo del principal
 
-**Del harness, en orden de prioridad:**
+### 8.1 Nombrar el carácter que falló
 
-- **Nombrar el carácter que falló.** Cuando `edit_file` no matchea, comparar
-  `old_string` con el archivo y reportar la primera divergencia con su
-  codepoint. Convierte 25 minutos de deadlock ciego en una ronda. Es el
-  arreglo de mayor retorno que salió de todo esto.
-- **Cortar la rama de rescate por `write_file` completo.** Tras dos fallos de
-  `edit_file` sobre el mismo bloque, abortar y escalar; y revisar la redacción
-  de la guarda que hoy la sugiere (§ 7.3).
-- **`braze run` no debe colgarse en un prompt de permiso** sin TTY (§ 7.4).
-- Alias `search` → `grep`, si el conteo se sostiene (§ 4).
-- No filtrar el canal `analysis` en `--output-format plain`.
+`edit_file` ahora, cuando no matchea, alinea `old_string` contra el archivo y
+reporta la **primera divergencia con su codepoint en los dos lados**, más
+ambas líneas. Reemplaza al hint anterior de "línea más parecida", que anclaba
+en la *primera* línea de `old_string` y por eso no decía nada cuando esa línea
+estaba bien.
+
+**Verificado en vivo** contra el caso exacto que lo motivó (mismo bloque, mismo
+carácter, mismo modelo):
+
+| | Antes | Después |
+|---|---|---|
+| Rondas | 20 (agotó el tope) | **4** |
+| Tiempo | 25m08s | **7m31s** |
+| Desenlace | reescritura de 268 líneas con daño silencioso | **"I can't perform that edit"** y se detuvo |
+| Daño al archivo | 3 regresiones, 2 invisibles | **ninguno** |
+
+Ronda 1, el mensaje: *"First difference: line 29, column 51 of old_string (line
+32 of the file) — the file has U+1D62 ('ᵢ') where old_string has U+0020
+(space)"*. Ronda 2 releyó el archivo. Ronda 3 reintentó y **volvió a comerse el
+`ᵢ`** — tercera replicación del fenómeno, esta vez con el carácter nombrado y
+exhibido delante. Ronda 4 la bloqueó la guarda de repetición, y paró.
+
+O sea: el arreglo no le enseña al modelo a emitir el carácter —eso no se puede
+arreglar desde el harness— pero convierte un deadlock ciego de 25 minutos en un
+fracaso honesto de 7, sin daño colateral y con la causa legible para el humano.
+Que el modelo siga sin poder emitirlo **con la respuesta puesta delante** es la
+confirmación más fuerte de que es una brecha de capacidad y no un descuido.
+
+### 8.2 Los otros cuatro
+
+- **La guarda de `write_file` ahora depende del tamaño del archivo.** Bajo 120
+  líneas sigue ofreciendo la reescritura completa (la evidencia de Aider que la
+  justificaba es de archivos chicos); encima, dice explícitamente que no lo
+  haga, y por qué: retipear lo que nadie pidió tocar es donde el daño no lo
+  caza ningún gate. El modelo citaba textualmente la redacción vieja para
+  justificar la rama que rompió los tests.
+- **`braze run` ya no se cuelga sin TTY.** El default de seguridad era correcto
+  (denegar en EOF) pero nunca se alcanzaba: un stdin heredado y abierto no
+  entrega EOF nunca. Ahora se chequea si hay terminal antes de leer, en el
+  prompt de permisos y en `ask_user`. Es un chequeo y no un timeout, a
+  propósito: debe fallar cerrado de inmediato.
+- **`search` → `grep` se sugiere.** No era un typo sino un sinónimo, así que
+  ninguna cota de distancia de edición podía cubrirlo; hace falta tabla. Se
+  **sugiere**, no se remapea en silencio: los schemas de argumentos difieren, y
+  adivinar mal ejecuta la cosa equivocada en vez de devolver un error
+  corregible. De paso, se le sacan los puntos suspensivos al nombre antes de
+  matchear, con lo que `read...` se resuelve solo.
+- **Canal `analysis`: trazado, no cambiado.** `Channel::Unknown` se trata como
+  visible a propósito, y está bien: invertirlo haría que un modelo sin header
+  de canal produzca turnos mudos, que es peor que una filtración. Sin el header
+  crudo no se puede distinguir "header no reconocido" de "el modelo puso su
+  análisis en `final`", así que se agregó la traza que dejaría eso respondido
+  la próxima vez, en vez de cambiar el default a ciegas.
+
+## 9. Qué queda
 
 **De la línea de trabajo:**
 
@@ -284,3 +329,8 @@ agente para siempre; el significado de la fórmula no cambia.
 **En el paper**: § Discussion tiene el párrafo nuevo sobre comprensión vs.
 emisión, contrastado con `zhu2026babeltele`. La entrada del `.bib` está
 **pendiente de `/verify-refs`**.
+
+**Del harness**: los cinco arreglos de § 8 están en main. Queda el interlock
+duro —bloquear `write_file` sobre un archivo que acaba de fallar `edit_file`
+dos veces— que necesita estado por turno en el engine y es una decisión de
+diseño más grande que la redacción de la guarda.

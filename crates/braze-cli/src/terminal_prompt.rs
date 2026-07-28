@@ -56,7 +56,16 @@ impl ConfirmationPrompt for TerminalConfirmationPrompt {
         let mut stdout = tokio::io::stdout();
         let prompt = format!("{action}\n¿Permitir? [y/N]: ");
 
-        let allowed = if stdout.write_all(prompt.as_bytes()).await.is_err()
+        let allowed = if !crate::terminal_question::stdin_is_interactive() {
+            // Nobody can answer, and a blocking read would never return
+            // (see `stdin_is_interactive`). Deny — the same safety
+            // default as EOF — but say so, so the denial reads as a
+            // decision rather than a mystery.
+            let notice = format!("{action}\n(sin terminal interactiva: denegado)\n");
+            let _ = stdout.write_all(notice.as_bytes()).await;
+            let _ = stdout.flush().await;
+            false
+        } else if stdout.write_all(prompt.as_bytes()).await.is_err()
             || stdout.flush().await.is_err()
         {
             false
