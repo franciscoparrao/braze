@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="es" xml:lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Operar gpt-oss:20b con braze — guía práctica</title>
+  <style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+
+ul.task-list[class]{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+font-size: inherit;
+width: 0.8em;
+margin: 0 0.8em 0.2em -1.6em;
+vertical-align: middle;
+}
+.display.math{display: block; text-align: center; margin: 0.5rem auto;}
+
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+  <style type="text/css">:root {
+--bg: #fbfaf8; --fg: #1c1a17; --muted: #6b6560; --line: #e0dcd5;
+--card: #ffffff; --accent: #0f6fa8; --ok: #1f7a3d; --bad: #a33232;
+}
+@media (prefers-color-scheme: dark) {
+:root { --bg: #16181a; --fg: #e8e6e3; --muted: #9a938c; --line: #2e3236;
+--card: #1d2023; --accent: #5cb3e8; --ok: #5fd08a; --bad: #e88b8b; }
+}
+html { -webkit-text-size-adjust: 100%; }
+body { background: var(--bg); color: var(--fg); margin: 0 auto; padding: 2.2rem 1.2rem 4rem;
+max-width: 46rem; line-height: 1.65;
+font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 0 0 .4rem; letter-spacing: -.01em; }
+h2 { font-size: 1.2rem; margin: 2.6rem 0 .8rem; padding-top: 1.1rem;
+border-top: 1px solid var(--line); letter-spacing: -.005em; }
+h3 { font-size: 1.02rem; margin: 1.8rem 0 .5rem; color: var(--muted); }
+p, li { font-size: .97rem; }
+a { color: var(--accent); }
+code { background: var(--card); border: 1px solid var(--line); border-radius: 4px;
+padding: .08em .35em; font-size: .87em; }
+pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+padding: .9rem 1rem; overflow-x: auto; }
+pre code { background: none; border: 0; padding: 0; font-size: .85rem; }
+blockquote { border-left: 3px solid var(--accent); margin: 1.2rem 0; padding: .1rem 0 .1rem 1rem;
+color: var(--muted); }
+table { border-collapse: collapse; width: 100%; margin: 1.1rem 0; display: block; overflow-x: auto; }
+th, td { border: 1px solid var(--line); padding: .48rem .7rem; text-align: left;
+font-size: .9rem; vertical-align: top; }
+th { background: var(--card); font-weight: 600; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 2.4rem 0; }
+strong { font-weight: 650; }
+</style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Operar gpt-oss:20b con braze — guía práctica</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#operar-gpt-oss20b-con-braze-guía-práctica" id="toc-operar-gpt-oss20b-con-braze-guía-práctica">Operar gpt-oss:20b
+con braze — guía práctica</a>
+<ul>
+<li><a href="#configuración-no-es-opcional" id="toc-configuración-no-es-opcional">1. Configuración: no es
+opcional</a></li>
+<li><a href="#dónde-es-de-fiar" id="toc-dónde-es-de-fiar">2. Dónde es de
+fiar</a></li>
+<li><a href="#dónde-no" id="toc-dónde-no">3. Dónde no</a></li>
+<li><a href="#la-receta-partir-en-tres-pasos-acotados" id="toc-la-receta-partir-en-tres-pasos-acotados">4. La receta: partir en
+tres pasos acotados</a></li>
+<li><a href="#el-flujo-de-contexto-sesión-nueva-memoria-de-proyecto" id="toc-el-flujo-de-contexto-sesión-nueva-memoria-de-proyecto">5. El
+flujo de contexto: sesión nueva + memoria de proyecto</a></li>
+<li><a href="#verificación-qué-caza-cada-gate" id="toc-verificación-qué-caza-cada-gate">6. Verificación: qué caza cada
+gate</a></li>
+<li><a href="#evidencia" id="toc-evidencia">7. Evidencia</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="operar-gpt-oss20b-con-braze-guía-práctica">Operar gpt-oss:20b
+con braze — guía práctica</h1>
+<p><strong>Qué es esto</strong>: qué se le puede pedir a gpt-oss:20b con
+expectativa razonable de que salga bien, qué no, y cómo montar el
+trabajo para que la diferencia importe. Todo lo de acá está
+<strong>medido</strong> entre el 2026-07-25 y el 28 sobre Nitro (RTX
+3050 6GB), no estimado.</p>
+<p><strong>Por qué existe</strong>: la mitad de estas cosas se
+reaprendieron a golpes dos veces en la misma semana.</p>
+<hr />
+<h2 id="configuración-no-es-opcional">1. Configuración: no es
+opcional</h2>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">LD_LIBRARY_PATH</span><span class="op">=</span><span class="va">$(</span><span class="fu">ls</span> <span class="at">-d</span> ~/proyectos/braze/target/debug/build/llama-cpp-sys-2-<span class="pp">*</span>/out/build/bin <span class="kw">|</span> <span class="fu">head</span> <span class="at">-1</span><span class="va">)</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BRAZE_OLLAMA_NUM_CTX</span><span class="op">=</span>32768     <span class="co"># el default de 8192 estrangula</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">BRAZE_MAX_TOKENS</span><span class="op">=</span>12288         <span class="co"># el default de 4096 corta tool calls</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> ~/.cargo/env                   <span class="co"># sin esto el post-edit check se apaga EN SILENCIO</span></span></code></pre></div>
+<ul>
+<li><strong>No fijes <code>BRAZE_LOCAL_GPU_LAYERS</code>.</strong> El
+auto-fit elige 25 capas con KV en VRAM. El valor que se venía adivinando
+a mano era 8, y costaba 3.4× de velocidad.</li>
+<li><strong><code>--task-timeout-secs 900</code></strong>, no 300. Un
+tope que muerde convierte ruido continuo de reloj en ruido binario de
+pass/fail: con 300s un mismo banco oscilaba 7/4/3 entre corridas
+idénticas; con 900s, 6/6/6.</li>
+<li><strong><code>source ~/.cargo/env</code> importa más de lo que
+parece.</strong> En un shell no interactivo <code>cargo</code> no está
+en el <code>PATH</code>, y entonces el post-edit check —el guardrail que
+le devuelve los errores de compilación al modelo— <strong>se salta sin
+avisar</strong>. El modelo trabaja sin red y el resultado parece
+incapacidad suya.</li>
+</ul>
+<p>Con los defaults del proyecto, un refactor real muere por
+presupuesto, no por capacidad. Eso se midió: el prompt llegaba a 6491
+tokens dejando 1701 para generar, y escribir 216 líneas de Rust no
+cabe.</p>
+<hr />
+<h2 id="dónde-es-de-fiar">2. Dónde es de fiar</h2>
+<p>Determinista en su banco base: <strong>57/57 en
+<code>default.toml</code> con cero discordancia</strong> entre tres
+corridas idénticas. Y en la suite dura, cuatro familias nunca oscilaron
+en tres réplicas:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Tipo de tarea</th>
+<th>Estabilidad</th>
+<th>Costo típico</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Lectura/consulta sobre código</td>
+<td>3/3</td>
+<td>segundos</td>
+</tr>
+<tr class="even">
+<td>Localizar y editar en archivo grande</td>
+<td>5/5</td>
+<td>~1-2 min</td>
+</tr>
+<tr class="odd">
+<td>Arreglar errores de compilación puntuales</td>
+<td>2/2</td>
+<td>~1 min</td>
+</tr>
+<tr class="even">
+<td>Cambiar X sin tocar el Y parecido</td>
+<td>3/3</td>
+<td>~1 min</td>
+</tr>
+</tbody>
+</table>
+<p>El caso más elocuente: <strong>dos arreglos de una línea en un
+archivo de 469 líneas, 157 segundos, a la primera.</strong></p>
+<hr />
+<h2 id="dónde-no">3. Dónde no</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Falla</th>
+<th>Evidencia</th>
+<th>Señal</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Trayectorias de más de ~6 rondas</td>
+<td>55-71% de inestabilidad</td>
+<td>mismo prompt, distinto resultado</td>
+</tr>
+<tr class="even">
+<td>Movimiento masivo de código</td>
+<td>falló mover 216 líneas, repetidamente</td>
+<td><code>edit_file</code> sin match exacto</td>
+</tr>
+<tr class="odd">
+<td>Su propio reporte</td>
+<td>afirmó haber borrado código con el archivo intacto</td>
+<td>el resumen dice éxito</td>
+</tr>
+<tr class="even">
+<td>Copiar “verbatim”</td>
+<td>corrompió 2 de 2 veces</td>
+<td><strong>silenciosa</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Sobre la última, que es la peligrosa: al copiar código que debía
+mover sin cambios, rompió un <code>format!</code> (lo cazó el
+compilador, dos tareas después) y <strong>borró los subíndices de una
+fórmula en un doc comment</strong>, dejándola matemáticamente falsa. Eso
+compila, pasa los tests y pasa el post-edit check.</p>
+<p><strong>Ningún gate automático detecta corrupción en comentarios,
+strings o documentación.</strong></p>
+<p>Tic recurrente sin consecuencia grave: alucina nombres de tools
+(<code>search</code>) y emite rutas truncadas con puntos suspensivos
+(<code>&quot;ro...&quot;</code>). El harness responde con la lista válida y el
+modelo se recupera solo.</p>
+<hr />
+<h2 id="la-receta-partir-en-tres-pasos-acotados">4. La receta: partir en
+tres pasos acotados</h2>
+<p>Salió del ejercicio sobre roam, donde pedir el refactor entero falló
+dos veces y partirlo funcionó. Cada paso con oráculo objetivo (el
+compilador):</p>
+<ol type="1">
+<li><strong>Crear</strong> el archivo nuevo con el contenido → salió a
+la primera.</li>
+<li><strong>Quitar del original y enlazar</strong> el módulo → sale con
+presupuesto suficiente.</li>
+<li><strong>Arreglar los errores de compilación</strong> que queden →
+157s, a la primera.</li>
+</ol>
+<p>Esa secuencia produjo el refactor completo: 222 líneas movidas, 14/14
+tests. Lo que no funciona es pedir los tres juntos.</p>
+<p><strong>Regla general</strong>: si la tarea no cabe en ~6 rondas,
+partila. No es preferencia de estilo — arriba de ese umbral el resultado
+deja de ser reproducible.</p>
+<hr />
+<h2 id="el-flujo-de-contexto-sesión-nueva-memoria-de-proyecto">5. El
+flujo de contexto: sesión nueva + memoria de proyecto</h2>
+<p><code>braze run</code> <strong>abre sesión nueva en cada
+invocación</strong>, así que el contexto nace vacío sin que haya que
+vaciar nada. Eso es justo lo que conviene dado el punto anterior: cada
+paso arranca limpio en vez de arrastrar el ruido del anterior.</p>
+<p>Para que no se pierda lo aprendido entre pasos existe la
+<strong>memoria de proyecto</strong>
+(<code>enable_project_memory</code>, <strong>apagada por
+default</strong>):</p>
+<ul>
+<li>Al arrancar carga <code>.braze/memory.json</code> de la raíz del
+proyecto y lo renderiza en el system prompt con presupuesto de
+<strong>400 tokens</strong>.</li>
+<li>Durante el turno, un hook registra los archivos tocados por
+herramientas de escritura y persiste en background.</li>
+<li>Falla segura: un <code>memory.json</code> roto no bloquea el
+arranque, y una memoria cuyo <code>project_key</code> no corresponde al
+proyecto se descarta en vez de inyectar notas ajenas.</li>
+</ul>
+<p>Se enciende en el archivo de configuración:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode toml"><code class="sourceCode toml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="dt">enable_project_memory</span> <span class="op">=</span> <span class="cn">true</span></span></code></pre></div>
+<p>Está apagada por default por política del proyecto —una palanca nueva
+entra apagada y se promueve solo si su propio A/B la valida— así que
+<strong>encenderla es una decisión, no el default recomendado</strong>.
+Lo que registra automáticamente es modesto: qué archivos se tocaron, no
+un diario de decisiones.</p>
+<p>Con eso, el flujo <em>cargar contexto → ejecutar tarea → guardar →
+vaciar</em> ya está implementado: es simplemente <strong>un
+<code>braze run</code> por paso</strong>, con la memoria encendida.</p>
+<hr />
+<h2 id="verificación-qué-caza-cada-gate">6. Verificación: qué caza cada
+gate</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Gate</th>
+<th>Caza</th>
+<th>NO caza</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>cargo check</code> post-edit</td>
+<td>errores de sintaxis y tipos</td>
+<td>archivos que ningún <code>mod</code> declara (ver abajo)</td>
+</tr>
+<tr class="even">
+<td>Tests del proyecto</td>
+<td>regresiones de comportamiento</td>
+<td>corrupción en comentarios/strings</td>
+</tr>
+<tr class="odd">
+<td>Aserciones del bench</td>
+<td>el resultado declarado</td>
+<td>que las regiones no apuntadas se preservaran</td>
+</tr>
+<tr class="even">
+<td><strong><code>git diff</code> humano</strong></td>
+<td><strong>todo lo anterior</strong></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>Sobre el post-edit check: si escribe un <code>.rs</code> que
+<strong>ningún módulo declara</strong>, el compilador no lo mira y el
+check pasa en verde sobre un archivo roto. El harness ahora avisa de
+eso, pero conviene saberlo porque es el patrón normal de subdividir
+código: crear el archivo, enlazarlo después.</p>
+<p><strong>Las dos reglas que resumen todo:</strong></p>
+<ol type="1">
+<li><strong>Trabajo acotado con oráculo objetivo</strong> — compilador o
+tests, no criterio propio.</li>
+<li><strong>Verificá con el diff, nunca con su resumen.</strong> Es la
+única defensa contra el éxito falso y la corrupción silenciosa.</li>
+</ol>
+<hr />
+<h2 id="evidencia">7. Evidencia</h2>
+<ul>
+<li><code>docs/local-backend-design-2026-07-20.md</code> — auto-fit, KV
+placement medido, sampling, el 3.4× de gpt-oss.</li>
+<li><code>docs/roam-trajectory-exercise-2026-07-26.md</code> — el
+ejercicio del que salen la receta de tres pasos y las corrupciones
+silenciosas.</li>
+<li><code>docs/noise-floor-2026-07-26.md</code> — piso de ruido por
+modelo; <strong>consultar antes de interpretar cualquier
+A/B</strong>.</li>
+<li><code>docs/umbral-trayectoria-refutado-2026-07-28.md</code> — por
+qué el umbral de ~6 rondas vale para gpt-oss y <strong>no</strong>
+generaliza a otros modelos.</li>
+<li><code>crates/braze-bench/suites/fast-core.toml</code> — 13 tareas,
+~15 min, para verificar que un cambio no rompió nada.</li>
+</ul>
+</body>
+</html>
