@@ -396,6 +396,59 @@ no-lead,\allowbreak task-list,\allowbreak\ldots\}}), so a claim like
 "the lead model helps" is a number with a confidence interval and a
 commit hash behind it, not a design note.
 
+\paragraph{A pedagogy that arrived before its evidence.} While this
+paper was being finalized the design space it measures acquired not
+only a name but a curriculum. Walking Labs' open-source \emph{Learn
+Harness Engineering} \citep{walkinglabs2026} defines the discipline as
+"building a complete working environment around the model so it
+produces reliable results \ldots\ not about writing better prompts",
+decomposes it into five subsystems --- instructions, state,
+verification, scope, session lifecycle --- and ships thirteen lectures,
+seven projects and copy-ready templates. Its vocabulary is better than
+ours and we adopt parts of it in \S\ref{sec:discussion}; two of its
+five subsystems, scope and session lifecycle, have no counterpart in
+\braze{}, which bounds what we can say about the taxonomy as a whole.
+
+The relevant point for this paper is evidential rather than
+terminological. The course does cite evidence, and more of it than a
+glance suggests --- SWE-bench Verified pass rates with an explicit
+caveat that its tasks are selected, a five-month Codex-only
+million-line engineering report, and a case study on a 15{,}000-line
+application --- but none of it is an ablation, and its most-cited
+result is confounded in a way that matters here. The comparison it
+leads with holds model and prompt fixed and reports a bare run of
+twenty minutes and \$9 producing something nonfunctional against a
+harnessed run of six hours and \$200 producing a working artefact. The
+two conditions differ by roughly $22\times$ in spend as well as in
+harness, so the outcome cannot be attributed to the harness: the design
+does not separate the lever from the budget. This is the same gap as
+the vendor documentation above, one rung further along --- the
+principles are now taught rather than merely documented, and still not
+decomposed into independently switchable levers with confidence
+intervals. That is the gap this paper's ablation suffixes exist to
+close, and it is why we read a curriculum's arrival as raising the
+value of measurement rather than substituting for it. (We verified
+these characterizations against the course's first lecture and its
+published structure, not against all thirteen.)
+
+Against the curriculum sits a practitioner objection with the opposite
+bound. Dex's \emph{Why Software Factories Fail} \citep{dex2026wsff}
+argues that "no amount of harness engineering or loopsmaxxing can solve
+what is fundamentally a model-training issue", supported by industry
+telemetry the author explicitly declines to treat as causal ("more of a
+correlation signal than a verifiable smoking gun"). Our results speak
+to both positions and endorse neither wholesale. Several levers in
+Table~\ref{tab:levers} measure conditional or scale-dependent rather
+than the reliable wins a curriculum implies, which supports the
+objection; the trajectory-length instability we report is a
+round-budget effect that does not generalize across models, where the
+course states a wall-clock threshold. But the failure mode the
+objection attributes to training --- degradation that no gate reports
+--- is a detection problem, and detection is precisely what a harness
+can be built to do. \S\ref{sec:discussion} returns to this with a case
+in which neither position is quite right: a failure the harness could
+not repair and could nonetheless make legible and cheap.
+
 \paragraph{Breadth versus depth.} This paper sits inside a fast-growing
 empirical tradition of evaluating LLMs on software-engineering tasks
 under controlled designs --- recent examples in this journal alone
@@ -1810,6 +1863,25 @@ diff-review discipline we rely on elsewhere (\S\ref{sec:threats}): a
 human reading the diff is the only gate that caught any of the
 corruptions above, and it is exactly the gate a
 readability-relaxed representation would remove.
+
+This episode is also where the two practitioner positions of
+\S\ref{sec:related} meet, and neither survives intact. The objection is
+right that no harness creates a capability the model lacks: we named
+the offending character, showed it on both sides, and the model
+reproduced the same omission on its next attempt. The curriculum's
+prescription --- when something fails, check the harness before
+swapping the model --- is right often enough to teach, but here it
+pointed the wrong way for twenty-five minutes, because a capability gap
+and a harness defect present identically at the tool boundary
+(\texttt{old\_string not found} reads as a broken matcher). What the
+harness could do is narrower than the curriculum implies and larger
+than the objection allows: not repair the failure, but classify it,
+report the codepoint, and convert a blind twenty-round deadlock into an
+explicit refusal in four with no collateral damage. We take that as the
+operative form of the prescription: a harness for small models should
+be built to tell its operator which of the two it is in, because that
+is the one thing neither a better model nor a longer retry loop
+supplies.
 
 \paragraph{Pre-registration functioned as an engineering safeguard, not
 a formality.} Twice in this paper's own history, a criterion committed
