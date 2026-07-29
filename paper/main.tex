@@ -36,7 +36,7 @@ for Key Levers}
 \author{Francisco Parra}
 
 \institute{F. Parra \at
-  Departamento de Ingeniería Informática, Universidad de Santiago de
+  Departamento de Ingenier\'ia Inform\'atica, Universidad de Santiago de
   Chile, Santiago, Chile \\
   \email{francisco.parra.o@usach.cl}
 }
@@ -281,8 +281,8 @@ around the actual contribution.
   \item \textbf{\braze{} itself}: an open-source Rust harness where
     every lever is a per-row benchmark ablation
     (\texttt{+ablate:\{no-rescue, no-prune, no-lead, task-list, ...\}}),
-    releasable artifact with full sweep data. \todo{DOI Zenodo al
-    empaquetar (/zenodo).}
+    released with the full sweep data for every result reported here
+    (\S``Data availability'').
 \end{enumerate}
 
 % =====================================================================
@@ -1161,19 +1161,19 @@ slice}\label{sec:swebench}
 
 \S\ref{sec:bfcl} anchors the central lever on function-calling tasks;
 this section anchors it on \emph{repository-level software-engineering
-tasks} — real issues, real repositories, outcomes graded by each
+tasks} --- real issues, real repositories, outcomes graded by each
 project's own tests. The design was committed before the driver was
 implemented or any run executed
 (\texttt{docs/swebench-lite-anchor-design-2026-07-19.md}): 20
 instances sampled deterministically (seed 42 over sorted instance
-ids) from SWE-bench Lite \citep{jimenez2024swebench} — the seed drew
-13 Django, 2 matplotlib, 2 sphinx, and 3 sympy instances — three arms
+ids) from SWE-bench Lite \citep{jimenez2024swebench} --- the seed drew
+13 Django, 2 matplotlib, 2 sphinx, and 3 sympy instances --- three arms
 (the 1B executor alone, the 1B+lead composite, and the lead alone),
 two repetitions each (120 runs, 600\,s per-attempt budget), the same
 2\%-transport validity rule as \S\ref{sec:bfcl}, and three
 pre-declared readings. Grading is the \emph{official} SWE-bench
 harness (v4.1.0, Docker): an instance is resolved only if the
-project's failing tests pass and its passing tests stay green — not
+project's failing tests pass and its passing tests stay green --- not
 an authored grader. The design's committed expectation was honest
 about scale: at 1B on CPU with an 8K context, the likely outcome was
 a uniform floor, and the anchor's value would then be bounding the
@@ -1206,7 +1206,7 @@ table:
 \paragraph{The 1B alone is a floor of the most informative kind.}
 Zero non-empty patches in 40 runs, at a median of 4 seconds per run:
 the unassisted 1B does not fail at repository tasks so much as never
-engage them — it answers in prose without attempting an edit. This is
+engage them --- it answers in prose without attempting an edit. This is
 the boundary the paper's claims need stated: no reliability lever
 measured in this paper turns a model that cannot engage a repository
 into one that can.
@@ -1214,11 +1214,11 @@ into one that can.
 \paragraph{The lead lever moves behavior outside noise, and resolution
 directionally.} We report two layers separately rather than blend
 them. Behaviorally, the composite produces non-empty patches in 6/40
-runs where the 1B alone produced 0/40 (Fisher exact $p{=}0.026$) —
+runs where the 1B alone produced 0/40 (Fisher exact $p{=}0.026$) ---
 the lever's turn-opening converts ``never edits'' into ``edits.'' At
 the resolution layer, the composite resolves 2/40 versus 0/40
 ($p{=}0.49$): directional, not separable from noise at this sample
-size — though the resolved instance
+size --- though the resolved instance
 (\texttt{django\_\_django-14382}) resolved in \emph{both}
 repetitions, consistency rather than a sampling fluke. The honest
 compound statement: the lever transfers its behavioral effect to
@@ -1229,17 +1229,17 @@ only directionally.
 composite (2/40) is indistinguishable from the lead alone (3/40,
 $p{=}1.0$), at absolute levels (5--7.5\%) that are exactly where the
 lead's own ceiling sits on tasks this hard. The paper's central
-pattern — the composite lives at the lead's ceiling; the 1B neither
-adds nor subtracts — holds on execution-graded software-engineering
+pattern --- the composite lives at the lead's ceiling; the 1B neither
+adds nor subtracts --- holds on execution-graded software-engineering
 tasks, not just on the suites where we first measured it. As a
 reference point the benchmark's public leaderboards rarely cover: a
 quantized 8B-MoE helper on CPU resolves two distinct SWE-bench Lite
 instances.
 
 Costs replicate directionally too (median wall 4/50/158\,s across the
-three arms — the composite is $\sim$3$\times$ faster per run than the
+three arms --- the composite is $\sim$3$\times$ faster per run than the
 lead alone, consistent with \S\ref{sec:curve}'s accelerant reading).
-Threats specific to this anchor — the 4{,}000-character issue-text
+Threats specific to this anchor --- the 4{,}000-character issue-text
 truncation (5 instances affected, recorded per run), pre-training
 contamination of these public repositories (affects levels, not
 between-arm comparisons), and the driver living outside
@@ -1429,13 +1429,13 @@ re-measured under a pre-registered clean-re-run design
 (\texttt{docs/rerun-contaminated-cells-design-2026-07-18.md}, Bloque
 2; same 2\%-transport validity rule as \S\ref{sec:bfcl}; the first
 re-run attempt was itself invalidated by that rule after exposing a
-circuit-breaker bug in the harness — a cancelled half-open probe
-poisoned two arms — which we fixed, disclosed, and preserved before
+circuit-breaker bug in the harness --- a cancelled half-open probe
+poisoned two arms --- which we fixed, disclosed, and preserved before
 re-running). The clean sweep (285 runs, 2026-07-19) has \emph{zero}
 transport failures under the audit criterion in all three arms; its
 eleven \texttt{model\_backend\_error} rows are the model emitting
 malformed XML tool-call syntax that the textual-rescue parser
-surfaces as a stream error (wall-clock 18--78\,s — model failures,
+surfaces as a stream error (wall-clock 18--78\,s --- model failures,
 not infrastructure; that the rescue ladder converts them into
 backend errors rather than degrading is itself a harness finding we
 record for future work). On clean data: coder baseline 93/95 =
@@ -1486,7 +1486,7 @@ counts. The user-role delivery at 3B fails more clearly (target pair
 10/30, below baseline); at the ceiling, the user-role delivery
 recovers the collapse without measurably exceeding its baseline
 ($-3.2$\,pp, crossing zero) and the task-list delivery lands below
-its baseline outright ($-9.5$\,pp [$-17.6$, $-2.2$], clean re-run) —
+its baseline outright ($-9.5$\,pp [$-17.6$, $-2.2$], clean re-run) ---
 reinforcing the rejection from a second direction: the delivery with
 the largest (marginal) movement at 3B is measurably harmful at the
 scale ceiling. \emph{Deviation note
@@ -2281,9 +2281,24 @@ MIT/Apache-2.0. Every
 sweep this paper cites is reproducible from its raw JSON results file,
 committed to the repository alongside a reproduction command; commit
 hashes, suite fingerprints, and per-model digests embedded in each JSON
-are listed in Table~\ref{tab:sweeps}. \todo{Zenodo DOI for a versioned
-release of the code and the 14 sweep JSON files (\S\ref{app:sweeps})
-pending packaging at submission (\texttt{/zenodo}).}
+are listed in Table~\ref{tab:sweeps}.
+
+\paragraph{Data availability.} All data supporting the findings of this
+study are openly available in the \braze{} repository at
+\url{https://github.com/franciscoparrao/braze}, dual-licensed
+MIT/Apache-2.0. The repository contains the raw results file for every
+sweep cited here --- one JSON per sweep, carrying the per-run outcome,
+failure cause, wall-clock time and token counts used in the analyses,
+together with the commit hash, suite fingerprint and per-model digest
+that identify the exact configuration that produced it
+(Table~\ref{tab:sweeps}, Appendix~\ref{app:sweeps}) --- as well as the
+harness source, the benchmark suites, the reproduction command for each
+sweep, and the design documents that carry the pre-registered criteria
+(\S\ref{sec:setup}). No data are under embargo and no restrictions
+apply to their reuse. A versioned archival snapshot of the code and the
+sweep data will be deposited in Zenodo and assigned a DOI upon
+acceptance; the repository state corresponding to this submission is
+identified by its commit hash in Table~\ref{tab:sweeps}.
 
 \paragraph{Funding.} This work received no external funding.
 
@@ -2324,7 +2339,7 @@ sweep.
 \begin{table}[t]
 \centering\small
 \caption{Every sweep cited in this paper. $n$ is total runs in that
-sweep's JSON; ``§'' is where it is cited.}
+sweep's JSON; ``\S'' is where it is cited.}
 \label{tab:sweeps}
 \begin{tabular}{lllll}
 \toprule
@@ -2378,7 +2393,7 @@ pass rate de \texttt{multi\_step} + \texttt{error\_recovery} fuera del
 intervalo de Wilson del baseline (no dentro del ruido de $\pm$5pp), sin
 degradar \texttt{no\_tool}/\texttt{single\_tool}/\texttt{distractor\_%
 selection}. El costo extra de tokens del planner queda registrado por
-las sumas de \texttt{Usage} y entra al veredicto. Si no cumple: técnica
+las sumas de \texttt{Usage} y entra al veredicto. Si no cumple: t\'ecnica
 rechazada, se documenta y se remueve.
 \end{quote}
 
@@ -2389,26 +2404,26 @@ $\pm$5pp noise), without degrading the other three skills; the
 planner's own token cost is logged and counts toward the verdict;
 failing the bar means rejection and removal.
 
-\paragraph{(2) The isolated-explorer lever (I.7) — reported here only
+\paragraph{(2) The isolated-explorer lever (I.7) --- reported here only
 as a worked example of the same discipline applied to a lever this
 paper does not itself report results on.} Committed \texttt{4517b6d},
 \emph{docs/explorador-aislado-ab-design.md} \S~``Criterio
 pre-registrado'':
 
 \begin{quote}\itshape\small
-Adoptar (promover a implementación completa + considerar en Fase 2) si
+Adoptar (promover a implementaci\'on completa + considerar en Fase 2) si
 \texttt{+explore} mejora pass rate en $\geq$8pp agregado sobre baseline
 en 3b (fuera del ruido con n=30/brazo en las 5 tareas no-control), O si
 iguala pass rate con $\geq$30\% menos tokens de turno principal (medido
 por \texttt{expect\_max\_tokens}/tokens totales incluyendo al hijo).
-Rechazar (cerrar I.7, no implementar isolation en Fase 2 por esta vía)
-si \texttt{+explore} no mueve ninguna de las dos métricas, o si el
-control negativo (tarea 6) muestra delegación compulsiva ($>$2/5 reps
+Rechazar (cerrar I.7, no implementar isolation en Fase 2 por esta v\'ia)
+si \texttt{+explore} no mueve ninguna de las dos m\'etricas, o si el
+control negativo (tarea 6) muestra delegaci\'on compulsiva ($>$2/5 reps
 delegando lo que estaba en el prompt). Iterar UNA vez (misma regla que
 el planner) solo si el modo de falla dominante es identificable y
 atacable (p.ej. el hijo converge pero el padre ignora su respuesta
 $\to$ problema de render del tool result, no de la palanca).
-Pre-registrado ahora para no re-litigar después.
+Pre-registrado ahora para no re-litigar despu\'es.
 \end{quote}
 
 \noindent\emph{Gloss}: adopt if the isolated-child lever beats baseline
@@ -2420,26 +2435,26 @@ rather than the lever itself.
 
 \paragraph{(3) The constrained-decoding criterion.} Committed
 \texttt{a279495}, \emph{docs/constrained-decoding-ab-design.md}
-\S~``Criterio pre-registrado'' — this is the same adopt/reject/iterate
+\S~``Criterio pre-registrado'' --- this is the same adopt/reject/iterate
 language paraphrased against the numbers in \S\ref{sec:constrained}:
 
 \begin{quote}\itshape\small
 Adoptar (promover \texttt{constrained-tools} a knob de config
-documentado para modelos débiles, sección en el paper) si, en al menos
-un executor débil (llama3.2:1b o gemma4:e2b): C $-$ A $\geq$ +10pp
+documentado para modelos d\'ebiles, secci\'on en el paper) si, en al menos
+un executor d\'ebil (llama3.2:1b o gemma4:e2b): C $-$ A $\geq$ +10pp
 agregado, fuera del ruido (Newcombe 95\% sobre el delta within-sweep),
 Y C $-$ B $>$ 0 (la ganancia es del constraint, no del cambio de
 modalidad), Y el mecanismo verifica: \texttt{schema\_fail + rescues} de
-C $\approx$ 0. Rechazar (documentar como negativo en la discusión del
+C $\approx$ 0. Rechazar (documentar como negativo en la discusi\'on del
 paper: la capa de harness es el tradeoff correcto incluso con decoder
-controlable) si C $\leq$ A en ambos débiles, o si C $>$ A pero C
+controlable) si C $\leq$ A en ambos d\'ebiles, o si C $>$ A pero C
 $\leq$ B (la mejora era la modalidad prompt, no el constraint --- adoptar
-B sería otra decisión, anotarla). Iterar UNA vez (misma regla que el
+B ser\'ia otra decisi\'on, anotarla). Iterar UNA vez (misma regla que el
 planner) solo si el modo de falla dominante es identificable y
-atacable. Candidata única pre-declarada: el
-\texttt{arguments: \{"type": "object"\}} genérico deja pasar args mal
-formados por tool $\to$ la iteración es el envelope con \texttt{oneOf}
-por tool usando su \texttt{input\_schema} real. Nada más se itera.
+atacable. Candidata \'unica pre-declarada: el
+\texttt{arguments: \{"type": "object"\}} gen\'erico deja pasar args mal
+formados por tool $\to$ la iteraci\'on es el envelope con \texttt{oneOf}
+por tool usando su \texttt{input\_schema} real. Nada m\'as se itera.
 \end{quote}
 
 \noindent\emph{Gloss}: adopt constrained decoding if it beats both the
