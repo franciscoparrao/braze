@@ -2,7 +2,9 @@
 
 Fecha: 2026-07-28
 Estado: `proposed` — nada corrido todavía
-Línea: paper3-round-economics
+Línea: round-economics (renombrada desde `paper3-round-economics` el
+2026-07-29 — chocaba con el Paper 3 que el framework ya asignaba a
+RL/bandits; ver `docs/research-discipline-framework-2026-07-16.md`)
 
 ## El hueco
 
