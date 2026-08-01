@@ -539,6 +539,9 @@ async fn run() -> Result<(), BenchError> {
                     .ok()
                     .flatten()
             },
+            // v9 L-1: the env-only deployment tier travels with the
+            // sweep — see `RunMetadata::local_env`.
+            local_env: metadata::collect_local_env(std::env::vars()),
             // H-17: the resolved display name carries the full spec —
             // executor, +plan:/+lead: halves, and the +ablate: suffix —
             // so the run itself records which ablations were active.

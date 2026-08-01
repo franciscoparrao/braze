@@ -51,6 +51,31 @@ pub struct RunMetadata {
     /// reader aggregating across sweeps can silently mix ablated and
     /// unablated rows. Same order `--backends` listed them in.
     pub backend_specs: Vec<String>,
+    /// v9 L-1 (docs/AUDITORIA-2026-07-v9.md): every `BRAZE_LOCAL_*`
+    /// variable set in the sweep's environment, plus
+    /// `BRAZE_VERIFY_COMMAND` — the deliberately env-only deployment
+    /// tier (per-machine tuning: GPU layers, VRAM margin, KV type,
+    /// sampling overrides, the verification lever). These knobs change
+    /// results but never pass through the config file, so without this
+    /// map a sweep's JSON under-specified the configuration that
+    /// produced it — the same class of gap as the missing
+    /// `ollama_server_version` before EMSE b2/Issue 3. Deterministic
+    /// order (BTreeMap) so two sweeps with the same env serialize
+    /// identically. Empty when none are set (the common case away from
+    /// the LocalBackend), and omitted from the JSON then.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub local_env: std::collections::BTreeMap<String, String>,
+}
+
+/// Collects the env-only deployment tier for [`RunMetadata::local_env`]
+/// from an explicit iterator — the same testability pattern as
+/// `braze_config::Config::load_with` (env-var tests must not read or
+/// mutate the real process environment; parallel tests race on it).
+pub fn collect_local_env(
+    vars: impl Iterator<Item = (String, String)>,
+) -> std::collections::BTreeMap<String, String> {
+    vars.filter(|(k, _)| k.starts_with("BRAZE_LOCAL_") || k == "BRAZE_VERIFY_COMMAND")
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,6 +143,33 @@ pub async fn collect_ollama_model_digests(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// v9 L-1: only the env-only deployment tier is captured — anything
+    /// else in the environment (other BRAZE_* vars already covered by
+    /// the config system, unrelated vars, secrets like API keys) must
+    /// NOT leak into a sweep JSON that gets committed to a public repo.
+    #[test]
+    fn collect_local_env_captures_the_tier_and_nothing_else() {
+        let vars = [
+            ("BRAZE_LOCAL_GPU_LAYERS", "25"),
+            ("BRAZE_LOCAL_KV_TYPE", "q8_0"),
+            ("BRAZE_VERIFY_COMMAND", "cargo check"),
+            ("BRAZE_ANTHROPIC_API_KEY", "sk-ant-secret"),
+            ("BRAZE_OLLAMA_BASE_URL", "http://192.168.1.8:11434"),
+            ("PATH", "/usr/bin"),
+        ];
+        let got = collect_local_env(
+            vars.iter().map(|(k, v)| (k.to_string(), v.to_string())),
+        );
+        assert_eq!(got.len(), 3, "got: {got:?}");
+        assert_eq!(got["BRAZE_LOCAL_GPU_LAYERS"], "25");
+        assert_eq!(got["BRAZE_LOCAL_KV_TYPE"], "q8_0");
+        assert_eq!(got["BRAZE_VERIFY_COMMAND"], "cargo check");
+        assert!(
+            !got.keys().any(|k| k.contains("API_KEY")),
+            "an API key must never travel into sweep metadata"
+        );
+    }
 
     #[test]
     fn fingerprint_is_stable_for_the_same_bytes() {

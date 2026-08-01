@@ -10,6 +10,22 @@ use crate::overrides::ConfigOverrides;
 /// unrecognized-key warning below; a mismatch here means a missing/stale
 /// warning, not an incorrectly-rejected config, so this is best-effort,
 /// same as the rest of this codebase's non-critical diagnostics).
+///
+/// **Deliberately NOT here — the env-only deployment tier** (v9 L-1,
+/// docs/AUDITORIA-2026-07-v9.md; decisión en
+/// docs/decision-local-env-tier-2026-08-01.md): the `BRAZE_LOCAL_*`
+/// family (GPU layers, VRAM margin, KV type/offload, ubatch, model
+/// cache, family override, local sampling) and `BRAZE_VERIFY_COMMAND`
+/// are per-machine, per-experiment tuning read directly from the
+/// environment by their consumers (`braze_model::local`,
+/// `braze-cli`), on purpose: they describe the *deployment*, not the
+/// agent, and promoting them here would put hardware-specific values in
+/// a file that outlives the hardware context. The provenance cost of
+/// being outside this system is paid back where it matters: braze-bench
+/// records the whole tier into every sweep's
+/// `metadata.local_env` (`braze-bench/src/metadata.rs::collect_local_env`).
+/// If one of them ever needs config-file ergonomics, promote it
+/// individually — don't blanket-import the family.
 const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "default_backend",
     "anthropic_api_key",
