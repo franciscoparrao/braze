@@ -22,9 +22,14 @@ pub struct TouchedFile {
     pub path: String,
     /// The tool that touched it last (`"write_file"` or `"edit_file"`).
     pub last_tool: String,
-    /// RFC3339-ish timestamp string, supplied by the caller — this crate
+    /// Opaque timestamp string, supplied by the caller — this crate
     /// never calls a clock itself (keeps it deterministic and testable;
-    /// see the crate-level "no clock" note).
+    /// see the crate-level "no clock" note). The shipping producer
+    /// (`braze-engine`'s `ProjectMemoryHook`) writes seconds-since-epoch
+    /// (e.g. `"1785218110"`), not RFC3339 — an earlier version of this
+    /// comment promised RFC3339 that nothing produced (v9 L-8). The
+    /// field is never rendered into the prompt; it exists for a future
+    /// human or tool inspecting `memory.json`.
     pub at: String,
 }
 
@@ -57,8 +62,11 @@ pub enum SignalSource {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryMeta {
-    /// RFC3339-ish timestamp string of the last successful `save`,
-    /// caller-supplied (see the crate-level "no clock" note).
+    /// Timestamp string (same opaque, caller-supplied convention as
+    /// [`TouchedFile::at`] — seconds-since-epoch from the shipping
+    /// producer) stamped by the persisting side immediately before each
+    /// write. `None` only for a memory that has never been saved (or one
+    /// written by a pre-v9 binary, which never stamped it — v9 L-8).
     pub updated_at: Option<String>,
     /// Bumped whenever the on-disk schema changes shape — mirrors the
     /// `_meta.version` convention already used by

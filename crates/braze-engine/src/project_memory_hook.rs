@@ -123,6 +123,14 @@ impl ProjectMemoryHook {
                                 Err(_) => break,
                             }
                         }
+                        // v9 L-8: stamp here, immediately before the
+                        // write — the saver is the only place that knows
+                        // a persist is actually happening, and stamping
+                        // in the record_* mutators would date mutations
+                        // that coalescing then throws away. The crate's
+                        // "no clock" rule holds: braze-memory still never
+                        // reads a clock; this side supplies the value.
+                        snapshot.meta.updated_at = Some(Self::now());
                         if let Err(err) = store.save(&snapshot).await {
                             // Best-effort by design: a failing disk must
                             // not fail turns (the hook already returned
@@ -311,6 +319,26 @@ mod tests {
         assert_eq!(snapshot.touched_files.len(), 1);
         assert_eq!(snapshot.touched_files[0].path, "src/main.rs");
         assert_eq!(snapshot.touched_files[0].last_tool, "write_file");
+
+        // v9 L-8: the saver stamps `updated_at` immediately before each
+        // write, so the PERSISTED copy carries it (the in-memory snapshot
+        // does not — stamping there would date mutations that coalescing
+        // throws away). It must parse as the epoch-seconds convention the
+        // producer documents, not as an arbitrary string.
+        hook.flush().await;
+        let store2 = FileProjectMemoryStore::new(&path);
+        let persisted = store2
+            .load()
+            .await
+            .expect("load back")
+            .expect("file must exist after flush");
+        let stamp = persisted
+            .meta
+            .updated_at
+            .expect("saver must stamp updated_at on every save");
+        stamp
+            .parse::<u64>()
+            .expect("stamp follows the epoch-seconds convention");
 
         tokio::fs::remove_dir_all(path.parent().unwrap()).await.ok();
     }
