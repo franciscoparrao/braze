@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/franciscoparrao/braze/docs/learned-playbook-v1.schema.json",
+  "title": "LearnedPlaybook",
+  "description": "Procedural memory distilled from a cloud escalation for reuse by a local-first coding agent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "lifecycle",
+    "task_family",
+    "applies_when",
+    "failure_signals",
+    "method_steps",
+    "verification",
+    "avoid",
+    "escalate_if",
+    "source",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,120}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 160
+    },
+    "lifecycle": {
+      "type": "string",
+      "enum": ["candidate", "approved", "validated", "trusted", "retired"]
+    },
+    "task_family": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 80
+    },
+    "applies_when": {
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "failure_signals": {
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "preconditions": {
+      "$ref": "#/$defs/string_array"
+    },
+    "method_steps": {
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "verification": {
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "avoid": {
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "escalate_if": {
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "created_at"],
+      "properties": {
+        "origin": {
+          "type": "string",
+          "enum": ["cloud_tutor", "human", "synthetic_fixture"]
+        },
+        "session_id": {
+          "type": ["string", "null"],
+          "maxLength": 120
+        },
+        "transcript_path": {
+          "type": ["string", "null"],
+          "maxLength": 240
+        },
+        "tutor_backend": {
+          "type": ["string", "null"],
+          "maxLength": 80
+        },
+        "tutor_model": {
+          "type": ["string", "null"],
+          "maxLength": 160
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validated_runs", "failed_runs"],
+      "properties": {
+        "validated_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_used_at": {
+          "type": ["string", "null"],
+          "maxLength": 40
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "maxLength": 500
+        }
+      }
+    }
+  },
+  "$defs": {
+    "string_array": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 220
+      }
+    },
+    "non_empty_string_array": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 220
+      }
+    }
+  }
+}

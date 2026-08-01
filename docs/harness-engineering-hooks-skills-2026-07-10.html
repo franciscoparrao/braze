@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="es" xml:lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Estudio consolidado: harness engineering para braze — Codex, OpenCode y Claude Code</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Estudio consolidado: harness engineering para braze —
+Codex, OpenCode y Claude Code</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a
+href="#estudio-consolidado-harness-engineering-para-braze-codex-opencode-y-claude-code"
+id="toc-estudio-consolidado-harness-engineering-para-braze-codex-opencode-y-claude-code">Estudio
+consolidado: harness engineering para braze — Codex, OpenCode y Claude
+Code</a>
+<ul>
+<li><a href="#resumen-ejecutivo" id="toc-resumen-ejecutivo">Resumen
+ejecutivo</a></li>
+<li><a
+href="#principios-slm-first-del-estudio-de-codex-vigentes-para-todo-el-documento"
+id="toc-principios-slm-first-del-estudio-de-codex-vigentes-para-todo-el-documento">Principios
+SLM-first (del estudio de Codex, vigentes para todo el
+documento)</a></li>
+<li><a href="#estado-actual-de-braze-post-e16143e"
+id="toc-estado-actual-de-braze-post-e16143e">Estado actual de braze
+(post-<code>e16143e</code>)</a></li>
+</ul></li>
+<li><a href="#parte-i-el-canal-harnessmodelo-estudio-de-claude-code"
+id="toc-parte-i-el-canal-harnessmodelo-estudio-de-claude-code">Parte I —
+El canal harness→modelo (estudio de Claude Code)</a>
+<ul>
+<li><a
+href="#i.1-contrato-de-compactación-explicado-al-modelo-recovery-hint-en-el-colapso-aci"
+id="toc-i.1-contrato-de-compactación-explicado-al-modelo-recovery-hint-en-el-colapso-aci">I.1
+Contrato de compactación explicado al modelo + recovery hint en el
+colapso ACI</a></li>
+<li><a
+href="#i.2-harnessnote-presupuesto-loops-y-compactación-avisados-antes-de-cortar"
+id="toc-i.2-harnessnote-presupuesto-loops-y-compactación-avisados-antes-de-cortar">I.2
+<code>HarnessNote</code> — presupuesto, loops y compactación avisados
+ANTES de cortar</a></li>
+<li><a href="#i.3-search_tools-herramientas-diferidas-en-dos-niveles"
+id="toc-i.3-search_tools-herramientas-diferidas-en-dos-niveles">I.3
+<code>search_tools</code> — herramientas diferidas en DOS
+niveles</a></li>
+<li><a
+href="#i.4-lista-de-tareas-tipada-el-plan-como-estado-no-como-prosa"
+id="toc-i.4-lista-de-tareas-tipada-el-plan-como-estado-no-como-prosa">I.4
+Lista de tareas tipada — el plan como estado, no como prosa</a></li>
+<li><a
+href="#i.5-ask_user-clarificación-estructurada-de-opción-múltiple"
+id="toc-i.5-ask_user-clarificación-estructurada-de-opción-múltiple">I.5
+<code>ask_user</code> — clarificación estructurada de opción
+múltiple</a></li>
+<li><a href="#i.6-bloque-de-entorno-opt-in-en-el-system-prompt"
+id="toc-i.6-bloque-de-entorno-opt-in-en-el-system-prompt">I.6 Bloque de
+entorno opt-in en el system prompt</a></li>
+<li><a
+href="#i.7-explorador-de-contexto-aislado-la-inversión-del-lead-diseño-del-ab-que-v6-pidió"
+id="toc-i.7-explorador-de-contexto-aislado-la-inversión-del-lead-diseño-del-ab-que-v6-pidió">I.7
+Explorador de contexto aislado — la inversión del lead (diseño del A/B
+que v6 pidió)</a></li>
+<li><a
+href="#i.8-braze-permissions-suggest-minar-los-session-logs-para-proponer-la-allowlist"
+id="toc-i.8-braze-permissions-suggest-minar-los-session-logs-para-proponer-la-allowlist">I.8
+<code>braze permissions suggest</code> — minar los session logs para
+proponer la allowlist</a></li>
+<li><a
+href="#i.9-retry-con-backoff-en-el-wire-cloud-v5-h-19-confirmado-desde-el-otro-lado"
+id="toc-i.9-retry-con-backoff-en-el-wire-cloud-v5-h-19-confirmado-desde-el-otro-lado">I.9
+Retry con backoff en el wire cloud (v5 H-19, confirmado desde el otro
+lado)</a></li>
+<li><a href="#ideas-evaluadas-y-descartadas-para-no-re-litigar"
+id="toc-ideas-evaluadas-y-descartadas-para-no-re-litigar">Ideas
+evaluadas y descartadas (para no re-litigar)</a></li>
+</ul></li>
+<li><a href="#parte-ii-hooks-estudio-de-codex"
+id="toc-parte-ii-hooks-estudio-de-codex">Parte II — Hooks (estudio de
+Codex)</a>
+<ul>
+<li><a href="#características-útiles-del-harness-de-codex"
+id="toc-características-útiles-del-harness-de-codex">Características
+útiles del harness de Codex</a></li>
+<li><a href="#separación-conceptual-y-niveles"
+id="toc-separación-conceptual-y-niveles">Separación conceptual y
+niveles</a></li>
+<li><a href="#surface-mínimo-recomendado"
+id="toc-surface-mínimo-recomendado">Surface mínimo recomendado</a></li>
+<li><a href="#eventos-nuevos-sugeridos"
+id="toc-eventos-nuevos-sugeridos">Eventos nuevos sugeridos</a></li>
+<li><a href="#hooks-útiles-para-modelos-pequeños"
+id="toc-hooks-útiles-para-modelos-pequeños">Hooks útiles para modelos
+pequeños</a></li>
+<li><a href="#dónde-enganchar-sin-romper-el-motor"
+id="toc-dónde-enganchar-sin-romper-el-motor">Dónde enganchar sin romper
+el motor</a></li>
+<li><a href="#config-inicial" id="toc-config-inicial">Config
+inicial</a></li>
+</ul></li>
+<li><a href="#parte-iii-skills-estudio-de-codex"
+id="toc-parte-iii-skills-estudio-de-codex">Parte III — Skills (estudio
+de Codex)</a>
+<ul>
+<li><a href="#diagnóstico" id="toc-diagnóstico">Diagnóstico</a></li>
+<li><a href="#no-cargar-las-116-skills-del-entorno-tal-cual"
+id="toc-no-cargar-las-116-skills-del-entorno-tal-cual">No cargar las 116
+skills del entorno tal cual</a></li>
+<li><a href="#modelo-de-datos" id="toc-modelo-de-datos">Modelo de
+datos</a></li>
+<li><a href="#loader-local-v1" id="toc-loader-local-v1">Loader local
+(v1)</a></li>
+<li><a href="#selección-router-determinista-no-el-modelo"
+id="toc-selección-router-determinista-no-el-modelo">Selección: router
+determinista, no el modelo</a></li>
+<li><a href="#inyección-al-prompt"
+id="toc-inyección-al-prompt">Inyección al prompt</a></li>
+<li><a href="#skills-como-toolprovider-vs-skillregistry"
+id="toc-skills-como-toolprovider-vs-skillregistry">Skills como
+ToolProvider vs SkillRegistry</a></li>
+<li><a href="#permisos-de-skills" id="toc-permisos-de-skills">Permisos
+de skills</a></li>
+<li><a href="#bench-para-skills" id="toc-bench-para-skills">Bench para
+skills</a></li>
+</ul></li>
+<li><a href="#parte-iv-lo-vigente-del-estudio-de-opencode"
+id="toc-parte-iv-lo-vigente-del-estudio-de-opencode">Parte IV — Lo
+vigente del estudio de OpenCode</a></li>
+<li><a href="#roadmap-consolidado" id="toc-roadmap-consolidado">Roadmap
+consolidado</a>
+<ul>
+<li><a
+href="#paquete-a-canal-harnessmodelo-mínimo-s-valor-slm-alto-medible-hoy"
+id="toc-paquete-a-canal-harnessmodelo-mínimo-s-valor-slm-alto-medible-hoy">Paquete
+A′ — canal harness→modelo mínimo (S, valor SLM alto, medible
+hoy)</a></li>
+<li><a href="#paquete-b-hooks-audit-only-m-valor-de-investigación-alto"
+id="toc-paquete-b-hooks-audit-only-m-valor-de-investigación-alto">Paquete
+B′ — hooks audit-only (M, valor de investigación alto)</a></li>
+<li><a href="#paquete-c-escala-de-inventario-y-plan-tipado-m"
+id="toc-paquete-c-escala-de-inventario-y-plan-tipado-m">Paquete C′ —
+escala de inventario y plan tipado (M)</a></li>
+<li><a
+href="#paquete-d-skills-locales-explicit-first-m-l-como-paquete-c-de-la-v1"
+id="toc-paquete-d-skills-locales-explicit-first-m-l-como-paquete-c-de-la-v1">Paquete
+D′ — skills locales explicit-first (M-L, como Paquete C de la
+v1)</a></li>
+<li><a href="#paquete-e-interactivo-y-fase-2"
+id="toc-paquete-e-interactivo-y-fase-2">Paquete E′ — interactivo y Fase
+2</a></li>
+<li><a href="#criterios-de-aceptación"
+id="toc-criterios-de-aceptación">Criterios de aceptación</a></li>
+<li><a href="#riesgos" id="toc-riesgos">Riesgos</a></li>
+<li><a href="#decisión-recomendada"
+id="toc-decisión-recomendada">Decisión recomendada</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1
+id="estudio-consolidado-harness-engineering-para-braze-codex-opencode-y-claude-code">Estudio
+consolidado: harness engineering para braze — Codex, OpenCode y Claude
+Code</h1>
+<p>Fecha: 2026-07-10 (consolidado; v2 de este archivo) Procedencia: este
+documento consolida los tres estudios del ciclo “cada agente estudia su
+propio harness y propone qué le serviría a braze”:</p>
+<ol type="1">
+<li><strong>OpenCode</strong> (glm-5.2, 2026-07-08) —
+<code>docs/opencode-a-braze.md</code>, que se conserva como fuente de
+detalle; acá solo se recogen sus dictámenes vigentes.</li>
+<li><strong>Codex</strong> (2026-07-10) — la versión 1 de este mismo
+archivo: harness determinista, propuesta de hooks y skills en
+profundidad. Sus secciones se conservan abajo (Partes II y III) con el
+estado actualizado.</li>
+<li><strong>Claude Code</strong> (Fable 5, 2026-07-10) — introspección
+del propio harness en vivo; sus propuestas forman la Parte I y absorben
+lo que era <code>docs/claude-code-a-braze.md</code> (eliminado al
+consolidar).</li>
+</ol>
+<p>Estado de braze de referencia: HEAD <code>e16143e</code>
+(post-Paquete 4 de v6). <strong>Importante</strong>: la v1 de este
+archivo recomendaba implementar <code>references</code> como primer
+paquete; eso se cerró hoy (opencode-10, commit <code>e16143e</code>) —
+el roadmap de abajo ya lo refleja.</p>
+<h2 id="resumen-ejecutivo">Resumen ejecutivo</h2>
+<p>Los tres estudios convergen en la misma tesis desde ángulos
+distintos: <strong>braze no debe copiar un agente frontier, sino
+convertir más responsabilidades en harness determinista</strong> — para
+modelos pequeños, las mejoras útiles no son “más texto en el prompt”
+sino andamiaje que el modelo chico no puede improvisar.</p>
+<p>Cada estudio aporta una capa distinta:</p>
+<ul>
+<li><strong>OpenCode</strong> aportó la capa de
+<strong>configuración</strong>: knobs expuestos en vez de constantes
+(compaction, steps, permisos declarativos, references). De sus 10
+propuestas + 7 ítems de backlog, lo dictaminado HACER ya está cerrado
+(steps/P0.2, ablations, pricing, references); el resto quedó diferido
+con dictamen explícito.</li>
+<li><strong>Codex</strong> aportó la capa de <strong>extensibilidad
+disciplinada</strong>: hooks por niveles de riesgo (audit-only primero),
+skills como memoria procedural con disclosure progresivo y router
+determinista, y la regla rectora “si una extensión no puede demostrarse
+con una suite y una ablation, no debe convertirse en default”.</li>
+<li><strong>Claude Code</strong> aportó la capa de <strong>canal
+harness→modelo</strong>: el harness no solo ejecuta y observa — le habla
+al modelo (avisos de presupuesto antes de cortar, contratos de
+compactación explicados, recordatorios en el momento del loop,
+resultados con receta de recuperación). braze nació copiando los
+principios de primera generación de Claude Code (carga diferida,
+compactación diferencial, push notifications, permisos de dos capas); lo
+que queda por copiar es esta segunda generación conversacional — y un
+SLM la necesita más que un frontier, no menos.</li>
+</ul>
+<p>Prioridad consolidada (detalle en § Roadmap): primero las palancas
+conversacionales baratas y medibles hoy (recovery hint del colapso ACI,
+<code>HarnessNote</code> de budget/loops, <code>search_tools</code> de
+dos niveles), después hooks audit-only, después skills locales
+explicit-first.</p>
+<h2
+id="principios-slm-first-del-estudio-de-codex-vigentes-para-todo-el-documento">Principios
+SLM-first (del estudio de Codex, vigentes para todo el documento)</h2>
+<ol type="1">
+<li>El harness debe hacer lo que el modelo chico hace mal: clasificar
+estados, preservar invariantes, recordar presupuestos, aplicar
+validaciones y decidir cuándo reintentar.</li>
+<li>El modelo debe recibir instrucciones pequeñas, oportunas y
+específicas. El contexto es presupuesto, no almacenamiento general.</li>
+<li>Toda palanca debe ser medible en <code>braze-bench</code>: baseline,
+variante, ablation, costo, rondas, tokens y causa de fallo.</li>
+<li>Una mejora opcional debe degradar sin matar el turno, pero debe
+emitir un evento persistido si falla.</li>
+<li>Las decisiones del harness deben ser tipadas, no inferidas desde
+strings renderizados.</li>
+<li>Las habilidades deben ser retrieval objects, no una excusa para
+inflar el system prompt.</li>
+</ol>
+<p>Adenda del estudio de Claude Code: <strong>7. El harness debe avisar
+antes de actuar</strong> — un corte (budget, dedup, compactación) que el
+modelo no vio venir es un fallo silencioso para un SLM; el mismo corte
+anunciado una ronda antes es una oportunidad de convergencia.</p>
+<h2 id="estado-actual-de-braze-post-e16143e">Estado actual de braze
+(post-<code>e16143e</code>)</h2>
+<p>Piezas correctas que ya existen:</p>
+<ul>
+<li><code>ToolRegistry</code> con stubs baratos y resolución de schema
+bajo demanda.</li>
+<li><code>AgentEvent</code> persistido, usado por session, TUI/observer
+y bench; eventos de palancas SLM (H-3: rescates, escalaciones,
+compaction, summary fallback).</li>
+<li><code>braze-bench</code> con suites TOML, sandbox por tarea,
+timeout, repeticiones, métricas de rondas/tokens/cache/costo
+(<code>estimated_cost_usd</code>, Paquete 3) y causas de fallo
+tipadas.</li>
+<li>Palancas SLM: rescate textual por familia (Qwen/Qwen3-coder/GLM),
+hints proactivos por nombre de modelo (I-4), schema repair, compactación
+diferencial + colapso ACI, best-of-n paralelo (P1.4), planner opt-in,
+lead/worker con knobs alcanzables (I-1) y atribución causal medida
+(apertura proactiva ≫ escalación reactiva,
+<code>docs/sweep-lead-3brazos-2026-07-10.md</code>), post-edit check,
+preflight destructivo de <code>write_file</code> (P0.3), TurnBudget por
+tokens y costo (P0.2/Paquete 3).</li>
+<li>Matriz de ablations completa por fila de sweep
+(<code>no-rescue</code>, <code>no-post-edit-check</code>,
+<code>strict-edit</code>, <code>best-of-n</code>,
+<code>tactical-*</code>, <code>full-observations</code>,
+<code>no-caching</code>, <code>no-prune</code>, <code>no-planner</code>,
+<code>no-lead</code>, <code>lead-*</code>).</li>
+<li><strong><code>references</code> con descriptions (opencode-10):
+implementado</strong> — <code>Config::references</code> entra al
+<code>WorkdirAllowlist</code> y se anuncia en el system prompt;
+verificado en vivo.</li>
+</ul>
+<p>Gaps que este documento ataca:</p>
+<ul>
+<li>El canal harness→modelo mid-turn es ad hoc (post-edit check dentro
+del tool result); los cortes duros (TurnBudget, D4,
+<code>MAX_TURN_ITERATIONS</code>) ocurren sin aviso previo al
+modelo.</li>
+<li>La carga diferida es de un solo nivel: todos los nombres+summaries
+entran al contexto; no escala a providers MCP grandes (el gateway GIS
+del usuario: 1.500+ tools contra <code>num_ctx=8192</code>).</li>
+<li><code>braze-skills</code> y <code>braze-hooks</code> siguen
+diferidos; no hay loader ni eventos de carga.</li>
+<li><code>TurnObserver</code> es un mirror pasivo; no resuelve
+extensiones que deben intervenir.</li>
+<li>Sin retry/backoff en cloud (v5 H-19): un 429 mata el turno y
+contamina la medición.</li>
+</ul>
+<hr />
+<h1 id="parte-i-el-canal-harnessmodelo-estudio-de-claude-code">Parte I —
+El canal harness→modelo (estudio de Claude Code)</h1>
+<p>Método: introspección del propio harness en ejecución — system prompt
+(bloque de entorno, contrato de compactación, sección de memoria),
+inventario de tools (<code>ToolSearch</code>,
+<code>TaskCreate</code>/<code>TaskUpdate</code>,
+<code>AskUserQuestion</code>, subagentes tipados, <code>Monitor</code>),
+y comportamiento observado en la sesión misma (system-reminders
+inyectados, task-notifications re-invocando al agente, avisos de
+archivo-modificado tras cada edición externa).</p>
+<p>Lo que braze ya tiene y el estudio valida (sin re-proponer): carga
+diferida de schemas, compactación diferencial, <code>TaskNotifier</code>
+push, permisos de dos capas con replay por sesión, post-edit feedback en
+el tool result (la versión braze de “hook output as feedback”).</p>
+<h3
+id="i.1-contrato-de-compactación-explicado-al-modelo-recovery-hint-en-el-colapso-aci">I.1
+Contrato de compactación explicado al modelo + recovery hint en el
+colapso ACI</h3>
+<p><strong>Claude Code</strong>: el system prompt explica qué pasa
+cuando el contexto se llena (“se resume; seguí trabajando, no cierres
+antes”) y los resultados truncados traen la receta exacta de
+recuperación (<code>read_file</code> con <code>offset</code>).</p>
+<p><strong>braze hoy</strong>: mitad y mitad. <code>read_file</code>
+pagina con nota de recuperación (bien). El colapso ACI marca
+<code>[old observation collapsed: N chars omitted; ...]</code> — dice
+QUÉ pasó, no QUÉ HACER; y el system prompt no menciona que las
+observaciones viejas se colapsan.</p>
+<p><strong>Arreglo (dos strings)</strong>: (a) extender el marcador:
+<code>...shown in full. Re-run the tool or read_file the path if you need the omitted content]</code>;
+(b) una línea en el system prompt. Medible hoy:
+<code>+ablate:no-prune</code> ya existe; un tercer brazo “prune +
+recovery hint” aísla el efecto sobre
+<code>error_recovery</code>/<code>multi_step</code> con ventana táctica
+chica.</p>
+<h3
+id="i.2-harnessnote-presupuesto-loops-y-compactación-avisados-antes-de-cortar">I.2
+<code>HarnessNote</code> — presupuesto, loops y compactación avisados
+ANTES de cortar</h3>
+<p><strong>Claude Code</strong>: inyecta
+<code>&lt;system-reminder&gt;</code> operacionales en el momento
+accionable (“lista de tareas stale”, “archivo modificado por linter”,
+“contexto por compactarse”).</p>
+<p><strong>braze hoy</strong>: <code>TurnBudget</code> intenta una ronda
+de summary y aborta con <code>TurnBudgetExhausted</code> — el modelo
+nunca supo que tenía presupuesto; D4 filtra la tool call duplicada en
+silencio; <code>MAX_TURN_ITERATIONS</code> corta sin countdown.</p>
+<p><strong>Por qué SLM-first</strong>: un frontier infiere “llevo muchas
+rondas, cierro”; un 3B no — explora hasta que el harness lo mata y el
+turno cuenta como fallo. Un aviso único al 80% del budget (“quedan ~N
+tokens; responde ahora con lo que tienes”) convierte aborts en
+respuestas degradadas-pero-útiles.</p>
+<p><strong>Arreglo</strong>: tipo
+<code>HarnessNote { kind, text }</code> anexado al último tool result de
+la ronda (mismo mecanismo que el post-edit check, generalizado y tipado
+— no un rol nuevo de mensaje, que algunos wire formats no soportan).
+Tres emisores iniciales: budget al 80% (una vez), D4 al filtrar
+duplicado, aviso pre-compactación. Cada emisión persiste como
+<code>AgentEvent</code>. Medible: ¿el aviso convierte
+<code>TurnBudgetExhausted</code> en turnos convergidos? Nota de diseño:
+los <code>HarnessNote</code> son el caso de uso concreto del punto de
+enganche <code>after_tool_dispatch</code> de la Parte II — pueden
+implementarse directo en el engine primero y migrar a hook H1 cuando esa
+surface exista.</p>
+<h3 id="i.3-search_tools-herramientas-diferidas-en-dos-niveles">I.3
+<code>search_tools</code> — herramientas diferidas en DOS niveles</h3>
+<p><strong>Claude Code</strong>: las tools diferidas no pesan NADA en el
+prompt (ni el nombre); un meta-tool <code>ToolSearch</code> acepta
+<code>select:</code> o keywords y carga schemas bajo demanda, con guía
+explícita de batch.</p>
+<p><strong>braze hoy</strong>: <code>list_stubs()</code> pone todos los
+nombres+summaries en contexto. Correcto para 6 tools locales; no escala
+al caso real del usuario: gateway MCP con 1.500+ tools GIS (su CLAUDE.md
+global documenta que lo redujo a mano a 6 meta-tools — braze debería
+tenerlo nativo).</p>
+<p><strong>Por qué SLM-first</strong>: es el argumento del colapso ACI
+aplicado al inventario. <code>distractor_selection</code> mide la
+debilidad con 2-3 tools de ruido; con cientos, el problema es
+estructural.</p>
+<p><strong>Arreglo</strong>: umbral en config
+(<code>deferred_tool_names_threshold</code>, default ~40): si los stubs
+de un provider lo superan, no se listan — se registra
+<code>search_tools(query)</code> que rankea nombre+summary y devuelve
+top-K stubs (invocables vía <code>resolve_schema</code> normal).
+Medible: suite con provider sintético de N tools de ruido, brazos
+con/sin search.</p>
+<h3
+id="i.4-lista-de-tareas-tipada-el-plan-como-estado-no-como-prosa">I.4
+Lista de tareas tipada — el plan como estado, no como prosa</h3>
+<p><strong>Claude Code</strong>: tasks con estados/dependencias vía
+tools; el harness la muestra al usuario y <strong>se la recuerda al
+modelo</strong> cuando está stale. El plan sobrevive compactaciones.</p>
+<p><strong>braze hoy</strong>: el plan del split planner/executor es
+prosa (<code>PlanCreated</code>), y el A/B dio negativo — una hipótesis
+anotada: el plan-en-prosa no guía al executor chico.</p>
+<p><strong>Arreglo</strong>: tools
+<code>task_add</code>/<code>task_update</code> sobre estado en el engine
++ re-inyección compacta por ronda (“hecho: 1,2; en curso: 3”). Vehículo
+del A/B: la iteración pre-registrada del planner (PLAN.md) —
+planner→tasks vs planner→prosa vs sin planner, sobre
+<code>multi_step</code>.</p>
+<h3 id="i.5-ask_user-clarificación-estructurada-de-opción-múltiple">I.5
+<code>ask_user</code> — clarificación estructurada de opción
+múltiple</h3>
+<p><strong>Claude Code</strong>: ante una decisión genuinamente del
+usuario, pregunta tipada con 2-4 opciones renderizada como picker; guía
+estricta de no abusar.</p>
+<p><strong>braze hoy</strong>: un modelo inseguro divaga o adivina; la
+TUI ya tiene overlays (approval, <code>/model</code>).</p>
+<p><strong>Por qué SLM-first</strong>: adivinar mal cuesta un turno de
+tools + arreglo; preguntar cuesta ~100 tokens. Convertir “editó el
+archivo equivocado” en “preguntó cuál” es degradar fallo destructivo a
+fricción — la filosofía de P0.3. Solo sesiones interactivas (bench y
+<code>run</code> no la exponen); verificación pty, no bench.</p>
+<h3 id="i.6-bloque-de-entorno-opt-in-en-el-system-prompt">I.6 Bloque de
+entorno opt-in en el system prompt</h3>
+<p><strong>Claude Code</strong>: snapshot al inicio (branch, status,
+últimos commits, OS, fecha) — el modelo no gasta rondas en
+orientarse.</p>
+<p><strong>braze hoy</strong>: cwd + reglas + hint de familia +
+references. Un modelo local gasta 1-2 rondas de <code>shell_exec</code>
+en orientarse (~2-6s/ronda en Nitro).</p>
+<p><strong>Arreglo</strong>:
+<code>Config::environment_block: bool</code> (default off por
+<code>num_ctx</code>); el composition root genera el snapshot recortado
+(branch + <code>git status -s | head -10</code> + fecha). El bench lo
+deja off (sandbox sin git; N-36 exige paridad con el prompt de
+producción si se promueve a default).</p>
+<h3
+id="i.7-explorador-de-contexto-aislado-la-inversión-del-lead-diseño-del-ab-que-v6-pidió">I.7
+Explorador de contexto aislado — la inversión del lead (diseño del A/B
+que v6 pidió)</h3>
+<p><strong>Claude Code</strong>: además de subagentes más capaces,
+ofrece <code>Explore</code> — read-only y barato — al que delega
+búsqueda amplia para <strong>proteger el contexto del agente
+principal</strong>: el explorador quema su propia ventana leyendo 30
+archivos y devuelve tres líneas.</p>
+<p><strong>braze hoy</strong>: multi-agente es Fase 2; v6 dictaminó
+“subagent isolation: diseñar A/B primero”. La escalación existente va
+chico→grande; no existe la dirección aislamiento-de-exploración.</p>
+<p><strong>Diseño del A/B (no implementación)</strong>: tool
+<code>explore(question)</code> que instancia un Engine hijo (mismo
+backend 3B, tools read-only, <code>max_turn_iterations</code> bajo, sin
+session store) y devuelve su texto final como tool result. Suite de
+búsqueda-amplia (respuesta en 1 de 15 archivos de ruido); brazos:
+baseline / +explore / +explore+<code>no-prune</code> (¿el aislamiento
+subsume al colapso?). Positivo → recién ahí diseñar la isolation seria
+de Fase 2.</p>
+<h3
+id="i.8-braze-permissions-suggest-minar-los-session-logs-para-proponer-la-allowlist">I.8
+<code>braze permissions suggest</code> — minar los session logs para
+proponer la allowlist</h3>
+<p><strong>Claude Code</strong>: un skill lee transcripts pasados,
+encuentra las tool calls read-only que más confirmaciones pidieron y
+propone la allowlist priorizada.</p>
+<p><strong>braze hoy</strong>: replay de <code>PermissionKey</code>
+dentro de la sesión; cada sesión nueva parte de cero. El dictamen de
+opencode-5 (permisos declarativos, M-L) fue tibio; esto lo reordena:
+primero la evidencia (los session logs ya persisten los eventos),
+después el formato declarativo mínimo que esa evidencia pida.</p>
+<p><strong>Arreglo</strong>: subcomando que agrega sobre los session
+logs, imprime top-N de confirmaciones por (tool, patrón) y el snippet de
+config propuesto. Sin cambios en el guard hasta ver la evidencia.</p>
+<h3
+id="i.9-retry-con-backoff-en-el-wire-cloud-v5-h-19-confirmado-desde-el-otro-lado">I.9
+Retry con backoff en el wire cloud (v5 H-19, confirmado desde el otro
+lado)</h3>
+<p><strong>Claude Code</strong>: los errores transitorios
+(429/5xx/stream) se reintentan dentro del harness; el agente solo ve el
+error terminal.</p>
+<p><strong>braze hoy</strong>: H-19 abierto — un 429 aborta el turno. El
+A/B de 3 brazos de hoy mostró 2 fallos <code>model_backend_error</code>
+transitorios contaminando <code>error_recovery</code>. Valor principal:
+fidelidad de medición (F5: fallos de harness ≠ fallos de modelo).
+Arreglo: el ya especificado en H-19 + evento persistido por retry.</p>
+<h3 id="ideas-evaluadas-y-descartadas-para-no-re-litigar">Ideas
+evaluadas y descartadas (para no re-litigar)</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Idea</th>
+<th>Por qué no</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Memoria persistente escrita por el agente entre sesiones</td>
+<td>Riesgo de auto-envenenamiento para un SLM (memorias erróneas
+re-inyectadas); <code>references</code> cubre la variante
+curada-por-humano, que es la segura. Reevaluar en Fase 2 con
+validación.</td>
+</tr>
+<tr class="even">
+<td>Plan mode (fase read-only gateada por el usuario)</td>
+<td>El split automático ya dio A/B negativo; la variante user-gated es
+UX de supervisión (<code>--supervised</code> cubre), no palanca
+SLM.</td>
+</tr>
+<tr class="odd">
+<td>Wakeups auto-programados con economía de cache TTL</td>
+<td>No hay loop autónomo desatendido donde amortizarlo.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="parte-ii-hooks-estudio-de-codex">Parte II — Hooks (estudio de
+Codex)</h1>
+<h3 id="características-útiles-del-harness-de-codex">Características
+útiles del harness de Codex</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Característica</th>
+<th>Valor para modelos pequeños</th>
+<th>Adaptación a braze</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Sandbox y permisos por acción</td>
+<td>El modelo no necesita razonar perfectamente sobre seguridad.</td>
+<td>Extender <code>braze-permissions</code> con permisos para skills y
+hooks transformadores.</td>
+</tr>
+<tr class="even">
+<td>Aprobaciones con justificación</td>
+<td>Hace visible por qué una acción requiere permiso.</td>
+<td>Persistir
+<code>HookPermissionRequested</code>/<code>SkillLoadRequested</code> o
+reutilizar <code>PermissionRequested</code> con
+<code>PermissionKey</code> nuevo.</td>
+</tr>
+<tr class="odd">
+<td>Edición por patch</td>
+<td>Reduce riesgo de sobrescribir archivos grandes.</td>
+<td><code>edit_file</code> como ruta preferente (P0.3 ya bloquea el
+overwrite destructivo); hooks con transformaciones acotadas, no
+escrituras libres.</td>
+</tr>
+<tr class="even">
+<td>Disclosure progresivo de skills</td>
+<td>Solo metadata hasta que la tarea necesita instrucciones.</td>
+<td><code>SkillStub</code> siempre barato; <code>SkillBody</code> solo
+por invocación explícita o router confiable.</td>
+</tr>
+<tr class="odd">
+<td>Tool discovery diferido</td>
+<td>Nombres/resumen visibles, schema al dispatch.</td>
+<td>Ya existe; la Parte I (I.3) propone el segundo nivel.</td>
+</tr>
+<tr class="even">
+<td>Plan de trabajo observable</td>
+<td>Reduce drift en tareas largas.</td>
+<td><code>PlanCreated</code> existe; falta <code>planner_rounds</code> y
+la variante tipada (I.4).</td>
+</tr>
+<tr class="odd">
+<td>Observer separado de persistencia</td>
+<td>UI mira sin ser fuente de verdad.</td>
+<td>Un hook puede influir → necesita permisos, timeout y eventos; no
+confundir con <code>TurnObserver</code>.</td>
+</tr>
+<tr class="even">
+<td>Comandos con timeout y cap de salida</td>
+<td>Evita que una tool ahogue el contexto.</td>
+<td>Existe en tools/bench; hooks/skills heredan caps por defecto.</td>
+</tr>
+<tr class="odd">
+<td>No pisar worktree sucio</td>
+<td>Evita destruir trabajo humano.</td>
+<td>Preflight de tasks self-improvement: registrar estado git y exigir
+confirmación si hay archivos no relacionados.</td>
+</tr>
+<tr class="even">
+<td>Verificación como parte del flujo</td>
+<td>El agente no declara éxito sin checks.</td>
+<td>Skills declaran checks recomendados; hooks sugieren, no ejecutan sin
+permiso.</td>
+</tr>
+<tr class="odd">
+<td>Logs/eventos tipados</td>
+<td>Distinguen fallo de modelo/harness/aserción.</td>
+<td><code>AgentEvent</code> como contrato; eventos pequeños para
+skills/hooks.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="separación-conceptual-y-niveles">Separación conceptual y
+niveles</h3>
+<p><code>TurnObserver</code> sigue siendo vista pasiva. Un hook puede
+observar, bloquear, transformar o enriquecer — mezclarlos volvería
+ambiguo el source of truth.</p>
+<table>
+<colgroup>
+<col style="width: 18%" />
+<col style="width: 18%" />
+<col style="width: 25%" />
+<col style="width: 18%" />
+<col style="width: 18%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Nivel</th>
+<th>Tipo</th>
+<th style="text-align: right;">Puede mutar</th>
+<th>Riesgo</th>
+<th>Implementar</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>H0</td>
+<td>audit-only</td>
+<td style="text-align: right;">No</td>
+<td>Bajo</td>
+<td>Primero</td>
+</tr>
+<tr class="even">
+<td>H1</td>
+<td>enrich/annotate</td>
+<td style="text-align: right;">Solo metadata/eventos</td>
+<td>Bajo-medio</td>
+<td>Segundo</td>
+</tr>
+<tr class="odd">
+<td>H2</td>
+<td>transform</td>
+<td style="text-align: right;">Mensajes, tool args, tool result</td>
+<td>Medio-alto</td>
+<td>Después de bench</td>
+</tr>
+<tr class="even">
+<td>H3</td>
+<td>authority</td>
+<td style="text-align: right;">Permisos, provider routing, abort</td>
+<td>Alto</td>
+<td>Solo con policy clara</td>
+</tr>
+</tbody>
+</table>
+<h3 id="surface-mínimo-recomendado">Surface mínimo recomendado</h3>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span><span class="pp">async_trait::</span>async_trait<span class="at">]</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">trait</span> EngineHook<span class="op">:</span> <span class="bu">Send</span> <span class="op">+</span> <span class="bu">Sync</span> <span class="op">{</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">async</span> <span class="kw">fn</span> on_event(<span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span> _ctx<span class="op">:</span> <span class="op">&amp;</span>HookContext<span class="op">&lt;</span><span class="ot">&#39;_</span><span class="op">&gt;,</span> _event<span class="op">:</span> <span class="op">&amp;</span>AgentEvent) <span class="op">-&gt;</span> HookResult <span class="op">{</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>        <span class="pp">HookResult::</span>Continue</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">async</span> <span class="kw">fn</span> before_model_request(</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>        _ctx<span class="op">:</span> <span class="op">&amp;</span>HookContext<span class="op">&lt;</span><span class="ot">&#39;_</span><span class="op">&gt;,</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>        _request<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> CompletionRequest<span class="op">,</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> HookResult <span class="op">{</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>        <span class="pp">HookResult::</span>Continue</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">async</span> <span class="kw">fn</span> before_tool_dispatch(</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>        _ctx<span class="op">:</span> <span class="op">&amp;</span>HookContext<span class="op">&lt;</span><span class="ot">&#39;_</span><span class="op">&gt;,</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>        _call<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> ToolCall<span class="op">,</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>        _schema<span class="op">:</span> <span class="op">&amp;</span>ToolSchema<span class="op">,</span></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> HookResult <span class="op">{</span></span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>        <span class="pp">HookResult::</span>Continue</span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>    <span class="kw">async</span> <span class="kw">fn</span> after_tool_dispatch(</span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>        _ctx<span class="op">:</span> <span class="op">&amp;</span>HookContext<span class="op">&lt;</span><span class="ot">&#39;_</span><span class="op">&gt;,</span></span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>        _call<span class="op">:</span> <span class="op">&amp;</span>ToolCall<span class="op">,</span></span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>        _result<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> ToolResult<span class="op">,</span></span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> HookResult <span class="op">{</span></span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a>        <span class="pp">HookResult::</span>Continue</span>
+<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a>    <span class="kw">async</span> <span class="kw">fn</span> before_compaction(<span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span> _ctx<span class="op">:</span> <span class="op">&amp;</span>HookContext<span class="op">&lt;</span><span class="ot">&#39;_</span><span class="op">&gt;,</span> _events<span class="op">:</span> <span class="op">&amp;</span>[AgentEvent]) <span class="op">-&gt;</span> HookResult <span class="op">{</span></span>
+<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a>        <span class="pp">HookResult::</span>Continue</span>
+<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> HookResult <span class="op">{</span></span>
+<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a>    Continue<span class="op">,</span></span>
+<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a>    AbortTurn <span class="op">{</span> reason<span class="op">:</span> <span class="dt">String</span> <span class="op">},</span></span>
+<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a>    DisableHook <span class="op">{</span> reason<span class="op">:</span> <span class="dt">String</span> <span class="op">},</span></span>
+<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Cada hook: <code>id</code> estable, timeout corto, failure policy
+(<code>warn_and_continue</code>/<code>disable_hook</code>/<code>abort_turn</code>),
+contadores de latencia/errores, permiso para mutar separado del de
+observar.</p>
+<h3 id="eventos-nuevos-sugeridos">Eventos nuevos sugeridos</h3>
+<ul>
+<li><code>HookErrored { id, point, policy }</code></li>
+<li><code>HookModifiedRequest { id, point, summary }</code></li>
+<li><code>HookAbortedTurn { id, reason }</code></li>
+</ul>
+<p>(<code>HookInvoked</code> omitido por ruido en H0.) En bench:
+<code>hook_errors</code>, <code>hook_modifications</code>,
+<code>hook_latency_ms</code>.</p>
+<h3 id="hooks-útiles-para-modelos-pequeños">Hooks útiles para modelos
+pequeños</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Hook</th>
+<th>Nivel</th>
+<th>Utilidad</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>FailureKindHook</code></td>
+<td>H1</td>
+<td>Clasifica fallos sobre eventos crudos, no strings colapsados (I-3/F3
+— I-3 ya cerrado; F3 abierto).</td>
+</tr>
+<tr class="even">
+<td><code>ToolResultNormalizerHook</code></td>
+<td>H2</td>
+<td>Preserva markers importantes antes de truncar/colapsar.</td>
+</tr>
+<tr class="odd">
+<td><code>PromptBudgetAuditHook</code></td>
+<td>H0</td>
+<td>Bytes/tokens por system, tools, history, skill y references.</td>
+</tr>
+<tr class="even">
+<td><code>SkillSelectionAuditHook</code></td>
+<td>H0</td>
+<td>Skills consideradas/cargadas y tokens agregados.</td>
+</tr>
+<tr class="odd">
+<td><code>HarnessNoteHook</code></td>
+<td>H1</td>
+<td>Los avisos de I.2 (budget/D4/compaction) como hook cuando la surface
+exista.</td>
+</tr>
+<tr class="even">
+<td><code>OtelExportHook</code></td>
+<td>H0</td>
+<td>Exporta eventos sin tocar <code>engine.rs</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>(El <code>TurnBudgetHook</code> H3 de la v1 quedó obsoleto: P0.2 se
+cerró dentro del engine — Paquete 3.)</p>
+<h3 id="dónde-enganchar-sin-romper-el-motor">Dónde enganchar sin romper
+el motor</h3>
+<ol type="1">
+<li>Después de <code>append_and_notify</code>:
+<code>on_event</code>.</li>
+<li>Antes de
+<code>complete_once</code>/<code>complete_with_best_of_n</code>:
+<code>before_model_request</code>.</li>
+<li>Después de <code>RoundOutcome</code>: <code>after_model_round</code>
+(audit-only inicialmente).</li>
+<li>En <code>dispatch_tool_calls</code>, tras resolver schema y antes de
+spawn: <code>before_tool_dispatch</code>.</li>
+<li>Después de recibir <code>ToolResult</code>:
+<code>after_tool_dispatch</code>.</li>
+<li>En el punto de decisión de compaction:
+<code>before_compaction</code>/<code>after_compaction</code>.</li>
+</ol>
+<p>Orden estable y probado; si dos hooks transforman el mismo objeto, el
+orden viene de config, no del discovery.</p>
+<h3 id="config-inicial">Config inicial</h3>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;hooks&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;enabled&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;failure_policy&quot;</span><span class="fu">:</span> <span class="st">&quot;warn_and_continue&quot;</span><span class="fu">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;timeout_ms&quot;</span><span class="fu">:</span> <span class="dv">250</span><span class="fu">,</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;audit_only&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;plugins&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Primera versión sin plugins dinámicos: solo hooks compilados o
+construidos por <code>braze-cli</code>/<code>braze-bench</code>. La API
+pública se estabiliza antes de cargar código externo.</p>
+<hr />
+<h1 id="parte-iii-skills-estudio-de-codex">Parte III — Skills (estudio
+de Codex)</h1>
+<h3 id="diagnóstico">Diagnóstico</h3>
+<p>Una skill no debería ser “más system prompt”: es una unidad de
+memoria procedural — metadata barata siempre indexable, body cargado
+solo si es relevante, recursos con disclosure progresivo, scripts nunca
+ejecutados implícitamente, eventos para saber si ayudó. Coincide con el
+patrón de Codex (<code>SKILL.md</code> con frontmatter + recursos); lo
+que cambia para braze es la <strong>selección</strong>: un frontier
+decide bien qué skill pedir; un SLM necesita ayuda del harness.</p>
+<h3 id="no-cargar-las-116-skills-del-entorno-tal-cual">No cargar las 116
+skills del entorno tal cual</h3>
+<p>v6 acierta al diferir un loader general: muchas skills existentes son
+largas, densas y escritas para modelos fuertes. En un SLM consumen
+contexto, aumentan indecisión, introducen instrucciones incompatibles, o
+hacen que el modelo imite procedimientos que no puede ejecutar. La ruta
+correcta: soportar el formato, empezar con una allowlist de skills
+SLM-native (cuerpos chicos, triggers claros, ejemplos cortos, checks
+medibles).</p>
+<h3 id="modelo-de-datos">Modelo de datos</h3>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> SkillStub <span class="op">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> name<span class="op">:</span> <span class="dt">String</span><span class="op">,</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> description<span class="op">:</span> <span class="dt">String</span><span class="op">,</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> source<span class="op">:</span> SkillSource<span class="op">,</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> estimated_tokens<span class="op">:</span> <span class="dt">u32</span><span class="op">,</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> SkillBody <span class="op">{</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> name<span class="op">:</span> <span class="dt">String</span><span class="op">,</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> body_markdown<span class="op">:</span> <span class="dt">String</span><span class="op">,</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> resources<span class="op">:</span> SkillResources<span class="op">,</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> SkillTrigger <span class="op">{</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>    ExplicitMention<span class="op">,</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>    SlashCommand<span class="op">,</span></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>    RouterMatch<span class="op">,</span></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>    BenchFixture<span class="op">,</span></span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Eventos:
+<code>SkillLoaded { name, source, trigger, estimated_tokens }</code>,
+<code>SkillLoadSkipped { name, reason }</code>,
+<code>SkillSelectionFailed { reason }</code>. No persistir
+<code>SkillIndexed</code> por turno (ruido).</p>
+<h3 id="loader-local-v1">Loader local (v1)</h3>
+<ul>
+<li><code>skills.paths</code>: directorios locales; discovery por
+<code>**/SKILL.md</code> con límites de profundidad y bytes.</li>
+<li>Parser mínimo de frontmatter (<code>name</code>,
+<code>description</code>); nombre normalizado; duplicados por prioridad
+de path con warning.</li>
+<li>Sin URLs remotas en v1 (requieren cache, checksum, permisos,
+política de actualización).</li>
+</ul>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;skills&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;enabled&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;paths&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;.braze/skills&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;mode&quot;</span><span class="fu">:</span> <span class="st">&quot;explicit_first&quot;</span><span class="fu">,</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;max_loaded_per_turn&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;max_body_tokens&quot;</span><span class="fu">:</span> <span class="dv">1200</span><span class="fu">,</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;allow_remote&quot;</span><span class="fu">:</span> <span class="kw">false</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p><code>mode</code>: <code>off</code> / <code>explicit_only</code> /
+<code>explicit_first</code> (recomendado para SLMs) / <code>auto</code>
+(solo post-bench).</p>
+<h3 id="selección-router-determinista-no-el-modelo">Selección: router
+determinista, no el modelo</h3>
+<ol type="1">
+<li>Mención explícita (<code>$testing</code>,
+<code>/skill testing</code>) gana.</li>
+<li>Sin mención: ranking lexical/BM25 sobre
+<code>name + description</code>.</li>
+<li>Penalizar skills largas y re-cargas sin progreso.</li>
+<li>Máximo 1-2 por turno; evento con trigger y tokens.</li>
+</ol>
+<p>El modelo puede ver una lista pequeña de skills disponibles, pero el
+harness decide qué cuerpos entran al prompt.</p>
+<h3 id="inyección-al-prompt">Inyección al prompt</h3>
+<p>Addendum estructurado al system prompt del siguiente request
+(<code>Loaded skill: testing</code> + body capado). No persistir el body
+como <code>UserMessage</code> (ensucia historial y compaction):
+persistir <code>SkillLoaded</code> y reconstruir desde el registry; si
+el replay exacto lo exige, persistir hash+versión.</p>
+<h3 id="skills-como-toolprovider-vs-skillregistry">Skills como
+ToolProvider vs SkillRegistry</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Opción</th>
+<th>Ventaja</th>
+<th>Problema</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Skills como <code>ToolProvider</code></td>
+<td>Reusa tool-calling y permisos.</td>
+<td>Un SLM puede no pedir la skill correcta antes de fallar; la carga
+llega tarde.</td>
+</tr>
+<tr class="even">
+<td><code>SkillRegistry</code> first-class</td>
+<td>El harness carga antes del primer round.</td>
+<td>Crate y wiring nuevos.</td>
+</tr>
+</tbody>
+</table>
+<p>Recomendación: <code>SkillRegistry</code> first-class + tool opcional
+<code>load_skill</code> para cargas explícitas mid-turn. Lo importante
+para SLMs: cargar la guía <strong>antes</strong> del primer error del
+executor.</p>
+<h3 id="permisos-de-skills">Permisos de skills</h3>
+<p>Lectura de archivos, no ejecución.
+<code>skill.load: allow|ask|deny</code>;
+<code>skill.remote.load: deny</code> default; scripts dentro de una
+skill pasan por las tools y permisos normales; paths fuera de allowlist
+requieren config explícita.</p>
+<h3 id="bench-para-skills">Bench para skills</h3>
+<p><code>TaskDef</code>: <code>expect_skill_loaded</code>,
+<code>expect_no_skill_loaded</code>,
+<code>expect_max_skill_tokens</code>. <code>TaskResult</code>:
+<code>skills_loaded</code>, <code>skill_tokens</code>,
+<code>skill_selection_failures</code>,
+<code>expected_skill_loaded</code>. Ablations:
+<code>+ablate:no-skills</code>, <code>skill-mode=explicit_only</code>,
+<code>skill-max-body-tokens=N</code>. Tareas:
+<code>skill_explicit_testing</code>,
+<code>skill_irrelevant_rejected</code>, <code>skill_guided_edit</code>,
+<code>skill_budget_cap</code>.</p>
+<hr />
+<h1 id="parte-iv-lo-vigente-del-estudio-de-opencode">Parte IV — Lo
+vigente del estudio de OpenCode</h1>
+<p>Detalle completo en <code>docs/opencode-a-braze.md</code>. Estado de
+sus propuestas a <code>e16143e</code>:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Propuesta</th>
+<th>Estado</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>#1 steps / max_turn_iterations configurable</td>
+<td><strong>Cerrado</strong> (v4 P0.2 mitad rondas; Paquete 3 cerró la
+mitad costo/tokens)</td>
+</tr>
+<tr class="even">
+<td>#2 knobs de compaction + prune ablatable</td>
+<td><strong>Cerrado</strong> (I-2 caps proporcionales; opencode-2
+<code>no-prune</code> en 912fedb)</td>
+</tr>
+<tr class="odd">
+<td>#8 pricing table / costo</td>
+<td><strong>Cerrado</strong> (Paquete 3: <code>estimated_cost_usd</code>
++ enforcement)</td>
+</tr>
+<tr class="even">
+<td>#10 references con descriptions</td>
+<td><strong>Cerrado</strong> (opencode-10 en <code>e16143e</code>)</td>
+</tr>
+<tr class="odd">
+<td>#5 permisos declarativos por patrón</td>
+<td>Diferido condicionado — I.8 (<code>permissions suggest</code>)
+genera la evidencia que lo desbloquearía</td>
+</tr>
+<tr class="even">
+<td>#6 chunkTimeout</td>
+<td>BAJA (I-7); absorber al cerrar H-19 (I.9) si conviene</td>
+</tr>
+<tr class="odd">
+<td>#7 skills loader</td>
+<td>Diferido → Parte III es el plan cuando se retome</td>
+</tr>
+<tr class="even">
+<td>#9 hook surface</td>
+<td>Fase 2 → Parte II es el plan cuando se retome</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="roadmap-consolidado">Roadmap consolidado</h1>
+<p>Reemplaza los paquetes A-E de la v1 (el Paquete A — references — ya
+está cerrado) e integra las prioridades de la Parte I.</p>
+<h3
+id="paquete-a-canal-harnessmodelo-mínimo-s-valor-slm-alto-medible-hoy">Paquete
+A′ — canal harness→modelo mínimo (S, valor SLM alto, medible hoy)</h3>
+<ol type="1">
+<li><strong>I.1</strong> recovery hint del colapso ACI + línea de
+contrato de compactación en el system prompt (dos strings; ablation
+<code>no-prune</code> ya lista para el A/B de tres brazos).</li>
+<li><strong>I.2</strong> <code>HarnessNote</code> con tres emisores
+(budget 80%, D4, pre-compactación), directo en el engine; migra a hook
+H1 cuando exista la surface.</li>
+<li><strong>I.9</strong> retry/backoff cloud (H-19, spec lista) + evento
+por retry — limpia la medición de los sweeps cloud del paper.</li>
+</ol>
+<h3
+id="paquete-b-hooks-audit-only-m-valor-de-investigación-alto">Paquete B′
+— hooks audit-only (M, valor de investigación alto)</h3>
+<p><code>EngineHook</code> H0/H1 (<code>on_event</code> +
+<code>before_model_request</code> read-only), registro en Engine,
+timeout/failure policy, eventos de error/modificación/abort,
+<code>PromptBudgetAuditHook</code>, tests de orden y degradación. (Como
+estaba en la v1, menos el <code>TurnBudgetHook</code> obsoleto.)</p>
+<h3 id="paquete-c-escala-de-inventario-y-plan-tipado-m">Paquete C′ —
+escala de inventario y plan tipado (M)</h3>
+<ol type="1">
+<li><strong>I.3</strong> <code>search_tools</code> de dos niveles con
+umbral en config + suite de distractores masivos.</li>
+<li><strong>I.4</strong> task list tipada como vehículo de la iteración
+pre-registrada del planner.</li>
+</ol>
+<h3
+id="paquete-d-skills-locales-explicit-first-m-l-como-paquete-c-de-la-v1">Paquete
+D′ — skills locales explicit-first (M-L, como Paquete C de la v1)</h3>
+<p><code>braze-skills</code> con discovery local, config, detección
+<code>$skill</code>/<code>/skill</code>, inyección capada, eventos,
+bench con <code>expect_skill_loaded</code>. Después (gate por A/B):
+router automático (Paquete D v1).</p>
+<h3 id="paquete-e-interactivo-y-fase-2">Paquete E′ — interactivo y Fase
+2</h3>
+<ol type="1">
+<li><strong>I.5</strong> <code>ask_user</code> (TUI overlay;
+verificación pty).</li>
+<li><strong>I.6</strong> bloque de entorno opt-in.</li>
+<li><strong>I.8</strong> <code>braze permissions suggest</code>.</li>
+<li><strong>I.7</strong> A/B del explorador aislado — el gate que v6
+pidió antes de diseñar subagent isolation.</li>
+<li>Hooks transformadores (H2/H3) y plugins remotos (Paquete E v1) —
+después de todo lo anterior.</li>
+</ol>
+<p>Nada de esto bloquea la matriz del paper (en curso) ni los diferidos
+explícitos de v6 (P1.1 split de engine.rs antes de Fase 2).</p>
+<h2 id="criterios-de-aceptación">Criterios de aceptación</h2>
+<p>Para el canal harness→modelo (Paquete A′):</p>
+<ul>
+<li>El aviso de budget se emite UNA vez, al cruzar el umbral, y persiste
+como evento; el bench puede contar cuántos
+<code>TurnBudgetExhausted</code> se convirtieron en turnos
+convergidos.</li>
+<li>El marcador de colapso extendido no rompe la clasificación de fallos
+(I-3 la hizo robusta a render — verificar que siga).</li>
+<li>Un retry de red no cuenta como fallo del modelo en
+<code>TaskResult</code> (F5).</li>
+</ul>
+<p>Para hooks (sin cambios respecto de la v1):</p>
+<ul>
+<li>Hook audit-only no cambia resultados del turno; hook que falla con
+<code>warn_and_continue</code> no mata el turno y emite evento; timeout
+desactiva o registra según policy; orden estable y testeado; bench
+reporta latencia/errores.</li>
+</ul>
+<p>Para skills (sin cambios respecto de la v1):</p>
+<ul>
+<li>Discovery encuentra <code>SKILL.md</code> válido y rechaza
+frontmatter incompleto; duplicados deterministas; mención explícita
+carga la correcta; <code>max_body_tokens</code> se respeta;
+<code>no-skills</code> deja la tarea sin eventos de skill; una
+mini-skill mejora al menos una tarea o reduce rondas/tokens frente a
+baseline.</li>
+</ul>
+<h2 id="riesgos">Riesgos</h2>
+<ul>
+<li>Cargar skills largas puede empeorar el rendimiento de SLMs (por eso
+allowlist + caps).</li>
+<li>Hooks transformadores pueden volver irreproducible el bench si no se
+registran como metadata.</li>
+<li>Plugins dinámicos abren superficie de seguridad y versionado.</li>
+<li>Un router automático (de skills O de tools — I.3) puede esconder un
+problema de prompt si no hay ablations.</li>
+<li>Avisos del harness (<code>HarnessNote</code>) mal calibrados son
+ruido que compite con el presupuesto de prompt — cada emisor nace con su
+ablation.</li>
+<li>Inflar <code>AgentEvent</code> engorda el rollout log; persistir
+solo lo necesario para reproducibilidad y métricas.</li>
+</ul>
+<h2 id="decisión-recomendada">Decisión recomendada</h2>
+<p>Con <code>references</code> ya cerrado, el orden es: <strong>Paquete
+A′ primero</strong> (tres palancas chicas, medibles con la
+infraestructura de ablations que ya existe — es la continuación natural
+del ciclo v6 y alimenta directamente el paper), luego hooks audit-only
+(B′) para observabilidad, luego la escala de inventario (C′) cuando haya
+un caso MCP real conectado, y skills locales (D′) solo con cuerpos
+SLM-native y allowlist.</p>
+<p>El criterio rector no cambia: <strong>si una extensión no puede
+demostrarse con una suite y una ablation, no debe convertirse en
+default.</strong> Y su corolario del tercer estudio: si el harness va a
+cortar algo, que lo avise primero — los cortes silenciosos son fallos de
+modelo solo en apariencia.</p>
+</body>
+</html>

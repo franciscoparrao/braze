@@ -86,7 +86,7 @@ sub-hipótesis de plantilla/serving: que el template de chat trate un
 mensaje assistant final como *prefill* y el modelo emita EOS inmediato.
 Eso NO se responde variando `num_predict` — requiere inspeccionar el
 prompt renderizado, lo que redefine el experimento encolado (ver
-`docs/empty-response-discriminant-design-2026-07-18.md`).
+`docs/empty-response-template-probe-design-2026-07-18.md`).
 
 ## Acciones derivadas
 

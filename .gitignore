@@ -7,7 +7,19 @@
 *.snap.new
 
 # Papers de referencia leídos durante auditorías/investigación — nunca se
-# suben al repo (son grandes y no son necesarios para nadie más).
+# suben al repo (son grandes y no son necesarios para nadie más). El patrón
+# de raíz cubre PDFs de terceros con copyright que aterrizan ahí (v9 L-3).
 docs/*.pdf
+/*.pdf
 tools/swebench_cache/
 paper/submission-emse/
+
+# v9 L-3 — artefactos que nunca son fuente:
+# Sesiones preservadas del bench (--keep-sessions): rollouts JSONL y
+# sandboxes con rutas absolutas de la máquina local. Evidencia de trabajo,
+# no código; viven en el disco, no en el repo.
+braze-bench-preserved-sessions/
+# Historial de consola de R (se regenera solo).
+.Rhistory
+# Logs de sweeps abortados.
+*.log.killed

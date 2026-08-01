@@ -81,7 +81,7 @@ De ahí que braze tuviera que hacerlo a mano. Dos consecuencias auditadas:
   **duplica** funcionalidad madura. [verificado]
 - **GBNF para tool-calls: llama.cpp SÍ.** Grammar triggers (GBNF *lazy*
   activadas por regex) + un auto-parser que **deriva la gramática del
-  template** renderizándolo dos veces y difeando (`docs/autoparser.md`). El
+  template** renderizándolo dos veces y difeando (`docs/autoparser.md` del repo de llama.cpp, no de braze). El
   stencil de braze no es único. [verificado]
 
 **Lo que sí sostiene a braze** (y hay que decirlo con precisión): braze evita
