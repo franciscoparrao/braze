@@ -1,24 +1,34 @@
 # braze — motor agéntico genérico en Rust (experimento)
 
-> **Estado (2026-07-18):** MVP completo, reorientado a **"maestro en
+> **Estado (2026-08-01):** MVP completo, reorientado a **"maestro en
 > modelos pequeños"** — el harness como variable que compensa la escala
-> del modelo (respaldo: SWE-agent/ACI y el TR de Qwen3-Coder-Next, ver
-> `docs/SOTA-2026-07.md`; el encuadre ya tiene nombre de disciplina:
-> "harness engineering", delta de literatura en
-> `docs/AUDITORIA-2026-07-v8.md` § 6). Fases 1-5 + TUI (2 fases) +
-> auditorías **v1-v8** (v8 ejecutó en el día sus Paquetes 0-3 completos
-> y el top-6 S/M del Paquete 4; abiertos vigentes en
-> `docs/AUDITORIA-2026-07-v8.md`); split planificador/ejecutor rescatado
-> bajo pre-registro (`docs/sweep-planlead-2026-07-11.md`); **P1.1
-> ejecutado**: `engine.rs` (11.4k líneas) partido en 9 módulos
-> (`engine/` + `rescue.rs`), queda solo repartir su `mod tests`;
-> evidencia experimental del paper completa, manuscrito en `paper/`, y
-> el ancla BFCL corrida el 2026-07-18 (análisis en curso); y el
-> **LocalBackend completo** (2026-07-20/21: inferencia in-process
-> llama.cpp, 3 familias de plantilla, stencil GBNF — ver su § abajo;
-> gpt-oss:20b por el camino Harmony logró 57/57, el mejor número del
-> proyecto). Creado 2026-07-03. Ver `PLAN.md` para la arquitectura y
-> verificación por incremento.
+> del modelo (el encuadre ya tiene nombre de disciplina, "harness
+> engineering", y desde jul-2026 hasta currículo externo — ver el paper
+> § Related Work). **El manuscrito está CONGELADO para EMSE**: paquete
+> compilado en `paper/submission-emse/`, tag
+> `emse-submission-2026-07-29`, `/paper-match` lo confirmó STRONG FIT
+> (ML 29,5% vs 6,0% del segundo); faltan solo dos acciones del autor
+> (hacer público el repo + IDs de registro OSF). Auditorías **v1-v9**
+> (v9, 2026-07-31: código sano — 1.117 tests, clippy limpio — y el
+> riesgo en el *perímetro*; sus Paquetes 0-2 ya ejecutados: evidencia
+> del Paper 2 al repo, procedencia de sweeps pre-metadata, capa
+> env-only declarada con `metadata.local_env`). **LocalBackend
+> completo** (Fases 1-3 + KV-quant; gpt-oss:20b por Harmony logró
+> 57/57, el mejor número del proyecto). **Hallazgo del 2026-07-28**:
+> hay caracteres que el modelo entiende y NO PUEDE EMITIR (`U+1D62`,
+> `≈`, comillas anidadas en `format!`) → corrupción silenciosa que
+> ningún gate caza y regiones *estructuralmente ineditables* por el
+> agente; cinco arreglos de harness salieron de ahí, el principal
+> verificado en vivo (deadlock de 20 rondas/25m → rechazo honesto en
+> 4/7m31s) — ver `docs/roam-metrics-memoria-2026-07-28.md` y el párrafo
+> nuevo del paper en Discussion. Dos palancas más medidas y muertas con
+> nulos limpios (H2 verificación: piloto positivo era falso positivo,
+> potenciado REJECT; stencil: empate ×3). Suite **discriminante v2**
+> (34 tareas, 2,9 pp/ítem) + piso de ruido medido. Línea nueva
+> **round-economics** pre-registrada (¿manda la escala del modelo o el
+> precio de la ronda?), con gate explícito hacia metaheurísticas.
+> Creado 2026-07-03. Ver `PLAN.md` para la arquitectura y verificación
+> por incremento.
 
 **Wiki de referencia**: ver `wiki/index.md`
 
@@ -113,20 +123,26 @@ del autor** (datacube-rs, geostat-rs, swarm-abm son 100% sync + rayon):
 Todo lo demás sigue la convención habitual: `thiserror` v2, `clap` v4,
 `serde`+`serde_json`, licencia dual `MIT OR Apache-2.0`, archivo-por-módulo.
 
-## Estado del código (2026-07-18)
+## Estado del código (2026-08-01)
 
 Los 15 crates tienen lógica real y verificada. `cargo build/test/clippy
---workspace` verdes: **~1.000 tests**, clippy `-D warnings` limpio.
-**P1.1 ejecutado** (4 commits, 2026-07-18): `engine.rs` vive ahora en
+--workspace` verdes: **1.117 tests**, clippy `-D warnings` limpio
+(re-verificado completo en la auditoría v9, 2026-07-31). **P1.1
+ejecutado** (4 commits, 2026-07-18): `engine.rs` vive ahora en
 `engine/` (mod.rs solo struct+builders+tests, más `context`, `turn`,
 `round`, `dispatch`, `planner`, `fallback`, `hooks_dispatch`) y la
 escalera de rescate en `src/rescue.rs` — extracción verbatim, tests
-verdes tras cada paso. Reparto del `mod tests` en curso (pasos 4-7,
-2026-07-21): fixtures compartidas en `engine/test_support.rs` y los
-clusters de context/planner/compactación/best-of-n/dispatch ya en sus
-módulos (`mod.rs` 8.704→6.680 líneas); queda el cluster grande de
-`run_turn_*`/summary-round (~50 tests) → `turn.rs`. J-20 (symlinks): aceptación MVP
-**ratificada** por el autor el 2026-07-18. La
+verdes tras cada paso. Reparto del `mod tests` en curso: queda el
+cluster grande de `run_turn_*`/summary-round (~50 tests) → `turn.rs`
+(v9 L-5). Deuda gemela nueva: `local.rs` llegó a 2.046 líneas — es el
+nuevo engine.rs y se corta ANTES de features de Fase 2 (v9 L-4).
+Arreglos del 2026-07-28 en main (`b1325fa`): `edit_file` reporta la
+primera divergencia con codepoint en ambos lados; la guarda de
+`write_file` depende del tamaño del archivo; `braze run` no se cuelga
+en prompts de permiso sin TTY (deniega y lo dice); `search`→`grep` se
+sugiere por tabla de sinónimos; canal Harmony desconocido trazado.
+J-20 (symlinks): aceptación MVP **ratificada** por el autor el
+2026-07-18. La
 convención de verificación del proyecto: cada incremento se prueba
 también **en vivo** (pty scripteado contra el binario real para la TUI,
 sweeps de braze-bench contra modelos reales, smoke contra APIs reales) —
@@ -278,33 +294,42 @@ no sobre la plantilla).
 
 ## Próximos pasos al retomar
 
-(Actualizado 2026-07-18 tras ejecutar la auditoría v8 — Paquetes 0-3
-completos y el top-6 S/M del Paquete 4 en main; el sweep BFCL corrió el
-mismo día. El arco LocalBackend de 2026-07-20/21 está en su § arriba.)
+(Actualizado 2026-08-01 tras la auditoría v9 y sus Paquetes 0-2. El
+roadmap completo vive en `docs/AUDITORIA-2026-07-v9.md` § 5; esto es el
+resumen operativo.)
 
-- **Ancla BFCL**: análisis post-sweep (transporte 2% → grader → E1-E4,
-  `docs/bfcl-anchor-RESUME.md`) e integración al paper; luego re-runs
-  bloques 1-2 y probe Parte B (diseños pre-registrados).
-- **A/B Gemma4**: Ollama de Nitro **ya actualizado a 0.32.1** (2026-07-20,
-  era 0.30.7 — el fix de tool calling del 16-jul ya está en el nodo);
-  falta re-correr e4b vs gpt-oss:20b con el MISMO digest (`c6eb396dbd59`
-  — el stealth refresh del 15-jul aún no llega al registry); vigilar el
-  cambio de digest para el A/B de pesos.
-- **A/Bs nuevos de la cola de Nitro**: lead-summary (con `num_ctx`
-  chico para que compacte de verdad) y TTC (`qwen2.5:3b` vs
-  `+ablate:ttc=3`, cruzado con pass^k).
-- **Manuscrito** (`paper/`): prosa de los TODOs, `/verify-refs`, venue,
-  `/zenodo`; anotar en Threats el complemento McNemar/Holm y las citas
-  nuevas de v8 § 6 (Constraint Tax, Trivedy, MemCoder, pass^k).
-- **TUI**: verificación en vivo del overlay `ask_user` con un modelo
-  que llame la tool (resto de la fase 3 verificado en vivo el
-  2026-07-19); celdas de compactación (diferido explícito).
-- **P1.1 resto**: repartir el `mod tests` de `engine/mod.rs`.
-- **v8 restantes**: Paquete 4 L (Landlock write-only, subagente
-  Viewer/Editor, background trans-ronda), P0.2 (costo USD/walltime por
-  turno), K-16 (negative-cache MCP), AGENTS.md interop. J-12 y J-26
-  (v7) quedaron cerrados con la fase TUI 3.
-- Infra Nitro: IP fija en el router, `OLLAMA_KEEP_ALIVE`.
+- **SUBMISSION EMSE — dos bloqueantes, ambos del autor**: (1) hacer
+  público el repo (`gh repo edit franciscoparrao/braze --visibility
+  public --accept-visibility-change-consequences`; el escaneo de
+  seguridad de la historia completa ya se corrió, limpio); (2) crear
+  los 2 registros OSF (formularios listos en `/tmp/osf/` de la sesión
+  del 29-jul; el texto también está en los dos design docs § "Registro
+  externo") y pegar los IDs donde el ÚNICO `\todo` restante del
+  manuscrito los espera — ese TODO es la salvaguarda deliberada. Tras
+  ambos: verificar 200 anónimo del tag + un JSON de sweep, quitar
+  `\todo` y su `\newcommand`, regenerar `paper/submission-emse/`, subir.
+- **v9 Paquete 3**: P1.1 resto (cluster `run_turn_*` → `turn.rs`) y
+  split de `local.rs` — este último ANTES de cualquier feature nueva
+  del backend.
+- **v9 Paquete 4**: interlock duro de `write_file` tras 2 fallos de
+  `edit_file` (necesita estado por turno), fail-fast de brazo en el
+  bench, K-16 (negative-cache MCP), AGENTS.md interop, Landlock
+  write-only, subagente Viewer/Editor.
+- **round-economics** (pre-registro en
+  `docs/hypothesis-2026-07-28-round-economics.md`): dos pilotos
+  independientes; el de contexto YA CORRIÓ pero sus réplicas son copias
+  (greedy determinista sobre estado idéntico, v9 L-9) — re-correr con
+  `BRAZE_LOCAL_TEMP>0` y semillas antes de interpretar nada.
+  Metaheurísticas queda BLOQUEADA hasta que este piloto decida.
+- **Paper de seguimiento**: `/verify-refs` sobre las 3 entradas nuevas
+  del bib (zhu2026babeltele, walkinglabs2026, dex2026wsff); `/zenodo`
+  a la aceptación (decisión del autor, no antes).
+- **Backlog que sobrevive de v8**: A/B Gemma4 de runtime con digest
+  fijo (`c6eb396dbd59`); lead-summary y TTC en la cola de Nitro; TUI
+  overlay `ask_user` en vivo; P0.2 (costo USD/walltime por turno).
+- **Higiene**: 9 untracked deliberados en `docs/` (diagnósticos gemma
+  cerrados, etc.) — decisión diferida, no accidente; infra Nitro (IP
+  fija, `OLLAMA_KEEP_ALIVE`).
 
 ## Modelos locales recomendados (Ollama)
 
