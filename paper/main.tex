@@ -25,7 +25,6 @@
 \usepackage[colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue]{hyperref}
 \usepackage{xcolor}
 
-\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\braze}{\textsc{braze}}
 
 \title{Not All Scaffolding Helps: A Lever-by-Lever Study of Agentic
@@ -746,19 +745,19 @@ in this paper's results), and constrained decoding
 own repository, timestamped and ordered ahead of the sweep it governs,
 but recorded nowhere outside the author's control. We consider this
 weaker evidence than an independent registry and disclose it as such
-rather than implying otherwise. Starting with the two solo-baseline
+rather than implying otherwise. For the two solo-baseline
 measurements added during revision (\texttt{gemma4:e4b} alone,
 \S\ref{sec:curve}; the bare lead+executor loop,
-\S\ref{sec:external}), we additionally prepared OSF Registrations
-(\texttt{osf.io/registries}) carrying the same hypothesis, design, and
-analysis-plan text as the corresponding design document
-(\texttt{docs/gemma4-e4b-solo-baseline-design.md},
+\S\ref{sec:external}), the corresponding design documents each carry a
+section drafted for an external OSF registration
+(\texttt{osf.io/registries}) with the same hypothesis, design, and
+analysis-plan text (\texttt{docs/gemma4-e4b-solo-baseline-design.md},
 \texttt{docs/external-harness-baseline-design.md}, \S~``Registro
-externo (OSF)'' in each). \todo{OSF registration IDs: paste both links
-here once created at osf.io/registries --- the text is already
-prepared in the two design documents above, this is a manual step
-pending at submission.} Both sweeps ran without waiting for the
-external registration to close, for the reason noted in each design
+externo (OSF)'' in each); no external registration was ultimately
+filed, so the pre-registration evidence for these two criteria is the
+self-hosted record alone, with the limitation the audit below
+discloses. Both sweeps ran without waiting for any external
+registration, for the reason noted in each design
 document (neither measurement adopts an irreversible harness change or
 carries an iteration clause). A post-hoc audit of the repository,
 however, found that for these two criteria even the self-hosted
@@ -776,9 +775,10 @@ solo baseline and the bare-loop baseline are what forced the
 framing revision and the present title), which is the direction
 post-hoc framing would be least tempted to produce; and the criterion
 structure (hypothesis, arms, analysis plan) matches the pattern of the
-three verifiably-ordered earlier criteria. The OSF registrations
-archive the same text under an independent timestamp that also
-postdates the runs and states so explicitly. This audit --- which we
+three verifiably-ordered earlier criteria. Filing the drafted OSF text
+now would add only an independent timestamp that itself postdates the
+runs, and would have to say so --- which is why we report this audit
+instead of decorating the record. The audit --- which we
 ran on ourselves and disclose here --- is the concrete argument for the
 register-before-run gate the project adopts for all future criteria.
 
