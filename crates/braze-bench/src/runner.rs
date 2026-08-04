@@ -174,6 +174,47 @@ impl ConfirmationPrompt for BenchPrompt {
     }
 }
 
+/// Synthesizes the `.braze/memory.json` a previous session would have
+/// left, for `+ablate:project-memory-seeded` — see the call site for the
+/// full rationale. Deterministic by construction: touched files are the
+/// task's own `setup_files` (sorted; `TaskSandbox::new` literally just
+/// wrote them), the tool is the one that would have written them, and
+/// the timestamp is a fixed epoch string (the field is never rendered;
+/// `docs/decision-*`: no clocks in evidence paths). Tasks with no
+/// `setup_files` produce an empty memory, which renders as no section —
+/// those cells degenerate to the plain `project-memory` arm by design,
+/// and the pre-registration counts them as null cells, not signal.
+///
+/// Hard error (not best-effort) on I/O failure: a silently missing seed
+/// would turn the injection arm into the empty arm and invalidate the
+/// experiment without anyone noticing — the same reasoning as the
+/// grader's fail-fast, opposite of the production hook's own
+/// best-effort posture.
+fn seed_project_memory_from_setup_files(
+    task: &crate::task::TaskDef,
+    sandbox_root: &std::path::Path,
+) -> Result<(), BenchError> {
+    let mut memory = braze_memory::ProjectMemory::new(sandbox_root.display().to_string());
+    let mut paths: Vec<&String> = task.setup_files.keys().collect();
+    paths.sort();
+    for path in paths {
+        memory.record_touched_file(path.clone(), "write_file", "1785000000");
+    }
+    let memory_path = braze_memory::default_memory_path(sandbox_root);
+    if let Some(parent) = memory_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            BenchError::Startup(format!("project-memory-seeded: mkdir {parent:?}: {e}"))
+        })?;
+    }
+    let json = serde_json::to_string_pretty(&memory).map_err(|e| {
+        BenchError::Startup(format!("project-memory-seeded: serialize: {e}"))
+    })?;
+    std::fs::write(&memory_path, json).map_err(|e| {
+        BenchError::Startup(format!("project-memory-seeded: write {memory_path:?}: {e}"))
+    })?;
+    Ok(())
+}
+
 fn join_memory_sections(project_memory: Option<&str>, task_memory: Option<&str>) -> Option<String> {
     match (project_memory, task_memory) {
         (Some(project), Some(task)) => {
@@ -291,6 +332,17 @@ pub async fn run_task(
     // producción, para que el mecanismo sea verificable aunque su valor
     // cross-sesión necesite el suite multi-turno que el roadmap v7 ya
     // anota como pendiente.
+    // `+ablate:project-memory-seeded` (pre-registro:
+    // docs/hypothesis-2026-08-04-project-memory-ab.md): sintetiza la
+    // memoria que una sesión previa habría dejado, ANTES de construir el
+    // hook (que carga en el constructor). Contenido derivado
+    // determinísticamente de los `setup_files` de la tarea — cero texto
+    // escrito por el experimentador — y `project_key` = el sandbox real,
+    // así que K-7 queda intacto: nada fuera del bench puede fabricar una
+    // memoria que pase la validación.
+    if ablation.seed_project_memory {
+        seed_project_memory_from_setup_files(task, sandbox.path())?;
+    }
     let project_memory_hook = if ablation.enable_project_memory {
         let memory_path = braze_memory::default_memory_path(sandbox.path());
         let store: std::sync::Arc<dyn braze_memory::ProjectMemoryStore> =
@@ -857,6 +909,84 @@ mod tests {
         );
         assert_eq!(winner.outcome_fingerprint.as_deref(), Some("ddd"));
         assert!(winner.converged);
+    }
+
+    /// Pre-registro project-memory A/B: el ciclo completo del brazo
+    /// seeded — sintetizar desde `setup_files` → el hook CARGA el seed
+    /// (o sea pasa la validación K-7, porque el `project_key` es el
+    /// sandbox real) → el render produce una sección no vacía con las
+    /// rutas. Si cualquiera de esos eslabones se rompe, el brazo
+    /// degenera en el brazo vacío y el experimento mide nada — este
+    /// test es el que lo delataría.
+    #[tokio::test]
+    async fn seeded_project_memory_survives_k7_and_renders() {
+        let dir = std::env::temp_dir().join(format!(
+            "braze-bench-seed-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut setup_files = std::collections::HashMap::new();
+        setup_files.insert("src/lib.rs".to_string(), "pub fn f() {}".to_string());
+        setup_files.insert("notas.txt".to_string(), "hola".to_string());
+        let task = crate::task::TaskDef {
+            id: "seed-test".to_string(),
+            prompt: "p".to_string(),
+            setup_files,
+            expect_tool_call: None,
+            expect_no_tool_call: false,
+            expect_text_contains: None,
+            expect_file_contains: Default::default(),
+            expect_cargo_check: false,
+            skill: None,
+            expect_max_rounds: None,
+            expect_max_tokens: None,
+            expect_max_cost_usd: None,
+            noise_tools: 0,
+            synthetic_tools: Vec::new(),
+            memory_condition: None,
+            memory_file: None,
+            memory_budget_tokens: None,
+        };
+
+        seed_project_memory_from_setup_files(&task, &dir).expect("seed must write");
+
+        // El mismo wiring que el runner usa: si K-7 descartara el seed,
+        // el snapshot saldría vacío y el render None.
+        let store: std::sync::Arc<dyn braze_memory::ProjectMemoryStore> = std::sync::Arc::new(
+            braze_memory::FileProjectMemoryStore::new(braze_memory::default_memory_path(&dir)),
+        );
+        let hook =
+            braze_engine::ProjectMemoryHook::new(store, dir.display().to_string()).await;
+        let section = braze_memory::render_project_memory_section(
+            &hook.snapshot(),
+            braze_memory::DEFAULT_PROJECT_MEMORY_BUDGET_TOKENS,
+        )
+        .expect("seeded memory must render a non-empty section");
+        assert!(section.contains("src/lib.rs"), "got: {section}");
+        assert!(section.contains("notas.txt"), "got: {section}");
+
+        // Y el contrafactual K-7: un hook con OTRA raíz descarta el seed.
+        let other_store: std::sync::Arc<dyn braze_memory::ProjectMemoryStore> =
+            std::sync::Arc::new(braze_memory::FileProjectMemoryStore::new(
+                braze_memory::default_memory_path(&dir),
+            ));
+        let foreign =
+            braze_engine::ProjectMemoryHook::new(other_store, "/otra/raiz".to_string()).await;
+        assert!(
+            braze_memory::render_project_memory_section(
+                &foreign.snapshot(),
+                braze_memory::DEFAULT_PROJECT_MEMORY_BUDGET_TOKENS,
+            )
+            .is_none(),
+            "K-7 must discard a seed whose project_key doesn't match"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// v8 K-9, end-to-end con cargo REAL: el grading semántico devuelve

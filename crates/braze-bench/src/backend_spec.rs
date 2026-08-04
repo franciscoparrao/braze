@@ -746,6 +746,21 @@ pub struct AblationOverrides {
     /// doc's own § "mejor opción" flags as needing a multi-turn suite
     /// this bench doesn't have yet.
     pub enable_project_memory: bool,
+    /// `+ablate:project-memory-seeded` — ENABLES the hook (like
+    /// `project-memory`) AND asks the runner to synthesize a
+    /// `.braze/memory.json` seed in the sandbox before the session
+    /// starts, derived deterministically from the task's own
+    /// `setup_files` (as if a previous session had created them — which
+    /// is literally what `TaskSandbox::new` just did). This is the arm
+    /// that measures the PROMPT-side effect of the lever: with a fresh
+    /// sandbox the plain `project-memory` arm always renders an empty
+    /// section (see that key's doc), so injection needs a seed, and a
+    /// static fixture can't provide one — K-7 discards any memory whose
+    /// `project_key` isn't the real (unique, temp) sandbox root. Only
+    /// the bench synthesizes the seed, at the real root, with zero
+    /// experimenter-authored content; K-7 stays intact in production.
+    /// Pre-registered A/B: docs/hypothesis-2026-08-04-project-memory-ab.md.
+    pub seed_project_memory: bool,
     /// `+ablate:lead-summary` — ENABLES summary-por-lead (v8 § 6): la
     /// compactación le pide el summary de los eventos dropeados al
     /// backend del `+lead:` de esta misma fila (segunda instancia), con
@@ -841,6 +856,10 @@ impl AblationOverrides {
                 "prompt-tools" => out.enable_prompt_tools = true,
                 "constrained-tools" => out.enable_constrained_tools = true,
                 "project-memory" => out.enable_project_memory = true,
+                "project-memory-seeded" => {
+                    out.enable_project_memory = true;
+                    out.seed_project_memory = true;
+                }
                 "lead-summary" => out.enable_lead_summary = true,
                 "tool-search-threshold" => {
                     out.tool_search_threshold = Some(Self::parse_usize(key, value)?)
@@ -933,7 +952,9 @@ impl AblationOverrides {
         if self.enable_constrained_tools {
             parts.push("constrained-tools".to_string());
         }
-        if self.enable_project_memory {
+        if self.seed_project_memory {
+            parts.push("project-memory-seeded".to_string());
+        } else if self.enable_project_memory {
             parts.push("project-memory".to_string());
         }
         if self.enable_lead_summary {
@@ -1615,6 +1636,28 @@ mod tests {
 
         let baseline = BackendSpec::parse("ollama:llama3.2:1b").unwrap();
         assert!(!baseline.ablation().enable_project_memory);
+    }
+
+    /// `+ablate:project-memory-seeded` — the injection arm: implies the
+    /// hook AND asks the runner for a synthesized seed. Its display name
+    /// must say `seeded` (not the plain key) so H-17's per-row record
+    /// distinguishes the two arms in the sweep JSON.
+    #[test]
+    fn project_memory_seeded_key_implies_the_hook_and_displays_as_seeded() {
+        let config = Config::default();
+
+        let arm =
+            BackendSpec::parse("ollama:llama3.2:1b+ablate:project-memory-seeded").unwrap();
+        assert!(arm.ablation().enable_project_memory);
+        assert!(arm.ablation().seed_project_memory);
+        assert_eq!(
+            arm.display_name(&config),
+            "ollama:llama3.2:1b+ablate:project-memory-seeded"
+        );
+
+        // The plain arm must NOT claim to be seeded.
+        let plain = BackendSpec::parse("ollama:llama3.2:1b+ablate:project-memory").unwrap();
+        assert!(!plain.ablation().seed_project_memory);
     }
 
     #[test]
