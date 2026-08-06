@@ -92,7 +92,32 @@ Holm entre los dos contrastes contra baseline. Secundarias: input_tokens
 
 ## Resultados
 
-(pendiente)
+**2026-08-06 — GATE DE PLOMERÍA (criterio 1): FALLÓ.** baseline 59/102,
+empty 68/102, **21 celdas discordantes pareadas** contra el umbral
+pre-registrado de ≤2. La discordancia además es asimétrica (15 flips a
+favor de empty vs 6, binomial p≈0.08) e incluye un volteo de tarea
+completa (`tres_archivos_coordinados` 0/3 → 3/3) — improbable como ruido
+de punto flotante con semillas idénticas. Conforme al criterio, **ningún
+contraste se interpreta** hasta diagnosticar.
+
+Hipótesis mecánica a probar: el hook escribe `.braze/memory.json` DENTRO
+del sandbox durante la corrida (wiring de producción) → el brazo con hook
+tiene un filesystem observable distinto a mitad de corrida, y las tareas
+de esta suite están por diseño en la frontera del modelo. Si se
+confirma, es un hallazgo sobre la palanca (también aplica en
+producción), no solo plomería del bench.
+
+Diagnóstico encolado tras el brazo seeded: las 4 tareas con más flips ×
+{baseline, empty} × 3 reps con `BRAZE_BENCH_KEEP_SESSIONS=1` — permite
+comparar el input de la ronda 1 (¿prompt idéntico?) y buscar
+observaciones que toquen `.braze/` en las trayectorias.
+
+Notas del barrido: `cambio_coordinado_dos_archivos` = timeout 900s en
+los 6 intentos de ambos brazos (la tarea no cabe; independiente de la
+suspensión del 05-ago, que congeló ~16.7h de reloj sin corromper datos —
+timeouts de tokio usan reloj monotónico). `metadata.local_env` idéntico
+en ambos brazos. El brazo seeded corre al escribir esto; sus datos se
+leerán solo después del diagnóstico.
 
 ## Decisión
 
