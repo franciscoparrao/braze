@@ -67,6 +67,19 @@ mutación para acotar falsos matches.
 **Predicción**: convierte el rechazo honesto de 4 rondas en edición exitosa
 de 1, con cero falsos positivos a distancia k=2 sobre la clase conocida.
 
+**EJECUTADA 2026-08-07 — implementada y verificada.** Peldaño 4 de la
+escalera en `edit_file.rs`. El certificado quedó en cuatro cláusulas (solo
+borrados / solo no-ASCII / match único / acotado a 8 borrados y ≥40 chars),
+más la direccionalidad: el peldaño corrige DÓNDE matchea, nunca CON QUÉ se
+reemplaza. Replay del caso real de roam: recuperado. Cuatro mutaciones que
+acotan falsos positivos (omisión ASCII, sustitución, dos regiones
+candidatas, `old_string` corto): las cuatro rechazadas, archivo intacto en
+todas. Se apaga con `strict` (`+ablate:strict-edit`), o sea es ablacionable
+por el bench. Nunca silencioso: el resumen de éxito advierte cuántos
+caracteres faltaban y que `new_string` probablemente también los omite.
+Prior cumplido; la predicción de "distancia k=2" quedó corta — el caso real
+necesitaba 3 borrados, y el límite se fijó en 8. 1.125 tests verdes.
+
 ## 4. Predicción conformal para la escalación al lead
 
 **Cuello**: `lead_turns`/`failure_threshold` son heurísticas reactivas fijas.

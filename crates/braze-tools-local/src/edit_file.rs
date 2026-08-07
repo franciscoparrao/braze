@@ -19,7 +19,12 @@
 //! 3. line-window match ignoring *leading and trailing* whitespace,
 //!    with `new_string` re-indented by the offset observed between the
 //!    file's first matched line and `old_string`'s first line — the
-//!    file's real indentation wins, not the model's.
+//!    file's real indentation wins, not the model's;
+//! 4. `old_string` es la región del archivo **menos caracteres que el
+//!    modelo no puede emitir** (v9 roadmap técnica #3, medido en
+//!    `docs/roam-metrics-memoria-2026-07-28.md` § 7). Solo borrados,
+//!    solo no-ASCII, match único y acotado — ver
+//!    [`unemittable_deletion_window`] para el certificado completo.
 //!
 //! Rungs 2-3 are line-window matches: `old_string`'s lines must
 //! correspond to whole lines of the file (the observed failure mode is
@@ -143,6 +148,14 @@ pub async fn edit_file(args: EditFileArgs, strict: bool) -> Result<String, Strin
             "edited {} (matched ignoring indentation; the file's real indentation was preserved)",
             path.display()
         ),
+        MatchStrategy::UnemittableDeletion(n) => format!(
+            "edited {} — WARNING: your old_string was missing {n} character(s) that ARE in the \
+             file. The edit was located by treating them as characters you cannot emit, and the \
+             match was unique, so it was applied to the file's real text. If your new_string is \
+             a copy of old_string, it is missing those characters too and they have now been \
+             DELETED from the file. Read the region back before continuing.",
+            path.display()
+        ),
     })
 }
 
@@ -195,6 +208,107 @@ enum MatchStrategy {
     Exact,
     TrailingWhitespace,
     RelativeIndentation,
+    /// Rung 4 — see [`unemittable_deletion_window`]. Carries how many
+    /// characters the model's `old_string` was missing, for the summary.
+    UnemittableDeletion(usize),
+}
+
+/// Cuántos caracteres puede faltarle a `old_string` antes de que el
+/// peldaño 4 se niegue. El caso real (roam, fórmula del KDE) tenía 3
+/// (`Σᵢ`, `xᵢ`, `yᵢ`); 8 deja margen para un bloque con varias
+/// ocurrencias sin volverse un comodín.
+const MAX_UNEMITTABLE_DELETIONS: usize = 8;
+
+/// Largo mínimo de `old_string` para que el peldaño 4 se active. Un
+/// fragmento corto que resulta ser subsecuencia de una región del
+/// archivo es coincidencia plausible; 40 caracteres no lo son.
+const MIN_UNEMITTABLE_OLD_STRING: usize = 40;
+
+/// Peldaño 4 de la escalera: recupera la edición cuando `old_string` es
+/// exactamente la región del archivo **menos** caracteres que el modelo
+/// no puede emitir.
+///
+/// Por qué existe (medido, no supuesto —
+/// `docs/roam-metrics-memoria-2026-07-28.md` § 7): `gpt-oss:20b` no
+/// puede escribir `U+1D62`. Produjo un `old_string` de 91 líneas
+/// correcto en todas menos una, y ninguna cantidad de reintentos lo
+/// arregla: el diagnóstico de `first_divergence` le nombra el codepoint
+/// y aun así vuelve a omitirlo. Esa región del archivo queda
+/// **estructuralmente ineditable** por el agente. Este peldaño la
+/// devuelve al alcance sin pedirle al modelo lo que no puede dar.
+///
+/// El certificado que lo hace seguro tiene cuatro partes, y basta que
+/// una falle para negarse:
+///
+/// 1. **Solo borrados.** `old_string` debe ser subsecuencia de la región
+///    del archivo: nada de sustituciones, inserciones ni reordenamientos
+///    — el `format!` corrupto del mismo incidente (comilla movida) NO
+///    califica, y no debe: mover una comilla puede ser intención.
+/// 2. **Solo no-ASCII.** Cada carácter ausente debe ser no-ASCII. Un
+///    `)` o un `;` que falta es semántico; un `ᵢ` que falta es motor.
+/// 3. **Unicidad.** Si dos regiones del archivo admiten el mismo
+///    alineamiento, se rechaza por ambiguo — igual que los peldaños 2-3.
+/// 4. **Acotado.** Máximo [`MAX_UNEMITTABLE_DELETIONS`] borrados, y
+///    `old_string` de al menos [`MIN_UNEMITTABLE_OLD_STRING`] caracteres.
+///
+/// Direccionalidad, que es la otra mitad de la seguridad: el peldaño
+/// solo corrige **dónde** matchea, nunca **con qué** se reemplaza. Si el
+/// modelo quisiera borrar esos caracteres, los pondría en `old_string`
+/// (copiando el archivo) y los omitiría en `new_string` — la dirección
+/// contraria a la que este peldaño acepta.
+///
+/// `Ok(None)` = no aplica. `Err(count)` = ambiguo.
+fn unemittable_deletion_window(
+    original: &str,
+    old_string: &str,
+) -> Result<Option<(usize, usize, Vec<char>)>, usize> {
+    if old_string.len() < MIN_UNEMITTABLE_OLD_STRING {
+        return Ok(None);
+    }
+    let mut hits: Vec<(usize, usize, Vec<char>)> = Vec::new();
+    let starts = std::iter::once(0).chain(original.match_indices('\n').map(|(i, _)| i + 1));
+    for start in starts {
+        if let Some((end, dropped)) = greedy_deletion_match(&original[start..], old_string) {
+            hits.push((start, start + end, dropped));
+            if hits.len() > 1 {
+                return Err(hits.len());
+            }
+        }
+    }
+    Ok(hits.pop())
+}
+
+/// Intenta consumir `old_string` desde el inicio de `haystack`
+/// permitiendo saltar caracteres no-ASCII del archivo. Determinístico:
+/// solo salta cuando el carácter del archivo difiere del esperado, así
+/// que no hay ramificación que explorar. Devuelve el offset (en bytes,
+/// relativo a `haystack`) donde termina la región y los caracteres
+/// saltados.
+fn greedy_deletion_match(haystack: &str, old_string: &str) -> Option<(usize, Vec<char>)> {
+    let mut dropped = Vec::new();
+    let mut hay = haystack.char_indices().peekable();
+    let mut consumed_end = 0usize;
+    for want in old_string.chars() {
+        loop {
+            let (idx, got) = *hay.peek()?;
+            if got == want {
+                hay.next();
+                consumed_end = idx + got.len_utf8();
+                break;
+            }
+            // Solo un no-ASCII puede estar ausente del old_string.
+            if got.is_ascii() || dropped.len() >= MAX_UNEMITTABLE_DELETIONS {
+                return None;
+            }
+            dropped.push(got);
+            hay.next();
+        }
+    }
+    // Un match sin ningún borrado ya lo habría tomado el peldaño 1.
+    if dropped.is_empty() {
+        return None;
+    }
+    Some((consumed_end, dropped))
 }
 
 /// Why no rung of the ladder could apply the edit.
@@ -237,6 +351,9 @@ impl MatchFailure {
                 path.display(),
                 match strategy {
                     MatchStrategy::Exact => "",
+                    MatchStrategy::UnemittableDeletion(_) => {
+                        " (treating characters absent from old_string as unemittable)"
+                    }
                     _ => " (under whitespace-tolerant matching)",
                 },
                 write_file_steering(original)
@@ -433,6 +550,28 @@ fn apply_edit(
             }
             Ok(None) => {}
             Err(count) => return Err(MatchFailure::Ambiguous(count, strategy)),
+        }
+    }
+
+    // Rung 4: `old_string` es la región del archivo menos caracteres que
+    // el modelo no puede emitir. Va última porque es la más permisiva, y
+    // solo corre cuando todo lo demás falló — no puede empeorar ningún
+    // caso que hoy funcione. Ver `unemittable_deletion_window`.
+    match unemittable_deletion_window(original, old_string) {
+        Ok(Some((start, end, dropped))) => {
+            let mut updated =
+                String::with_capacity(original.len() - (end - start) + new_string.len());
+            updated.push_str(&original[..start]);
+            updated.push_str(new_string);
+            updated.push_str(&original[end..]);
+            return Ok((updated, MatchStrategy::UnemittableDeletion(dropped.len())));
+        }
+        Ok(None) => {}
+        Err(count) => {
+            return Err(MatchFailure::Ambiguous(
+                count,
+                MatchStrategy::UnemittableDeletion(0),
+            ));
         }
     }
 
@@ -899,12 +1038,12 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
-    /// The regression this whole diagnostic exists for (roam, 2026-07-28):
-    /// `old_string` is right on every line but one, and the one it gets
-    /// wrong carries a character the model cannot emit. The old message
-    /// ("not found", plus a closest-line hint anchored on the *first*
-    /// line, which is correct here) gave the model nothing to act on and
-    /// it burned a whole turn re-issuing the same call.
+    /// El diagnóstico sigue siendo la red cuando el peldaño 4 NO puede
+    /// rescatar. Reorientado el 2026-08-07: el fixture original (borrado
+    /// puro de `U+1D62`) ahora lo recupera el peldaño 4, así que este
+    /// test usa una **sustitución** alrededor del mismo carácter — fuera
+    /// del alcance del rescate por diseño, y exactamente donde nombrar el
+    /// codepoint sigue siendo lo único que el harness puede ofrecer.
     #[tokio::test]
     async fn first_divergence_names_the_codepoint_the_model_could_not_emit() {
         let dir = unique_temp_dir("edit-file-unemittable-char");
@@ -918,8 +1057,11 @@ mod tests {
 
         // Byte-identical to the file except that U+1D62 is dropped — the
         // exact corruption gpt-oss:20b produced, twice.
+        // Sustitución, no borrado: el subíndice fue REEMPLAZADO por `j`.
+        // El peldaño 4 se niega (solo acepta borrados) y el diagnóstico
+        // tiene que nombrar el carácter igual.
         let old_string = "    /// At each cell center:\n\
-                          \x20   ///   d(x,y) = k * \u{3a3} exp(-0.5 * (x-x)\u{b2})\n\
+                          \x20   ///   d(x,y) = k * \u{3a3}j exp(-0.5 * (x-xj)\u{b2})\n\
                           \x20   /// Note: planar space.\n";
 
         let err = edit_file_fuzzy(EditFileArgs {
@@ -1121,6 +1263,189 @@ mod tests {
             .await
             .expect("read back");
         assert_eq!(contents, original, "file must be untouched");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- Peldaño 4: borrado de caracteres inemitibles (roadmap #3) ---
+
+    /// El caso REAL, replay del incidente de roam (2026-07-28): el modelo
+    /// mandó el bloque correcto salvo los tres `U+1D62` de la fórmula del
+    /// KDE, que no puede emitir. Antes: rechazo honesto tras 4 rondas.
+    /// Ahora: la edición se aplica al texto REAL del archivo.
+    #[tokio::test]
+    async fn the_roam_kde_block_is_recovered_from_dropped_subscripts() {
+        let dir = unique_temp_dir("edit-file-rung4-roam");
+        let original = "impl Trajectory {\n    /// At each cell center (x, y):\n    ///   density(x,y) = (1 / (n * 2*PI * h\u{b2})) * \u{3a3}\u{1d62} exp(-0.5 * ((x-x\u{1d62})\u{b2} + (y-y\u{1d62})\u{b2}) / h\u{b2})\n    /// The grid covers the bounding box.\n    pub fn kde(&self) -> f64 { 0.0 }\n}\n";
+        let file_path = fixture_file(&dir, original).await;
+
+        // Byte-idéntico salvo los tres ᵢ ausentes — lo que gpt-oss:20b
+        // produjo, dos veces, en dos sesiones distintas.
+        let old_string = "    /// At each cell center (x, y):\n    ///   density(x,y) = (1 / (n * 2*PI * h\u{b2})) * \u{3a3} exp(-0.5 * ((x-x)\u{b2} + (y-y)\u{b2}) / h\u{b2})\n    /// The grid covers the bounding box.\n";
+
+        let summary = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: old_string.to_string(),
+            new_string: String::new(),
+        })
+        .await
+        .expect("rung 4 must recover the block");
+
+        assert!(summary.contains("missing 3 character(s)"), "got: {summary}");
+        assert!(
+            summary.contains("WARNING"),
+            "el rescate nunca es silencioso: {summary}"
+        );
+
+        let after = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert!(
+            !after.contains("density"),
+            "el bloque debe borrarse: {after}"
+        );
+        assert!(after.contains("impl Trajectory {"), "{after}");
+        assert!(
+            after.contains("pub fn kde(&self) -> f64 { 0.0 }"),
+            "{after}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// MUTACIÓN 1 — falta un carácter ASCII. Un `)` ausente es semántico,
+    /// no motor: negarse aunque el resto alinee perfecto.
+    #[tokio::test]
+    async fn rung4_refuses_when_the_missing_character_is_ascii() {
+        let dir = unique_temp_dir("edit-file-rung4-ascii");
+        let original =
+            "fn compute(a: f64, b: f64) -> f64 {\n    let total = (a + b) * 2.0;\n    total\n}\n";
+        let file_path = fixture_file(&dir, original).await;
+        let old_string = "fn compute(a: f64, b: f64) -> f64 {\n    let total = (a + b * 2.0;\n";
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: old_string.to_string(),
+            new_string: "x".to_string(),
+        })
+        .await
+        .expect_err("una omisión ASCII nunca se repara sola");
+        assert!(err.contains("not found"), "got: {err}");
+        assert_eq!(
+            tokio::fs::read_to_string(&file_path).await.unwrap(),
+            original,
+            "el archivo no puede haber cambiado"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// MUTACIÓN 2 — sustitución, no borrado. El `format!` corrupto del
+    /// mismo incidente (comilla MOVIDA) no califica: mover una comilla
+    /// puede ser intención deliberada.
+    #[tokio::test]
+    async fn rung4_refuses_a_substitution_even_with_non_ascii_around() {
+        let dir = unique_temp_dir("edit-file-rung4-subst");
+        let original = "let msg = format!(\"cannot read '{}': {} \u{2014} aborting\", path, e);\nlet other = 1;\n";
+        let file_path = fixture_file(&dir, original).await;
+        let old_string =
+            "let msg = format!(\"cannot read '{}'\": {} \u{2014} aborting, path, e);\n";
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: old_string.to_string(),
+            new_string: "y".to_string(),
+        })
+        .await
+        .expect_err("una sustitución no es un borrado");
+        assert!(err.contains("not found"), "got: {err}");
+        assert_eq!(
+            tokio::fs::read_to_string(&file_path).await.unwrap(),
+            original
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// MUTACIÓN 3 — dos regiones admiten el mismo alineamiento. Sin
+    /// unicidad no hay certificado: ambiguo, igual que los peldaños 2-3.
+    #[tokio::test]
+    async fn rung4_refuses_when_two_regions_admit_the_same_alignment() {
+        let dir = unique_temp_dir("edit-file-rung4-ambig");
+        let block = "    /// resumen: \u{3a3}\u{1d62} de los pesos normalizados del bloque\n    pub fn total(&self) -> f64 { 0.0 }\n";
+        let original = format!("mod a {{\n{block}}}\n\nmod b {{\n{block}}}\n");
+        let file_path = fixture_file(&dir, &original).await;
+        let old_string = "    /// resumen: \u{3a3} de los pesos normalizados del bloque\n    pub fn total(&self) -> f64 { 0.0 }\n";
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: old_string.to_string(),
+            new_string: String::new(),
+        })
+        .await
+        .expect_err("dos candidatos = ambiguo, no se adivina");
+        assert!(err.contains("ambiguous"), "got: {err}");
+        assert_eq!(
+            tokio::fs::read_to_string(&file_path).await.unwrap(),
+            original,
+            "un ambiguo no toca el archivo"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// MUTACIÓN 4 — `old_string` corto: coincidencia plausible por azar.
+    #[tokio::test]
+    async fn rung4_refuses_a_short_old_string() {
+        let dir = unique_temp_dir("edit-file-rung4-short");
+        let original = "let x = \u{3a3}\u{1d62} + 1;\nlet y = 2;\n";
+        let file_path = fixture_file(&dir, original).await;
+
+        let err = edit_file_fuzzy(EditFileArgs {
+            path: file_path.to_string_lossy().into_owned(),
+            old_string: "let x = \u{3a3} + 1;\n".to_string(),
+            new_string: "z".to_string(),
+        })
+        .await
+        .expect_err("bajo el mínimo de longitud no aplica");
+        assert!(err.contains("not found"), "got: {err}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// El peldaño 4 es parte de la escalera fuzzy: `strict` (el
+    /// `+ablate:strict-edit` del bench) debe apagarlo con los demás.
+    #[tokio::test]
+    async fn strict_mode_disables_rung4() {
+        let dir = unique_temp_dir("edit-file-rung4-strict");
+        let original = "impl T {\n    /// suma sobre los indices: \u{3a3}\u{1d62} w\u{1d62} x\u{1d62} normalizados aqui\n    pub fn f(&self) {}\n}\n";
+        let file_path = fixture_file(&dir, original).await;
+        let old_string = "    /// suma sobre los indices: \u{3a3} w x normalizados aqui\n    pub fn f(&self) {}\n";
+
+        edit_file(
+            EditFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                old_string: old_string.to_string(),
+                new_string: "    // borrado\n".to_string(),
+            },
+            false,
+        )
+        .await
+        .expect("fuzzy debe recuperarlo");
+
+        tokio::fs::write(&file_path, original).await.unwrap();
+        edit_file(
+            EditFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                old_string: old_string.to_string(),
+                new_string: "    // borrado\n".to_string(),
+            },
+            true,
+        )
+        .await
+        .expect_err("strict debe apagar el peldaño 4");
+        assert_eq!(
+            tokio::fs::read_to_string(&file_path).await.unwrap(),
+            original
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
