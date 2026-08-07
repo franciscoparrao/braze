@@ -119,6 +119,55 @@ timeouts de tokio usan reloj monotónico). `metadata.local_env` idéntico
 en ambos brazos. El brazo seeded corre al escribir esto; sus datos se
 leerán solo después del diagnóstico.
 
+## Resultados finales (2026-08-07, los tres brazos + diagnóstico)
+
+| brazo | pass | in_tok medio | rondas |
+|---|---|---|---|
+| baseline | 59/102 (57.8%) | 13,526 | 5.5 |
+| empty | 68/102 (66.7%) | 18,709 | 6.7 |
+| seeded | 72/102 (70.6%) | 17,559 | 6.1 |
+
+Contrastes (McNemar exacto pareado): `empty−base` +9, p=0.078; `seeded−base`
++13, p=0.011 (Holm 0.021); **`seeded−empty` +4, p=0.541**.
+
+**Diagnóstico del gate** (4 tareas × 2 brazos × 3 reps, sesiones
+preservadas): (1) ronda 1 con tokens IDÉNTICOS en los 12 pares — los prompts
+son iguales, probado, no asumido; (2) **cero** menciones de `.braze` en
+todas las trayectorias — la hipótesis del filesystem observable queda
+REFUTADA; (3) la discordancia del re-run invirtió su dirección (3/12, todas
+a favor de baseline). Veredicto del gate: **los 21 discordantes eran ruido**.
+El piso de ruido real de `discriminating.toml` + KV-host + temp 0.2 es ~20%
+de celdas — 10× el umbral ≤2 que este pre-registro tomó prestado del piso
+medido en `default.toml`. Error de calibración del pre-registro, y queda
+anotado como tal.
+
 ## Decisión
 
-(pendiente)
+```text
+Decision: NO promover. enable_project_memory queda OFF por default. El
+  criterio 2 se cumple en su letra (seeded−base +13, Holm p=0.021,
+  seeded>=empty) pero su premisa quedo invalidada por el propio control:
+  con prompts identicos, empty subio +9 — el unico contraste que aisla el
+  CONTENIDO del seed (seeded−empty) es nulo (p=0.541). Atribuirle el
+  titular a la palanca seria exactamente el error que el brazo de control
+  existia para impedir.
+Evidencia: los 3 JSON en docs/pm-ab/ + diag-plumbing con sesiones; ronda 1
+  bit-identica entre brazos; cero observaciones de .braze; direccion de
+  flips inestable entre corridas.
+Metricas: arriba. El costo de la seccion seeded es modesto (~40 tokens en
+  ronda 1); los deltas de in_tok/rondas entre brazos no muestran patron
+  atribuible (6.7 vs 6.1 entre los dos brazos con hook).
+Scope donde aplica: el lado prompt de la palanca en sesion unica, este
+  banco, este modelo. El valor cross-sesion sigue SIN medirse (bench
+  multi-sesion, Gate 0).
+Riesgos: ninguno nuevo — la palanca ya estaba off.
+Hallazgo colateral REAL de este experimento: el piso de ruido por-config —
+  el de default.toml NO transfiere a discriminating+KV-host (2 vs ~21
+  celdas). Todo A/B futuro en esta config debe usar el control del mismo
+  prompt como piso in-sweep, y el e-process del roadmap #1 como gate.
+Estado nuevo: experimental (sin cambio) — palanca off, A/B prompt-side
+  cerrado como no-atribuible, cross-sesion pendiente.
+```
+
+Sin iteración, conforme al criterio 5: el diagnóstico fue la investigación
+que el gate exigía, no una re-especificación del tratamiento.
