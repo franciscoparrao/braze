@@ -15,6 +15,7 @@ mod preserve;
 mod report;
 mod runner;
 mod sandbox;
+mod sequential;
 mod synthetic;
 mod task;
 
@@ -111,6 +112,18 @@ struct Cli {
     /// modelo. Ver docs/AUDITORIA-2026-07.md.
     #[arg(long)]
     no_ollama_stop: bool,
+    /// Corte secuencial anytime-valid (`sequential.rs`): monitorea los pares
+    /// discordantes de McNemar entre el PRIMER brazo y cada brazo siguiente,
+    /// y corta el sweep cuando el criterio ya está decidido — sin inflar α,
+    /// por la desigualdad de Ville. El valor es el umbral PRE-REGISTRADO del
+    /// experimento, en celdas (p.ej. `--sequential-stop 3` para un criterio
+    /// de "±3 tareas"); ese umbral define `p1`, y no hay default a propósito:
+    /// un `p1` genérico confunde "sub-umbral" con "efecto cero" (medido en
+    /// docs/retrodiccion-evalues-2026-08-06.md). Ahorro mediano histórico:
+    /// 62%, concentrado en los A/B que SÍ tienen efecto — un nulo corre
+    /// completo, que es lo correcto.
+    #[arg(long)]
+    sequential_stop: Option<usize>,
     /// Corre un baseline de harness externo (bypassa `braze_engine::Engine`
     /// por completo, EMSE review Issue 1 —
     /// `docs/external-harness-baseline-design.md`) además de los
@@ -277,8 +290,19 @@ async fn run() -> Result<(), BenchError> {
     // Sequential on purpose: several large local Ollama models sharing
     // one GPU/CPU would just thrash each other under concurrency, and a
     // sequential run keeps stdout progress readable task by task.
-    for (raw_spec, spec) in &specs {
+    // `--sequential-stop`: un monitor por brazo-vs-primer-brazo. El primer
+    // brazo es la referencia (baseline), así que no tiene monitor propio.
+    // Las celdas del primer brazo se guardan para poder parear.
+    let mut baseline_cells: std::collections::HashMap<(String, u32), bool> =
+        std::collections::HashMap::new();
+    let mut sequential_notes: Vec<String> = Vec::new();
+
+    for (arm_index, (raw_spec, spec)) in specs.iter().enumerate() {
         let display_name = spec.display_name(&config);
+        let mut monitor = cli.sequential_stop.map(|delta| {
+            sequential::SequentialStop::for_threshold(delta, tasks.len() * cli.repetitions as usize)
+        });
+        let mut arm_cut_short = false;
         // A backend that can't even build (Ollama down, no API key, ...)
         // is skipped, not fatal — the rest of the comparison still runs.
         let probe_sampling = backend_spec::SamplingSpec {
@@ -366,7 +390,21 @@ async fn run() -> Result<(), BenchError> {
                     .await
                 };
                 match run {
-                    Ok(result) => results.push(result),
+                    Ok(result) => {
+                        let key = (result.task_id.clone(), result.repetition);
+                        if arm_index == 0 {
+                            baseline_cells.insert(key, result.passed);
+                        } else if let (Some(m), Some(&base_passed)) =
+                            (monitor.as_mut(), baseline_cells.get(&key))
+                            && m.observe(base_passed, result.passed).is_some()
+                        {
+                            let note = format!("[{display_name}] {}", m.summary());
+                            println!("\n{note}");
+                            sequential_notes.push(note);
+                            arm_cut_short = true;
+                        }
+                        results.push(result);
+                    }
                     Err(err) => {
                         // A harness-level failure (sandbox setup, reading
                         // back the session log, ...) — not attributable to
@@ -383,6 +421,17 @@ async fn run() -> Result<(), BenchError> {
                         results.push(harness_error_result(&display_name, task, repetition, &err));
                     }
                 }
+            }
+            if arm_cut_short {
+                // El criterio pre-registrado ya está decidido para este
+                // brazo: seguir corriendo no cambia el veredicto y sí
+                // cuesta horas. Las celdas faltantes NO se inventan —
+                // simplemente no existen, y el JSON lo refleja.
+                println!(
+                    "-> {display_name}: brazo cortado por --sequential-stop tras {} filas",
+                    results.iter().filter(|r| r.backend == display_name).count()
+                );
+                break;
             }
         }
 
@@ -495,6 +544,47 @@ async fn run() -> Result<(), BenchError> {
     }
 
     report::print_table(&results);
+
+    // Chequeo de salud de banco (técnica #2, docs/irt-suites-2026-08-07.md):
+    // un ítem cuyo acierto no correlaciona con el puntaje total del
+    // respondente no está midiendo capacidad. Solo informa — nunca falla el
+    // sweep — pero se imprime DESPUÉS de la tabla para que nadie interprete
+    // los números sin verlo.
+    {
+        let cells: Vec<(String, String, bool)> = results
+            .iter()
+            .map(|r| {
+                (
+                    format!("{}#{}", r.backend, r.repetition),
+                    r.task_id.clone(),
+                    r.passed,
+                )
+            })
+            .collect();
+        match sequential::low_discrimination_items(&cells) {
+            Some(flagged) if !flagged.is_empty() => {
+                println!(
+                    "\n[salud del banco] {} ítem(s) con discriminación bajo {:.2} — \
+                     REVISAR antes de interpretar este sweep:",
+                    flagged.len(),
+                    sequential::LOW_DISCRIMINATION
+                );
+                for (item, r) in &flagged {
+                    println!("   {item:38} r_pbis={r:+.3}");
+                }
+                println!(
+                    "   Un ítem así puede estar midiendo infraestructura y no capacidad \
+                     (caso read_file_basic / transporte Ollama 0.30.7, julio 2026)."
+                );
+            }
+            Some(_) => println!("\n[salud del banco] sin ítems de discriminación anómala."),
+            None => {}
+        }
+    }
+
+    for note in &sequential_notes {
+        println!("[secuencial] {note}");
+    }
 
     if let Some(output_path) = &cli.output {
         // E6 (docs/AUDITORIA-2026-07-v3.md): the digest lookups only

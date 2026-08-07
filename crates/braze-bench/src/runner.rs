@@ -206,9 +206,8 @@ fn seed_project_memory_from_setup_files(
             BenchError::Startup(format!("project-memory-seeded: mkdir {parent:?}: {e}"))
         })?;
     }
-    let json = serde_json::to_string_pretty(&memory).map_err(|e| {
-        BenchError::Startup(format!("project-memory-seeded: serialize: {e}"))
-    })?;
+    let json = serde_json::to_string_pretty(&memory)
+        .map_err(|e| BenchError::Startup(format!("project-memory-seeded: serialize: {e}")))?;
     std::fs::write(&memory_path, json).map_err(|e| {
         BenchError::Startup(format!("project-memory-seeded: write {memory_path:?}: {e}"))
     })?;
@@ -960,8 +959,7 @@ mod tests {
         let store: std::sync::Arc<dyn braze_memory::ProjectMemoryStore> = std::sync::Arc::new(
             braze_memory::FileProjectMemoryStore::new(braze_memory::default_memory_path(&dir)),
         );
-        let hook =
-            braze_engine::ProjectMemoryHook::new(store, dir.display().to_string()).await;
+        let hook = braze_engine::ProjectMemoryHook::new(store, dir.display().to_string()).await;
         let section = braze_memory::render_project_memory_section(
             &hook.snapshot(),
             braze_memory::DEFAULT_PROJECT_MEMORY_BUDGET_TOKENS,
@@ -971,10 +969,9 @@ mod tests {
         assert!(section.contains("notas.txt"), "got: {section}");
 
         // Y el contrafactual K-7: un hook con OTRA raíz descarta el seed.
-        let other_store: std::sync::Arc<dyn braze_memory::ProjectMemoryStore> =
-            std::sync::Arc::new(braze_memory::FileProjectMemoryStore::new(
-                braze_memory::default_memory_path(&dir),
-            ));
+        let other_store: std::sync::Arc<dyn braze_memory::ProjectMemoryStore> = std::sync::Arc::new(
+            braze_memory::FileProjectMemoryStore::new(braze_memory::default_memory_path(&dir)),
+        );
         let foreign =
             braze_engine::ProjectMemoryHook::new(other_store, "/otra/raiz".to_string()).await;
         assert!(

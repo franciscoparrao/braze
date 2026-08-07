@@ -158,9 +158,7 @@ mod tests {
             ("BRAZE_OLLAMA_BASE_URL", "http://192.168.1.8:11434"),
             ("PATH", "/usr/bin"),
         ];
-        let got = collect_local_env(
-            vars.iter().map(|(k, v)| (k.to_string(), v.to_string())),
-        );
+        let got = collect_local_env(vars.iter().map(|(k, v)| (k.to_string(), v.to_string())));
         assert_eq!(got.len(), 3, "got: {got:?}");
         assert_eq!(got["BRAZE_LOCAL_GPU_LAYERS"], "25");
         assert_eq!(got["BRAZE_LOCAL_KV_TYPE"], "q8_0");

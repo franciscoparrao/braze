@@ -1646,8 +1646,7 @@ mod tests {
     fn project_memory_seeded_key_implies_the_hook_and_displays_as_seeded() {
         let config = Config::default();
 
-        let arm =
-            BackendSpec::parse("ollama:llama3.2:1b+ablate:project-memory-seeded").unwrap();
+        let arm = BackendSpec::parse("ollama:llama3.2:1b+ablate:project-memory-seeded").unwrap();
         assert!(arm.ablation().enable_project_memory);
         assert!(arm.ablation().seed_project_memory);
         assert_eq!(
