@@ -34,6 +34,15 @@ ahorro mediano sin cambiar ninguna decisión histórica.
 **Si valida**: el e-process entra al bench como criterio de corte de primera
 clase (opt-in, `--sequential-stop`), ANTES de los pilotos de round-economics.
 
+**EJECUTADA 2026-08-06, ADOPTADA EN CÓDIGO 2026-08-07** (`cd0ce7b`,
+`crates/braze-bench/src/sequential.rs`). Resultados de la retrodicción en
+`docs/retrodiccion-evalues-2026-08-06.md`: 62% de ahorro mediano, 93% de
+acuerdo del e-process con el n-fijo. El flag toma el **umbral
+pre-registrado** en celdas (sin default) porque un `p1` genérico confunde
+"sub-umbral" con "efecto cero". Asimetría medida al implementar: el corte
+paga cuando HAY efecto; un nulo corre completo — correcto, un nulo necesita
+todo el n.
+
 ## 2. Teoría de respuesta al ítem (IRT) para las suites
 
 **Cuello**: `discriminating.toml` se construyó a mano ("2.9pp por ítem"). IRT
@@ -129,6 +138,10 @@ IRT de la #2) con un modelo no saturado.
 **Descartadas por ahora** (con razón): beta-binomial jerárquico para
 flakiness (pass^k ya cumple ese rol), selección submodular para compactación
 (necesita embeddings; prior débil tras el nulo del lead-summary).
+
+**Estado al 2026-08-07**: #1, #2 y #3 ejecutadas; las dos adopciones que
+dejaron (#1 `--sequential-stop`, #2 chequeo de salud de banco) están en
+código (`cd0ce7b`). Siguen #4 (conformal, offline) y #5 (DoE, gateada).
 
 **Orden de ejecución comprometido**: 1 → (2 y 3 en paralelo, son
 independientes) → 4 → 5. La #5 además está gateada por el ordenamiento ya
