@@ -47,6 +47,19 @@ subset reproduce el ranking de brazos de los sweeps históricos completos.
 **Predicción**: un subset de 12-15 tareas reproduce el ranking de la suite de
 34 en los sweeps históricos. Combinada con la #1: costo por A/B cae 3-4×.
 
+**EJECUTADA 2026-08-07 — resultados en `docs/irt-suites-2026-08-07.md`.**
+La reducción de suite **NO se adopta**: k=12 da Spearman medio 0,949 pero el
+ranking exacto solo se preserva en 6/13 sweeps, y la técnica #1 ataca el
+mismo cuello (costo de reloj) sin perder información. Lo que SÍ sale: (a) una
+corrección de nomenclatura — `default.toml` tiene **19 ítems**, no 57 (el
+"57/57" son corridas, 19×3); (b) el diagnóstico de discriminación como
+chequeo rutinario de salud de banco — `read_file_basic` tiene a=0,44 y
+anti-correlaciona con el tamaño del modelo (7B 12% vs 3B 46%), y resultó
+estar midiendo los errores de transporte de Ollama 0.30.7, no capacidad. Un
+ítem con a≈0 detecta contaminación de banco sin leer una transcripción.
+Autocorrección de método: el primer ajuste (JML) degeneró con `a` en el tope
+en 18/19 ítems; se rehízo con MML.
+
 ## 3. Rescate de ediciones por alineamiento con certificado de unicidad
 
 **Cuello**: la región estructuralmente ineditable (hallazgo U+1D62,
