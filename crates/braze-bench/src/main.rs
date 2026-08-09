@@ -74,8 +74,27 @@ struct Cli {
     /// iteraciones) — sin este límite, una sola tarea puede colgar todo
     /// el sweep en vez de registrarse como el fallo (diagnósticamente
     /// útil) que es.
-    #[arg(long, default_value_t = runner::DEFAULT_TASK_TIMEOUT.as_secs())]
-    task_timeout_secs: u64,
+    /// Default: 180 (`runner::DEFAULT_TASK_TIMEOUT`), o 3× el
+    /// `--turn-wall-clock-secs` si ese se pasa y este no.
+    #[arg(long)]
+    task_timeout_secs: Option<u64>,
+    /// Presupuesto de wall-clock POR TURNO, en segundos — el corte
+    /// experimental de la línea round-economics
+    /// (`docs/hypothesis-2026-07-28-round-economics.md`). El engine para en
+    /// el borde de la ronda cuando el turno ya gastó este tiempo, y la
+    /// fila queda como [WallClock], con sus rondas y tokens COMPLETOS.
+    ///
+    /// No confundir con `--task-timeout-secs`, que es el backstop de
+    /// infraestructura: aquel mata la ronda en vuelo y censura su `Usage`
+    /// (J-21/J-10), así que una fila [Timeout] no es comparable entre
+    /// brazos. Por eso `run()` exige que el backstop sea estrictamente
+    /// mayor que este presupuesto — si muerde primero, el experimento
+    /// midió el backstop.
+    ///
+    /// Sin el flag (default) no hay presupuesto de tiempo y el turno corta
+    /// por rondas/tokens como siempre.
+    #[arg(long)]
+    turn_wall_clock_secs: Option<u64>,
     /// Temperatura de sampling aplicada por igual a los tres backends
     /// (N-34, docs/AUDITORIA-2026-07-v2.md) — sin esto, comparar Ollama
     /// fijado a una temperatura baja contra Anthropic/OpenRouter en su
@@ -168,7 +187,7 @@ async fn run() -> Result<(), BenchError> {
             "se requiere al menos uno de --backends o --external".to_string(),
         ));
     }
-    let config = braze_config::Config::load()?;
+    let mut config = braze_config::Config::load()?;
     let tasks = task::load_suite(&cli.suite)?;
 
     // La identidad del sweep se captura al INICIO, no al escribir el
@@ -279,11 +298,42 @@ async fn run() -> Result<(), BenchError> {
     }
 
     let mut results: Vec<TaskResult> = Vec::new();
-    let task_timeout = Duration::from_secs(cli.task_timeout_secs);
+    // round-economics: el backstop de infraestructura tiene que quedar
+    // POR ENCIMA del presupuesto experimental, si no muerde primero y
+    // todas las filas del brazo salen censuradas ([Timeout] pierde el
+    // `Usage` de la ronda en vuelo). Cuando el usuario no fija el
+    // backstop, se deriva de 3× el presupuesto — el corte del engine es
+    // en el borde de la ronda, así que el turno puede sobrepasar el
+    // presupuesto por hasta una ronda entera y el backstop tiene que
+    // dejar lugar para eso.
+    let task_timeout_secs = match (cli.task_timeout_secs, cli.turn_wall_clock_secs) {
+        (Some(explicit), Some(budget)) if explicit <= budget => {
+            return Err(BenchError::Startup(format!(
+                "--task-timeout-secs ({explicit}) debe ser MAYOR que --turn-wall-clock-secs \
+                 ({budget}): el backstop de infraestructura mataría el turno antes de que el \
+                 presupuesto experimental pueda cortar, y toda fila cortada así queda con \
+                 rondas/tokens censurados y no comparable entre brazos"
+            )));
+        }
+        (Some(explicit), _) => explicit,
+        (None, Some(budget)) => (budget * 3).max(runner::DEFAULT_TASK_TIMEOUT.as_secs()),
+        (None, None) => runner::DEFAULT_TASK_TIMEOUT.as_secs(),
+    };
+    let task_timeout = Duration::from_secs(task_timeout_secs);
+    // El presupuesto viaja por `Config` (es donde `runner::run_task` lee
+    // los knobs del engine); el flag gana sobre lo que traiga el archivo
+    // de config o el entorno, como el resto de los flags del bench.
+    if let Some(budget) = cli.turn_wall_clock_secs {
+        config.max_turn_wall_clock_secs = Some(budget);
+        println!(
+            "Presupuesto de wall-clock por turno: {budget}s (corte en borde de ronda). \
+             Backstop de infraestructura: {task_timeout_secs}s."
+        );
+    }
     if cli.repetitions > 1 {
         println!(
             "Corriendo {} repetición(es) por (tarea, backend) — timeout {}s por intento.",
-            cli.repetitions, cli.task_timeout_secs
+            cli.repetitions, task_timeout_secs
         );
     }
 
@@ -365,6 +415,12 @@ async fn run() -> Result<(), BenchError> {
                 // fila por repetición igual que siempre, con el costo
                 // agregado de los N adentro.
                 let ttc_rollouts = spec.ablation().ttc_rollouts.unwrap_or(1);
+                // round-economics: el presupuesto es de la TAREA. Con TTC
+                // se reparte entre los rollouts (`run_task_ttc`), no se
+                // le da entero a cada uno.
+                let wall_clock_budget = config
+                    .max_turn_wall_clock_secs
+                    .map(std::time::Duration::from_secs);
                 let run = if ttc_rollouts > 1 {
                     runner::run_task_ttc(
                         spec,
@@ -375,6 +431,7 @@ async fn run() -> Result<(), BenchError> {
                         sampling,
                         preserve_root.as_deref(),
                         ttc_rollouts,
+                        wall_clock_budget,
                     )
                     .await
                 } else {
@@ -386,6 +443,7 @@ async fn run() -> Result<(), BenchError> {
                         task_timeout,
                         sampling,
                         preserve_root.as_deref(),
+                        wall_clock_budget,
                     )
                     .await
                 };
@@ -545,6 +603,30 @@ async fn run() -> Result<(), BenchError> {
 
     report::print_table(&results);
 
+    // round-economics: en un sweep con presupuesto experimental, una fila
+    // [Timeout] significa que el backstop de infraestructura mordió antes
+    // que el corte del engine — o sea que esa fila perdió las rondas y
+    // tokens de su ronda en vuelo (J-21/J-10) y no es comparable entre
+    // brazos. La guardia de `--task-timeout-secs` de arriba hace esto
+    // improbable, no imposible: una sola ronda puede durar más que todo
+    // el margen si el modelo es lento y el presupuesto chico.
+    if config.max_turn_wall_clock_secs.is_some() {
+        let censored = results
+            .iter()
+            .filter(|r| r.failure_cause == Some(metrics::FailureCause::Timeout))
+            .count();
+        if censored > 0 {
+            println!(
+                "\n[round-economics] ATENCIÓN: {censored} fila(s) cortadas por el backstop de \
+                 infraestructura ({task_timeout_secs}s) y no por el presupuesto de turno \
+                 ({}s). Esas filas tienen rondas/tokens censurados — subir \
+                 --task-timeout-secs o bajar --turn-wall-clock-secs y re-correr antes de \
+                 interpretar el contraste.",
+                config.max_turn_wall_clock_secs.unwrap_or_default()
+            );
+        }
+    }
+
     // Chequeo de salud de banco (técnica #2, docs/irt-suites-2026-08-07.md):
     // un ítem cuyo acierto no correlaciona con el puntaje total del
     // respondente no está midiendo capacidad. Solo informa — nunca falla el
@@ -609,7 +691,8 @@ async fn run() -> Result<(), BenchError> {
                 repeat_penalty: cli.repeat_penalty,
             },
             repetitions: cli.repetitions,
-            task_timeout_secs: cli.task_timeout_secs,
+            task_timeout_secs,
+            turn_wall_clock_secs: config.max_turn_wall_clock_secs,
             suite_path: cli.suite.display().to_string(),
             suite_fingerprint,
             braze_git_commit,

@@ -16,7 +16,15 @@ use crate::backend_spec::SamplingSpec;
 pub struct RunMetadata {
     pub sampling: SamplingSpec,
     pub repetitions: u32,
+    /// Backstop de infraestructura por intento de tarea. NO es el
+    /// presupuesto experimental — ver `turn_wall_clock_secs`.
     pub task_timeout_secs: u64,
+    /// Presupuesto de wall-clock por turno de la línea round-economics
+    /// (`--turn-wall-clock-secs`), cuando el sweep corrió con uno.
+    /// Sin este campo, un `results.json` de un sweep a tiempo fijo es
+    /// indistinguible de uno a rondas fijas — que es la diferencia entera
+    /// entre los dos regímenes que esa línea compara.
+    pub turn_wall_clock_secs: Option<u64>,
     pub suite_path: String,
     /// Non-cryptographic fingerprint (`std::hash::DefaultHasher` over the
     /// suite file's raw bytes, hex-encoded) — enough to detect "the suite

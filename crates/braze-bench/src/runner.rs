@@ -236,6 +236,12 @@ fn join_memory_sections(project_memory: Option<&str>, task_memory: Option<&str>)
 /// temp copies are deleted as usual — see `preserve.rs`'s module doc. `None`
 /// (the default; `BRAZE_BENCH_KEEP_SESSIONS` unset) means zero behavior
 /// change from before this parameter existed.
+/// `wall_clock_budget`: presupuesto de wall-clock del TURNO
+/// (round-economics). Llega por parámetro y no leído de `config` porque
+/// una unidad TTC lo REPARTE entre sus rollouts — ver
+/// [`run_task_ttc`]. `None` = sin presupuesto de tiempo, el
+/// comportamiento histórico.
+#[allow(clippy::too_many_arguments)] // ya estaba en el límite; el budget es un parámetro más del brazo
 pub async fn run_task(
     spec: &BackendSpec,
     config: &Config,
@@ -244,6 +250,7 @@ pub async fn run_task(
     timeout: Duration,
     sampling: SamplingSpec,
     preserve_root: Option<&Path>,
+    wall_clock_budget: Option<Duration>,
 ) -> Result<TaskResult, BenchError> {
     let sandbox = TaskSandbox::new(task)?;
 
@@ -268,6 +275,13 @@ pub async fn run_task(
         .tactical_compaction_threshold
         .unwrap_or(config.tactical_compaction_threshold);
     let best_of_n = ablation.best_of_n.unwrap_or(config.best_of_n);
+    // round-economics: el tope de rondas es la mitad "avara vs
+    // derrochadora" del factorial, así que tiene que ser por fila y no
+    // solo por `Config` — si no, las dos configuraciones no caben en el
+    // mismo sweep y se pierde el pareo (tarea, repetición) de McNemar.
+    let max_turn_iterations = ablation
+        .max_turn_iterations
+        .unwrap_or(config.max_turn_iterations as usize);
 
     let allowlist = WorkdirAllowlist::new(sandbox.path());
     let classifier = DefaultClassifier::new(WorkdirAllowlist::new(sandbox.path()));
@@ -471,9 +485,15 @@ pub async fn run_task(
     // production since opencode ítem 1 but never here — a bench run
     // measured the hardcoded defaults regardless of config);
     // `max_turn_total_tokens` is the v4 P0.2 breaker, new in Paquete 3.
-    .with_max_turn_iterations(config.max_turn_iterations as usize)
+    .with_max_turn_iterations(max_turn_iterations)
     .with_planner_max_tokens(config.planner_max_tokens)
-    .with_max_turn_total_tokens(config.max_turn_total_tokens);
+    .with_max_turn_total_tokens(config.max_turn_total_tokens)
+    // round-economics: el presupuesto de wall-clock del turno
+    // (`--turn-wall-clock-secs` / `BRAZE_MAX_TURN_WALL_CLOCK_SECS`). Es
+    // la unidad experimental de esa línea, y NO reemplaza al `timeout`
+    // de abajo: aquel sigue de backstop de infraestructura, este corta
+    // en el borde de ronda con la contabilidad intacta.
+    .with_max_turn_wall_clock(wall_clock_budget);
 
     if let Some(full_observations) = ablation.tactical_full_observations {
         engine = engine.with_tactical_full_observations(full_observations);
@@ -680,6 +700,19 @@ pub async fn run_task(
 ///
 /// Un rollout que falla a nivel harness no mata la unidad TTC (los
 /// demás siguen); solo si TODOS fallan se propaga el último error.
+/// `wall_clock_budget` (round-economics) es del TASK, no del rollout:
+/// la unidad experimental de esa línea es "una tarea bajo un presupuesto
+/// fijo de tiempo", así que N rollouts tienen que caber DENTRO del
+/// mismo presupuesto. Darle el presupuesto entero a cada rollout — que
+/// es lo que salía gratis de reusar `run_task` tal cual — le regalaba N×
+/// el tiempo al brazo derrochador contra el avaro, o sea confundía el
+/// tratamiento con el recurso que el experimento mantiene fijo.
+///
+/// El reparto es un DEADLINE de tarea, no una división en N partes
+/// iguales: cada rollout recibe lo que quede, y los rollouts que ya no
+/// entran simplemente no corren. Eso es lo que de verdad hace un harness
+/// derrochador contra un reloj — y que quepan más rollouts cuando la
+/// ronda se abarata es el mecanismo mismo que la hipótesis predice.
 #[allow(clippy::too_many_arguments)] // espejo de `run_task` (ya en el límite) + rollouts
 pub async fn run_task_ttc(
     spec: &BackendSpec,
@@ -690,10 +723,29 @@ pub async fn run_task_ttc(
     sampling: SamplingSpec,
     preserve_root: Option<&Path>,
     rollouts: u32,
+    wall_clock_budget: Option<Duration>,
 ) -> Result<TaskResult, BenchError> {
     let mut candidates = Vec::new();
     let mut last_error = None;
+    let unit_started = Instant::now();
     for rollout in 0..rollouts {
+        // Presupuesto restante de la unidad. Sin presupuesto (`None`) la
+        // rama entera es un no-op y los N rollouts corren como siempre.
+        let rollout_budget = match wall_clock_budget {
+            None => None,
+            Some(total) => {
+                let Some(remaining) = total.checked_sub(unit_started.elapsed()) else {
+                    eprintln!(
+                        "braze-bench: TTC '{}' rollout {}/{rollouts}: presupuesto de wall-clock \
+                         de la unidad agotado — los rollouts restantes no corren",
+                        task.id,
+                        rollout + 1
+                    );
+                    break;
+                };
+                Some(remaining)
+            }
+        };
         // Auto-consistencia REQUIERE variación entre rollouts: mismo
         // seed daría n copias idénticas y el voto sería un no-op. El
         // offset primo grande no colisiona con el offset por repetición
@@ -710,6 +762,7 @@ pub async fn run_task_ttc(
             timeout,
             rollout_sampling,
             preserve_root,
+            rollout_budget,
         )
         .await
         {

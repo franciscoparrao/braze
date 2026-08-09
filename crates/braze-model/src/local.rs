@@ -225,6 +225,7 @@ enum GpuLayersSource {
 fn resolve_model_params(
     gguf: &Path,
     n_ctx: u32,
+    gpu_layers_override: Option<u32>,
 ) -> (
     Pin<Box<LlamaModelParams>>,
     i32,
@@ -232,17 +233,27 @@ fn resolve_model_params(
     KvPlacement,
 ) {
     let forced = forced_kv_placement();
-    // El env explícito gana siempre: es el escape hatch y el brazo de
-    // ablación del bench.
-    if let Some(n) = std::env::var("BRAZE_LOCAL_GPU_LAYERS")
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-    {
+    // Precedencia: override del llamador > env > auto-fit > CPU. El
+    // override es POR BACKEND y el env es del proceso entero, así que el
+    // más específico manda — es lo que deja correr dos precios de ronda
+    // (GPU y CPU) como dos brazos del MISMO sweep de braze-bench
+    // (`+ablate:gpu-layers=N`, línea round-economics) en vez de dos
+    // corridas separadas.
+    if let Some(n) = gpu_layers_override.or_else(|| {
+        std::env::var("BRAZE_LOCAL_GPU_LAYERS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+    }) {
         let layers = i32::try_from(n).unwrap_or(i32::MAX);
         let params = Box::pin(LlamaModelParams::default().with_n_gpu_layers(n));
         tracing::info!(
             gpu_layers = layers,
-            "local: n_gpu_layers explícito (BRAZE_LOCAL_GPU_LAYERS) — auto-fit omitido"
+            source = if gpu_layers_override.is_some() {
+                "caller"
+            } else {
+                "BRAZE_LOCAL_GPU_LAYERS"
+            },
+            "local: n_gpu_layers explícito — auto-fit omitido"
         );
         // Sin fit no hay medición, así que se usa el default rápido
         // (`Device`, el de llama.cpp) salvo override. La red de seguridad es
@@ -615,7 +626,11 @@ pub fn tune_model(gguf: impl AsRef<Path>, n_ctx: u32) -> Result<TuneReport, Mode
     // que estar inicializado (y esto además rutea los logs de llama.cpp a
     // `tracing`, para que el probe no escupa a stderr).
     let _backend = shared_llama_backend()?;
-    let (_params, n_gpu_layers, source, placement) = resolve_model_params(gguf, n_ctx);
+    // `None`: `tune_model` existe justamente para MEDIR qué resuelve el
+    // auto-fit (o qué fijó el env) y poder fijar ese número después —
+    // pasarle un override acá haría que el reporte describiera el
+    // override en vez de la máquina.
+    let (_params, n_gpu_layers, source, placement) = resolve_model_params(gguf, n_ctx, None);
     Ok(TuneReport {
         gguf: gguf.canonicalize().unwrap_or_else(|_| gguf.to_path_buf()),
         n_ctx,
@@ -674,11 +689,18 @@ impl TuneReport {
 struct ModelCacheKey {
     path: PathBuf,
     n_ctx: u32,
+    /// Override de capas GPU del llamador. Parte de la clave por la misma
+    /// razón que `BRAZE_LOCAL_GPU_LAYERS`: dos brazos del mismo sweep que
+    /// solo difieren en cuántas capas van a la GPU son DOS cargas
+    /// distintas, y reusar la del primero le daría al segundo el precio
+    /// de ronda del primero — el experimento entero medido al revés y sin
+    /// una sola señal de que pasó.
+    gpu_layers_override: Option<u32>,
     env: Vec<Option<String>>,
 }
 
 impl ModelCacheKey {
-    fn new(gguf: &Path, n_ctx: u32) -> Self {
+    fn new(gguf: &Path, n_ctx: u32, gpu_layers_override: Option<u32>) -> Self {
         const VARS: [&str; 6] = [
             "BRAZE_LOCAL_GPU_LAYERS",
             "BRAZE_LOCAL_AUTOFIT",
@@ -692,6 +714,7 @@ impl ModelCacheKey {
             // mismo archivo no carguen dos veces.
             path: gguf.canonicalize().unwrap_or_else(|_| gguf.to_path_buf()),
             n_ctx,
+            gpu_layers_override,
             env: VARS.iter().map(|v| std::env::var(v).ok()).collect(),
         }
     }
@@ -726,10 +749,12 @@ fn load_model_cached(
     backend: &Arc<LlamaBackend>,
     gguf: &Path,
     n_ctx: u32,
+    gpu_layers_override: Option<u32>,
 ) -> Result<(Arc<LlamaModel>, i32, GpuLayersSource, KvPlacement), ModelError> {
     let load_fresh =
         || -> Result<(Arc<LlamaModel>, i32, GpuLayersSource, KvPlacement), ModelError> {
-            let (params, gpu_layers, source, placement) = resolve_model_params(gguf, n_ctx);
+            let (params, gpu_layers, source, placement) =
+                resolve_model_params(gguf, n_ctx, gpu_layers_override);
             let model = LlamaModel::load_from_file(backend, gguf, &params).map_err(|e| {
                 ModelError::Request(format!("failed to load GGUF '{}': {e}", gguf.display()))
             })?;
@@ -740,7 +765,7 @@ fn load_model_cached(
         return load_fresh();
     }
 
-    let key = ModelCacheKey::new(gguf, n_ctx);
+    let key = ModelCacheKey::new(gguf, n_ctx, gpu_layers_override);
     // El lock se sostiene durante la carga a propósito: si dos hilos piden el
     // mismo modelo a la vez, el segundo espera y reusa en vez de cargar un
     // duplicado de 12GB.
@@ -763,10 +788,17 @@ fn load_model_cached(
 impl LocalBackend {
     /// Carga un GGUF desde una ruta directa a `.gguf` o al blob de Ollama.
     /// `model_label` es solo para `name()`/trazas (precio local = $0).
+    /// `gpu_layers` fija cuántas capas se ofloadean a GPU para ESTA
+    /// instancia, ganándole a `BRAZE_LOCAL_GPU_LAYERS` y al auto-fit;
+    /// `None` deja la resolución como siempre (env > auto-fit > CPU).
+    /// Es por instancia y no por proceso porque un sweep de braze-bench
+    /// corre dos precios de ronda como dos brazos de la misma corrida
+    /// (`+ablate:gpu-layers=N`, línea round-economics).
     pub fn from_gguf_path(
         gguf: impl AsRef<Path>,
         model_label: impl Into<String>,
         n_ctx: u32,
+        gpu_layers: Option<u32>,
     ) -> Result<Self, ModelError> {
         // llama-cpp-2 panickea (no devuelve Err) si la ruta no existe —
         // chequear antes convierte el panic en el error legible del
@@ -785,7 +817,7 @@ impl LocalBackend {
         // devices GPU que medir y el fit devuelve 0 capas → CPU puro, el
         // mismo comportamiento que antes de la palanca.
         let (model, gpu_layers, layers_source, kv_placement) =
-            load_model_cached(&backend, gguf.as_ref(), n_ctx)?;
+            load_model_cached(&backend, gguf.as_ref(), n_ctx, gpu_layers)?;
         let model_label = model_label.into();
         let family = detect_family(&model, &model_label);
         let harmony = match family {
@@ -832,9 +864,10 @@ impl LocalBackend {
         model_ref: &str,
         model_label: impl Into<String>,
         n_ctx: u32,
+        gpu_layers: Option<u32>,
     ) -> Result<Self, ModelError> {
         let gguf = resolve_ollama_gguf(ollama_root.as_ref(), model_ref)?;
-        Self::from_gguf_path(gguf, model_label, n_ctx)
+        Self::from_gguf_path(gguf, model_label, n_ctx, gpu_layers)
     }
 }
 

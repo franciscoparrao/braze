@@ -564,12 +564,18 @@ impl BackendSpec {
             .clone()
             .unwrap_or_else(|| config.ollama_model.clone());
         let n_ctx = config.ollama_num_ctx;
+        // round-economics: `+ablate:gpu-layers=N` es el precio de la ronda
+        // como brazo de ESTA fila — mismos pesos y (bajo greedy) los mismos
+        // tokens, a otro precio.
+        let gpu_layers = self.ablation.gpu_layers;
         let backend = if model_ref.contains('/') || model_ref.ends_with(".gguf") {
-            braze_model::LocalBackend::from_gguf_path(&model_ref, &model_ref, n_ctx)
+            braze_model::LocalBackend::from_gguf_path(&model_ref, &model_ref, n_ctx, gpu_layers)
         } else {
             let root = std::env::var("BRAZE_OLLAMA_MODELS_ROOT")
                 .unwrap_or_else(|_| "/usr/share/ollama/.ollama".to_string());
-            braze_model::LocalBackend::from_ollama_model(&root, &model_ref, &model_ref, n_ctx)
+            braze_model::LocalBackend::from_ollama_model(
+                &root, &model_ref, &model_ref, n_ctx, gpu_layers,
+            )
         }
         .map_err(|e| BenchError::Startup(format!("backend local: {e}")))?;
         // N-34: hasta el 2026-07-26 el LocalBackend ignoraba `sampling`
@@ -784,6 +790,28 @@ pub struct AblationOverrides {
     /// `cargo check` como comando en las tareas con `expect_cargo_check`.
     /// `None` (el default) = brazo control, sin gate.
     pub verify_gate: Option<usize>,
+    /// `+ablate:max-iterations=N` — sobreescribe
+    /// `Config::max_turn_iterations` para ESTA fila
+    /// (`Engine::with_max_turn_iterations`).
+    ///
+    /// Existe por round-economics: el contraste "avara vs derrochadora"
+    /// es, antes que nada, un tope de rondas distinto por brazo, y el
+    /// tope vivía solo en `Config` — es decir, era global al sweep, así
+    /// que las dos configuraciones no podían correr en la misma corrida
+    /// y quedar pareadas por (tarea, repetición) para McNemar. Con la
+    /// llave acá, el factorial entero cabe en un sweep.
+    pub max_turn_iterations: Option<usize>,
+    /// `+ablate:gpu-layers=N` — capas ofloadeadas a GPU del `LocalBackend`
+    /// para ESTA fila, equivalente por brazo a `BRAZE_LOCAL_GPU_LAYERS`
+    /// (que es del proceso y por lo tanto del sweep entero).
+    ///
+    /// Es el instrumento B de round-economics: mismos pesos, mismos
+    /// tokens bajo decodificación greedy, distinto precio por ronda. Sin
+    /// esta llave, "GPU" y "CPU" son dos sweeps separados y el pareo
+    /// tarea-a-tarea que la estadística del Paper 1 usa hay que
+    /// reconstruirlo a mano desde dos JSON. Ignorada por los backends que
+    /// no son `local:`.
+    pub gpu_layers: Option<u32>,
 }
 
 impl AblationOverrides {
@@ -798,7 +826,8 @@ impl AblationOverrides {
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
          task-list, explore, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
-         tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N";
+         tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N, \
+         max-iterations=N, gpu-layers=N";
 
     fn parse(raw: &str) -> Result<Self, BenchError> {
         let mut out = Self::default();
@@ -865,6 +894,17 @@ impl AblationOverrides {
                     out.tool_search_threshold = Some(Self::parse_usize(key, value)?)
                 }
                 "lead-window" => out.lead_escalation_turns = Some(Self::parse_usize(key, value)?),
+                "max-iterations" => {
+                    let n = Self::parse_usize(key, value)?;
+                    if n == 0 {
+                        return Err(BenchError::Startup(
+                            "max-iterations=N requiere N >= 1 (N=0 no correría ninguna ronda)"
+                                .to_string(),
+                        ));
+                    }
+                    out.max_turn_iterations = Some(n);
+                }
+                "gpu-layers" => out.gpu_layers = Some(Self::parse_usize(key, value)? as u32),
                 other => {
                     return Err(BenchError::Startup(format!(
                         "unknown '+ablate:' key '{other}' (expected one of: {})",
@@ -974,6 +1014,12 @@ impl AblationOverrides {
         }
         if let Some(n) = self.lead_escalation_turns {
             parts.push(format!("lead-window={n}"));
+        }
+        if let Some(n) = self.max_turn_iterations {
+            parts.push(format!("max-iterations={n}"));
+        }
+        if let Some(n) = self.gpu_layers {
+            parts.push(format!("gpu-layers={n}"));
         }
         if parts.is_empty() {
             String::new()
@@ -1579,6 +1625,51 @@ mod tests {
                 "advertised '+ablate:' key '{entry}' does not actually parse"
             );
         }
+    }
+
+    /// round-economics: el factorial entero (dos precios de ronda × dos
+    /// configuraciones) tiene que caber en UN sweep, porque el pareo
+    /// (tarea, repetición) de McNemar es dentro de la corrida. Estas dos
+    /// llaves son lo que lo permite, y ambas tienen que sobrevivir al
+    /// `display_name` — si no, las cuatro filas se ven iguales en la
+    /// tabla y en el JSON.
+    #[test]
+    fn the_round_economics_factorial_fits_in_one_sweep_and_stays_distinguishable() {
+        let config = Config::default();
+        let avara_cpu =
+            BackendSpec::parse("local:qwen2.5:3b+ablate:max-iterations=4;gpu-layers=0").unwrap();
+        let derrochadora_gpu =
+            BackendSpec::parse("local:qwen2.5:3b+ablate:max-iterations=40;ttc=3;gpu-layers=99")
+                .unwrap();
+
+        assert_eq!(avara_cpu.ablation().max_turn_iterations, Some(4));
+        assert_eq!(avara_cpu.ablation().gpu_layers, Some(0));
+        assert_eq!(derrochadora_gpu.ablation().max_turn_iterations, Some(40));
+        assert_eq!(derrochadora_gpu.ablation().gpu_layers, Some(99));
+        assert_eq!(derrochadora_gpu.ablation().ttc_rollouts, Some(3));
+
+        let avara_name = avara_cpu.display_name(&config);
+        let derrochadora_name = derrochadora_gpu.display_name(&config);
+        assert!(
+            avara_name.contains("max-iterations=4") && avara_name.contains("gpu-layers=0"),
+            "el brazo avaro/CPU tiene que ser identificable en la tabla: {avara_name}"
+        );
+        assert!(
+            derrochadora_name.contains("max-iterations=40")
+                && derrochadora_name.contains("gpu-layers=99"),
+            "el brazo derrochador/GPU tiene que ser identificable en la tabla: \
+             {derrochadora_name}"
+        );
+        assert_ne!(avara_name, derrochadora_name);
+    }
+
+    /// `max-iterations=0` no correría ninguna ronda — un brazo que falla
+    /// el 100% de las tareas sin llamar al modelo, y que en la tabla se ve
+    /// igual que un modelo incapaz.
+    #[test]
+    fn max_iterations_zero_is_a_startup_error() {
+        let result = BackendSpec::parse("local:qwen2.5:3b+ablate:max-iterations=0");
+        assert!(matches!(result, Err(BenchError::Startup(_))));
     }
 
     #[test]

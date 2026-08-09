@@ -84,6 +84,20 @@ pub enum FailureCause {
     /// (`max_turn_total_tokens`, v4 P0.2) and the graceful tools-free
     /// summary attempt didn't produce usable text either.
     TurnBudgetExhausted,
+    /// `Engine::run_turn` agotó su presupuesto de wall-clock por turno
+    /// (`max_turn_wall_clock`, `--turn-wall-clock-secs`) y paró en el
+    /// borde de la ronda — el corte de primera clase de la línea
+    /// round-economics.
+    ///
+    /// Deliberadamente DISTINTA de [`FailureCause::Timeout`], que es el
+    /// backstop de infraestructura del runner. Las dos significan "se
+    /// acabó el tiempo", pero solo esta es interpretable: cuenta rondas y
+    /// tokens completos (el corte es en el borde), mientras que `Timeout`
+    /// mata la ronda en vuelo y censura su `Usage` (J-21/J-10). Un sweep
+    /// del brazo experimental que produzca filas `Timeout` está diciendo
+    /// que el backstop mordió antes que el presupuesto — o sea que el
+    /// experimento está mal configurado, no que el modelo falló.
+    WallClockExhausted,
     /// Something failed *outside* the model/tool loop entirely — sandbox
     /// setup, reading back the session log, etc. Not attributable to the
     /// model at all; the task should generally be re-run rather than
@@ -589,6 +603,9 @@ pub fn compute_metrics(
                 }
                 braze_engine::EngineError::TurnBudgetExhausted { .. } => {
                     FailureCause::TurnBudgetExhausted
+                }
+                braze_engine::EngineError::TurnWallClockExhausted { .. } => {
+                    FailureCause::WallClockExhausted
                 }
                 braze_engine::EngineError::IncompleteStream => FailureCause::IncompleteStream,
                 // AUDITORIA-2026-07-v8 K-1d: a tripped circuit breaker
@@ -1205,6 +1222,52 @@ mod tests {
         assert!(!result.passed);
         assert!(!result.converged);
         assert_eq!(result.failure_cause, Some(FailureCause::Timeout));
+    }
+
+    /// round-economics: el corte por presupuesto de turno NO es un
+    /// `Timeout` ni un `HarnessError`. Es un fallo del modelo bajo el
+    /// presupuesto — cuenta en el denominador, como
+    /// `MaxIterationsExhausted` — y conserva las rondas y tokens de todas
+    /// las rondas que sí completó, que es exactamente lo que el backstop
+    /// de infraestructura pierde.
+    #[test]
+    fn a_wall_clock_cut_is_its_own_cause_and_keeps_the_rounds_it_completed() {
+        let events = vec![
+            AgentEvent::Usage {
+                input_tokens: 10,
+                output_tokens: 2,
+                stop_reason: Some("tool_use".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            },
+            AgentEvent::Usage {
+                input_tokens: 15,
+                output_tokens: 3,
+                stop_reason: Some("tool_use".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+            },
+        ];
+        let result = metrics(
+            &task(None, false, None),
+            &events,
+            RunOutcome::Failed(braze_engine::EngineError::TurnWallClockExhausted {
+                budget_ms: 30_000,
+                elapsed_ms: 31_200,
+                rounds_completed: 2,
+            }),
+        );
+        assert!(!result.passed);
+        assert!(!result.converged);
+        assert_eq!(
+            result.failure_cause,
+            Some(FailureCause::WallClockExhausted),
+            "confundirlo con Timeout borraría la diferencia entre el corte \
+             experimental y el backstop de infraestructura"
+        );
+        assert_eq!(result.rounds, 2, "las rondas completas se conservan");
+        assert_eq!(result.input_tokens, 25);
+        assert_eq!(result.output_tokens, 5);
     }
 
     #[test]
