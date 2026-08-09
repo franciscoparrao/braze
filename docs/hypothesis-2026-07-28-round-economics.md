@@ -1,7 +1,12 @@
 # Hipótesis: el eje no es la escala del modelo, es el precio de una ronda
 
 Fecha: 2026-07-28
-Estado: `proposed` — nada corrido todavía
+Estado: **piloto de costo CORRIDO (2026-08-08)** — instrumento construido
+y verificado, manipulación de precio fuerte (4,4× por ronda), pero la
+interacción quedó **dentro del ruido del régimen**: se materializó el
+asesino #2 de este documento. El factorial completo NO se corre como
+está diseñado hasta resolver el poder. Ver
+`docs/round-economics-pilot-costo-2026-08-08.md`.
 Línea: round-economics (renombrada desde `paper3-round-economics` el
 2026-07-29 — chocaba con el Paper 3 que el framework ya asignaba a
 RL/bandits; ver `docs/research-discipline-framework-2026-07-16.md`)
@@ -93,6 +98,76 @@ está**, porque "reintentar" es gratis para una clase e infinito para la otra.
 El diagnóstico de primera divergencia con codepoint (`b1325fa`) es la primera
 instancia de esa clasificación, y ya se midió que convierte un deadlock ciego
 de 20 rondas en un abandono honesto en 4.
+
+### El esquema de clasificación existe y no hay que inventarlo (2026-08-08)
+
+Este documento pedía una clasificación de clases de fallo sin decir de
+dónde saldría. Salió sola: Raj et al. (Scale AI, arXiv:2607.28802,
+30-jul-2026), *Model or Harness? An Interaction-Centric Taxonomy for
+Localizing Agent Failures*. Localiza cada fallo en una **arista** entre
+dos componentes (`MODEL — TOOL`, `MODEL — CONTEXT`, …) más un **lado
+culpable**, con 41 modos, y su tesis operativa es la misma que la de acá:
+el mismo fallo observable pide intervención distinta —post-training,
+harness engineering, rediseño de entorno o reparación del banco— según
+dónde se originó.
+
+Trae además la maquinaria de aplicación, que es lo que faltaba: pipeline
+de agent-as-a-judge en tres turnos (reconstrucción de evidencia →
+clasificación → reflexión) y **voto selectivo con curva
+precisión/cobertura** — 0,83 de precisión de categoría al 90% de
+cobertura con 3 de 4 jueces, 0,96 al 68% con unanimidad. Un harness que
+tiene que decidir *en línea* si reintentar o abandonar puede usar
+exactamente esa curva: abstenerse donde la atribución es incierta es
+mejor que reintentar a ciegas, y el costo de abstenerse se paga en
+cobertura, no en daño.
+
+**Tres reservas, declaradas antes de adoptar nada:**
+
+1. **Su regla de atribución empuja casi todo al modelo por
+   construcción.** Es "el fallo es del modelo si un modelo más capaz lo
+   habría evitado o se habría recuperado" — un contrafactual
+   inobservable. Resultado: **36 de 41 modos caen del lado del modelo**,
+   y del harness propiamente solo dos (*Context Rationale Erosion*,
+   compactación que borra una restricción; *Mistranslation*, la capa de
+   integración corrompiendo una acción correcta). Los autores lo
+   reconocen a medias. Para una línea cuya tesis es que el harness
+   compensa la escala, heredar esa regla sin discutirla sería regalar el
+   argumento: se adopta el **vocabulario de aristas**, no la regla de
+   atribución.
+2. **Es preprint de vendor sobre 40 ejemplos elegidos para ilustrar la
+   taxonomía.** Los propios autores dicen que el conjunto es
+   "illustrative rather than exhaustive" y que no sirve para estimar
+   prevalencia. Entonces κ=0,76 mide que los jueces coinciden sobre un
+   set curado, no sobre una muestra representativa. Mismo estatus
+   evidencial que se le dio al post de HumanLayer: el argumento como
+   hipótesis, las cifras nunca como evidencia.
+3. **Los 8 modos de memoria están todos del lado del modelo**, lo que
+   contradice el encuadre del Paper 2, donde la memoria es palanca de
+   harness. Es desacuerdo sustantivo, no de vocabulario.
+
+**Qué adopta esta línea, concretamente**: la distinción arista+lado como
+vocabulario para la § "mitad negativa", y la idea del clasificador con
+abstención como el diseño de referencia para un harness de rondas
+baratas. Lo que NO adopta: la regla de atribución contrafactual, ni las
+cifras de κ como validación de nada fuera de su set.
+
+Dos vecinos verificados el mismo día, que también pertenecen acá:
+
+- **Ben Sghaier, Li, Adams & Hassan** (arXiv:2607.03691v2, 04-jul-2026),
+  *Don't Blame the Large Language Model: How Agent Harness Evolution
+  Shapes Coding Agent Quality*. Fija el LLM y varía **solo el harness**
+  a lo largo de 35 releases de Qwen Code CLI. Su abstract enuncia el
+  mismo problema de atribución: *"Practitioners regularly report quality
+  regressions after agent harness updates, yet consistently attribute
+  them to the underlying model rather than the harness itself."* Es
+  preprint (verificado: sin `journal_ref` ni DOI).
+- **Kapoor et al.**, *Holistic Agent Leaderboard* (arXiv:2510.11977),
+  **ICLR 2026 Poster** — verificado en OpenReview con camera-ready. Es
+  el ancla **peer-reviewed** que esta línea no tenía: infraestructura de
+  evaluación de agentes con un dashboard de confiabilidad
+  multidimensional (consistencia, predictibilidad, robustez, seguridad,
+  abstención). La abstención como dimensión de primera clase es
+  directamente el criterio de corte que la § "mitad negativa" busca.
 
 ## La manipulación: cómo variar el precio de la ronda sin tocar la capacidad
 
