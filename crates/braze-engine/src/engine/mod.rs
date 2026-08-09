@@ -3242,10 +3242,12 @@ mod tests {
 
         let engine = Engine::new(
             Box::new(model),
-            ToolRegistry::new(vec![Box::new(super::test_support::SlowEchoToolProvider::new(
-                Arc::clone(&invocations),
-                Duration::from_millis(80),
-            ))]),
+            ToolRegistry::new(vec![Box::new(
+                super::test_support::SlowEchoToolProvider::new(
+                    Arc::clone(&invocations),
+                    Duration::from_millis(80),
+                ),
+            )]),
             Arc::new(store),
             Box::new(SimpleContextCompactor::default()),
             Box::new(TestNotifier::new()),
