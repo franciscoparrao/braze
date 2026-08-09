@@ -449,6 +449,42 @@ mod tests {
     /// parse, and must cover more than the "single_tool" floor — a
     /// gradient with only one difficulty level can't show *where* a small
     /// model's capability ends.
+    /// El banco del piloto de round-economics es, por construcción, la
+    /// UNIÓN de `default.toml` y `discriminating.toml` — no una selección.
+    /// Este test fija esa regla: si alguien agrega una tarea a cualquiera
+    /// de los dos bancos base y no la propaga, el banco combinado deja de
+    /// ser la unión y pasa a ser una selección, que es exactamente lo que
+    /// su encabezado promete no ser (elegir ítems por dificultad
+    /// observada sería seleccionar sobre el resultado).
+    #[test]
+    fn round_economics_bank_is_exactly_the_union_of_its_two_sources() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites");
+        let combinado = load_suite(&dir.join("round-economics-v1.toml"))
+            .expect("round-economics-v1.toml must parse");
+        let base: Vec<_> = ["default.toml", "discriminating.toml"]
+            .iter()
+            .flat_map(|f| load_suite(&dir.join(f)).expect("banco base debe parsear"))
+            .collect();
+
+        let ids = |tasks: &[TaskDef]| {
+            tasks
+                .iter()
+                .map(|t| t.id.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(
+            ids(&combinado),
+            ids(&base),
+            "el banco combinado dejó de ser la unión de default + discriminating"
+        );
+        assert_eq!(
+            combinado.len(),
+            base.len(),
+            "ids duplicados entre bancos: un id repetido colapsaría dos ítems en uno \
+             y el pareo por (tarea, repetición) mediría cosas distintas bajo el mismo nombre"
+        );
+    }
+
     #[test]
     fn default_suite_parses_and_covers_a_difficulty_gradient() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites/default.toml");
