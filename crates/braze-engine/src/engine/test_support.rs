@@ -352,6 +352,64 @@ impl ToolProvider for EchoToolProvider {
     }
 }
 
+/// Like `EchoToolProvider`, but `invoke` sleeps first — el reloj de
+/// pared del turno tiene que avanzar de verdad para poder probar el
+/// corte de `Engine::with_max_turn_wall_clock` (round-economics) en el
+/// borde entre una ronda y la siguiente, y no solo el caso degenerado de
+/// presupuesto cero.
+pub(crate) struct SlowEchoToolProvider {
+    pub(crate) invocations: Arc<AtomicU32>,
+    pub(crate) delay: std::time::Duration,
+}
+
+impl SlowEchoToolProvider {
+    pub(crate) fn new(invocations: Arc<AtomicU32>, delay: std::time::Duration) -> Self {
+        Self { invocations, delay }
+    }
+}
+
+#[async_trait]
+impl ToolProvider for SlowEchoToolProvider {
+    fn provider_id(&self) -> &str {
+        "test:slow-echo"
+    }
+
+    async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+        Ok(vec![ToolStub {
+            name: "echo".to_string(),
+            summary: "echoes its input, slowly".to_string(),
+            source: "test:slow-echo".to_string(),
+            input_schema: None,
+        }])
+    }
+
+    async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+        if name == "echo" {
+            Ok(Some(ToolSchema {
+                name: "echo".to_string(),
+                description: "echoes its input, slowly".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                }),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        tokio::time::sleep(self.delay).await;
+        self.invocations.fetch_add(1, Ordering::SeqCst);
+        Ok(ToolResult {
+            tool_call_id: call.id.clone(),
+            content: "echoed (slowly)".to_string(),
+            is_error: false,
+        })
+    }
+}
+
 /// Like `EchoToolProvider`, but its schema declares an `integer`
 /// field — used to test F2 (docs/AUDITORIA-2026-07-v3.md):
 /// `coerce_arguments_to_schema` must turn a stringified integer from

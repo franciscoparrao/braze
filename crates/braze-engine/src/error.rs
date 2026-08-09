@@ -44,6 +44,33 @@ pub enum EngineError {
         spent_tokens: u64,
     },
 
+    /// The turn ran out of its wall-clock budget
+    /// (`Engine::max_turn_wall_clock`) at a round boundary — la condición
+    /// de corte de primera clase que pide la línea round-economics
+    /// (`docs/hypothesis-2026-07-28-round-economics.md` § "Factibilidad
+    /// hoy"). Distinta de las otras dos en lo que mide: `max_turn_iterations`
+    /// cuenta rondas y `max_turn_total_tokens` cuenta tokens, ambos
+    /// invariantes al precio de una ronda; este cuenta el recurso que SÍ
+    /// cambia cuando la ronda se abarata, y es lo que permite comparar
+    /// configuraciones a presupuesto de tiempo fijo en vez de a rondas
+    /// fijas.
+    ///
+    /// A diferencia de `TurnBudgetExhausted`, este corte NO intenta la
+    /// ronda de resumen sin tools: esa ronda cuesta tiempo, y su costo
+    /// escala con el precio de la ronda — es decir, con el factor
+    /// experimental. Concederla le regalaría una ronda extra al brazo
+    /// caro medida en el mismo eje que el experimento manipula, que es
+    /// exactamente el confundido que este corte existe para evitar.
+    #[error(
+        "turn spent {elapsed_ms} ms, past its wall-clock budget of {budget_ms} ms, \
+         without converging (stopped at a round boundary after {rounds_completed} round(s))"
+    )]
+    TurnWallClockExhausted {
+        budget_ms: u128,
+        elapsed_ms: u128,
+        rounds_completed: usize,
+    },
+
     /// A `ModelBackend`'s completion stream ended without ever yielding
     /// `CompletionEvent::Done` and without reporting an `Err` first — an
     /// invariant every implementation must uphold (see

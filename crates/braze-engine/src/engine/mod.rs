@@ -162,6 +162,12 @@ pub struct Engine {
     /// history. `None` (the default) = disabled. See
     /// [`Engine::with_max_turn_total_tokens`].
     max_turn_total_tokens: Option<u64>,
+    /// Presupuesto de wall-clock por turno, evaluado en el borde de cada
+    /// ronda. `None` (el default) = deshabilitado. Ver
+    /// [`Engine::with_max_turn_wall_clock`] — es el corte que la línea
+    /// round-economics necesita para comparar configuraciones a tiempo
+    /// fijo en vez de a rondas fijas.
+    max_turn_wall_clock: Option<Duration>,
     /// Approximate token budget for the durable+tactical portion of the
     /// prompt (i.e. excluding `system_prompt`/tool schemas, which the
     /// caller should already have reserved headroom for when computing
@@ -400,6 +406,7 @@ impl Engine {
             observation_collapse_enabled: true,
             compaction_enabled: true,
             max_turn_total_tokens: None,
+            max_turn_wall_clock: None,
             context_budget_tokens: None,
             best_of_n: 1,
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
@@ -491,6 +498,32 @@ impl Engine {
     /// thinks in dollars can convert with its own rates. Chainable.
     pub fn with_max_turn_total_tokens(mut self, budget: Option<u64>) -> Self {
         self.max_turn_total_tokens = budget;
+        self
+    }
+
+    /// Presupuesto de wall-clock por turno (línea round-economics,
+    /// `docs/hypothesis-2026-07-28-round-economics.md`): al empezar cada
+    /// ronda, si el turno ya gastó más de `budget`, el loop para con
+    /// [`EngineError::TurnWallClockExhausted`]. `None` (el default) lo
+    /// deshabilita, que es el comportamiento histórico.
+    ///
+    /// Es el tercer corte del turno, y el único cuyo recurso cambia de
+    /// precio con el despliegue: `max_turn_iterations` cuenta rondas y
+    /// `max_turn_total_tokens` cuenta tokens — las dos son invariantes a
+    /// si una ronda tarda 2 s o 90 s. Medir configuraciones de harness a
+    /// *tiempo* fijo en vez de a rondas fijas es la unidad experimental
+    /// que pide esa línea, y no se puede construir desde afuera: un
+    /// `tokio::time::timeout` alrededor de [`Engine::run_turn`] mata la
+    /// ronda en vuelo y con ella su `Usage`, así que las rondas y los
+    /// tokens de toda fila cortada quedan censurados (J-21/J-10). Cortar
+    /// en el borde de ronda deja la contabilidad completa y comparable.
+    ///
+    /// El corte NO concede la ronda de resumen sin tools que sí concede
+    /// el presupuesto de tokens — ver [`EngineError::TurnWallClockExhausted`]
+    /// por qué esa concesión sesgaría justo el factor bajo estudio.
+    /// Chainable, misma forma que [`Engine::with_context_budget`].
+    pub fn with_max_turn_wall_clock(mut self, budget: Option<Duration>) -> Self {
+        self.max_turn_wall_clock = budget;
         self
     }
 
@@ -3164,6 +3197,123 @@ mod tests {
             }
             other => panic!("expected TurnBudgetExhausted, got {other:?}"),
         }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// round-economics (docs/hypothesis-2026-07-28-round-economics.md):
+    /// el presupuesto de wall-clock corta en el BORDE de la ronda, no
+    /// abortando la que está en vuelo. La ronda 0 pide un tool que tarda
+    /// más que el presupuesto entero; el corte tiene que llegar recién al
+    /// intentar la ronda 1, con `rounds_completed = 1` y el tool ya
+    /// ejecutado — que es justo lo que un `tokio::time::timeout` de
+    /// afuera NO puede dar (mata la ronda en vuelo y pierde su `Usage`,
+    /// J-21/J-10).
+    #[tokio::test]
+    async fn a_turn_over_its_wall_clock_budget_stops_at_the_next_round_boundary() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                CompletionEvent::Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    stop_reason: Some("tool_use".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            // La ronda 2 existe en el guion pero no debe llegar a correr:
+            // el presupuesto ya se agotó mientras el tool dormía.
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(super::test_support::SlowEchoToolProvider::new(
+                Arc::clone(&invocations),
+                Duration::from_millis(80),
+            ))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_wall_clock(Some(Duration::from_millis(30)));
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        match result {
+            Err(EngineError::TurnWallClockExhausted {
+                budget_ms,
+                elapsed_ms,
+                rounds_completed,
+            }) => {
+                assert_eq!(budget_ms, 30);
+                assert!(
+                    elapsed_ms >= 80,
+                    "el turno tiene que haber gastado al menos lo que durmió el tool, \
+                     got {elapsed_ms} ms"
+                );
+                assert_eq!(
+                    rounds_completed, 1,
+                    "la ronda 0 completó entera — el corte es en el borde, no un abort"
+                );
+            }
+            other => panic!("expected TurnWallClockExhausted, got {other:?}"),
+        }
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "el tool de la ronda 0 corrió completo antes del corte"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// El presupuesto no muerde a un turno que converge dentro de él: sin
+    /// esto, el corte sería indistinguible de "toda corrida falla" y el
+    /// brazo experimental no mediría nada.
+    #[tokio::test]
+    async fn a_turn_that_converges_within_its_wall_clock_budget_is_untouched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("listo".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_turn_wall_clock(Some(Duration::from_secs(60)));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("un turno dentro del presupuesto converge normal");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

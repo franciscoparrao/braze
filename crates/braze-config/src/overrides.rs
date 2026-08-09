@@ -93,6 +93,8 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub max_turn_total_tokens: Option<u64>,
     #[serde(default)]
+    pub max_turn_wall_clock_secs: Option<u64>,
+    #[serde(default)]
     pub tool_output_max_bytes: Option<u32>,
     #[serde(default)]
     pub tool_output_max_lines: Option<u32>,
@@ -413,6 +415,16 @@ impl ConfigOverrides {
                             reason: e.to_string(),
                         })?;
                     overrides.max_turn_total_tokens = Some(parsed);
+                }
+                "MAX_TURN_WALL_CLOCK_SECS" => {
+                    let parsed = value
+                        .parse::<u64>()
+                        .map_err(|e| ConfigError::InvalidEnvValue {
+                            var: key.to_string(),
+                            value: value.to_string(),
+                            reason: e.to_string(),
+                        })?;
+                    overrides.max_turn_wall_clock_secs = Some(parsed);
                 }
                 "TOOL_OUTPUT_MAX_BYTES" => {
                     let parsed = value

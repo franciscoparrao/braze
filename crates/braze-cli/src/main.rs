@@ -345,11 +345,17 @@ fn build_model_backend(
                 .unwrap_or_else(|| config.ollama_model.clone());
             let n_ctx = config.ollama_num_ctx;
             let backend = if model_ref.contains('/') || model_ref.ends_with(".gguf") {
-                braze_model::LocalBackend::from_gguf_path(&model_ref, &model_ref, n_ctx)
+                // `None`: el CLI no expone un override de capas GPU —
+                // resuelve como siempre (BRAZE_LOCAL_GPU_LAYERS > auto-fit
+                // > CPU). El override por instancia existe para los brazos
+                // de un sweep, no para una sesión interactiva.
+                braze_model::LocalBackend::from_gguf_path(&model_ref, &model_ref, n_ctx, None)
             } else {
                 let root = std::env::var("BRAZE_OLLAMA_MODELS_ROOT")
                     .unwrap_or_else(|_| "/usr/share/ollama/.ollama".to_string());
-                braze_model::LocalBackend::from_ollama_model(&root, &model_ref, &model_ref, n_ctx)
+                braze_model::LocalBackend::from_ollama_model(
+                    &root, &model_ref, &model_ref, n_ctx, None,
+                )
             }
             .map_err(|e| CliError::Startup(format!("backend local: {e}")))?;
             Ok(Box::new(backend))
@@ -729,7 +735,17 @@ async fn build_engine(
     .with_exploration_enabled(config.enable_exploration)
     // v4 P0.2: circuit breaker por tokens acumulados por turno — None
     // (default) lo deshabilita.
-    .with_max_turn_total_tokens(config.max_turn_total_tokens);
+    .with_max_turn_total_tokens(config.max_turn_total_tokens)
+    // round-economics: presupuesto de wall-clock por turno. Espejo del de
+    // arriba — sin esta línea, `max_turn_wall_clock_secs` sería un campo
+    // de config que solo el bench honra, exactamente la clase de brecha
+    // de mirror que `max_turn_iterations` ya tuvo (comentario C10 en
+    // `braze-bench::runner`).
+    .with_max_turn_wall_clock(
+        config
+            .max_turn_wall_clock_secs
+            .map(std::time::Duration::from_secs),
+    );
     // J-13 (docs/AUDITORIA-2026-07-v7.md): ask_user espera a un HUMANO —
     // dispatch inline, exento del timeout de 120s de los background
     // tools (bajo ese reloj, una respuesta lenta se cancelaba y la línea

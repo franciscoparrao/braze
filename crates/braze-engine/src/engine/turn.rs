@@ -176,6 +176,19 @@ impl Engine {
 
         let mut messages = self.load_messages(session, observer).await?;
 
+        // round-economics: el reloj del turno arranca ANTES de la ronda de
+        // planificación, no antes del loop. La ronda del planner no cuenta
+        // contra `max_turn_iterations`, pero sí es una ronda de modelo y
+        // sí cuesta tiempo — el proyecto ya decidió que su costo pertenece
+        // a la comparación (ver `TaskResult::rounds` en braze-bench, que la
+        // cuenta). Arrancar el reloj después le regalaría al brazo con
+        // planner una ronda gratis medida en el mismo eje que este
+        // presupuesto corta.
+        //
+        // `Instant` (monotónico) y no hora de pared: un salto de NTP no
+        // debe cortar un turno ni regalarle tiempo.
+        let turn_started = std::time::Instant::now();
+
         // PLAN.md § "Split planificador/ejecutor": optional one-shot
         // planning round before the executor loop. Doesn't count against
         // `MAX_TURN_ITERATIONS`, and can only *add* a persisted
@@ -237,6 +250,35 @@ impl Engine {
         let mut empty_round_retries: u32 = 0;
 
         for round in 0..self.max_turn_iterations {
+            // round-economics (docs/hypothesis-2026-07-28-round-economics.md):
+            // presupuesto de wall-clock del turno, chequeado en el borde de
+            // la ronda como los otros dos cortes — una ronda que converge
+            // dentro del presupuesto+ε debe retornar normal, y lo que se
+            // evita es EMPEZAR una ronda más cuando el tiempo ya se acabó.
+            //
+            // Sin ronda de resumen, a propósito: ver
+            // `EngineError::TurnWallClockExhausted`. El costo de esa ronda
+            // extra escala con el precio de la ronda, que es exactamente el
+            // factor que esta línea manipula.
+            if let Some(budget) = self.max_turn_wall_clock {
+                let elapsed = turn_started.elapsed();
+                if elapsed > budget {
+                    tracing::warn!(
+                        round,
+                        budget_ms = budget.as_millis(),
+                        elapsed_ms = elapsed.as_millis(),
+                        "turn blew its wall-clock budget; stopping at the round boundary"
+                    );
+                    self.consecutive_turns_without_tool_calls
+                        .store(0, std::sync::atomic::Ordering::SeqCst);
+                    return Err(EngineError::TurnWallClockExhausted {
+                        budget_ms: budget.as_millis(),
+                        elapsed_ms: elapsed.as_millis(),
+                        rounds_completed: round,
+                    });
+                }
+            }
+
             // v4 P0.2 (docs/AUDITORIA-2026-07-v6.md § roadmap Paquete 3):
             // checked at the top of the NEXT iteration, not right after a
             // round — a round that converges to a final answer within

@@ -447,6 +447,16 @@ pub struct Config {
     /// real: 481K en 40 rondas, sesión ccd4621b).
     #[serde(default)]
     pub max_turn_total_tokens: Option<u64>,
+    /// Presupuesto de wall-clock por turno, en segundos
+    /// (`Engine::with_max_turn_wall_clock`). `None` (el default) =
+    /// deshabilitado. El tercer corte, y el único que mide un recurso cuyo
+    /// PRECIO cambia con el despliegue: los otros dos cuentan rondas y
+    /// tokens, invariantes a si una ronda tarda 2 s o 90 s. Es la unidad
+    /// experimental de la línea round-economics
+    /// (`docs/hypothesis-2026-07-28-round-economics.md`): comparar
+    /// configuraciones de harness a TIEMPO fijo en vez de a rondas fijas.
+    #[serde(default)]
+    pub max_turn_wall_clock_secs: Option<u64>,
     /// Per-tool-result byte budget before `LocalToolsProvider::wrap`
     /// truncates and appends an actionable "narrow your query" trailer
     /// (v4 P2.4). Default 8000 — the historical `MAX_TOOL_OUTPUT_BYTES`
@@ -615,6 +625,7 @@ impl Default for Config {
             max_turn_iterations: default_max_turn_iterations(),
             planner_max_tokens: default_planner_max_tokens(),
             max_turn_total_tokens: None,
+            max_turn_wall_clock_secs: None,
             tool_output_max_bytes: default_tool_output_max_bytes(),
             tool_output_max_lines: None,
             formatters: default_formatters(),
@@ -842,6 +853,9 @@ impl Config {
         }
         if let Some(v) = overrides.max_turn_total_tokens {
             self.max_turn_total_tokens = Some(v);
+        }
+        if let Some(v) = overrides.max_turn_wall_clock_secs {
+            self.max_turn_wall_clock_secs = Some(v);
         }
         if let Some(v) = overrides.tool_output_max_bytes {
             self.tool_output_max_bytes = v;
