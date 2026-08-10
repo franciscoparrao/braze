@@ -21,3 +21,5 @@ tokio = { workspace = true }
 # En otros SO el módulo `sandbox` compila un stub que reporta NotEnforced.
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
+libc = "0.2.189"
+seccompiler = "0.5.0"

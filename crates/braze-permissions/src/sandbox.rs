@@ -1,11 +1,40 @@
-//! Sandbox Landlock write-only (v9 Paquete 4 — hereda de v8 § "Sandboxing
-//! OS", ítem 16): restricción a nivel de KERNEL de los accesos de
-//! escritura del filesystem a una allowlist de raíces, con las lecturas
-//! libres. Cierra de raíz la clase K-2/J-20/J-31 — el gate léxico de la
-//! capa 2 clasifica la *descripción* de una acción, y symlinks, rutas
-//! creativas o un subproceso de `shell_exec` pueden escribir donde la
-//! descripción no alcanza; Landlock restringe el syscall mismo y se
-//! hereda por todos los procesos hijos.
+//! Sandbox de proceso (v9 Paquete 4 — hereda de v8 § "Sandboxing OS",
+//! ítem 16). Tres capas in-process, todas Linux-only, todas opt-in bajo
+//! `Config::enable_landlock_write_sandbox`:
+//!
+//! 1. [`apply_write_sandbox`] — **Landlock write-only**: restricción a
+//!    nivel de KERNEL de las escrituras del filesystem a una allowlist de
+//!    raíces, lecturas libres. Cierra la clase K-2/J-20/J-31 — el gate
+//!    léxico de la capa 2 clasifica la *descripción* de una acción, y
+//!    symlinks, rutas creativas o un subproceso de `shell_exec` escriben
+//!    donde la descripción no alcanza; Landlock restringe el syscall.
+//! 2. [`apply_syscall_hardening`] — **seccomp** que deniega
+//!    `io_uring_*`/`ptrace`/`process_vm_*` (paquete de seguridad
+//!    2026-08-10): las clases de bypass que Landlock write-only no cubre.
+//! 3. [`harden_process`] — **prctl + env scrub**: sin core dumps, sin
+//!    new-privs, sin `LD_PRELOAD` heredado.
+//!
+//! ## Lo que este sandbox NO puede hacer (restricción de mecanismo)
+//!
+//! Landlock es **allowlist-only, sin reglas de deny**, y el permiso más
+//! amplio de la jerarquía gana. Por eso **no** son expresables in-process
+//! y quedaron deliberadamente fuera del paquete de seguridad:
+//! - *Denegar lectura de rutas secretas* (`~/.ssh`, `.env`) manteniendo
+//!   lecturas amplias: habría que handle-ar READ y enumerar TODA raíz
+//!   legítima de lectura (toolchain, sysroot, workdir…) excluyendo los
+//!   secretos — frágil, rompe cargo/rustc. No hay "denegar bajo esta
+//!   ruta".
+//! - *`.git/hooks` read-only dentro de un workdir escribible*: el
+//!   write-allow del workdir cubre todos sus descendientes; no se puede
+//!   agregar una regla más restrictiva bajo un padre ya permitido.
+//!
+//! El fix real de ambos es un mount namespace (bubblewrap, el modelo
+//! out-of-process de codex) — trabajo futuro. Mientras tanto, la
+//! protección de `.git/`/`.braze/` vive en el clasificador (capa 2), que
+//! es la capa correcta para ella.
+//!
+//! Tampoco se deniega red in-process: braze necesita red para sus propios
+//! backends API/Ollama, y el sandbox aplica al proceso entero.
 //!
 //! Alcance deliberado de esta primera pasada:
 //!
@@ -100,6 +129,125 @@ pub fn apply_write_sandbox(write_roots: &[PathBuf]) -> Result<WriteSandboxStatus
     })
 }
 
+/// Endurecimiento de proceso previo al sandbox (paquete de seguridad v9,
+/// espejo del `process-hardening` de codex): cierra vectores que ni
+/// Landlock ni seccomp cubren y que son baratos.
+///
+/// - `PR_SET_DUMPABLE=0`: sin core dumps → un crash no vuelca la memoria
+///   del proceso (que pudo haber leído credenciales/keys de API) a disco.
+/// - `PR_SET_NO_NEW_PRIVS=1`: ningún `execve` posterior gana privilegios
+///   vía setuid/setgid — y es además el prerequisito para instalar un
+///   filtro seccomp sin CAP_SYS_ADMIN.
+/// - Scrub de `LD_PRELOAD`/`LD_AUDIT`/`DYLD_*`: un preload heredado
+///   inyecta código en cada subproceso que braze lance (`shell_exec`,
+///   `cargo check`); se limpia ANTES de spawnear nada.
+///
+/// Debe correr en `main()` antes del runtime de tokio y antes de
+/// spawnear cualquier subproceso — el scrub de env solo protege a los
+/// hijos creados después. Best-effort: un prctl que falla se traza y no
+/// aborta (el sandbox de escritura es la protección primaria).
+#[cfg(target_os = "linux")]
+pub fn harden_process() {
+    // SAFETY: prctl con argumentos válidos y constantes; sin efectos
+    // sobre memoria del caller.
+    unsafe {
+        if libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 {
+            tracing::warn!(
+                error = %std::io::Error::last_os_error(),
+                "hardening: PR_SET_DUMPABLE falló (core dumps no deshabilitados)"
+            );
+        }
+        if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+            tracing::warn!(
+                error = %std::io::Error::last_os_error(),
+                "hardening: PR_SET_NO_NEW_PRIVS falló"
+            );
+        }
+    }
+    // SAFETY: corre en main() antes de que exista cualquier otro thread
+    // (contrato del module doc), así que la mutación de env no compite.
+    unsafe {
+        for var in [
+            "LD_PRELOAD",
+            "LD_AUDIT",
+            "DYLD_INSERT_LIBRARIES",
+            "DYLD_LIBRARY_PATH",
+        ] {
+            std::env::remove_var(var);
+        }
+    }
+}
+
+/// Los syscalls que el filtro seccomp deniega — ninguno lo usa braze ni
+/// tokio (epoll por default, no io_uring), así que denegarlos con EPERM
+/// es seguro y cierra clases reales de bypass del sandbox:
+/// - `io_uring_*`: autoridad ambiente que saltea la mediación de
+///   syscalls (un io_uring puede hacer I/O sin volver a pasar por el
+///   filtro) — el hueco más citado de un sandbox seccomp/Landlock.
+/// - `ptrace`/`process_vm_readv`/`process_vm_writev`: leer o inyectar en
+///   la memoria de otro proceso (incl. escaparse adjuntándose a un
+///   proceso menos restringido).
+#[cfg(target_os = "linux")]
+const HARDENED_DENIED_SYSCALLS: &[libc::c_long] = &[
+    libc::SYS_io_uring_setup,
+    libc::SYS_io_uring_enter,
+    libc::SYS_io_uring_register,
+    libc::SYS_ptrace,
+    libc::SYS_process_vm_readv,
+    libc::SYS_process_vm_writev,
+];
+
+/// Compila el filtro seccomp de endurecimiento: allow-por-default
+/// (`mismatch_action = Allow`) con EPERM para los syscalls de
+/// [`HARDENED_DENIED_SYSCALLS`] (`match_action`, reglas vacías = matchean
+/// siempre). Separado de la aplicación para poder testear que compila sin
+/// restringir el proceso de test.
+#[cfg(target_os = "linux")]
+fn build_syscall_filter() -> Result<seccompiler::BpfProgram, SandboxError> {
+    use seccompiler::{SeccompAction, SeccompFilter};
+
+    let rules = HARDENED_DENIED_SYSCALLS
+        .iter()
+        .map(|&nr| (nr, Vec::new()))
+        .collect();
+    let filter = SeccompFilter::new(
+        rules,
+        SeccompAction::Allow, // default: permitir todo lo demás
+        SeccompAction::Errno(libc::EPERM as u32), // los listados: EPERM
+        std::env::consts::ARCH
+            .try_into()
+            .map_err(|e| SandboxError(format!("arch no soportada por seccomp: {e:?}")))?,
+    )
+    .map_err(|e| SandboxError(format!("build del filtro seccomp: {e}")))?;
+    filter
+        .try_into()
+        .map_err(|e| SandboxError(format!("compilación del filtro seccomp: {e}")))
+}
+
+/// Instala el filtro seccomp de endurecimiento en todos los threads del
+/// proceso (TSYNC). Debe correr antes del runtime de tokio; seccompiler
+/// setea `PR_SET_NO_NEW_PRIVS` por sí mismo antes de instalar. Ver
+/// [`build_syscall_filter`] por qué estos syscalls son seguros de
+/// denegar. Best-effort a nivel del caller: en un kernel sin seccomp
+/// esto devuelve `Err` y el caller decide (warning, no abort — el
+/// sandbox de escritura sigue siendo la protección primaria).
+#[cfg(target_os = "linux")]
+pub fn apply_syscall_hardening() -> Result<(), SandboxError> {
+    let program = build_syscall_filter()?;
+    seccompiler::apply_filter_all_threads(&program)
+        .map_err(|e| SandboxError(format!("apply del filtro seccomp: {e}")))
+}
+
+/// Stubs no-Linux: seccomp y prctl son de Linux. En otros SO estas dos
+/// son no-ops (el caller ya loguea que el sandbox no se enforza).
+#[cfg(not(target_os = "linux"))]
+pub fn harden_process() {}
+
+#[cfg(not(target_os = "linux"))]
+pub fn apply_syscall_hardening() -> Result<(), SandboxError> {
+    Ok(())
+}
+
 /// Stub no-Linux: Landlock es un LSM de Linux; en otros SO el sandbox
 /// simplemente no existe y se reporta como tal — el caller loguea y (si
 /// el usuario lo pidió explícitamente) decide si eso es aceptable.
@@ -149,5 +297,19 @@ mod tests {
         // Limpieza solo de lo permitido — el archivo denegado no existe.
         let _ = std::fs::remove_dir_all(&allowed);
         // remove_dir_all(&denied) fallaría: borrar también es escritura.
+    }
+
+    /// El filtro seccomp de endurecimiento COMPILA a un programa BPF no
+    /// vacío. No se APLICA en el test a propósito: `apply_filter_all_threads`
+    /// restringiría el binario de test entero (TSYNC) y es irreversible —
+    /// la aplicación real se verifica en vivo. Esto cubre que la lista de
+    /// syscalls y la arquitectura son válidas para seccompiler.
+    #[test]
+    fn the_syscall_hardening_filter_compiles_to_a_nonempty_bpf_program() {
+        let program = build_syscall_filter().expect("el filtro debe compilar");
+        assert!(
+            !program.is_empty(),
+            "un filtro con syscalls denegados no puede ser vacío"
+        );
     }
 }

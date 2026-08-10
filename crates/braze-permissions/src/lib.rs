@@ -61,4 +61,6 @@ pub use human_wait::{
     HumanWait, accumulated as human_wait_accumulated, is_waiting as human_is_waiting,
 };
 pub use question::QuestionPrompt;
-pub use sandbox::{SandboxError, WriteSandboxStatus, apply_write_sandbox};
+pub use sandbox::{
+    SandboxError, WriteSandboxStatus, apply_syscall_hardening, apply_write_sandbox, harden_process,
+};

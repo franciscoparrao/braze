@@ -116,7 +116,20 @@ impl ActionClassifier for DefaultClassifier {
                 // proyecto. Una escritura del modelo ahí es persistencia
                 // de instrucciones cross-sesión, no un archivo
                 // reversible del workdir — siempre pide confirmación.
-                if path.components().any(|c| c.as_os_str() == ".braze") {
+                //
+                // Paquete de seguridad v9 (2026-08-10): `.git/` recibe el
+                // mismo trato, en la capa correcta. El sandbox Landlock NO
+                // puede proteger `.git/hooks` (allowlist-only: el
+                // write-allow del workdir cubre sus descendientes — ver el
+                // module doc de `crate::sandbox`), así que la defensa de
+                // escalación vive acá: una escritura del modelo bajo
+                // `.git/` (un hook, `config` con `core.hooksPath`, un ref)
+                // corre código arbitrario en el próximo comando git — es
+                // irreversible por naturaleza, no un archivo del workdir.
+                if path
+                    .components()
+                    .any(|c| matches!(c.as_os_str().to_str(), Some(".braze") | Some(".git")))
+                {
                     Reversibility::Irreversible
                 } else if self.allowlist.is_allowed(path) {
                     Reversibility::Reversible
@@ -719,6 +732,34 @@ mod tests {
             }),
             Reversibility::Reversible,
             "reading .braze stays Reversible"
+        );
+    }
+
+    /// Paquete de seguridad v9: escribir bajo `.git/` (un hook, config,
+    /// un ref) es Irreversible aunque esté dentro del workdir permitido —
+    /// la defensa de escalación que el sandbox Landlock no puede dar. Leer
+    /// `.git/` sigue Reversible (inspeccionar el repo es legítimo).
+    #[test]
+    fn writes_under_dot_git_are_irreversible_even_inside_the_workdir() {
+        for path in [
+            ".git/hooks/pre-commit",
+            "/home/user/project/.git/config",
+            ".git/refs/heads/main",
+        ] {
+            assert_eq!(
+                classifier().classify(&ActionDescriptor::WriteFile {
+                    path: std::path::PathBuf::from(path),
+                }),
+                Reversibility::Irreversible,
+                "expected write to {path:?} to be Irreversible"
+            );
+        }
+        assert_eq!(
+            classifier().classify(&ActionDescriptor::ReadPath {
+                path: std::path::PathBuf::from(".git/config"),
+            }),
+            Reversibility::Reversible,
+            "reading .git stays Reversible"
         );
     }
 

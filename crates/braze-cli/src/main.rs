@@ -106,6 +106,22 @@ fn maybe_apply_landlock_sandbox() -> Option<ExitCode> {
     if !config.enable_landlock_write_sandbox {
         return None;
     }
+
+    // Paquete de seguridad v9, en orden: (1) hardening de proceso —
+    // setea PR_SET_NO_NEW_PRIVS, prerequisito del seccomp de abajo, y
+    // limpia LD_PRELOAD antes de spawnear nada; (2) seccomp io_uring/
+    // ptrace; (3) Landlock write-only. Las dos primeras son best-effort
+    // (defensa en profundidad; un kernel viejo las degrada con warning),
+    // el sandbox de escritura es la protección primaria y sigue
+    // fail-closed más abajo.
+    braze_permissions::harden_process();
+    if let Err(err) = braze_permissions::apply_syscall_hardening() {
+        eprintln!(
+            "braze: aviso: el endurecimiento seccomp (io_uring/ptrace) no se pudo aplicar \
+             ({err}); se continúa con el sandbox de escrituras como protección primaria."
+        );
+    }
+
     let mut roots: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         roots.push(cwd);
