@@ -360,11 +360,16 @@ Nota Gemma 4 (2026-07-18): Google publicó un *stealth refresh* el
 NO están en el registry de Ollama todavía (`gemma4:e4b` sigue en digest
 `c6eb396dbd59`, el mismo del sweep del 13-jul — re-pullear es no-op).
 La palanca accionable era **Ollama ≥0.32.1** (16-jul, fix propio de tool
-calling Gemma 4), y Nitro **ya está en 0.32.1** (actualizado 2026-07-20);
-el A/B de runtime queda listo para correr, en "Próximos pasos". pass^k
-mostró que los 3 fallos de e4b son sistemáticos (una tarea de
-`single_tool`), no flakiness — si el fix los repara, e4b salta a
-pass^5=100% y desafía a gpt-oss:20b como default por RAM.
+calling Gemma 4), y Nitro **ya está en 0.32.1** (actualizado 2026-07-20).
+**RESUELTO (2026-08-10, sin A/B formal)**: con digest fijo verificado y
+95 corridas frescas (brazo A del sweep edit-fence), el "fallo
+sistemático" resultó NO ser de tool calling — e4b responde bien
+`read_file_basic` pero vía `shell_exec` (`wc -l`) en vez del
+`read_file` que la aserción exige (5/5 con seed fijo; era preferencia
+de política, no capacidad — arista MODEL—BENCH, lado banco). No había
+nada que 0.32.1 pudiera reparar; gpt-oss:20b retiene el default y la
+decisión de banco (aceptar equivalencia funcional o no) queda abierta:
+ver `docs/gemma4-e4b-diagnostico-read-file-basic-2026-08-10.md`.
 
 Nota infra (2026-07-20): Nitro corre **Ollama 0.32.1** (era 0.30.7). El
 upgrade resolvió además la recurrencia del incidente #1 del testbed roam
