@@ -86,9 +86,7 @@ impl SkillRegistry {
             for file in found {
                 match parse_skill_file(&file) {
                     Some(stub) => {
-                        if let Some(existing) =
-                            skills.iter().find(|s| s.name == stub.name)
-                        {
+                        if let Some(existing) = skills.iter().find(|s| s.name == stub.name) {
                             tracing::warn!(
                                 name = %stub.name,
                                 kept = ?existing.path,
@@ -147,7 +145,13 @@ impl SkillRegistry {
             while !body.is_char_boundary(end) {
                 end -= 1;
             }
-            (format!("{}\n[skill body truncated at {max_body_tokens} tokens]", &body[..end]), true)
+            (
+                format!(
+                    "{}\n[skill body truncated at {max_body_tokens} tokens]",
+                    &body[..end]
+                ),
+                true,
+            )
         } else {
             (body.to_string(), false)
         };
@@ -287,10 +291,8 @@ mod tests {
     use super::*;
 
     fn temp_skills_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "braze-skills-test-{}-{label}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("braze-skills-test-{}-{label}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -311,8 +313,20 @@ mod tests {
     #[test]
     fn discovery_indexes_valid_skills_and_skips_invalid_ones() {
         let root = temp_skills_dir("discovery");
-        write_skill(&root, "testing", "Testing", "how to write tests here", "Run cargo test.");
-        write_skill(&root, "review", "review", "review checklist", "Check invariants.");
+        write_skill(
+            &root,
+            "testing",
+            "Testing",
+            "how to write tests here",
+            "Run cargo test.",
+        );
+        write_skill(
+            &root,
+            "review",
+            "review",
+            "review checklist",
+            "Check invariants.",
+        );
         std::fs::write(root.join("broken.md"), "not a skill").unwrap();
         std::fs::create_dir_all(root.join("no-front")).unwrap();
         std::fs::write(root.join("no-front/SKILL.md"), "body sin frontmatter").unwrap();
@@ -352,7 +366,10 @@ mod tests {
         let registry = SkillRegistry::discover(std::slice::from_ref(&root));
         let loaded = registry.load_body("big", 100).expect("skill exists");
         assert!(loaded.truncated);
-        assert!(loaded.body.len() < 1_000, "capped near 100 tokens ≈ 400 chars");
+        assert!(
+            loaded.body.len() < 1_000,
+            "capped near 100 tokens ≈ 400 chars"
+        );
         assert!(loaded.body.contains("[skill body truncated"));
         assert_eq!(loaded.estimated_tokens, 100);
 
@@ -371,8 +388,9 @@ mod tests {
         write_skill(&root, "r", "review", "d", "b");
         let registry = SkillRegistry::discover(std::slice::from_ref(&root));
 
-        let mentions = registry
-            .explicit_mentions("usa $review y $testing, de nuevo $review; $desconocida y $ solo no");
+        let mentions = registry.explicit_mentions(
+            "usa $review y $testing, de nuevo $review; $desconocida y $ solo no",
+        );
         assert_eq!(mentions, vec!["review".to_string(), "testing".to_string()]);
         assert!(registry.explicit_mentions("sin menciones").is_empty());
 

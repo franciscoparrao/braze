@@ -119,7 +119,9 @@ impl ProjectMemoryStore for FileProjectMemoryStore {
             .map_err(|e| MemoryError::Write(format!("{tmp_path:?}: {e}")))?;
         tokio::fs::rename(&tmp_path, &self.path)
             .await
-            .map_err(|e| MemoryError::Write(format!("renaming {tmp_path:?} -> {:?}: {e}", self.path)))?;
+            .map_err(|e| {
+                MemoryError::Write(format!("renaming {tmp_path:?} -> {:?}: {e}", self.path))
+            })?;
 
         Ok(())
     }
@@ -131,21 +133,25 @@ mod tests {
     use crate::memory::SignalSource;
 
     fn temp_path() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "braze-memory-store-test-{:?}-{}",
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
-        .join("memory.json")
+        std::env::temp_dir()
+            .join(format!(
+                "braze-memory-store-test-{:?}-{}",
+                std::thread::current().id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .join("memory.json")
     }
 
     #[tokio::test]
     async fn load_returns_none_when_no_file_exists_yet() {
         let store = FileProjectMemoryStore::new(temp_path());
-        let loaded = store.load().await.expect("load must not error on a missing file");
+        let loaded = store
+            .load()
+            .await
+            .expect("load must not error on a missing file");
         assert!(loaded.is_none());
     }
 
@@ -159,7 +165,11 @@ mod tests {
         memory.record_completed_signal("wrote the CLI", SignalSource::TaskListCompletion, "t2");
 
         store.save(&memory).await.expect("save must succeed");
-        let loaded = store.load().await.expect("load must succeed").expect("must find what was saved");
+        let loaded = store
+            .load()
+            .await
+            .expect("load must succeed")
+            .expect("must find what was saved");
 
         assert_eq!(loaded.project_key, "proj-key");
         assert_eq!(loaded.touched_files.len(), 1);
@@ -176,7 +186,10 @@ mod tests {
         let store = FileProjectMemoryStore::new(&path);
         let memory = ProjectMemory::new("proj-key");
 
-        store.save(&memory).await.expect("save must create missing parent dirs");
+        store
+            .save(&memory)
+            .await
+            .expect("save must create missing parent dirs");
         assert!(path.exists());
 
         tokio::fs::remove_dir_all(path.parent().unwrap()).await.ok();
@@ -196,7 +209,11 @@ mod tests {
         store.save(&second).await.unwrap();
 
         let loaded = store.load().await.unwrap().unwrap();
-        assert_eq!(loaded.touched_files.len(), 1, "save replaces, it does not append");
+        assert_eq!(
+            loaded.touched_files.len(),
+            1,
+            "save replaces, it does not append"
+        );
         assert_eq!(loaded.touched_files[0].path, "b.rs");
 
         tokio::fs::remove_dir_all(path.parent().unwrap()).await.ok();

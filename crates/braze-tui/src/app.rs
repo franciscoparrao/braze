@@ -25,7 +25,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::approval::ApprovalRequest;
-use crate::{EngineFactory, SkillCandidate};
 use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len};
 use crate::error::TuiError;
 use crate::history_cell::{
@@ -41,6 +40,7 @@ use crate::slash_commands::{SlashCommand, matching_commands};
 use crate::status_bar;
 use crate::terminal::{ACTIVE_ROWS, Backend};
 use crate::theme::Theme;
+use crate::{EngineFactory, SkillCandidate};
 
 /// Suggestions shown at once in the `/`/`@` popup — see `draw_popup`.
 /// Kept small and fixed (no scrolling within the popup): it reuses the
@@ -1103,7 +1103,10 @@ impl App {
         // than listing the action twice with contradictory verdicts.
         let mut entries: Vec<(String, bool)> = Vec::new();
         for event in &events {
-            if let AgentEvent::PermissionDecided { action, allowed, .. } = event {
+            if let AgentEvent::PermissionDecided {
+                action, allowed, ..
+            } = event
+            {
                 match entries.iter_mut().find(|(a, _)| a == action) {
                     Some(entry) => entry.1 = *allowed,
                     None => entries.push((action.clone(), *allowed)),
@@ -1114,8 +1117,7 @@ impl App {
         if entries.is_empty() {
             return self.commit_cell(
                 &NoticeCell {
-                    message: "esta sesión aún no registra ninguna decisión de permisos"
-                        .to_string(),
+                    message: "esta sesión aún no registra ninguna decisión de permisos".to_string(),
                     theme: self.theme,
                 },
                 terminal,
@@ -1844,8 +1846,8 @@ impl App {
             // more), with a visible "…" marker if anything had to be cut.
             let available_rows_for_description =
                 usize::from(inner_area.height.saturating_sub(1).max(1));
-            let max_chars = available_rows_for_description
-                .saturating_mul(usize::from(inner_area.width.max(1)));
+            let max_chars =
+                available_rows_for_description.saturating_mul(usize::from(inner_area.width.max(1)));
             let description = truncate_for_display(&request.description, max_chars);
             let lines = vec![
                 Line::from(description),
@@ -2295,9 +2297,7 @@ mod tests {
             .collect();
         assert_eq!(keys, vec!["Enter", "Ctrl+J", "/", "@", "Ctrl+T", "Ctrl+C"]);
         assert!(
-            line.spans
-                .iter()
-                .all(|s| s.style.fg == Some(theme.muted)),
+            line.spans.iter().all(|s| s.style.fg == Some(theme.muted)),
             "every span stays in the muted tone"
         );
     }

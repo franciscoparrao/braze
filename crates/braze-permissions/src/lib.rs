@@ -51,6 +51,8 @@ pub use classifier::{
 };
 pub use confirm::ConfirmationPrompt;
 pub use error::PermissionError;
-pub use human_wait::{HumanWait, accumulated as human_wait_accumulated, is_waiting as human_is_waiting};
 pub use guard::{PermissionGuard, derive_permission_key};
+pub use human_wait::{
+    HumanWait, accumulated as human_wait_accumulated, is_waiting as human_is_waiting,
+};
 pub use question::QuestionPrompt;

@@ -668,8 +668,7 @@ mod tests {
         // LIVE writer's `write_all` can look like from a reader racing it.
         let raw = format!(
             "{}\n{}",
-            r#"{"type":"user_message","text":"hola"}"#,
-            r#"{"type":"user_message","text":"cor"#
+            r#"{"type":"user_message","text":"hola"}"#, r#"{"type":"user_message","text":"cor"#
         );
         tokio::fs::write(&path, &raw).await.unwrap();
 

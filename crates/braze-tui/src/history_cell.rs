@@ -744,10 +744,7 @@ mod tests {
         let text = cell.as_text();
         assert_eq!(text.lines.len(), 3);
         assert!(text.lines[0].spans[0].content.contains("turn_budget"));
-        assert_eq!(
-            text.lines[2].spans[0].content,
-            "  Finish now."
-        );
+        assert_eq!(text.lines[2].spans[0].content, "  Finish now.");
     }
 
     #[test]

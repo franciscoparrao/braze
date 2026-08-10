@@ -307,143 +307,157 @@ impl ConfigOverrides {
                 "LEAD_BACKEND" => overrides.lead_backend = Some(value.to_string()),
                 "LEAD_MODEL" => overrides.lead_model = Some(value.to_string()),
                 "LEAD_TURNS" => {
-                    let parsed = value
-                        .parse::<usize>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.lead_turns = Some(parsed);
                 }
                 "LEAD_FAILURE_THRESHOLD" => {
-                    let parsed = value
-                        .parse::<usize>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.lead_failure_threshold = Some(parsed);
                 }
                 "LEAD_ESCALATION_TURNS" => {
-                    let parsed = value
-                        .parse::<usize>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.lead_escalation_turns = Some(parsed);
                 }
                 "ENVIRONMENT_BLOCK" => {
-                    let parsed = value
-                        .parse::<bool>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.environment_block = Some(parsed);
                 }
                 "ENABLE_TASK_LIST" => {
-                    let parsed = value
-                        .parse::<bool>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.enable_task_list = Some(parsed);
                 }
                 "ENABLE_EXPLORATION" => {
-                    let parsed = value
-                        .parse::<bool>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.enable_exploration = Some(parsed);
                 }
                 "ENABLE_PROJECT_MEMORY" => {
-                    let parsed = value
-                        .parse::<bool>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.enable_project_memory = Some(parsed);
                 }
                 "TOOL_SEARCH_THRESHOLD" => {
-                    let parsed = value
-                        .parse::<usize>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.tool_search_threshold = Some(parsed);
                 }
                 "MAX_TURN_ITERATIONS" => {
-                    let parsed = value
-                        .parse::<u32>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<u32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.max_turn_iterations = Some(parsed);
                 }
                 "PLANNER_MAX_TOKENS" => {
-                    let parsed = value
-                        .parse::<u32>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<u32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.planner_max_tokens = Some(parsed);
                 }
                 "MAX_TURN_TOTAL_TOKENS" => {
-                    let parsed = value
-                        .parse::<u64>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<u64>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.max_turn_total_tokens = Some(parsed);
                 }
                 "MAX_TURN_WALL_CLOCK_SECS" => {
-                    let parsed = value
-                        .parse::<u64>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<u64>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.max_turn_wall_clock_secs = Some(parsed);
                 }
                 "TOOL_OUTPUT_MAX_BYTES" => {
-                    let parsed = value
-                        .parse::<u32>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<u32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.tool_output_max_bytes = Some(parsed);
                 }
                 "TOOL_OUTPUT_MAX_LINES" => {
-                    let parsed = value
-                        .parse::<u32>()
-                        .map_err(|e| ConfigError::InvalidEnvValue {
-                            var: key.to_string(),
-                            value: value.to_string(),
-                            reason: e.to_string(),
-                        })?;
+                    let parsed =
+                        value
+                            .parse::<u32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
                     overrides.tool_output_max_lines = Some(parsed);
                 }
                 "DISABLE_TEXTUAL_TOOL_CALL_RESCUE" => {

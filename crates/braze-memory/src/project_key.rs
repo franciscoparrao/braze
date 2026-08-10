@@ -22,7 +22,9 @@ pub fn resolve_project_root(cwd: &Path) -> PathBuf {
     let mut candidate = cwd;
     loop {
         if candidate.join(".git").exists() {
-            return candidate.canonicalize().unwrap_or_else(|_| candidate.to_path_buf());
+            return candidate
+                .canonicalize()
+                .unwrap_or_else(|_| candidate.to_path_buf());
         }
         match candidate.parent() {
             Some(parent) => candidate = parent,

@@ -694,7 +694,10 @@ mod tests {
     /// Reversible (the content already reaches the model via injection).
     #[test]
     fn writes_under_dot_braze_are_irreversible_even_inside_the_workdir() {
-        for path in [".braze/memory.json", "/home/user/project/.braze/memory.json"] {
+        for path in [
+            ".braze/memory.json",
+            "/home/user/project/.braze/memory.json",
+        ] {
             assert_eq!(
                 classifier().classify(&ActionDescriptor::WriteFile {
                     path: std::path::PathBuf::from(path),

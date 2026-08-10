@@ -415,8 +415,7 @@ mod tests {
     /// `None` rather than failing the whole session load.
     #[test]
     fn usage_without_cache_token_fields_deserializes_with_none() {
-        let json =
-            r#"{"type":"usage","input_tokens":10,"output_tokens":5,"stop_reason":"stop"}"#;
+        let json = r#"{"type":"usage","input_tokens":10,"output_tokens":5,"stop_reason":"stop"}"#;
         let event: AgentEvent = serde_json::from_str(json).expect("must deserialize");
         match event {
             AgentEvent::Usage {
@@ -611,7 +610,11 @@ mod tests {
     /// construction, not by a tag-specific carve-out.
     #[test]
     fn h3_event_tags_are_ordinary_internally_tagged_variants_not_special_cased() {
-        for tag in ["textual_rescue_applied", "escalation_to_lead", "summary_fallback_attempted"] {
+        for tag in [
+            "textual_rescue_applied",
+            "escalation_to_lead",
+            "summary_fallback_attempted",
+        ] {
             let json = format!(r#"{{"type":"{tag}_but_from_the_future","x":1}}"#);
             let event: AgentEvent = serde_json::from_str(&json).expect("must deserialize");
             assert!(matches!(event, AgentEvent::Unknown));

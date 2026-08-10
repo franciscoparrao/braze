@@ -164,7 +164,10 @@ pub fn default_system_prompt(
 
     let project_memory_section = match project_memory {
         Some(section) if !section.trim().is_empty() => {
-            format!("\n\nProject memory (from earlier sessions):\n{}", section.trim_end())
+            format!(
+                "\n\nProject memory (from earlier sessions):\n{}",
+                section.trim_end()
+            )
         }
         _ => String::new(),
     };
@@ -176,8 +179,9 @@ pub fn default_system_prompt(
     let references_section = if described.is_empty() {
         String::new()
     } else {
-        let mut section =
-            String::from("\n\nReference directories (outside the working directory, also allowed):\n");
+        let mut section = String::from(
+            "\n\nReference directories (outside the working directory, also allowed):\n",
+        );
         for reference in described {
             section.push_str(&format!(
                 "- {}: {}\n",
@@ -300,7 +304,13 @@ mod tests {
 
     #[test]
     fn a_qwen3_coder_model_gets_the_xml_hint_not_the_tagged_one() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("qwen3.5-coder:latest"), &[], None, None);
+        let prompt = default_system_prompt(
+            Path::new("/p"),
+            Some("qwen3.5-coder:latest"),
+            &[],
+            None,
+            None,
+        );
         assert!(prompt.contains("<function="));
         assert!(!prompt.contains("<tool_call>"));
     }
@@ -374,14 +384,20 @@ mod tests {
             Some("- date: 2026-07-10\n- git branch: main"),
             None,
         );
-        assert!(with.contains("Environment:\n- date: 2026-07-10"), "got: {with}");
+        assert!(
+            with.contains("Environment:\n- date: 2026-07-10"),
+            "got: {with}"
+        );
         assert!(with.contains("- git branch: main"));
 
         let without = default_system_prompt(Path::new("/p"), None, &[], None, None);
         assert!(!without.contains("Environment:"));
 
         let blank = default_system_prompt(Path::new("/p"), None, &[], Some("   "), None);
-        assert!(!blank.contains("Environment:"), "blank snapshot adds nothing");
+        assert!(
+            !blank.contains("Environment:"),
+            "blank snapshot adds nothing"
+        );
     }
 
     /// `project_memory` mirrors `environment`'s contract exactly: `Some`
@@ -407,7 +423,10 @@ mod tests {
         assert!(!without.contains("Project memory"));
 
         let blank = default_system_prompt(Path::new("/p"), None, &[], None, Some("   "));
-        assert!(!blank.contains("Project memory"), "blank section adds nothing");
+        assert!(
+            !blank.contains("Project memory"),
+            "blank section adds nothing"
+        );
     }
 
     #[test]

@@ -93,7 +93,9 @@ mod tests {
         let prompt = ChannelQuestionPrompt::new(tx);
 
         let ask = tokio::spawn(async move {
-            prompt.ask("¿a o b?", &["a".to_string(), "b".to_string()]).await
+            prompt
+                .ask("¿a o b?", &["a".to_string(), "b".to_string()])
+                .await
         });
 
         let request = rx.recv().await.expect("expected a QuestionRequest");
@@ -118,9 +120,10 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let prompt = ChannelQuestionPrompt::new(tx);
 
-        let ask = tokio::spawn(async move {
-            prompt.ask("¿?", &["a".to_string(), "b".to_string()]).await
-        });
+        let ask =
+            tokio::spawn(
+                async move { prompt.ask("¿?", &["a".to_string(), "b".to_string()]).await },
+            );
 
         let request = rx.recv().await.expect("expected a QuestionRequest");
         drop(request); // simulates the app quitting with this still pending

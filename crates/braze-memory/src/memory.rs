@@ -191,11 +191,18 @@ mod tests {
         memory.record_touched_file("src/lib.rs", "edit_file", "t2");
         memory.record_touched_file("src/main.rs", "edit_file", "t3");
 
-        assert_eq!(memory.touched_files.len(), 2, "duplicate path collapses to one entry");
+        assert_eq!(
+            memory.touched_files.len(),
+            2,
+            "duplicate path collapses to one entry"
+        );
         assert_eq!(memory.touched_files[0].path, "src/lib.rs");
         assert_eq!(memory.touched_files[1].path, "src/main.rs");
         assert_eq!(memory.touched_files[1].last_tool, "edit_file");
-        assert_eq!(memory.touched_files[1].at, "t3", "re-touch moves to most-recent");
+        assert_eq!(
+            memory.touched_files[1].at, "t3",
+            "re-touch moves to most-recent"
+        );
     }
 
     #[test]
@@ -228,7 +235,10 @@ mod tests {
                 "t",
             );
         }
-        assert_eq!(memory.completed_signals.len(), ProjectMemory::MAX_COMPLETED_SIGNALS);
+        assert_eq!(
+            memory.completed_signals.len(),
+            ProjectMemory::MAX_COMPLETED_SIGNALS
+        );
         assert_eq!(memory.completed_signals[0].description, "task 3");
     }
 }

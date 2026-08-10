@@ -1095,7 +1095,10 @@ mod tests {
             config.references[0].path,
             PathBuf::from("/home/user/api-docs")
         );
-        assert_eq!(config.references[0].description.as_deref(), Some("API docs"));
+        assert_eq!(
+            config.references[0].description.as_deref(),
+            Some("API docs")
+        );
         assert_eq!(config.references[1].description, None);
         assert!(Config::default().references.is_empty());
 
@@ -1233,9 +1236,15 @@ mod tests {
         });
 
         let specific = config.pricing_for("ollama", "qwen3.5-coder").unwrap();
-        assert_eq!(specific.input_usd_per_mtok, 1.0, "specific prefix beats catch-all");
+        assert_eq!(
+            specific.input_usd_per_mtok, 1.0,
+            "specific prefix beats catch-all"
+        );
         let fallback = config.pricing_for("ollama", "gemma4:e4b").unwrap();
-        assert_eq!(fallback.input_usd_per_mtok, 0.0, "catch-all still covers the rest");
+        assert_eq!(
+            fallback.input_usd_per_mtok, 0.0,
+            "catch-all still covers the rest"
+        );
     }
 
     /// I-1 (docs/AUDITORIA-2026-07-v6.md): the escalation knobs default
