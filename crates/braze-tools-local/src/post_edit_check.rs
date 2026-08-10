@@ -35,6 +35,54 @@ const MAX_FEEDBACK_CHARS: usize = 2_000;
 const MAX_WARNING_LINES: usize = 3;
 const MAX_WARNING_CHARS: usize = 400;
 
+/// Saca las secuencias de escape ANSI de la salida capturada de un
+/// formatter, antes de buscar `warning:`/`error` en ella.
+///
+/// POR QUÉ EXISTE (2026-08-09). El guardrail clasificaba por substring
+/// sobre los bytes crudos, y cargo colorea partiendo justo la palabra que
+/// se busca:
+///
+/// ```text
+/// \x1b[1m\x1b[33mwarning\x1b[0m\x1b[1m: unused import: `std::collections::HashMap`\x1b[0m
+/// ```
+///
+/// No existe el substring `warning:` ahí — hay 8 bytes de escape entre
+/// `warning` y los dos puntos. O sea que **con color encendido el
+/// guardrail descartaba TODOS los warnings en silencio**, que es el mismo
+/// modo de falla del incidente roam #11 que se creía cerrado: el modelo
+/// recibe "passed, the code COMPILES" y lee que no quedó residuo.
+///
+/// No es hipotético ni exclusivo de CI: cargo colorea cuando
+/// `CARGO_TERM_COLOR=always` está en el entorno, y el proceso hijo lo
+/// hereda. El CI del repo lo tiene puesto, que es cómo se destapó.
+///
+/// Los errores se salvaban de casualidad (su filtro es `contains("error")`,
+/// sin dos puntos) pero se llevaban los escapes al contexto del modelo.
+/// Limpiar acá arregla las dos cosas para CUALQUIER formatter —ruff, tsc,
+/// los que vengan— en vez de apagarle el color a cargo y solo a cargo.
+fn strip_ansi(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        // CSI (`ESC [` … byte final en @-~) es lo que emiten cargo/rustc.
+        // Cualquier otra secuencia de escape se descarta junto con el
+        // carácter que la sigue, que es lo conservador: el objetivo es
+        // clasificar texto, no preservar formato.
+        if chars.next() == Some('[') {
+            for p in chars.by_ref() {
+                if ('@'..='~').contains(&p) {
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Runs the guardrail for `path` (already resolved to an absolute path
 /// by the provider), using the configured formatter list (v4 P1.6),
 /// and returns the feedback block to append to the tool result, or
@@ -205,7 +253,9 @@ async fn check_with_formatter(fmt: &FormatterConfig, cwd: &Path) -> Option<Strin
         // mucho menor que `MAX_FEEDBACK_CHARS`: el modo de falla del
         // incidente #7 fue ahogar el canal con texto, y un warning no
         // justifica el mismo espacio que un error.
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // `strip_ansi` ANTES de clasificar: con color encendido, cargo
+        // parte la palabra que este filtro busca (ver su doc).
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
         let mut warnings = String::new();
         // `contains`, no `starts_with`: el formatter por defecto usa
         // `--message-format=short`, que antepone la ubicación
@@ -244,8 +294,8 @@ async fn check_with_formatter(fmt: &FormatterConfig, cwd: &Path) -> Option<Strin
     // Combine stdout+stderr — many tools (ruff, tsc) put diagnostics on
     // stdout; others (cargo) on stderr. Cap at `MAX_FEEDBACK_CHARS`.
     let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
-    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    combined.push_str(&strip_ansi(&String::from_utf8_lossy(&output.stdout)));
+    combined.push_str(&strip_ansi(&String::from_utf8_lossy(&output.stderr)));
 
     // Error-like lines (prefix `error:` or "error[" or containing the
     // word "error" — same heuristic as before the generalization); drop
@@ -461,6 +511,42 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regresión del bug de 2026-08-09: con color encendido, cargo parte
+    /// la palabra que el filtro de warnings busca, y el guardrail los
+    /// descartaba TODOS en silencio. Los bytes de acá son los que emite
+    /// `cargo check` real con `CARGO_TERM_COLOR=always` — copiados de una
+    /// corrida, no inventados.
+    #[test]
+    fn un_warning_coloreado_sigue_siendo_clasificable_como_warning() {
+        let coloreado = concat!(
+            "\u{1b}[1m\u{1b}[33mwarning\u{1b}[0m\u{1b}[1m",
+            ": unused import: `std::collections::HashMap`\u{1b}[0m"
+        );
+        assert!(
+            !coloreado.contains("warning:"),
+            "premisa del bug: el substring NO está en los bytes crudos"
+        );
+        let limpio = strip_ansi(coloreado);
+        assert!(
+            limpio.contains("warning:"),
+            "tras limpiar, el filtro del guardrail tiene que verlo: {limpio}"
+        );
+        assert_eq!(
+            limpio, "warning: unused import: `std::collections::HashMap`",
+            "y el texto que llega al modelo queda sin basura de escape"
+        );
+    }
+
+    /// El camino de errores se salvaba de casualidad (`contains("error")`
+    /// no lleva dos puntos), pero arrastraba los escapes al contexto del
+    /// modelo. Se fija que ahora llegue limpio.
+    #[test]
+    fn un_error_coloreado_llega_al_modelo_sin_escapes() {
+        let coloreado = "\u{1b}[1m\u{1b}[31merror[E0425]\u{1b}[0m: cannot find value `x`";
+        let limpio = strip_ansi(coloreado);
+        assert_eq!(limpio, "error[E0425]: cannot find value `x`");
     }
 
     /// Los warnings de un exit 0 son el único lugar donde aparece el
