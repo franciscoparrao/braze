@@ -1365,4 +1365,363 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
+
+    // P1.1 resto (v9 L-5): schema-repair y repeated-call movidos
+    // VERBATIM del mod tests de engine/mod.rs.
+
+    #[tokio::test]
+    async fn invalid_args_get_one_round_of_schema_repair_context_then_the_retry_succeeds() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                // First attempt: missing the required `text` field.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                // Second attempt (scripted as if the model read the repair
+                // context and corrected itself): valid arguments.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        assert!(matches!(events[0], AgentEvent::UserMessage { .. }));
+        assert!(matches!(events[1], AgentEvent::AssistantToolCall { .. }));
+
+        // The rejected call never gets a `ToolCallStarted` (it never
+        // reaches dispatch) — its `ToolCallCompleted` follows the
+        // `AssistantToolCall` directly, and carries the resolved schema so
+        // the model has something concrete to correct itself with.
+        match &events[2] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-1");
+                assert!(result.is_error);
+                // "properties" only appears in the serialized schema dump,
+                // never in `jsonschema`'s own error text (which reads
+                // along the lines of `"text" is a required property`,
+                // singular) — a reliable signal the schema was included.
+                assert!(result.content.contains("properties"));
+                assert!(result.content.contains("text"));
+                // The real tool must never have run for the rejected call.
+                assert_ne!(result.content, "echoed: hi");
+            }
+            other => panic!("expected ToolCallCompleted for call-1, got {other:?}"),
+        }
+
+        assert!(matches!(events[3], AgentEvent::AssistantToolCall { .. }));
+        assert!(matches!(events[4], AgentEvent::ToolCallStarted { .. }));
+        match &events[5] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-2");
+                assert!(!result.is_error);
+                assert_eq!(result.content, "echoed: hi");
+            }
+            other => panic!("expected ToolCallCompleted for call-2, got {other:?}"),
+        }
+
+        // `invoke` ran exactly once: only for the corrected, valid call.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn a_second_invalid_call_to_the_same_tool_in_one_turn_gets_no_more_schema_context() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                // Same tool, still invalid — the model didn't correct
+                // itself this time.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "wrong_field": 1 }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("giving up".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        let first_message = match &events[2] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-1");
+                assert!(result.is_error);
+                assert!(result.content.contains("properties"));
+                result.content.clone()
+            }
+            other => panic!("expected ToolCallCompleted for call-1, got {other:?}"),
+        };
+
+        match &events[4] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-2");
+                assert!(result.is_error);
+                // Second failure of the same tool name this turn: no
+                // schema dump this time, and a visibly shorter/different
+                // message than the first repair-context one.
+                assert!(!result.content.contains("properties"));
+                assert_ne!(result.content, first_message);
+                assert!(result.content.len() < first_message.len());
+            }
+            other => panic!("expected ToolCallCompleted for call-2, got {other:?}"),
+        }
+
+        // Both calls were rejected before dispatch — `invoke` never ran.
+        assert_eq!(invocations.load(Ordering::SeqCst), 0);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for A5: the model repeating an identical
+    /// (name, arguments) tool call within the same turn must be nudged
+    /// instead of re-dispatched — the dominant non-convergence pattern for
+    /// small/local models, which otherwise burn a round (and, in Ollama's
+    /// case, real CPU time) re-running a call whose result can't change.
+    #[tokio::test]
+    async fn an_identical_repeated_tool_call_is_served_from_cache_not_re_dispatched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                // Same tool, same arguments, different id — a small model
+                // re-issuing the identical call instead of using the
+                // result it already has.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi twice", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        // La invariante que de verdad protege esta palanca: la tool REAL
+        // corrió una sola vez. La repetición no se re-despacha (sin efectos
+        // secundarios, sin costo repetido).
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let first = match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-1"))
+            .expect("expected a ToolCallCompleted for call-1")
+        {
+            AgentEvent::ToolCallCompleted { result, .. } => result.content.clone(),
+            _ => unreachable!(),
+        };
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-2"))
+            .expect("expected a ToolCallCompleted for call-2")
+        {
+            AgentEvent::ToolCallCompleted { result, .. } => {
+                // La repetición se responde CON el resultado anterior, no con
+                // una negativa. Negarse dejaba al modelo pidiendo algo que el
+                // colapso ACI ya le había borrado del contexto: medido contra
+                // roam (2026-07-26), gastó 4 llamadas y abandonó el turno.
+                assert!(
+                    !result.is_error,
+                    "servir el resultado cacheado no es un error"
+                );
+                assert!(
+                    result.content.contains(&first),
+                    "la repetición debe traer el contenido del resultado original"
+                );
+                assert!(
+                    result.content.contains("caché"),
+                    "y debe decir que viene de caché, para que el modelo no crea que re-ejecutó"
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// F6 (docs/AUDITORIA-2026-07-v3.md): `read_file(x)` → `write_file(x)`
+    /// → `read_file(x)` again is a legitimate re-verification pattern —
+    /// the second `read_file` must actually re-run (the write may have
+    /// changed what it returns), not get nudged with a now-false "the
+    /// result has not changed" claim.
+    #[tokio::test]
+    async fn a_repeated_read_after_a_mutating_call_actually_redispatches() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let read_args = serde_json::json!({ "path": "x.txt" });
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: read_args.clone(),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({ "path": "x.txt", "content": "new" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                // Same (name, arguments) as call-1 — but a write happened
+                // in between, so this must actually re-run.
+                CompletionEvent::ToolCallRequested {
+                    id: "call-3".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: read_args,
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let read_invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::clone(
+                &read_invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "read x, write x, read x again", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            read_invocations.load(Ordering::SeqCst),
+            2,
+            "the second read_file, after an intervening write_file, must actually re-run"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. } if id == "call-3"))
+            .expect("expected a ToolCallCompleted for call-3")
+        {
+            AgentEvent::ToolCallCompleted { result, .. } => {
+                assert!(!result.is_error, "must not be nudged: {result:?}");
+                assert_eq!(result.content, "contenido");
+            }
+            other => panic!("expected ToolCallCompleted, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
 }

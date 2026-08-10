@@ -587,4 +587,127 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
+
+    // P1.1 resto (v9 L-5): oleada 2 de Engine::with_planner movida
+    // VERBATIM del mod tests de engine/mod.rs.
+
+    // --- oleada 2: Engine::with_planner (PLAN.md § "Split planificador/ejecutor") ---
+
+    /// Degradation rule 3 (espíritu N-24): a plan truncated by the token
+    /// budget is discarded — a cut-off plan can mislead mid-step — but
+    /// its `Usage` is still persisted: the cost was real.
+    #[tokio::test]
+    async fn a_truncated_plan_is_discarded_but_its_usage_is_persisted() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("1. paso cortado a mit".to_string()),
+            CompletionEvent::Usage {
+                input_tokens: 40,
+                output_tokens: 1024,
+                stop_reason: Some("max_tokens".to_string()),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                escalation_trigger: None,
+            },
+            CompletionEvent::Done,
+        ]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("the turn must survive a truncated plan");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. })),
+            "a truncated plan must be discarded"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::Usage {
+                    input_tokens: 40,
+                    ..
+                }
+            )),
+            "the planner's Usage must be persisted even when its plan is discarded"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A single-step plan is discarded, not persisted — the executor's
+    /// first round covers a trivial request without paying the
+    /// plan-in-prompt cost (and without the degeneration artifact the
+    /// matrix sweep measured on exactly those tasks).
+    #[tokio::test]
+    async fn a_single_step_plan_is_discarded_and_the_turn_proceeds_without_it() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("1. responder al usuario".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let executor = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("listo".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should succeed without the plan");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. })),
+            "a single-step plan must not be persisted"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AssistantText { text } if text == "listo")),
+            "the executor must still answer normally"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
 }

@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 
 use async_trait::async_trait;
-use braze_events::{BackgroundTask, TaskHandle, TaskNotifier};
+use braze_events::{AgentEvent, BackgroundTask, TaskHandle, TaskNotifier, TurnObserver};
 use braze_model::{CompletionEvent, CompletionRequest, ModelBackend, ModelError};
 use braze_session::FileSessionStore;
 use braze_tools_core::{ToolError, ToolProvider, ToolSchema};
@@ -773,4 +773,21 @@ pub(crate) fn temp_store() -> (FileSessionStore, std::path::PathBuf) {
         SessionId::new()
     ));
     (FileSessionStore::new(dir.clone()), dir)
+}
+
+/// Records everything the engine mirrors into it, for asserting the
+/// live `TurnObserver` seam (PLAN.md § "Fase TUI — diseño", oleada 1)
+/// sees exactly what gets persisted, in the same order.
+pub(crate) struct RecordingObserver {
+    pub(crate) deltas: Vec<String>,
+    pub(crate) events: Vec<AgentEvent>,
+}
+
+impl TurnObserver for RecordingObserver {
+    fn on_text_delta(&mut self, delta: &str) {
+        self.deltas.push(delta.to_string());
+    }
+    fn on_event(&mut self, event: &AgentEvent) {
+        self.events.push(event.clone());
+    }
 }
