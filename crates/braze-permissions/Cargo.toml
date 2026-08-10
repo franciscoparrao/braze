@@ -11,6 +11,13 @@ authors.workspace = true
 braze-types = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+
+# Landlock write-only (v9 Paquete 4): sandbox de escrituras a nivel de
+# kernel, Linux-only por naturaleza (LSM Landlock, mainline desde 5.13).
+# En otros SO el módulo `sandbox` compila un stub que reporta NotEnforced.
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"

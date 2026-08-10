@@ -97,6 +97,10 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub max_round_wall_clock_secs: Option<u64>,
     #[serde(default)]
+    pub enable_landlock_write_sandbox: Option<bool>,
+    #[serde(default)]
+    pub disable_agents_md: Option<bool>,
+    #[serde(default)]
     pub tool_output_max_bytes: Option<u32>,
     #[serde(default)]
     pub tool_output_max_lines: Option<u32>,
@@ -506,6 +510,28 @@ impl ConfigOverrides {
                             })?;
                     overrides.disable_post_edit_check = Some(parsed);
                 }
+                "ENABLE_LANDLOCK_WRITE_SANDBOX" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.enable_landlock_write_sandbox = Some(parsed);
+                }
+                "DISABLE_AGENTS_MD" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.disable_agents_md = Some(parsed);
+                }
                 // Unrecognized `BRAZE_*` var: ignore (forward-compatible
                 // with a different braze version), but log it — bajo
                 // (docs/AUDITORIA-2026-07-v2.md, "claves de config
@@ -664,6 +690,24 @@ mod tests {
         let vars = [("BRAZE_DISABLE_TEXTUAL_TOOL_CALL_RESCUE", "true")];
         let overrides = ConfigOverrides::from_env(vars).unwrap();
         assert_eq!(overrides.disable_textual_tool_call_rescue, Some(true));
+    }
+
+    /// Regresión del bug encontrado en la verificación en vivo del
+    /// sandbox (v9 Paquete 4): un campo nuevo de `Config` que NO se
+    /// espeja en `ConfigOverrides` + `apply_overrides` queda mudo — el
+    /// flag del config file/env se ignora en silencio. Estos dos cierran
+    /// esa brecha para las dos palancas nuevas.
+    #[test]
+    fn from_env_parses_enable_landlock_write_sandbox() {
+        let overrides =
+            ConfigOverrides::from_env([("BRAZE_ENABLE_LANDLOCK_WRITE_SANDBOX", "true")]).unwrap();
+        assert_eq!(overrides.enable_landlock_write_sandbox, Some(true));
+    }
+
+    #[test]
+    fn from_env_parses_disable_agents_md() {
+        let overrides = ConfigOverrides::from_env([("BRAZE_DISABLE_AGENTS_MD", "true")]).unwrap();
+        assert_eq!(overrides.disable_agents_md, Some(true));
     }
 
     #[test]

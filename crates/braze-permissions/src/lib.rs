@@ -1,8 +1,12 @@
 //! Two-layer permission model: working-dir allowlist + irreversible-action
 //! confirmation.
 //!
-//! Layer 1 ([`WorkdirAllowlist`]) is a soft, non-enforced directory scope —
-//! no Landlock/seccomp yet, that is deferred to Fase 2.
+//! Layer 1 ([`WorkdirAllowlist`]) is a soft, non-enforced directory scope.
+//! Desde v9 Paquete 4 existe además una capa de KERNEL opt-in — el
+//! sandbox Landlock write-only ([`apply_write_sandbox`], ver el module
+//! doc de `sandbox`) — que restringe el syscall de escritura mismo donde
+//! esta capa léxica solo clasifica descripciones; seccomp sigue diferido
+//! a Fase 2.
 //!
 //! Layer 2 ([`ActionClassifier`] + [`ConfirmationPrompt`]) intercepts
 //! actions [`DefaultClassifier`] considers irreversible and blocks on a
@@ -43,6 +47,7 @@ mod error;
 mod guard;
 mod human_wait;
 mod question;
+mod sandbox;
 
 pub use action::{ActionDescriptor, sanitize_control_chars};
 pub use allowlist::WorkdirAllowlist;
@@ -56,3 +61,4 @@ pub use human_wait::{
     HumanWait, accumulated as human_wait_accumulated, is_waiting as human_is_waiting,
 };
 pub use question::QuestionPrompt;
+pub use sandbox::{SandboxError, WriteSandboxStatus, apply_write_sandbox};

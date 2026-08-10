@@ -64,8 +64,7 @@ use cli_args::{Cli, Command, PermissionsAction};
 use error::CliError;
 use terminal_prompt::TerminalConfirmationPrompt;
 
-#[tokio::main]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     // Installed exactly once, here, never in any library crate — respects
     // `RUST_LOG`, writes to stderr so it never interleaves with the
     // conversation printed to stdout.
@@ -74,6 +73,83 @@ async fn main() -> ExitCode {
         .with_writer(std::io::stderr)
         .init();
 
+    // Sandbox Landlock write-only (v9 Paquete 4), aplicado ANTES de
+    // construir el runtime de tokio y a propósito: la restricción es
+    // por-thread y se hereda solo por los threads creados DESPUÉS —
+    // dentro del async main llegaría tarde, con los worker threads del
+    // runtime (donde corren los tools) ya arrancados y sin restringir.
+    // Por eso `main` dejó de ser `#[tokio::main]`.
+    if let Some(exit) = maybe_apply_landlock_sandbox() {
+        return exit;
+    }
+
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("braze: error: no se pudo construir el runtime de tokio: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(async_main())
+}
+
+/// Aplica el sandbox si la config lo pide. `Some(exit)` = abortar el
+/// arranque (fail-closed): el usuario pidió explícitamente un sandbox y
+/// correr sin él en silencio sería mentirle. `None` = seguir (sandbox
+/// aplicado, o no pedido, o config ilegible — en ese último caso `run()`
+/// reporta el error de config por el camino normal).
+fn maybe_apply_landlock_sandbox() -> Option<ExitCode> {
+    let config = braze_config::Config::load().ok()?;
+    if !config.enable_landlock_write_sandbox {
+        return None;
+    }
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+    for reference in &config.references {
+        roots.push(reference.path.clone());
+    }
+    roots.push(config.session_dir.clone());
+    // Escrituras de infraestructura sin las que el flujo normal muere:
+    // tempfiles (el guardrail post-edit y varios tools), la caché de
+    // cargo (todo `cargo check/build` del modelo), y /dev/null (los
+    // shells redirigen ahí constantemente).
+    roots.push(std::env::temp_dir());
+    if let Some(cargo_home) = std::env::var_os("CARGO_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::home_dir().map(|h| h.join(".cargo")))
+    {
+        roots.push(cargo_home);
+    }
+    roots.push(std::path::PathBuf::from("/dev/null"));
+
+    match braze_permissions::apply_write_sandbox(&roots) {
+        Ok(status) => {
+            tracing::info!(?status, ?roots, "landlock write sandbox aplicado");
+            if status == braze_permissions::WriteSandboxStatus::NotEnforced {
+                eprintln!(
+                    "braze: aviso: enable_landlock_write_sandbox está activo pero este \
+                     kernel/SO no soporta Landlock — corriendo SIN sandbox de escrituras."
+                );
+            }
+            None
+        }
+        Err(err) => {
+            eprintln!(
+                "braze: error: enable_landlock_write_sandbox está activo y el sandbox no \
+                 se pudo aplicar ({err}). Abortando en vez de correr sin la protección \
+                 pedida; desactiva la opción para correr sin sandbox."
+            );
+            Some(ExitCode::FAILURE)
+        }
+    }
+}
+
+async fn async_main() -> ExitCode {
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

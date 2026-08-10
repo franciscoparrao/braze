@@ -469,6 +469,16 @@ pub struct Config {
     /// (`docs/round-economics-pilot-costo-2026-08-08.md` § 4.4).
     #[serde(default)]
     pub max_round_wall_clock_secs: Option<u64>,
+    /// Sandbox Landlock write-only (v9 Paquete 4): restricción a nivel
+    /// de KERNEL de las escrituras del filesystem a la allowlist de
+    /// raíces (workdir, references, session dir, temp, ~/.cargo,
+    /// /dev/null), heredada por todos los subprocesos de `shell_exec`.
+    /// Cierra la clase K-2/J-20/J-31 que el gate léxico no puede
+    /// (symlinks, rutas creativas, subprocesos). Opt-in mientras la
+    /// allowlist de raíces se valida contra flujos reales; Linux-only
+    /// (en otros SO se loguea y se sigue sin sandbox).
+    #[serde(default)]
+    pub enable_landlock_write_sandbox: bool,
     /// Interop AGENTS.md (v8/v9): por default braze lee `AGENTS.md` de la
     /// raíz del working directory y lo inyecta como sección del system
     /// prompt — el context file estándar entre harnesses, versionado en
@@ -647,6 +657,7 @@ impl Default for Config {
             max_turn_total_tokens: None,
             max_turn_wall_clock_secs: None,
             max_round_wall_clock_secs: None,
+            enable_landlock_write_sandbox: false,
             disable_agents_md: false,
             tool_output_max_bytes: default_tool_output_max_bytes(),
             tool_output_max_lines: None,
@@ -881,6 +892,12 @@ impl Config {
         }
         if let Some(v) = overrides.max_round_wall_clock_secs {
             self.max_round_wall_clock_secs = Some(v);
+        }
+        if let Some(v) = overrides.enable_landlock_write_sandbox {
+            self.enable_landlock_write_sandbox = v;
+        }
+        if let Some(v) = overrides.disable_agents_md {
+            self.disable_agents_md = v;
         }
         if let Some(v) = overrides.tool_output_max_bytes {
             self.tool_output_max_bytes = v;
