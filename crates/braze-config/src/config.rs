@@ -457,6 +457,18 @@ pub struct Config {
     /// configuraciones de harness a TIEMPO fijo en vez de a rondas fijas.
     #[serde(default)]
     pub max_turn_wall_clock_secs: Option<u64>,
+    /// Deadline de wall-clock por RONDA, en segundos
+    /// (`Engine::with_max_round_wall_clock`). `None` (el default) =
+    /// deshabilitado. A diferencia del presupuesto de turno de arriba —
+    /// que evalúa en el borde de la ronda — este aplica DENTRO de la
+    /// ronda, a nivel de streaming, y existe para acotar la ronda
+    /// desbocada que aquel no puede: el piloto de round-economics midió
+    /// filas de 600 s con `rounds` 0-1 (una sola ronda de generación CPU
+    /// sin cota) que solo el backstop de infraestructura paraba,
+    /// censurando la contabilidad
+    /// (`docs/round-economics-pilot-costo-2026-08-08.md` § 4.4).
+    #[serde(default)]
+    pub max_round_wall_clock_secs: Option<u64>,
     /// Per-tool-result byte budget before `LocalToolsProvider::wrap`
     /// truncates and appends an actionable "narrow your query" trailer
     /// (v4 P2.4). Default 8000 — the historical `MAX_TOOL_OUTPUT_BYTES`
@@ -626,6 +638,7 @@ impl Default for Config {
             planner_max_tokens: default_planner_max_tokens(),
             max_turn_total_tokens: None,
             max_turn_wall_clock_secs: None,
+            max_round_wall_clock_secs: None,
             tool_output_max_bytes: default_tool_output_max_bytes(),
             tool_output_max_lines: None,
             formatters: default_formatters(),
@@ -856,6 +869,9 @@ impl Config {
         }
         if let Some(v) = overrides.max_turn_wall_clock_secs {
             self.max_turn_wall_clock_secs = Some(v);
+        }
+        if let Some(v) = overrides.max_round_wall_clock_secs {
+            self.max_round_wall_clock_secs = Some(v);
         }
         if let Some(v) = overrides.tool_output_max_bytes {
             self.tool_output_max_bytes = v;

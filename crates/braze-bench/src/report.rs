@@ -631,6 +631,7 @@ mod tests {
             repetitions: 3,
             task_timeout_secs: 180,
             turn_wall_clock_secs: None,
+            round_wall_clock_secs: None,
             suite_path: "suites/default.toml".to_string(),
             suite_fingerprint: "deadbeef".to_string(),
             braze_git_commit: Some("abc123".to_string()),

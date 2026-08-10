@@ -1454,6 +1454,20 @@ fn generate_blocking(
     let total = tokens.len();
     let mut fed = 0usize;
     while fed < total {
+        // Misma cancelación por consumidor caído que el loop de
+        // generación, y acá importa MÁS: el prefill de un prompt largo en
+        // CPU puede tardar decenas de segundos por sí solo — verificado
+        // en vivo con el deadline por ronda del engine (2026-08-09): el
+        // corte llegó a los 2 s y el prefill siguió quemando CPU 44 s
+        // más antes de que el loop de generación notara el canal cerrado.
+        if tx.is_closed() {
+            tracing::debug!(
+                fed,
+                total,
+                "local: el consumidor abandonó — prefill cortado"
+            );
+            return;
+        }
         batch.clear();
         let end = (fed + N_BATCH).min(total);
         for (i, tok) in tokens[fed..end].iter().enumerate() {
@@ -1523,6 +1537,24 @@ fn generate_blocking(
     // que continúan la generación) — de ahí el allow.
     #[allow(clippy::explicit_counter_loop)]
     for _ in 0..budget {
+        // Cancelación por consumidor caído, chequeada POR TOKEN. Los
+        // `blocking_send(...).is_err()` de abajo no bastan: hay tramos
+        // largos que no intentan ningún send — el canal analysis de
+        // Harmony suprimido puede tragarse miles de tokens de
+        // razonamiento sin emitir evento, y los fragmentos UTF-8
+        // parciales tampoco emiten. Sin este chequeo, un consumidor que
+        // dropea el stream (p.ej. el deadline por ronda del engine,
+        // `Engine::with_max_round_wall_clock`) dejaría la generación
+        // quemando CPU/GPU en background hasta agotar `budget` —
+        // contaminando la celda siguiente de un sweep con un decode
+        // concurrente fantasma.
+        if tx.is_closed() {
+            tracing::debug!(
+                output_tokens,
+                "local: el consumidor abandonó — generación cortada"
+            );
+            return;
+        }
         // OJO: `sample()` ya hace el accept internamente
         // (`llama_sampler_sample` → `llama_sampler_accept`). Un accept
         // explícito acá sería double-accept: inofensivo con greedy
@@ -1908,13 +1940,30 @@ mod tests {
     #[test]
     fn la_clave_del_cache_distingue_modelo_y_contexto() {
         // Reusar un modelo cargado solo es correcto si la clave captura todo
-        // lo que cambiaría su carga. Ruta y n_ctx son los dos ejes obvios; el
-        // entorno entra en `ModelCacheKey::new` y no se testea acá porque
-        // mutarlo es `unsafe` en la edición 2024 y contaminaría otros tests.
-        let a = ModelCacheKey::new(Path::new("/models/x.gguf"), 8192);
-        assert_eq!(a, ModelCacheKey::new(Path::new("/models/x.gguf"), 8192));
-        assert_ne!(a, ModelCacheKey::new(Path::new("/models/x.gguf"), 4096));
-        assert_ne!(a, ModelCacheKey::new(Path::new("/models/y.gguf"), 8192));
+        // lo que cambiaría su carga. Ruta, n_ctx y las capas GPU del caller
+        // (`+ablate:gpu-layers` — el bug #1 del piloto de round-economics:
+        // sin este eje, el segundo brazo del sweep reusaba el modelo del
+        // primero y los dos precios de ronda se medían al mismo precio) son
+        // los tres ejes; el entorno entra en `ModelCacheKey::new` y no se
+        // testea acá porque mutarlo es `unsafe` en la edición 2024 y
+        // contaminaría otros tests.
+        let a = ModelCacheKey::new(Path::new("/models/x.gguf"), 8192, None);
+        assert_eq!(
+            a,
+            ModelCacheKey::new(Path::new("/models/x.gguf"), 8192, None)
+        );
+        assert_ne!(
+            a,
+            ModelCacheKey::new(Path::new("/models/x.gguf"), 4096, None)
+        );
+        assert_ne!(
+            a,
+            ModelCacheKey::new(Path::new("/models/y.gguf"), 8192, None)
+        );
+        assert_ne!(
+            a,
+            ModelCacheKey::new(Path::new("/models/x.gguf"), 8192, Some(99))
+        );
     }
 
     #[test]

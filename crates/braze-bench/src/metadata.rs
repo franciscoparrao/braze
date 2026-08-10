@@ -25,6 +25,11 @@ pub struct RunMetadata {
     /// indistinguible de uno a rondas fijas — que es la diferencia entera
     /// entre los dos regímenes que esa línea compara.
     pub turn_wall_clock_secs: Option<u64>,
+    /// Deadline de wall-clock por ronda (`--round-wall-clock-secs`),
+    /// cuando el sweep corrió con uno — misma razón de procedencia que
+    /// `turn_wall_clock_secs`: sin él, un sweep con rondas acotadas a
+    /// nivel de streaming es indistinguible de uno sin cota.
+    pub round_wall_clock_secs: Option<u64>,
     pub suite_path: String,
     /// Non-cryptographic fingerprint (`std::hash::DefaultHasher` over the
     /// suite file's raw bytes, hex-encoded) — enough to detect "the suite

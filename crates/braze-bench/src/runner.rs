@@ -493,7 +493,16 @@ pub async fn run_task(
     // la unidad experimental de esa línea, y NO reemplaza al `timeout`
     // de abajo: aquel sigue de backstop de infraestructura, este corta
     // en el borde de ronda con la contabilidad intacta.
-    .with_max_turn_wall_clock(wall_clock_budget);
+    .with_max_turn_wall_clock(wall_clock_budget)
+    // Deadline de streaming por ronda (`--round-wall-clock-secs`): acota
+    // la ronda desbocada que el corte en borde de ronda no puede, con
+    // las rondas completadas del turno intactas. Viaja por `Config` como
+    // el resto de los knobs del engine.
+    .with_max_round_wall_clock(
+        config
+            .max_round_wall_clock_secs
+            .map(std::time::Duration::from_secs),
+    );
 
     if let Some(full_observations) = ablation.tactical_full_observations {
         engine = engine.with_tactical_full_observations(full_observations);

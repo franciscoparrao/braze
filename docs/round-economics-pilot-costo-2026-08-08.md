@@ -316,6 +316,18 @@ sino "presupuesto + una ronda **no acotada**". Acotarlo requiere un
 deadline a nivel de streaming, dentro de la ronda — anotado como trabajo
 futuro, no hecho acá.
 
+**Hecho el 2026-08-09**: `Engine::with_max_round_wall_clock`
+(`--round-wall-clock-secs`, `BRAZE_MAX_ROUND_WALL_CLOCK_SECS`) — deadline
+por ronda aplicado sobre cada espera del stream (request incluido), fila
+`[RoundWallClock]` con las rondas completadas intactas. El LocalBackend
+además chequea `tx.is_closed()` por token generado Y por chunk de
+prefill: sin eso, verificado en vivo, la generación seguía quemando CPU
+decenas de segundos tras el corte (el canal analysis de Harmony
+suprimido y el prefill no intentan ningún `send`). La granularidad de
+cancelación queda acotada por una llamada FFI (carga del modelo, un
+chunk de prefill de 2048, un token) — cancelarla adentro pediría el
+abort callback de ggml, anotado como trabajo futuro.
+
 Impacto en el resultado: las 8 filas se reparten 1/3/2/2 entre los cuatro
 brazos (no sesgan) y tocan 4 tareas. Excluyéndolas, la interacción pasa
 de +5,7 a **+4,8 pp** con IC **[−1,0, +9,4]** — o sea que la conclusión

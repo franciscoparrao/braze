@@ -18,7 +18,7 @@ use braze_model::{CompletionEvent, CompletionRequest, ModelBackend, ModelError};
 use braze_session::FileSessionStore;
 use braze_tools_core::{ToolError, ToolProvider, ToolSchema};
 use braze_types::{SessionId, ToolCall, ToolResult, ToolStub};
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
 /// Fixed sequence of "rounds" of `CompletionEvent`s: each call to
@@ -140,6 +140,49 @@ impl ModelBackend for SlowModel {
         Ok(Box::pin(futures::stream::iter(
             self.round.clone().into_iter().map(Ok),
         )))
+    }
+}
+
+/// Como `ScriptedModel`, pero cada ronda lleva un flag `then_stall`: si
+/// está encendido, el stream emite sus eventos scripteados y después se
+/// queda MUDO para siempre (sin `Done`, sin `Err`) — la ronda desbocada
+/// que `Engine::with_max_round_wall_clock` existe para acotar. Un
+/// `ScriptedModel` no puede simularla: sus streams terminan al agotar el
+/// guion, y el guardia `IncompleteStream` los convierte en error, que es
+/// otra clase de fallo.
+pub(crate) struct StallingModel {
+    pub(crate) rounds: AsyncMutex<std::collections::VecDeque<(Vec<CompletionEvent>, bool)>>,
+}
+
+impl StallingModel {
+    pub(crate) fn new(rounds: Vec<(Vec<CompletionEvent>, bool)>) -> Self {
+        Self {
+            rounds: AsyncMutex::new(rounds.into_iter().collect()),
+        }
+    }
+}
+
+#[async_trait]
+impl ModelBackend for StallingModel {
+    fn name(&self) -> &str {
+        "stalling"
+    }
+
+    async fn complete(
+        &self,
+        _req: CompletionRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
+    {
+        let mut rounds = self.rounds.lock().await;
+        let (round, then_stall) = rounds
+            .pop_front()
+            .unwrap_or_else(|| (vec![CompletionEvent::Done], false));
+        let scripted = futures::stream::iter(round.into_iter().map(Ok));
+        if then_stall {
+            Ok(Box::pin(scripted.chain(futures::stream::pending())))
+        } else {
+            Ok(Box::pin(scripted))
+        }
     }
 }
 

@@ -745,6 +745,14 @@ async fn build_engine(
         config
             .max_turn_wall_clock_secs
             .map(std::time::Duration::from_secs),
+    )
+    // Deadline de streaming por RONDA — acota la ronda desbocada que el
+    // presupuesto de arriba (corte en borde de ronda) no puede. Mismo
+    // argumento de mirror que el de arriba.
+    .with_max_round_wall_clock(
+        config
+            .max_round_wall_clock_secs
+            .map(std::time::Duration::from_secs),
     );
     // J-13 (docs/AUDITORIA-2026-07-v7.md): ask_user espera a un HUMANO —
     // dispatch inline, exento del timeout de 120s de los background

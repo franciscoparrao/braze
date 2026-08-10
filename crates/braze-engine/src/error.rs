@@ -71,6 +71,31 @@ pub enum EngineError {
         rounds_completed: usize,
     },
 
+    /// UNA ronda superó `Engine::max_round_wall_clock` y el stream se
+    /// abandonó a mitad de generación. Es el deadline a nivel de
+    /// streaming que el piloto de round-economics anotó como defecto del
+    /// instrumento (`docs/round-economics-pilot-costo-2026-08-08.md`
+    /// § 4.4): el corte de `TurnWallClockExhausted` evalúa en el borde de
+    /// la ronda, así que no puede acotar una ronda que no termina — con
+    /// generación en CPU a ~6 tok/s y un presupuesto de tokens amplio,
+    /// una sola ronda pasaba de los 600 s del backstop con `rounds` 0-1 y
+    /// contabilidad censurada.
+    ///
+    /// A diferencia de aquel corte, este NO deja la contabilidad de la
+    /// ronda en vuelo intacta — no puede: el `Usage` llega al final del
+    /// stream y el stream se abandonó. Lo que sí preserva, y el backstop
+    /// de infraestructura no, es todo lo anterior: las rondas completadas
+    /// del turno ya persistieron sus eventos y su usage, y el error sale
+    /// por el camino normal de `run_turn` en vez de matar el future desde
+    /// afuera. El texto/tool-calls parciales de la ronda cortada se
+    /// descartan por la misma razón que el brazo `Err` del stream: un
+    /// intento inconcluso no debe persistirse como respuesta convergida.
+    #[error(
+        "a single round spent {elapsed_ms} ms, past the per-round deadline of {deadline_ms} ms — \
+         the stream was abandoned mid-generation"
+    )]
+    RoundWallClockExhausted { deadline_ms: u128, elapsed_ms: u128 },
+
     /// A `ModelBackend`'s completion stream ended without ever yielding
     /// `CompletionEvent::Done` and without reporting an `Err` first — an
     /// invariant every implementation must uphold (see

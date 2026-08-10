@@ -95,6 +95,19 @@ struct Cli {
     /// por rondas/tokens como siempre.
     #[arg(long)]
     turn_wall_clock_secs: Option<u64>,
+    /// Deadline de wall-clock POR RONDA, en segundos, aplicado a nivel de
+    /// streaming (`Engine::with_max_round_wall_clock`). Acota la ronda
+    /// desbocada que el corte en borde de ronda de
+    /// `--turn-wall-clock-secs` no puede: el piloto de round-economics
+    /// midió filas de 600 s con `rounds` 0-1 — una sola ronda de
+    /// generación CPU sin cota — que solo el backstop paraba, censurando
+    /// la contabilidad (`docs/round-economics-pilot-costo-2026-08-08.md`
+    /// § 4.4). Al vencerse, la fila queda como [RoundWallClock]: las
+    /// rondas COMPLETADAS conservan rondas/tokens, la desbocada se
+    /// descarta. `run()` exige que el backstop quede por encima, igual
+    /// que con el presupuesto de turno.
+    #[arg(long)]
+    round_wall_clock_secs: Option<u64>,
     /// Temperatura de sampling aplicada por igual a los tres backends
     /// (N-34, docs/AUDITORIA-2026-07-v2.md) — sin esto, comparar Ollama
     /// fijado a una temperatura baja contra Anthropic/OpenRouter en su
@@ -328,6 +341,25 @@ async fn run() -> Result<(), BenchError> {
         println!(
             "Presupuesto de wall-clock por turno: {budget}s (corte en borde de ronda). \
              Backstop de infraestructura: {task_timeout_secs}s."
+        );
+    }
+    // El deadline por ronda tiene la misma relación con el backstop que
+    // el presupuesto de turno: si el backstop muerde primero, la fila
+    // sale [Timeout] con la contabilidad censurada y el deadline nunca
+    // llega a actuar.
+    if let Some(deadline) = cli.round_wall_clock_secs {
+        if task_timeout_secs <= deadline {
+            return Err(BenchError::Startup(format!(
+                "--task-timeout-secs ({task_timeout_secs}) debe ser MAYOR que \
+                 --round-wall-clock-secs ({deadline}): el backstop de infraestructura mataría \
+                 la ronda antes de que el deadline de streaming pueda cortarla con la \
+                 contabilidad de las rondas previas intacta"
+            )));
+        }
+        config.max_round_wall_clock_secs = Some(deadline);
+        println!(
+            "Deadline de wall-clock por ronda: {deadline}s (corte a nivel de streaming, \
+             acota la ronda desbocada)."
         );
     }
     if cli.repetitions > 1 {
@@ -609,8 +641,11 @@ async fn run() -> Result<(), BenchError> {
     // tokens de su ronda en vuelo (J-21/J-10) y no es comparable entre
     // brazos. La guardia de `--task-timeout-secs` de arriba hace esto
     // improbable, no imposible: una sola ronda puede durar más que todo
-    // el margen si el modelo es lento y el presupuesto chico.
-    if config.max_turn_wall_clock_secs.is_some() {
+    // el margen si el modelo es lento y el presupuesto chico. El aviso
+    // aplica igual si el corte del engine es el presupuesto de turno o
+    // el deadline de ronda — cualquiera de los dos debería morder antes
+    // que el backstop.
+    if config.max_turn_wall_clock_secs.is_some() || config.max_round_wall_clock_secs.is_some() {
         let censored = results
             .iter()
             .filter(|r| r.failure_cause == Some(metrics::FailureCause::Timeout))
@@ -618,11 +653,16 @@ async fn run() -> Result<(), BenchError> {
         if censored > 0 {
             println!(
                 "\n[round-economics] ATENCIÓN: {censored} fila(s) cortadas por el backstop de \
-                 infraestructura ({task_timeout_secs}s) y no por el presupuesto de turno \
-                 ({}s). Esas filas tienen rondas/tokens censurados — subir \
-                 --task-timeout-secs o bajar --turn-wall-clock-secs y re-correr antes de \
+                 infraestructura ({task_timeout_secs}s) y no por los cortes del engine \
+                 (turno: {}, ronda: {}). Esas filas tienen rondas/tokens censurados — subir \
+                 --task-timeout-secs o bajar el corte del engine y re-correr antes de \
                  interpretar el contraste.",
-                config.max_turn_wall_clock_secs.unwrap_or_default()
+                config
+                    .max_turn_wall_clock_secs
+                    .map_or("—".to_string(), |s| format!("{s}s")),
+                config
+                    .max_round_wall_clock_secs
+                    .map_or("—".to_string(), |s| format!("{s}s")),
             );
         }
     }
@@ -693,6 +733,7 @@ async fn run() -> Result<(), BenchError> {
             repetitions: cli.repetitions,
             task_timeout_secs,
             turn_wall_clock_secs: config.max_turn_wall_clock_secs,
+            round_wall_clock_secs: config.max_round_wall_clock_secs,
             suite_path: cli.suite.display().to_string(),
             suite_fingerprint,
             braze_git_commit,

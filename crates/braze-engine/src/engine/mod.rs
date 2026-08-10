@@ -168,6 +168,15 @@ pub struct Engine {
     /// round-economics necesita para comparar configuraciones a tiempo
     /// fijo en vez de a rondas fijas.
     max_turn_wall_clock: Option<Duration>,
+    /// Deadline de wall-clock por RONDA, aplicado a nivel de streaming
+    /// (cubre el request inicial y cada `stream.next()`). `None` (el
+    /// default) = deshabilitado. Complementa a `max_turn_wall_clock`, que
+    /// evalúa en el borde de la ronda y por eso no puede acotar una ronda
+    /// desbocada — el defecto de instrumento que el piloto de
+    /// round-economics encontró en sus datos
+    /// (`docs/round-economics-pilot-costo-2026-08-08.md` § 4.4). Ver
+    /// [`Engine::with_max_round_wall_clock`].
+    max_round_wall_clock: Option<Duration>,
     /// Approximate token budget for the durable+tactical portion of the
     /// prompt (i.e. excluding `system_prompt`/tool schemas, which the
     /// caller should already have reserved headroom for when computing
@@ -407,6 +416,7 @@ impl Engine {
             compaction_enabled: true,
             max_turn_total_tokens: None,
             max_turn_wall_clock: None,
+            max_round_wall_clock: None,
             context_budget_tokens: None,
             best_of_n: 1,
             tool_completion_timeout: TOOL_COMPLETION_TIMEOUT,
@@ -524,6 +534,35 @@ impl Engine {
     /// Chainable, misma forma que [`Engine::with_context_budget`].
     pub fn with_max_turn_wall_clock(mut self, budget: Option<Duration>) -> Self {
         self.max_turn_wall_clock = budget;
+        self
+    }
+
+    /// Deadline de wall-clock por RONDA, aplicado dentro de la ronda a
+    /// nivel de streaming: el reloj arranca antes del request al modelo y
+    /// cada espera (`complete` inicial, cada `stream.next()`) corre
+    /// contra lo que queda del deadline. Al vencerse, el stream se
+    /// abandona — lo que cancela la generación en los backends que
+    /// detectan al consumidor caído, como el `LocalBackend` — y la ronda
+    /// falla con [`EngineError::RoundWallClockExhausted`]. `None` (el
+    /// default) lo deshabilita.
+    ///
+    /// Existe porque [`Engine::with_max_turn_wall_clock`] evalúa en el
+    /// borde de la ronda, deliberadamente — y por eso su caso peor no es
+    /// "presupuesto + una ronda" sino "presupuesto + una ronda NO
+    /// acotada": el piloto de round-economics midió filas de 600 s con
+    /// `rounds` 0-1 (una sola ronda desbocada de generación CPU) que solo
+    /// el backstop de infraestructura podía parar, censurando toda la
+    /// contabilidad (`docs/round-economics-pilot-costo-2026-08-08.md`
+    /// § 4.4). Este deadline acota esa ronda desde adentro: las rondas
+    /// completadas del turno conservan sus eventos y su usage, y el error
+    /// sale por el camino normal en vez de matar el future desde afuera.
+    ///
+    /// Aplica a TODA ronda que pase por `complete_once_with` — ejecutor,
+    /// planner, resumen sin tools y cada candidato de best-of-n — porque
+    /// cualquiera de ellas puede desbocarse por la misma causa.
+    /// Chainable, misma forma que [`Engine::with_context_budget`].
+    pub fn with_max_round_wall_clock(mut self, deadline: Option<Duration>) -> Self {
+        self.max_round_wall_clock = deadline;
         self
     }
 

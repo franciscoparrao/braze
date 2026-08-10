@@ -98,6 +98,21 @@ pub enum FailureCause {
     /// que el backstop mordió antes que el presupuesto — o sea que el
     /// experimento está mal configurado, no que el modelo falló.
     WallClockExhausted,
+    /// UNA ronda superó el deadline de streaming
+    /// (`Engine::with_max_round_wall_clock`, `--round-wall-clock-secs`)
+    /// y el stream se abandonó a mitad de generación — la ronda
+    /// desbocada que el corte en borde de ronda no puede acotar (defecto
+    /// de instrumento del piloto de round-economics,
+    /// `docs/round-economics-pilot-costo-2026-08-08.md` § 4.4).
+    ///
+    /// Contabilidad intermedia entre las otras dos causas de tiempo: las
+    /// rondas COMPLETADAS del turno conservan rondas/tokens (a
+    /// diferencia de [`FailureCause::Timeout`], que mata el future
+    /// entero), pero la ronda cortada pierde su `Usage` — el reporte
+    /// llega al final del stream y el stream se abandonó (a diferencia
+    /// de [`FailureCause::WallClockExhausted`], cuya contabilidad es
+    /// completa por construcción).
+    RoundWallClockExhausted,
     /// Something failed *outside* the model/tool loop entirely — sandbox
     /// setup, reading back the session log, etc. Not attributable to the
     /// model at all; the task should generally be re-run rather than
@@ -606,6 +621,9 @@ pub fn compute_metrics(
                 }
                 braze_engine::EngineError::TurnWallClockExhausted { .. } => {
                     FailureCause::WallClockExhausted
+                }
+                braze_engine::EngineError::RoundWallClockExhausted { .. } => {
+                    FailureCause::RoundWallClockExhausted
                 }
                 braze_engine::EngineError::IncompleteStream => FailureCause::IncompleteStream,
                 // AUDITORIA-2026-07-v8 K-1d: a tripped circuit breaker

@@ -111,7 +111,36 @@ impl Engine {
         rescue_enabled: bool,
         envelope_enabled: bool,
     ) -> Result<RoundOutcome, EngineError> {
-        let mut stream = model.complete(req).await?;
+        // Deadline de streaming por ronda (round-economics § 4.4 del
+        // piloto): el reloj arranca ANTES del request — en un backend
+        // HTTP los headers pueden tardar todo el prefill, y en el
+        // LocalBackend el prefill corre dentro del stream; los dos
+        // pertenecen a la ronda. Cada espera de abajo corre contra lo
+        // que queda del deadline, así que la ronda entera —request,
+        // prefill, generación, y también un stream que se quedó mudo—
+        // queda acotada. `Instant` monotónico, misma razón que el
+        // presupuesto del turno.
+        let round_started = std::time::Instant::now();
+        let deadline_error = |deadline: Duration| {
+            let elapsed = round_started.elapsed();
+            tracing::warn!(
+                deadline_ms = deadline.as_millis(),
+                elapsed_ms = elapsed.as_millis(),
+                "round blew its per-round wall-clock deadline; abandoning the stream mid-generation"
+            );
+            EngineError::RoundWallClockExhausted {
+                deadline_ms: deadline.as_millis(),
+                elapsed_ms: elapsed.as_millis(),
+            }
+        };
+
+        let mut stream = match self.max_round_wall_clock {
+            Some(deadline) => match tokio::time::timeout(deadline, model.complete(req)).await {
+                Ok(started) => started?,
+                Err(_) => return Err(deadline_error(deadline)),
+            },
+            None => model.complete(req).await?,
+        };
 
         let mut text_buffer = String::new();
         let mut tool_calls: Vec<ToolCall> = Vec::new();
@@ -119,7 +148,24 @@ impl Engine {
         let mut saw_done = false;
         let mut truncated = false;
 
-        while let Some(event) = stream.next().await {
+        loop {
+            let next = match self.max_round_wall_clock {
+                Some(deadline) => {
+                    let Some(remaining) = deadline.checked_sub(round_started.elapsed()) else {
+                        return Err(deadline_error(deadline));
+                    };
+                    match tokio::time::timeout(remaining, stream.next()).await {
+                        Ok(next) => next,
+                        // Dropear `stream` es la señal de cancelación
+                        // río arriba: el LocalBackend detecta al
+                        // consumidor caído y corta la generación; un
+                        // backend HTTP cierra la conexión.
+                        Err(_) => return Err(deadline_error(deadline)),
+                    }
+                }
+                None => stream.next().await,
+            };
+            let Some(event) = next else { break };
             match event {
                 Ok(CompletionEvent::TextDelta(delta)) => {
                     if emit_deltas {
@@ -608,6 +654,181 @@ mod tests {
         assert!(
             matches!(result, Err(EngineError::Model(_))),
             "expected every candidate to fail and the error to propagate, got {result:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Deadline de streaming por ronda (round-economics § 4.4 del
+    /// piloto): una ronda cuyo stream se queda mudo a mitad de
+    /// generación — la ronda desbocada que el corte en borde de ronda no
+    /// puede acotar — tiene que fallar con `RoundWallClockExhausted` al
+    /// vencer el deadline, no colgarse hasta un backstop externo.
+    #[tokio::test]
+    async fn a_round_that_stalls_mid_stream_fails_at_the_per_round_deadline() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = StallingModel::new(vec![(
+            vec![CompletionEvent::TextDelta("pensando…".to_string())],
+            true, // emite un delta y después silencio para siempre
+        )]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_round_wall_clock(Some(Duration::from_millis(50)));
+
+        let started = std::time::Instant::now();
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        match result {
+            Err(EngineError::RoundWallClockExhausted {
+                deadline_ms,
+                elapsed_ms,
+            }) => {
+                assert_eq!(deadline_ms, 50);
+                assert!(
+                    elapsed_ms >= 50,
+                    "el corte no puede llegar antes del deadline, got {elapsed_ms} ms"
+                );
+            }
+            other => panic!("expected RoundWallClockExhausted, got {other:?}"),
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "el corte tiene que ser por el deadline de la ronda, no por un backstop lejano"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// El deadline por ronda acota cada ronda POR SEPARADO, no al turno:
+    /// un turno de dos rondas donde cada una cabe en el deadline pero la
+    /// suma no, converge normal. Sin esto, el deadline sería un
+    /// presupuesto de turno redundante con `with_max_turn_wall_clock`.
+    #[tokio::test]
+    async fn the_per_round_deadline_bounds_each_round_not_the_turn() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hola" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(
+                crate::engine::test_support::SlowEchoToolProvider::new(
+                    Arc::clone(&invocations),
+                    // El tool duerme más que el deadline entero: el tiempo
+                    // de tools NO corre contra el deadline de la ronda —
+                    // eso ya lo acota `tool_completion_timeout`.
+                    Duration::from_millis(120),
+                ),
+            )]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_round_wall_clock(Some(Duration::from_millis(80)));
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("dos rondas que caben cada una en el deadline convergen normal");
+        assert_eq!(invocations.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Lo que el deadline preserva y el backstop de infraestructura no:
+    /// las rondas ya completadas del turno. La ronda 0 (tool call +
+    /// Usage) persiste entera; la ronda 1 se desboca y el error sale por
+    /// el camino normal de `run_turn`, así que el rollout log conserva la
+    /// tool call y su resultado — la contabilidad que un
+    /// `tokio::time::timeout` de afuera censura (J-21/J-10).
+    #[tokio::test]
+    async fn a_mid_turn_stall_preserves_the_completed_rounds_accounting() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = StallingModel::new(vec![
+            (
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({ "text": "hola" }),
+                    },
+                    CompletionEvent::Usage {
+                        input_tokens: 10,
+                        output_tokens: 5,
+                        stop_reason: Some("tool_use".to_string()),
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        escalation_trigger: None,
+                    },
+                    CompletionEvent::Done,
+                ],
+                false,
+            ),
+            (vec![], true), // la ronda 1 nunca emite nada: desbocada
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_max_round_wall_clock(Some(Duration::from_millis(50)));
+
+        let result = engine.run_turn(&session, "hola", &mut NoopObserver).await;
+        assert!(
+            matches!(result, Err(EngineError::RoundWallClockExhausted { .. })),
+            "expected RoundWallClockExhausted, got {result:?}"
+        );
+        assert_eq!(
+            invocations.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "el tool de la ronda 0 corrió completo antes del corte"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolCallCompleted { id, .. }
+                    if id == "call-1")),
+            "la ronda 0 completada tiene que estar persistida — esa es la contabilidad \
+             que este corte preserva y el backstop censura"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
