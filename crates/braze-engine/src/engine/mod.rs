@@ -110,6 +110,16 @@ const FILE_MUTATING_TOOL_NAMES: &[&str] = &["write_file", "edit_file"];
 /// observado en producción.
 const UNPRODUCTIVE_REREAD_THRESHOLD: u32 = 4;
 
+/// A partir de cuántos fallos de `edit_file` sobre la MISMA ruta en un
+/// turno, sin edición exitosa intermedia, el interlock duro bloquea
+/// `write_file` sobre esa ruta (v9 L-10 — ver
+/// `TurnDispatchState::edit_failures_by_path` por la rama de daño que
+/// cierra). Dos: el primer fallo puede ser un old_string desactualizado
+/// legítimo; el segundo sobre la misma ruta ya es el patrón "no puedo
+/// reproducir el contenido", y la reescritura total es donde ese patrón
+/// corrompe en silencio.
+const EDIT_FAILURE_WRITE_INTERLOCK_THRESHOLD: u32 = 2;
+
 /// Consecutive zero-tool-call turns before `run_turn` injects the
 /// narration-without-action reminder (D5, docs/AUDITORIA-2026-07-v3.md).
 /// `2`: the *third* such turn in a row gets the reminder — one narrated

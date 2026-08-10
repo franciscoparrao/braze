@@ -148,6 +148,7 @@ pub fn default_system_prompt(
     references: &[crate::ReferenceConfig],
     environment: Option<&str>,
     project_memory: Option<&str>,
+    agents_md: Option<&str>,
 ) -> String {
     let family_hint = model_name
         .map(ModelFamily::from_model_name)
@@ -158,6 +159,21 @@ pub fn default_system_prompt(
     let environment_section = match environment {
         Some(snapshot) if !snapshot.trim().is_empty() => {
             format!("\n\nEnvironment:\n{}", snapshot.trim_end())
+        }
+        _ => String::new(),
+    };
+
+    // Interop AGENTS.md (v8/v9): el context file estándar del repo, ya
+    // cargado y capeado por `crate::load_agents_md` — este fn se queda
+    // puro (recibe strings, no lee disco), que es lo que mantiene al
+    // bench midiendo el prompt de producción sin heredar el AGENTS.md
+    // de la máquina del operador.
+    let agents_md_section = match agents_md {
+        Some(content) if !content.trim().is_empty() => {
+            format!(
+                "\n\nProject instructions (AGENTS.md, versioned in this repository):\n{}",
+                content.trim_end()
+            )
         }
         _ => String::new(),
     };
@@ -212,7 +228,7 @@ pub fn default_system_prompt(
          narrate never actually happens.\n\
          - Relative paths are resolved against the working directory above.\n\
          - Old tool results may appear collapsed to one line to save space — \
-         re-run the tool if you need their full content.{family_hint}{references_section}{environment_section}{project_memory_section}",
+         re-run the tool if you need their full content.{family_hint}{references_section}{environment_section}{agents_md_section}{project_memory_section}",
         cwd.display()
     )
 }
@@ -268,14 +284,16 @@ mod tests {
 
     #[test]
     fn default_system_prompt_includes_cwd_and_anti_loop_guidance() {
-        let prompt = default_system_prompt(Path::new("/home/user/project"), None, &[], None, None);
+        let prompt =
+            default_system_prompt(Path::new("/home/user/project"), None, &[], None, None, None);
         assert!(prompt.contains("/home/user/project"));
         assert!(prompt.contains("Never call the same tool"));
     }
 
     #[test]
     fn default_system_prompt_tells_the_model_to_act_not_just_narrate() {
-        let prompt = default_system_prompt(Path::new("/home/user/project"), None, &[], None, None);
+        let prompt =
+            default_system_prompt(Path::new("/home/user/project"), None, &[], None, None, None);
         assert!(prompt.contains("call the tool for it in the same turn"));
     }
 
@@ -283,21 +301,23 @@ mod tests {
 
     #[test]
     fn no_model_name_gets_no_family_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), None, &[], None, None);
+        let prompt = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
         assert!(!prompt.contains("tool_call"));
         assert!(!prompt.contains("<function="));
     }
 
     #[test]
     fn an_unrecognized_model_name_gets_no_family_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("llama3.1"), &[], None, None);
+        let prompt =
+            default_system_prompt(Path::new("/p"), Some("llama3.1"), &[], None, None, None);
         assert!(!prompt.contains("tool_call"));
         assert!(!prompt.contains("<function="));
     }
 
     #[test]
     fn a_qwen2_model_gets_the_tagged_json_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"), &[], None, None);
+        let prompt =
+            default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"), &[], None, None, None);
         assert!(prompt.contains("<tool_call>"));
         assert!(!prompt.contains("<function="));
     }
@@ -310,6 +330,7 @@ mod tests {
             &[],
             None,
             None,
+            None,
         );
         assert!(prompt.contains("<function="));
         assert!(!prompt.contains("<tool_call>"));
@@ -317,7 +338,8 @@ mod tests {
 
     #[test]
     fn model_family_matching_is_case_insensitive() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"), &[], None, None);
+        let prompt =
+            default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"), &[], None, None, None);
         assert!(prompt.contains("<tool_call>"));
     }
 
@@ -329,7 +351,8 @@ mod tests {
     /// exactly there.
     #[test]
     fn a_glm_model_gets_the_arg_tag_hint_including_openrouter_style_names() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("z-ai/glm-5.2"), &[], None, None);
+        let prompt =
+            default_system_prompt(Path::new("/p"), Some("z-ai/glm-5.2"), &[], None, None, None);
         assert!(prompt.contains("<arg_key>"), "got: {prompt}");
         assert!(prompt.contains("<arg_value>"));
         assert!(!prompt.contains("<tool_call>"));
@@ -342,7 +365,8 @@ mod tests {
     /// nudging the model toward something it was never trained on.
     #[test]
     fn a_gemma_model_gets_no_hint_no_observed_leak_grammar() {
-        let prompt = default_system_prompt(Path::new("/p"), Some("gemma4:e4b"), &[], None, None);
+        let prompt =
+            default_system_prompt(Path::new("/p"), Some("gemma4:e4b"), &[], None, None, None);
         assert!(!prompt.contains("<arg_key>"));
         assert!(!prompt.contains("<tool_call>"));
         assert!(!prompt.contains("<function="));
@@ -364,12 +388,12 @@ mod tests {
                 description: None,
             },
         ];
-        let prompt = default_system_prompt(Path::new("/p"), None, &references, None, None);
+        let prompt = default_system_prompt(Path::new("/p"), None, &references, None, None, None);
         assert!(prompt.contains("Reference directories"), "got: {prompt}");
         assert!(prompt.contains("/home/user/api-docs: API reference docs"));
         assert!(!prompt.contains("/home/user/scratch"));
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None, None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
         assert!(!without.contains("Reference directories"));
     }
 
@@ -383,6 +407,7 @@ mod tests {
             &[],
             Some("- date: 2026-07-10\n- git branch: main"),
             None,
+            None,
         );
         assert!(
             with.contains("Environment:\n- date: 2026-07-10"),
@@ -390,10 +415,10 @@ mod tests {
         );
         assert!(with.contains("- git branch: main"));
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None, None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
         assert!(!without.contains("Environment:"));
 
-        let blank = default_system_prompt(Path::new("/p"), None, &[], Some("   "), None);
+        let blank = default_system_prompt(Path::new("/p"), None, &[], Some("   "), None, None);
         assert!(
             !blank.contains("Environment:"),
             "blank snapshot adds nothing"
@@ -412,6 +437,7 @@ mod tests {
             &[],
             None,
             Some("Objective: build the CLI\n- src/main.rs (write_file)"),
+            None,
         );
         assert!(
             with.contains("Project memory (from earlier sessions):\nObjective: build the CLI"),
@@ -419,14 +445,38 @@ mod tests {
         );
         assert!(with.contains("- src/main.rs (write_file)"));
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None, None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
         assert!(!without.contains("Project memory"));
 
-        let blank = default_system_prompt(Path::new("/p"), None, &[], None, Some("   "));
+        let blank = default_system_prompt(Path::new("/p"), None, &[], None, Some("   "), None);
         assert!(
             !blank.contains("Project memory"),
             "blank section adds nothing"
         );
+    }
+
+    #[test]
+    fn agents_md_section_appears_when_provided_and_not_otherwise() {
+        let with = default_system_prompt(
+            Path::new("/p"),
+            None,
+            &[],
+            None,
+            None,
+            Some("# Reglas del repo\n- correr rustfmt antes de commitear"),
+        );
+        assert!(
+            with.contains(
+                "Project instructions (AGENTS.md, versioned in this repository):\n# Reglas del repo"
+            ),
+            "got: {with}"
+        );
+
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
+        assert!(!without.contains("AGENTS.md"));
+
+        let blank = default_system_prompt(Path::new("/p"), None, &[], None, None, Some("   "));
+        assert!(!blank.contains("AGENTS.md"), "blanco tras trim = ausente");
     }
 
     #[test]

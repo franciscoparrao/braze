@@ -10,6 +10,7 @@ use rmcp::{RoleClient, ServiceExt};
 use tokio::sync::RwLock;
 
 use crate::error::McpClientError;
+use crate::negative_cache::NegativeCache;
 use crate::summary::summarize;
 
 /// How long to wait for the subprocess to spawn and the MCP `initialize`
@@ -107,6 +108,12 @@ pub struct McpToolProvider {
     /// Never removed once inserted (an MCP tool set essentially never
     /// shrinks mid-session, matching this crate's other caching choices).
     resolved_names: RwLock<std::collections::HashSet<String>>,
+    /// K-16: negative-cache de server colgado — ver el module doc de
+    /// `crate::negative_cache`. Cooldown = `REQUEST_TIMEOUT`: la ventana
+    /// dura lo que costaría el timeout que evita, así que un turno contra
+    /// un server muerto paga ~un timeout por minuto de walltime en vez de
+    /// uno por ronda.
+    negative_cache: NegativeCache,
 }
 
 /// A cached `tools/list` result, timestamped so [`TOOL_CACHE_TTL`] can be
@@ -171,6 +178,7 @@ impl McpToolProvider {
             service,
             tool_cache: RwLock::new(None),
             resolved_names: RwLock::new(std::collections::HashSet::new()),
+            negative_cache: NegativeCache::new(REQUEST_TIMEOUT),
         })
     }
 
@@ -179,12 +187,20 @@ impl McpToolProvider {
     /// callers that want the TTL respected should go through
     /// [`Self::tools_respecting_ttl`] instead.
     async fn list_tools_fresh(&self) -> Result<Vec<Tool>, ToolError> {
-        let tools = tokio::time::timeout(REQUEST_TIMEOUT, self.service.list_all_tools())
-            .await
-            .map_err(|_| {
-                McpClientError::Timeout(REQUEST_TIMEOUT).into_tool_error(&self.provider_id)
-            })?
-            .map_err(|e| McpClientError::Request(e).into_tool_error(&self.provider_id))?;
+        self.check_negative_cache().await?;
+        let tools = match tokio::time::timeout(REQUEST_TIMEOUT, self.service.list_all_tools()).await
+        {
+            Err(_) => {
+                self.negative_cache.note_timeout().await;
+                return Err(
+                    McpClientError::Timeout(REQUEST_TIMEOUT).into_tool_error(&self.provider_id)
+                );
+            }
+            Ok(res) => {
+                res.map_err(|e| McpClientError::Request(e).into_tool_error(&self.provider_id))?
+            }
+        };
+        self.negative_cache.clear().await;
 
         *self.tool_cache.write().await = Some(ToolCacheEntry {
             tools: tools.clone(),
@@ -208,6 +224,28 @@ impl McpToolProvider {
             }
         }
         self.list_tools_fresh().await
+    }
+
+    /// K-16: convierte el estado de la negative-cache en el `ToolError`
+    /// accionable, en un solo lugar para los dos sitios de round-trip
+    /// (`list_tools_fresh` e `invoke`).
+    async fn check_negative_cache(&self) -> Result<(), ToolError> {
+        match self.negative_cache.check().await {
+            Ok(()) => Ok(()),
+            Err(cooldown) => {
+                tracing::warn!(
+                    provider = %self.provider_id,
+                    since = ?cooldown.since,
+                    retry_in = ?cooldown.retry_in,
+                    "MCP server in negative-cache cooldown; failing fast"
+                );
+                Err(McpClientError::NegativeCache {
+                    since: cooldown.since,
+                    retry_in: cooldown.retry_in,
+                }
+                .into_tool_error(&self.provider_id))
+            }
+        }
     }
 
     /// Returns whatever tool list is cached, however stale, only fetching
@@ -390,12 +428,20 @@ impl ToolProvider for McpToolProvider {
             params = params.with_arguments(arguments);
         }
 
-        let result = tokio::time::timeout(REQUEST_TIMEOUT, self.service.call_tool(params))
-            .await
-            .map_err(|_| {
-                McpClientError::Timeout(REQUEST_TIMEOUT).into_tool_error(&self.provider_id)
-            })?
-            .map_err(|e| McpClientError::Request(e).into_tool_error(&self.provider_id))?;
+        self.check_negative_cache().await?;
+        let result =
+            match tokio::time::timeout(REQUEST_TIMEOUT, self.service.call_tool(params)).await {
+                Err(_) => {
+                    self.negative_cache.note_timeout().await;
+                    return Err(
+                        McpClientError::Timeout(REQUEST_TIMEOUT).into_tool_error(&self.provider_id)
+                    );
+                }
+                Ok(res) => {
+                    res.map_err(|e| McpClientError::Request(e).into_tool_error(&self.provider_id))?
+                }
+            };
+        self.negative_cache.clear().await;
 
         Ok(ToolResult {
             tool_call_id: call.id.clone(),

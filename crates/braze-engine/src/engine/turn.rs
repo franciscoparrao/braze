@@ -42,6 +42,19 @@ pub(super) struct TurnDispatchState {
     /// archivo grande por trozos es legítimo, así que esto NO bloquea:
     /// anexa una nota accionable al resultado a partir del umbral.
     pub(super) reads_by_path: HashMap<String, u32>,
+    /// Fallos de `edit_file` por ruta en ESTE turno, sin un `edit_file`
+    /// exitoso posterior — el estado del interlock duro de `write_file`
+    /// (v9 L-10). La rama de daño que cierra: un modelo que no puede
+    /// REPRODUCIR el contenido de un archivo (hallazgo 2026-07-28:
+    /// caracteres que entiende y no puede emitir — `U+1D62`, `≈`,
+    /// comillas anidadas) falla `edit_file` repetidamente y cae a
+    /// reescribir el archivo entero con `write_file`, donde la misma
+    /// incapacidad corrompe en silencio TODO el archivo en vez de
+    /// fallar la edición. La guarda de tamaño de `write_file` (28-jul)
+    /// desincentiva esa rama; esto la cierra. Un `edit_file` exitoso
+    /// sobre la ruta resetea su contador (el modelo recuperó la
+    /// capacidad de editar dirigido).
+    pub(super) edit_failures_by_path: HashMap<String, u32>,
 }
 
 /// RAII guard for [`Engine::turn_in_progress`] — see that field's doc
@@ -216,6 +229,7 @@ impl Engine {
             seen_calls: HashMap::new(),
             known_tool_call_ids: Self::existing_tool_call_ids(&existing_events),
             reads_by_path: HashMap::new(),
+            edit_failures_by_path: HashMap::new(),
         };
 
         // D5: whether *any* round of this specific turn has dispatched a

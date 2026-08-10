@@ -469,6 +469,14 @@ pub struct Config {
     /// (`docs/round-economics-pilot-costo-2026-08-08.md` § 4.4).
     #[serde(default)]
     pub max_round_wall_clock_secs: Option<u64>,
+    /// Interop AGENTS.md (v8/v9): por default braze lee `AGENTS.md` de la
+    /// raíz del working directory y lo inyecta como sección del system
+    /// prompt — el context file estándar entre harnesses, versionado en
+    /// el repo. `true` lo apaga. Naming en negativo como
+    /// `disable_post_edit_check`: el default-on ES el comportamiento
+    /// estándar que el interop promete.
+    #[serde(default)]
+    pub disable_agents_md: bool,
     /// Per-tool-result byte budget before `LocalToolsProvider::wrap`
     /// truncates and appends an actionable "narrow your query" trailer
     /// (v4 P2.4). Default 8000 — the historical `MAX_TOOL_OUTPUT_BYTES`
@@ -639,6 +647,7 @@ impl Default for Config {
             max_turn_total_tokens: None,
             max_turn_wall_clock_secs: None,
             max_round_wall_clock_secs: None,
+            disable_agents_md: false,
             tool_output_max_bytes: default_tool_output_max_bytes(),
             tool_output_max_lines: None,
             formatters: default_formatters(),

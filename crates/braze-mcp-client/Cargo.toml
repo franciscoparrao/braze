@@ -41,3 +41,10 @@ rmcp = { workspace = true, features = [
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+# `test-util` habilita el reloj pausado (`start_paused` + `advance`) con el
+# que los tests de la negative-cache (K-16) ejercitan el cooldown de 60s
+# determinísticamente, sin esperar relojes reales — el mismo argumento que
+# `connect_with_ttl` documenta para el TTL del catálogo.
+tokio = { workspace = true, features = ["test-util", "macros"] }

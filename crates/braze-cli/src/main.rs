@@ -652,6 +652,16 @@ async fn build_engine(
             braze_memory::DEFAULT_PROJECT_MEMORY_BUDGET_TOKENS,
         )
     });
+    // Interop AGENTS.md: el context file estándar del repo entra al
+    // system prompt por default; `disable_agents_md` lo apaga. Se carga
+    // acá (la composición root que conoce el cwd real) y no dentro de
+    // `default_system_prompt`, que se mantiene puro — así el bench decide
+    // por sí mismo no cargarlo.
+    let agents_md_snapshot = if config.disable_agents_md {
+        None
+    } else {
+        braze_config::load_agents_md(cwd)
+    };
     let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
         braze_config::default_system_prompt(
             cwd,
@@ -659,6 +669,7 @@ async fn build_engine(
             &config.references,
             environment_snapshot.as_deref(),
             project_memory_snapshot.as_deref(),
+            agents_md_snapshot.as_deref(),
         )
     });
 

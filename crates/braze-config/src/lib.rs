@@ -24,6 +24,7 @@
 
 mod api_key;
 mod config;
+mod context_file;
 mod error;
 mod file;
 mod overrides;
@@ -35,6 +36,7 @@ pub use config::{
     Config, FormatterConfig, McpServerConfigStub, ModelPricing, ReferenceConfig, SkillsConfig,
     default_formatters,
 };
+pub use context_file::load_agents_md;
 pub use error::ConfigError;
 pub use overrides::ConfigOverrides;
 pub use paths::{config_file_path, default_session_dir};

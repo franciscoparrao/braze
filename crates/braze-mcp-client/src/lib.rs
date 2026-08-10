@@ -10,6 +10,7 @@
 //! called, right before dispatch.
 
 mod error;
+mod negative_cache;
 mod provider;
 mod summary;
 

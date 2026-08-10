@@ -28,6 +28,18 @@ pub(crate) enum McpClientError {
 
     #[error("MCP operation timed out after {0:?}")]
     Timeout(Duration),
+
+    /// K-16: el server está en el cooldown de la negative-cache tras un
+    /// timeout — la llamada se rechaza INSTANTÁNEO en vez de re-pagar
+    /// otro `REQUEST_TIMEOUT` completo contra un server colgado. El
+    /// mensaje dice cuándo se re-probará, para que el modelo (o el
+    /// operador leyendo el log) sepa que no es permanente.
+    #[error(
+        "MCP server is in a failure cooldown (a request timed out {since:?} ago); \
+         failing fast instead of waiting out another timeout — it will be re-probed \
+         in {retry_in:?}"
+    )]
+    NegativeCache { since: Duration, retry_in: Duration },
 }
 
 impl McpClientError {

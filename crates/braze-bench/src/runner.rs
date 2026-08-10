@@ -385,12 +385,16 @@ pub async fn run_task(
     // Sin environment block (E′ I.6): el sandbox no es un repo git y el
     // bench mide el prompt default de producción (environment_block es
     // off por default — si algún día se promueve, N-36 exige seguirlo).
+    // Sin AGENTS.md, mismo argumento que las reference dirs de arriba:
+    // el bench mide el prompt default de producción, y un context file
+    // del sandbox sería contenido de la tarea filtrado al prompt.
     let system_prompt = braze_config::default_system_prompt(
         sandbox.path(),
         model_hint.as_deref(),
         &[],
         None,
         combined_memory_snapshot.as_deref(),
+        None,
     );
 
     // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget

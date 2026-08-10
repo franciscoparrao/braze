@@ -30,6 +30,21 @@ use error::BenchError;
 use external::ExternalHarness;
 use metrics::{TaskResult, harness_error_result};
 
+/// L-11 (v9): cuántos fallos CONSECUTIVOS de nivel harness/backend, cada
+/// uno por debajo de [`ARM_FAIL_FAST_INSTANT_MS`], abortan el brazo. Tres:
+/// uno puede ser un blip transitorio, dos una mala racha; tres seguidos e
+/// instantáneos es la firma medida del brazo estructuralmente roto (57
+/// fallos de carga a ~185-200ms, casos gemma3:1b 2026-07-04 y binarios
+/// desincronizados de Nitro 2026-07-21).
+const ARM_FAIL_FAST_THRESHOLD: u32 = 3;
+
+/// Umbral de instantaneidad del fail-fast: un fallo REAL del modelo
+/// (razonamiento, timeout, presupuesto) gasta segundos de generación
+/// antes de fallar; un fallo de infraestructura (modelo ausente, breaker
+/// abierto) muere en milisegundos. 2s separa las dos poblaciones con
+/// margen en ambas direcciones.
+const ARM_FAIL_FAST_INSTANT_MS: u32 = 2_000;
+
 /// `braze-bench <suite.toml> --backends <spec,spec,...> [--output <path.json>]`
 #[derive(Parser, Debug)]
 #[command(
@@ -385,6 +400,19 @@ async fn run() -> Result<(), BenchError> {
             sequential::SequentialStop::for_threshold(delta, tasks.len() * cli.repetitions as usize)
         });
         let mut arm_cut_short = false;
+        // L-11 (v9): fail-fast de brazo. El caso real (dos veces, por
+        // binarios desincronizados en Nitro, 21-jul): la carga del modelo
+        // falla INSTANTÁNEO en cada tarea y el brazo entero se quema en 57
+        // fallos silenciosos de ~200ms que el reporte después descuenta
+        // como HarnessError. Tres filas consecutivas de nivel
+        // harness/backend por debajo del umbral de instantaneidad no son
+        // flakiness: son un brazo estructuralmente roto (modelo ausente,
+        // binario viejo, breaker abierto), y seguir corriéndolo no
+        // produce ni una celda interpretable. Las filas ya corridas se
+        // conservan; las restantes NO se inventan — misma doctrina que el
+        // corte de --sequential-stop.
+        let mut consecutive_instant_failures = 0u32;
+        let mut arm_failed_fast = false;
         // A backend that can't even build (Ollama down, no API key, ...)
         // is skipped, not fatal — the rest of the comparison still runs.
         let probe_sampling = backend_spec::SamplingSpec {
@@ -511,6 +539,37 @@ async fn run() -> Result<(), BenchError> {
                         results.push(harness_error_result(&display_name, task, repetition, &err));
                     }
                 }
+                // L-11: contabilidad del fail-fast sobre la fila recién
+                // registrada (ambas ramas del match empujan una).
+                let instant_infra_failure = results.last().is_some_and(|r| {
+                    matches!(
+                        r.failure_cause,
+                        Some(
+                            metrics::FailureCause::HarnessError
+                                | metrics::FailureCause::ModelBackendError
+                        )
+                    ) && r.wall_time_ms < u128::from(ARM_FAIL_FAST_INSTANT_MS)
+                });
+                if instant_infra_failure {
+                    consecutive_instant_failures += 1;
+                    if consecutive_instant_failures >= ARM_FAIL_FAST_THRESHOLD {
+                        eprintln!(
+                            "\nbraze-bench: BRAZO '{display_name}' ABORTADO: \
+                             {consecutive_instant_failures} fallos consecutivos de nivel \
+                             harness/backend en <{ARM_FAIL_FAST_INSTANT_MS}ms cada uno — el \
+                             brazo está estructuralmente roto (¿modelo ausente, binario \
+                             desincronizado, breaker abierto?), no flaky. Las filas corridas \
+                             se conservan; las restantes no se corren."
+                        );
+                        arm_failed_fast = true;
+                        break;
+                    }
+                } else {
+                    consecutive_instant_failures = 0;
+                }
+            }
+            if arm_failed_fast {
+                break;
             }
             if arm_cut_short {
                 // El criterio pre-registrado ya está decidido para este

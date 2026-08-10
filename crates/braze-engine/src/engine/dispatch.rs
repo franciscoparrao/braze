@@ -77,6 +77,7 @@ impl Engine {
             seen_calls,
             known_tool_call_ids,
             reads_by_path,
+            edit_failures_by_path,
         } = state;
 
         // Nota de relectura improductiva por id de llamada — ver
@@ -84,6 +85,11 @@ impl Engine {
         // (donde se conocen nombre y argumentos) y se anexa al resultado
         // exitoso, sin bloquearlo.
         let mut reread_nudge: HashMap<String, String> = HashMap::new();
+        // Interlock L-10: resuelve el id de un `edit_file` completado de
+        // vuelta a su ruta, para poder acreditar el fallo (o el éxito que
+        // resetea) a `edit_failures_by_path` cuando el resultado llega por
+        // el camino background, donde ya no está la llamada a mano.
+        let mut id_to_edit_path: HashMap<String, String> = HashMap::new();
         let mut handle_to_id: HashMap<TaskHandle, String> = HashMap::new();
         let mut pending: HashSet<TaskHandle> = HashSet::new();
         // F6: resolves a completed call's id back to its tool name, so a
@@ -171,6 +177,60 @@ impl Engine {
                 continue;
             }
 
+            // Interlock duro de `write_file` (v9 L-10): un `write_file`
+            // sobre una ruta cuyo `edit_file` ya falló
+            // `EDIT_FAILURE_WRITE_INTERLOCK_THRESHOLD` veces en este turno
+            // se bloquea sin despachar. La rama que cierra: el modelo que
+            // no puede REPRODUCIR el contenido (caracteres que entiende y
+            // no puede emitir, hallazgo 2026-07-28) cae de la edición
+            // dirigida que falla honesto a la reescritura total que
+            // corrompe en silencio. El error es accionable y deja las
+            // salidas legítimas abiertas: reintentar la edición con un
+            // old_string más corto, o reportar el bloqueo — que es el
+            // rechazo honesto que la verificación en vivo mostró como el
+            // buen desenlace (deadlock de 20 rondas → rechazo en 4).
+            //
+            // Como el gate J-9: la llamada bloqueada NO se registra en
+            // `seen_calls` — un `write_file` legítimo posterior (tras un
+            // `edit_file` exitoso que resetea el contador) debe poder
+            // despachar sin que el nudge de repetición mienta.
+            if call.name == "write_file"
+                && let Some(path) = call.arguments.get("path").and_then(|v| v.as_str())
+                && edit_failures_by_path
+                    .get(path)
+                    .is_some_and(|n| *n >= EDIT_FAILURE_WRITE_INTERLOCK_THRESHOLD)
+            {
+                tracing::warn!(
+                    path,
+                    "blocked write_file after repeated edit_file failures on the same path \
+                     (hard interlock, v9 L-10)"
+                );
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result: ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: format!(
+                                "write_file on '{path}' is blocked for the rest of this turn: \
+                                 edit_file already failed on that file {} times, and rewriting \
+                                 the whole file after failed targeted edits is how content gets \
+                                 silently corrupted (the same mismatch that broke the edits \
+                                 would be written over the entire file). Either retry edit_file \
+                                 with a shorter old_string copied EXACTLY from the latest \
+                                 read_file output, or stop and report honestly that you cannot \
+                                 make this edit.",
+                                EDIT_FAILURE_WRITE_INTERLOCK_THRESHOLD
+                            ),
+                            is_error: true,
+                        },
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
+            }
+
             // Exact repeat of a (name, arguments) pair already dispatched
             // earlier in this same turn — the dominant non-convergence
             // pattern for small/local models (they re-issue an identical
@@ -198,6 +258,21 @@ impl Engine {
                 // correcto en la mano. Dos palancas correctas por separado
                 // que se traban entre sí; devolver el contenido convierte la
                 // trampa en un acierto de caché.
+                // Interlock L-10: un repeat IDÉNTICO de un `edit_file` que
+                // no tiene resultado exitoso guardado cuenta como fallo
+                // hacia el umbral. Es exactamente el caso de producción
+                // que motivó el interlock — un modelo que no puede emitir
+                // un carácter reproduce la MISMA llamada corrupta cada
+                // vez, así que sus reintentos caen todos acá (nudgeados,
+                // nunca re-despachados) y sin este conteo el contador se
+                // quedaría en 1 mientras el modelo se descuelga a
+                // write_file.
+                if call.name == "edit_file"
+                    && previous.is_none()
+                    && let Some(path) = call.arguments.get("path").and_then(|v| v.as_str())
+                {
+                    *edit_failures_by_path.entry(path.to_string()).or_insert(0) += 1;
+                }
                 let (content, is_error) = match previous {
                     Some(prev) => (
                         format!(
@@ -564,6 +639,9 @@ impl Engine {
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
             {
+                if call.name == "edit_file" {
+                    id_to_edit_path.insert(call.id.clone(), path.clone());
+                }
                 if MUTATING_TOOL_NAMES.contains(&call.name.as_str()) {
                     reads_by_path.remove(&path);
                 } else if call.name == "read_file" {
@@ -616,6 +694,17 @@ impl Engine {
                     if !result.is_error {
                         self.turn_did_edit
                             .store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+                // Espejo del interlock L-10 del camino background — un
+                // edit_file no es interactivo hoy, pero el invariante no
+                // debe depender de esa expectativa (mismo argumento que
+                // el F6 de arriba).
+                if let Some(path) = id_to_edit_path.remove(&call.id) {
+                    if result.is_error {
+                        *edit_failures_by_path.entry(path).or_insert(0) += 1;
+                    } else {
+                        edit_failures_by_path.remove(&path);
                     }
                 }
                 self.append_and_notify(
@@ -746,6 +835,26 @@ impl Engine {
                         if !result.is_error {
                             self.turn_did_edit
                                 .store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                    }
+                    // Interlock L-10: acreditar el desenlace del edit_file
+                    // a su ruta — un fallo suma hacia el umbral que
+                    // bloquea write_file; un éxito resetea el contador (el
+                    // modelo recuperó la edición dirigida).
+                    if let Some(path) = id_to_edit_path.remove(&id) {
+                        if result.is_error {
+                            let n = edit_failures_by_path.entry(path.clone()).or_insert(0);
+                            *n += 1;
+                            if *n >= EDIT_FAILURE_WRITE_INTERLOCK_THRESHOLD {
+                                tracing::info!(
+                                    path,
+                                    failures = *n,
+                                    "edit_file failure threshold reached — write_file on this \
+                                     path is now blocked for the rest of the turn"
+                                );
+                            }
+                        } else {
+                            edit_failures_by_path.remove(&path);
                         }
                     }
                     // Nota de relectura improductiva: se anexa al
@@ -1721,6 +1830,273 @@ mod tests {
             }
             other => panic!("expected ToolCallCompleted, got {other:?}"),
         }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Provider de juguete para el interlock L-10: `edit_file` SIEMPRE
+    /// falla (el patrón "no puedo reproducir el contenido") y
+    /// `write_file` cuenta sus despachos reales — el assert central es
+    /// que ese contador NO avanza cuando el interlock bloquea.
+    struct EditFailingProvider {
+        write_invocations: Arc<AtomicU32>,
+    }
+
+    #[async_trait::async_trait]
+    impl braze_tools_core::ToolProvider for EditFailingProvider {
+        fn provider_id(&self) -> &str {
+            "test:edit-failing"
+        }
+
+        async fn list_stubs(
+            &self,
+        ) -> Result<Vec<braze_types::ToolStub>, braze_tools_core::ToolError> {
+            Ok(["edit_file", "write_file"]
+                .iter()
+                .map(|name| braze_types::ToolStub {
+                    name: name.to_string(),
+                    summary: format!("{name} de juguete"),
+                    source: "test:edit-failing".to_string(),
+                    input_schema: None,
+                })
+                .collect())
+        }
+
+        async fn resolve_schema(
+            &self,
+            name: &str,
+        ) -> Result<Option<braze_tools_core::ToolSchema>, braze_tools_core::ToolError> {
+            Ok(Some(braze_tools_core::ToolSchema {
+                name: name.to_string(),
+                description: format!("{name} de juguete"),
+                input_schema: serde_json::json!({"type": "object"}),
+            }))
+        }
+
+        async fn invoke(
+            &self,
+            call: &braze_types::ToolCall,
+        ) -> Result<braze_types::ToolResult, braze_tools_core::ToolError> {
+            match call.name.as_str() {
+                "edit_file" => Ok(braze_types::ToolResult {
+                    tool_call_id: call.id.clone(),
+                    content: "edit_file failed: old_string not found (first divergence at byte 3)"
+                        .to_string(),
+                    is_error: true,
+                }),
+                _ => {
+                    self.write_invocations.fetch_add(1, Ordering::SeqCst);
+                    Ok(braze_types::ToolResult {
+                        tool_call_id: call.id.clone(),
+                        content: "written".to_string(),
+                        is_error: false,
+                    })
+                }
+            }
+        }
+    }
+
+    fn edit_call(id: &str, path: &str) -> CompletionEvent {
+        edit_call_with(id, path, "a")
+    }
+
+    fn edit_call_with(id: &str, path: &str, old: &str) -> CompletionEvent {
+        CompletionEvent::ToolCallRequested {
+            id: id.to_string(),
+            name: "edit_file".to_string(),
+            arguments: serde_json::json!({ "path": path, "old_string": old, "new_string": "b" }),
+        }
+    }
+
+    fn write_call(id: &str, path: &str) -> CompletionEvent {
+        CompletionEvent::ToolCallRequested {
+            id: id.to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({ "path": path, "content": "todo el archivo" }),
+        }
+    }
+
+    /// Interlock L-10: tras dos fallos de `edit_file` sobre una ruta, un
+    /// `write_file` sobre ESA ruta se bloquea sin despachar (el provider
+    /// nunca lo ve) con un error accionable — y una ruta distinta queda
+    /// fuera del interlock, que es por-archivo y no global.
+    #[tokio::test]
+    async fn write_file_is_blocked_after_two_edit_failures_on_the_same_path() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![edit_call("e1", "src/lib.rs"), CompletionEvent::Done],
+            vec![edit_call("e2", "src/lib.rs"), CompletionEvent::Done],
+            vec![write_call("w1", "src/lib.rs"), CompletionEvent::Done],
+            vec![write_call("w2", "src/otro.rs"), CompletionEvent::Done],
+            vec![
+                CompletionEvent::TextDelta("me detengo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let write_invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EditFailingProvider {
+                write_invocations: Arc::clone(&write_invocations),
+            })]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "edita src/lib.rs", &mut NoopObserver)
+            .await
+            .expect("el turno converge: el interlock devuelve un error de tool, no mata el turno");
+
+        assert_eq!(
+            write_invocations.load(Ordering::SeqCst),
+            1,
+            "el write_file sobre la ruta bloqueada NO debe llegar al provider; el de la otra ruta sí"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let blocked = events.iter().find_map(|e| match e {
+            AgentEvent::ToolCallCompleted { id, result } if id == "w1" => Some(result.clone()),
+            _ => None,
+        });
+        let blocked = blocked.expect("el write_file bloqueado persiste su ToolCallCompleted");
+        assert!(blocked.is_error);
+        assert!(
+            blocked.content.contains("blocked"),
+            "el error debe explicar el bloqueo, got: {}",
+            blocked.content
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Un `edit_file` exitoso sobre la ruta resetea el contador del
+    /// interlock: el fallo posterior queda en 1 (< umbral) y el
+    /// `write_file` despacha normal. Sin el reset, un tropiezo temprano
+    /// bloquearía la reescritura legítima de un modelo que SÍ puede
+    /// editar.
+    #[tokio::test]
+    async fn a_successful_edit_resets_the_interlock_counter() {
+        struct FlakyEditProvider {
+            edit_calls: AtomicU32,
+            write_invocations: Arc<AtomicU32>,
+        }
+
+        #[async_trait::async_trait]
+        impl braze_tools_core::ToolProvider for FlakyEditProvider {
+            fn provider_id(&self) -> &str {
+                "test:flaky-edit"
+            }
+
+            async fn list_stubs(
+                &self,
+            ) -> Result<Vec<braze_types::ToolStub>, braze_tools_core::ToolError> {
+                Ok(["edit_file", "write_file"]
+                    .iter()
+                    .map(|name| braze_types::ToolStub {
+                        name: name.to_string(),
+                        summary: format!("{name} de juguete"),
+                        source: "test:flaky-edit".to_string(),
+                        input_schema: None,
+                    })
+                    .collect())
+            }
+
+            async fn resolve_schema(
+                &self,
+                name: &str,
+            ) -> Result<Option<braze_tools_core::ToolSchema>, braze_tools_core::ToolError>
+            {
+                Ok(Some(braze_tools_core::ToolSchema {
+                    name: name.to_string(),
+                    description: format!("{name} de juguete"),
+                    input_schema: serde_json::json!({"type": "object"}),
+                }))
+            }
+
+            async fn invoke(
+                &self,
+                call: &braze_types::ToolCall,
+            ) -> Result<braze_types::ToolResult, braze_tools_core::ToolError> {
+                match call.name.as_str() {
+                    // Falla el 1º y el 3º; el 2º (el del medio) tiene éxito.
+                    "edit_file" => {
+                        let n = self.edit_calls.fetch_add(1, Ordering::SeqCst);
+                        Ok(braze_types::ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: if n == 1 { "edited" } else { "edit_file failed" }.to_string(),
+                            is_error: n != 1,
+                        })
+                    }
+                    _ => {
+                        self.write_invocations.fetch_add(1, Ordering::SeqCst);
+                        Ok(braze_types::ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: "written".to_string(),
+                            is_error: false,
+                        })
+                    }
+                }
+            }
+        }
+
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Argumentos DISTINTOS por intento — el camino del reintento
+        // real que ajusta el old_string; el repeat idéntico (nudgeado)
+        // se cubre en el test anterior.
+        let model = ScriptedModel::new(vec![
+            vec![
+                edit_call_with("e1", "src/lib.rs", "a"),
+                CompletionEvent::Done,
+            ], // falla (1)
+            vec![
+                edit_call_with("e2", "src/lib.rs", "bb"),
+                CompletionEvent::Done,
+            ], // éxito → reset
+            vec![
+                edit_call_with("e3", "src/lib.rs", "ccc"),
+                CompletionEvent::Done,
+            ], // falla (1 de nuevo)
+            vec![write_call("w1", "src/lib.rs"), CompletionEvent::Done], // bajo el umbral → despacha
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let write_invocations = Arc::new(AtomicU32::new(0));
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(FlakyEditProvider {
+                edit_calls: AtomicU32::new(0),
+                write_invocations: Arc::clone(&write_invocations),
+            })]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "edita src/lib.rs", &mut NoopObserver)
+            .await
+            .expect("turno normal");
+
+        assert_eq!(
+            write_invocations.load(Ordering::SeqCst),
+            1,
+            "con el contador reseteado por el éxito, el write_file debe despachar"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
