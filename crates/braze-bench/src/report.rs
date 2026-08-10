@@ -879,6 +879,7 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             rescued_tool_calls: 0,
+            fence_edits: 0,
             leader_escalations: 0,
             compaction_count: 0,
             summary_fallbacks: 0,

@@ -467,6 +467,7 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         // H-3 (docs/AUDITORIA-2026-07-v5.md) lever events: audit-only,
         // same as `Usage`/`CompactionOccurred` above.
         | AgentEvent::TextualRescueApplied { .. }
+        | AgentEvent::EditFenceApplied { .. }
         | AgentEvent::EscalationToLead { .. }
         | AgentEvent::SummaryFallbackAttempted
         | AgentEvent::HookErrored { .. }

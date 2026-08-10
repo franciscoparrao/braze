@@ -339,6 +339,7 @@ impl ContextCompactor for SimpleContextCompactor {
                 // same as `Usage`/`CompactionOccurred` above — nothing here
                 // is conversational content worth surviving into the digest.
                 | AgentEvent::TextualRescueApplied { .. }
+                | AgentEvent::EditFenceApplied { .. }
                 | AgentEvent::EscalationToLead { .. }
                 | AgentEvent::SummaryFallbackAttempted
                 // A′.2: harness notes are rendered to the model live, but

@@ -48,6 +48,12 @@ pub(super) struct RoundOutcome {
     /// round, if any (H-3, docs/AUDITORIA-2026-07-v5.md) — see
     /// `AgentEvent::TextualRescueApplied`'s doc comment.
     pub(super) rescue_applied: Option<String>,
+    /// How many SEARCH/REPLACE blocks the edit-fence parser synthesized
+    /// into `edit_file` calls this round (`crate::edit_fence`, A/B del
+    /// impuesto JSON) — 0 always when the lever is off. Threaded so
+    /// `run_turn` can persist `AgentEvent::EditFenceApplied`, the
+    /// treatment arm's mechanism check.
+    pub(super) fence_edits: usize,
 }
 
 impl Engine {
@@ -77,6 +83,7 @@ impl Engine {
             emit_deltas,
             self.textual_rescue_enabled,
             self.envelope_parsing_enabled,
+            self.edit_fence_enabled,
         )
         .await
     }
@@ -102,6 +109,11 @@ impl Engine {
     /// `false`) — a plan that happens to be a whole-response JSON object
     /// must stay plan text, and the planner backend is never in
     /// prompt-tools mode anyway.
+    ///
+    /// `edit_fence_enabled` idem (planner round: always `false`) — a plan
+    /// that *quotes* a SEARCH/REPLACE block as a step to take later must
+    /// stay plan text, not execute the edit during planning.
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn complete_once_with(
         &self,
         model: &dyn ModelBackend,
@@ -110,6 +122,7 @@ impl Engine {
         emit_deltas: bool,
         rescue_enabled: bool,
         envelope_enabled: bool,
+        edit_fence_enabled: bool,
     ) -> Result<RoundOutcome, EngineError> {
         // Deadline de streaming por ronda (round-economics § 4.4 del
         // piloto): el reloj arranca ANTES del request — en un backend
@@ -288,6 +301,26 @@ impl Engine {
         // suppresses the ladder below: the model explicitly declared the
         // text final, and a JSON-looking final answer must not be
         // re-interpreted as a tool call.
+        // Edit-fence (A/B del impuesto JSON, `crate::edit_fence`): the
+        // instructed edit channel of the `+ablate:edit-fence` arm. Runs
+        // BEFORE the envelope and the rescue ladder, outside their
+        // accounting (same reasoning as the envelope below), and WITHOUT
+        // the `tool_calls.is_empty()` guard — a response may legitimately
+        // call `read_file` natively AND emit a fence edit in its text.
+        let mut fence_edits: usize = 0;
+        if edit_fence_enabled {
+            let (calls, remaining_text) = crate::edit_fence::extract_edit_fence_calls(&text_buffer);
+            if !calls.is_empty() {
+                fence_edits = calls.len();
+                tracing::info!(
+                    count = fence_edits,
+                    "parsed SEARCH/REPLACE edit-fence block(s) into edit_file call(s)"
+                );
+                tool_calls.extend(calls);
+                text_buffer = remaining_text;
+            }
+        }
+
         let mut envelope_handled = false;
         if envelope_enabled
             && tool_calls.is_empty()
@@ -360,6 +393,7 @@ impl Engine {
             usage,
             rescue_applied,
             truncated,
+            fence_edits,
         })
     }
 

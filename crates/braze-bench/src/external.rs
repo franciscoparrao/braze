@@ -138,6 +138,7 @@ pub fn external_outcome_to_task_result(
             // black-box external harness exposes none of the 4 SLM levers
             // through this contract either (H-3, docs/AUDITORIA-2026-07-v5.md).
             rescued_tool_calls: 0,
+            fence_edits: 0,
             leader_escalations: 0,
             compaction_count: 0,
             summary_fallbacks: 0,
@@ -213,6 +214,7 @@ pub fn external_outcome_to_task_result(
         cache_read_tokens: None,
         cache_write_tokens: None,
         rescued_tool_calls: 0,
+        fence_edits: 0,
         leader_escalations: 0,
         compaction_count: 0,
         summary_fallbacks: 0,

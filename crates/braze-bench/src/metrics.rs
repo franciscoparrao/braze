@@ -302,6 +302,17 @@ pub struct TaskResult {
     /// an opportunity to trigger this (or not), there's no "doesn't
     /// report it" case to distinguish.
     pub rescued_tool_calls: u32,
+    /// How many `edit_file` calls the edit-fence parser synthesized from
+    /// SEARCH/REPLACE blocks — summed over `AgentEvent::EditFenceApplied`
+    /// events' `blocks` (A/B del impuesto JSON,
+    /// docs/hypothesis-2026-08-10-json-tax-edit-fence.md: the treatment
+    /// arm's mechanism check — `fence_edits > 0` says the edits really
+    /// travelled through the fence, and comparing it against the row's
+    /// `edit_file` executions measures the native-call leak the design
+    /// doc's "contaminación medible" section requires). Same plain-`u32`
+    /// contract as [`Self::rescued_tool_calls`]: 0 and "lever off" are
+    /// the same fact.
+    pub fence_edits: u32,
     /// How many times `EscalatingBackend` reactively routed a round to its
     /// lead model because the worker's trailing observations crossed the
     /// failure threshold — counted from `AgentEvent::EscalationToLead`
@@ -405,6 +416,7 @@ pub fn harness_error_result(
         cache_write_tokens: None,
         // Nothing ran, so none of these levers could have fired either.
         rescued_tool_calls: 0,
+        fence_edits: 0,
         leader_escalations: 0,
         compaction_count: 0,
         summary_fallbacks: 0,
@@ -556,6 +568,16 @@ pub fn compute_metrics(
         .iter()
         .filter(|event| matches!(event, AgentEvent::TextualRescueApplied { .. }))
         .count() as u32;
+    // Summed (not counted): one event per round may carry several
+    // SEARCH/REPLACE blocks, and the mechanism check compares *edits*
+    // transported by the fence against `edit_file` executions.
+    let fence_edits = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::EditFenceApplied { blocks } => Some(*blocks),
+            _ => None,
+        })
+        .sum::<u32>();
     let leader_escalations = events
         .iter()
         .filter(|event| matches!(event, AgentEvent::EscalationToLead { .. }))
@@ -784,6 +806,7 @@ pub fn compute_metrics(
         cache_read_tokens,
         cache_write_tokens,
         rescued_tool_calls,
+        fence_edits,
         leader_escalations,
         compaction_count,
         summary_fallbacks,
@@ -1522,12 +1545,19 @@ mod tests {
                 dropped_tokens_estimate: 500,
             },
             AgentEvent::SummaryFallbackAttempted,
+            // A/B del impuesto JSON: `fence_edits` suma los `blocks` de
+            // cada evento (una ronda puede traer varios), y NO toca
+            // `rescued_tool_calls` — el fence es canal primario, no
+            // rescate, y el mecanismo del A/B depende de esa separación.
+            AgentEvent::EditFenceApplied { blocks: 2 },
+            AgentEvent::EditFenceApplied { blocks: 1 },
         ];
         let result = metrics(&task(None, false, None), &events, RunOutcome::Converged);
         assert_eq!(result.rescued_tool_calls, 2);
         assert_eq!(result.leader_escalations, 1);
         assert_eq!(result.compaction_count, 1);
         assert_eq!(result.summary_fallbacks, 1);
+        assert_eq!(result.fence_edits, 3);
     }
 
     /// A run with none of the 4 levers firing reports all-zero counts, not
@@ -1543,6 +1573,7 @@ mod tests {
         assert_eq!(result.leader_escalations, 0);
         assert_eq!(result.compaction_count, 0);
         assert_eq!(result.summary_fallbacks, 0);
+        assert_eq!(result.fence_edits, 0);
     }
 
     #[test]

@@ -352,6 +352,14 @@ pub struct Engine {
     /// everywhere except the `+ablate:prompt-tools`/`constrained-tools`
     /// bench rows — see [`Engine::with_envelope_parsing_enabled`].
     envelope_parsing_enabled: bool,
+    /// A/B del impuesto JSON (`crate::edit_fence`,
+    /// docs/hypothesis-2026-08-10-json-tax-edit-fence.md): con el lever
+    /// prendido, `edit_file` sale del inventario, el system prompt lleva
+    /// la gramática SEARCH/REPLACE, y los bloques del texto de cada
+    /// ronda se sintetizan como calls de `edit_file` — canal primario,
+    /// nunca contado como rescue. `false` (el default) es un no-op
+    /// estricto; `Config::enable_edit_fence` / `+ablate:edit-fence`.
+    edit_fence_enabled: bool,
     /// Optional planner backend (PLAN.md § "Split planificador/ejecutor"):
     /// a stronger model that produces a one-shot plan before the turn's
     /// first executor round, persisted as [`AgentEvent::PlanCreated`].
@@ -457,6 +465,7 @@ impl Engine {
             skills_max_loaded_per_turn: 2,
             textual_rescue_enabled: true,
             envelope_parsing_enabled: false,
+            edit_fence_enabled: false,
             planner: None,
             summarizer: None,
             verification: None,
@@ -664,6 +673,22 @@ impl Engine {
     /// ladder. `false` (the default) is a strict no-op. Chainable.
     pub fn with_envelope_parsing_enabled(mut self, enabled: bool) -> Self {
         self.envelope_parsing_enabled = enabled;
+        self
+    }
+
+    /// Enables (`enabled: true`) the edit-fence channel — the A/B del
+    /// impuesto JSON (docs/hypothesis-2026-08-10-json-tax-edit-fence.md):
+    /// `edit_file` leaves the request's tool inventory, the system
+    /// prompt carries the SEARCH/REPLACE grammar
+    /// (`crate::edit_fence::EDIT_FENCE_ADDENDUM`), and well-formed
+    /// blocks in a round's text are synthesized into `edit_file` calls.
+    /// Like the envelope, deliberately NOT a rung of the rescue ladder
+    /// and never counted as a rescue — the fence is the *instructed*
+    /// channel here, and the A/B needs `rescued_tool_calls` clean as a
+    /// mechanism check. `false` (the default) is a strict no-op.
+    /// Chainable.
+    pub fn with_edit_fence_enabled(mut self, enabled: bool) -> Self {
+        self.edit_fence_enabled = enabled;
         self
     }
 
@@ -3670,6 +3695,149 @@ mod tests {
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- Edit-fence (A/B del impuesto JSON,
+    //     docs/hypothesis-2026-08-10-json-tax-edit-fence.md) ---
+
+    /// El camino completo del brazo fence: el modelo emite prosa + un
+    /// bloque SEARCH/REPLACE, el parser lo sintetiza como `edit_file`,
+    /// dispatch lo ejecuta contra el provider real (schema-válido), y
+    /// queda el rastro contable (`EditFenceApplied`, NUNCA
+    /// `TextualRescueApplied` — la separación es el mecanismo del A/B).
+    #[tokio::test]
+    async fn an_edit_fence_block_is_parsed_dispatched_and_counted() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("Fixing the constant.\n\nsrc/lib.rs\n".to_string()),
+                CompletionEvent::TextDelta(
+                    "<<<<<<< SEARCH\nlet x = 1;\n=======\nlet x = 2;\n>>>>>>> REPLACE\n".to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EditRecordingToolProvider::new(Arc::clone(
+                &calls,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_edit_fence_enabled(true);
+
+        engine
+            .run_turn(&session, "fix the constant", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 1, "the fence edit must reach the tool");
+        assert_eq!(
+            recorded[0],
+            serde_json::json!({
+                "path": "src/lib.rs",
+                "old_string": "let x = 1;",
+                "new_string": "let x = 2;",
+            }),
+            "the block's sections must arrive verbatim as edit_file args"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::EditFenceApplied { blocks: 1 })),
+            "the fence channel must persist its own bench-countable event"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextualRescueApplied { .. })),
+            "the instructed fence channel must NOT count as a rescue"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("Fixing the constant.")
+            )),
+            "the surrounding prose must survive as the round's text"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("SEARCH")
+            )),
+            "the consumed block must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// La otra mitad del brazo: con el lever ON, `edit_file` no aparece
+    /// en el inventario del request y el system prompt lleva la
+    /// gramática del fence; con el lever OFF (default), ni lo uno ni lo
+    /// otro — no-op estricto.
+    #[tokio::test]
+    async fn edit_fence_lever_hides_the_stub_and_injects_the_addendum() {
+        for lever_on in [true, false] {
+            let (store, dir) = temp_store();
+            let session = SessionId::new();
+
+            let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let model = RequestCapturingModel {
+                inner: ScriptedModel::new(vec![vec![
+                    CompletionEvent::TextDelta("ok".to_string()),
+                    CompletionEvent::Done,
+                ]]),
+                requests: Arc::clone(&requests),
+            };
+
+            let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let engine = Engine::new(
+                Box::new(model),
+                ToolRegistry::new(vec![Box::new(EditRecordingToolProvider::new(calls))]),
+                Arc::new(store),
+                Box::new(SimpleContextCompactor::default()),
+                Box::new(TestNotifier::new()),
+                "system prompt".to_string(),
+                1024,
+            )
+            .with_edit_fence_enabled(lever_on);
+
+            engine
+                .run_turn(&session, "hola", &mut NoopObserver)
+                .await
+                .expect("turn should succeed");
+
+            let captured = requests.lock().unwrap().clone();
+            assert!(!captured.is_empty());
+            let req = &captured[0];
+            let has_edit_stub = req.tool_stubs.iter().any(|s| s.name == "edit_file");
+            let has_addendum = req.system_prompt.contains("<<<<<<< SEARCH");
+            if lever_on {
+                assert!(!has_edit_stub, "lever ON must hide the edit_file stub");
+                assert!(has_addendum, "lever ON must inject the fence grammar");
+            } else {
+                assert!(has_edit_stub, "lever OFF must keep the edit_file stub");
+                assert!(!has_addendum, "lever OFF must not touch the system prompt");
+            }
+
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+        }
     }
 
     // --- Envelope parsing (A/B constrained decoding,

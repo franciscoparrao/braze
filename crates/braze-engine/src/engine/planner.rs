@@ -43,7 +43,7 @@ impl Engine {
         // extracted and discarded by the textual rescue before this
         // function even sees it.
         let outcome = match self
-            .complete_once_with(planner.as_ref(), req, observer, false, false, false)
+            .complete_once_with(planner.as_ref(), req, observer, false, false, false, false)
             .await
         {
             Ok(outcome) => outcome,

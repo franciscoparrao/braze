@@ -766,6 +766,65 @@ impl ToolProvider for SlowToolProvider {
     }
 }
 
+/// Offers `edit_file` with the real tool's arg shape and records the
+/// arguments of every call — the integration seam for the edit-fence
+/// lever (A/B del impuesto JSON): a fence block must arrive here as a
+/// normal, schema-valid `edit_file` call, indistinguishable from a
+/// native one.
+pub(crate) struct EditRecordingToolProvider {
+    pub(crate) calls: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+}
+
+impl EditRecordingToolProvider {
+    pub(crate) fn new(calls: Arc<std::sync::Mutex<Vec<serde_json::Value>>>) -> Self {
+        Self { calls }
+    }
+}
+
+#[async_trait]
+impl ToolProvider for EditRecordingToolProvider {
+    fn provider_id(&self) -> &str {
+        "test:edit_recording"
+    }
+
+    async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+        Ok(vec![ToolStub {
+            name: "edit_file".to_string(),
+            summary: "edits a file".to_string(),
+            source: "test:edit_recording".to_string(),
+            input_schema: None,
+        }])
+    }
+
+    async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+        if name != "edit_file" {
+            return Ok(None);
+        }
+        Ok(Some(ToolSchema {
+            name: "edit_file".to_string(),
+            description: "edits a file".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_string": {"type": "string"},
+                    "new_string": {"type": "string"},
+                },
+                "required": ["path", "old_string", "new_string"],
+            }),
+        }))
+    }
+
+    async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        self.calls.lock().unwrap().push(call.arguments.clone());
+        Ok(ToolResult {
+            tool_call_id: call.id.clone(),
+            content: "edited".to_string(),
+            is_error: false,
+        })
+    }
+}
+
 pub(crate) fn temp_store() -> (FileSessionStore, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "braze-engine-test-{}-{}",

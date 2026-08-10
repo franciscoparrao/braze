@@ -475,6 +475,11 @@ pub async fn run_task(
     .with_task_list_enabled(config.enable_task_list || ablation.enable_task_list)
     .with_exploration_enabled(config.enable_exploration || ablation.enable_exploration)
     .with_editor_enabled(config.enable_editor || ablation.enable_editor)
+    // A/B del impuesto JSON (docs/hypothesis-2026-08-10-json-tax-edit-fence.md):
+    // el brazo `+ablate:edit-fence` — la edición como SEARCH/REPLACE
+    // textual en vez de tool-arg JSON. Off por default, igual que en
+    // todos los composition roots de producción.
+    .with_edit_fence_enabled(config.enable_edit_fence || ablation.enable_edit_fence)
     // A/B constrained decoding (docs/constrained-decoding-ab-design.md):
     // el canal de vuelta de los brazos `+ablate:prompt-tools`/
     // `constrained-tools` — el envelope se parsea como canal primario

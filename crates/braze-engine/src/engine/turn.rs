@@ -358,6 +358,16 @@ impl Engine {
             if self.editor_enabled {
                 tool_stubs.push(crate::editor::editor_tool_stub());
             }
+            // A/B del impuesto JSON (`crate::edit_fence`): en el brazo
+            // fence, `edit_file` sale del inventario — la edición viaja
+            // como SEARCH/REPLACE textual (addendum más abajo). La tool
+            // sigue existiendo en el provider: las calls sintetizadas
+            // por el parser (y las fugas de un modelo que la llame por
+            // nombre memorizado — contaminación que el A/B mide, no
+            // supone) despachan igual.
+            if self.edit_fence_enabled {
+                tool_stubs.retain(|s| s.name != "edit_file");
+            }
             if self.task_list_enabled {
                 tool_stubs.extend(crate::task_list::task_tool_stubs());
                 let task_list = self.task_list.lock().unwrap();
@@ -382,10 +392,14 @@ impl Engine {
                     }],
                 });
             }
+            let mut request_system_prompt = self.system_prompt_with_skills();
+            if self.edit_fence_enabled {
+                request_system_prompt.push_str(crate::edit_fence::EDIT_FENCE_ADDENDUM);
+            }
             let req = CompletionRequest {
                 messages: request_messages,
                 tool_stubs: tool_stubs.clone(),
-                system_prompt: self.system_prompt_with_skills(),
+                system_prompt: request_system_prompt,
                 max_tokens: self.max_tokens,
             };
 
@@ -419,6 +433,7 @@ impl Engine {
                 usage,
                 truncated,
                 rescue_applied,
+                fence_edits,
             } = if self.best_of_n > 1 {
                 self.complete_with_best_of_n(&req, observer).await?
             } else {
@@ -481,6 +496,20 @@ impl Engine {
                 self.append_and_notify(
                     session,
                     &AgentEvent::TextualRescueApplied { parser },
+                    observer,
+                )
+                .await?;
+            }
+
+            // Mismo patrón que el rescue de arriba, para el canal fence
+            // (A/B del impuesto JSON): la acción ya ocurrió en
+            // `complete_once_with`; esto la deja contable para el bench.
+            if fence_edits > 0 {
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::EditFenceApplied {
+                        blocks: fence_edits as u32,
+                    },
                     observer,
                 )
                 .await?;

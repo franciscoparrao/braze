@@ -562,6 +562,16 @@ pub struct Config {
     /// promueve solo si su A/B la valida.
     #[serde(default)]
     pub enable_editor: bool,
+    /// A/B del impuesto JSON
+    /// (docs/hypothesis-2026-08-10-json-tax-edit-fence.md): la edición
+    /// viaja como bloques SEARCH/REPLACE textuales en vez de tool call
+    /// JSON — `edit_file` sale del inventario y el engine parsea los
+    /// bloques como canal primario. OFF por default, mismo
+    /// posicionamiento que `enable_editor`: entra apagada y se promueve
+    /// solo si su A/B la valida (`BRAZE_ENABLE_EDIT_FENCE` /
+    /// `+ablate:edit-fence`).
+    #[serde(default)]
+    pub enable_edit_fence: bool,
     /// E′ I.6 (docs/harness-engineering-hooks-skills-2026-07-10.md):
     /// anexa al system prompt un snapshot del entorno (branch + git
     /// status recortado + fecha + OS) generado por el composition root —
@@ -684,6 +694,7 @@ impl Default for Config {
             enable_task_list: false,
             enable_exploration: false,
             enable_editor: false,
+            enable_edit_fence: false,
             environment_block: false,
             enable_project_memory: false,
             enable_lead_summary: false,
@@ -950,6 +961,9 @@ impl Config {
         }
         if let Some(v) = overrides.enable_editor {
             self.enable_editor = v;
+        }
+        if let Some(v) = overrides.enable_edit_fence {
+            self.enable_edit_fence = v;
         }
         if let Some(v) = overrides.environment_block {
             self.environment_block = v;

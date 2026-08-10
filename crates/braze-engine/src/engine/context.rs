@@ -219,6 +219,7 @@ pub(crate) fn event_text_len(event: &AgentEvent) -> usize {
         // same as `Usage` above — never reached the model, nothing to
         // count as dropped.
         | AgentEvent::TextualRescueApplied { .. }
+        | AgentEvent::EditFenceApplied { .. }
         | AgentEvent::EscalationToLead { .. }
         | AgentEvent::SummaryFallbackAttempted
         | AgentEvent::HookErrored { .. }

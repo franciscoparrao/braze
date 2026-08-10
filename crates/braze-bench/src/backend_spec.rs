@@ -736,6 +736,14 @@ pub struct AblationOverrides {
     /// (`docs/editor-subagent-design-2026-08-10.md`). Misma excepción de
     /// clave-que-habilita que `explore`: el lever es OFF por default.
     pub enable_editor: bool,
+    /// `+ablate:edit-fence` — ENABLES el canal SEARCH/REPLACE textual
+    /// del A/B del impuesto JSON
+    /// (docs/hypothesis-2026-08-10-json-tax-edit-fence.md): `edit_file`
+    /// sale del inventario y la edición viaja como bloques de texto que
+    /// el engine parsea como canal primario (NUNCA contado como rescue —
+    /// el mecanismo del A/B exige `rescued_tool_calls` limpio). Misma
+    /// excepción de clave-que-habilita que `task-list`. Backend-agnóstico.
+    pub enable_edit_fence: bool,
     /// `+ablate:prompt-tools` — brazo B del A/B pre-registrado de
     /// constrained decoding (docs/constrained-decoding-ab-design.md): el
     /// request Ollama va SIN el campo `tools` (inventario como addendum
@@ -831,7 +839,7 @@ impl AblationOverrides {
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, no-syntactic-gate, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
-         task-list, explore, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
+         task-list, explore, editor, edit-fence, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
          tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N, \
          max-iterations=N, gpu-layers=N";
@@ -891,6 +899,7 @@ impl AblationOverrides {
                 "task-list" => out.enable_task_list = true,
                 "explore" => out.enable_exploration = true,
                 "editor" => out.enable_editor = true,
+                "edit-fence" => out.enable_edit_fence = true,
                 "prompt-tools" => out.enable_prompt_tools = true,
                 "constrained-tools" => out.enable_constrained_tools = true,
                 "project-memory" => out.enable_project_memory = true,
@@ -1000,6 +1009,9 @@ impl AblationOverrides {
         }
         if self.enable_editor {
             parts.push("editor".to_string());
+        }
+        if self.enable_edit_fence {
+            parts.push("edit-fence".to_string());
         }
         if self.enable_prompt_tools {
             parts.push("prompt-tools".to_string());
@@ -1581,6 +1593,19 @@ mod tests {
         // must not leak into the provider/model split.
         assert_eq!(spec.provider, Provider::Ollama);
         assert_eq!(spec.model_override.as_deref(), Some("qwen2.5:3b"));
+    }
+
+    /// A/B del impuesto JSON: la clave que habilita el canal
+    /// SEARCH/REPLACE textual, con su identidad en el display name (el
+    /// JSON del sweep queda autodocumentado vía `backend_specs`).
+    #[test]
+    fn parses_edit_fence_enabling_key_and_displays_it() {
+        let spec = BackendSpec::parse("ollama:gemma4:e4b+ablate:edit-fence").unwrap();
+        assert!(spec.ablation().enable_edit_fence);
+        assert!(
+            spec.display_name(&braze_config::Config::default())
+                .ends_with("+ablate:edit-fence")
+        );
     }
 
     #[test]

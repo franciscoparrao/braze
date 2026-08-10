@@ -143,6 +143,24 @@ pub enum AgentEvent {
         /// site in `engine.rs`.
         parser: String,
     },
+    /// The edit-fence parser (`braze-engine::edit_fence`, A/B del
+    /// impuesto JSON — docs/hypothesis-2026-08-10-json-tax-edit-fence.md)
+    /// synthesized `edit_file` call(s) from SEARCH/REPLACE blocks in this
+    /// round's text. Deliberately a separate event from
+    /// [`Self::TextualRescueApplied`]: with the lever on, the fence is
+    /// the *instructed* primary channel, and counting it as a rescue
+    /// would contaminate the very metric the A/B uses as its mechanism
+    /// check. Audit-only, never rendered back into model history —
+    /// exists so `braze-bench` can verify the treatment arm actually
+    /// transported its edits through the fence. Additive amendment to
+    /// the frozen contract, same precedent as `PlanCreated`: an older
+    /// binary reading a log with this event deserializes it as
+    /// [`Self::Unknown`].
+    EditFenceApplied {
+        /// How many SEARCH/REPLACE blocks parsed into `edit_file` calls
+        /// this round.
+        blocks: u32,
+    },
     /// `EscalatingBackend` (`braze-model::escalation`) routed this round to
     /// its lead model reactively, because the worker had a trailing streak
     /// of failed observations at or past its configured threshold (H-3,
