@@ -201,3 +201,70 @@ frontier elegiría.
    aider (tabla de formato por modelo).
 5. **Determinístico > LLM-turn para compaction**: el fallback de
    magnitude valida el default de braze.
+
+## Anexo (2026-08-10): gemini-cli — el quinto repo (segundo primo declarado)
+
+Clonado y revisado aparte, enfocado en lo que codex no cubrió. Es
+TypeScript (ideas, no código portable). Hallazgo central: gemini-cli está
+a mitad de migración de un sandbox de proceso-completo (contenedor) a un
+**sandbox por-tool con Bubblewrap** — que es EXACTAMENTE el "trabajo
+futuro / out-of-process" que el module doc de `braze-permissions::sandbox`
+declaró como el fix real para lo que Landlock no puede.
+
+**Worth building (nuevo, alto valor):**
+- **Sandbox por-tool con Bubblewrap** (`packages/core/src/sandbox/linux/
+  bwrapArgsBuilder.ts` + `LinuxSandboxManager.ts`): `--ro-bind / /`
+  (todo el FS read-only) + `--bind`/`--ro-bind` selectivos del workspace
+  por-comando, seccomp BPF adjunto vía `--seccomp`, `--die-with-parent`.
+  Logra las DOS cosas que el Landlock write-only de braze provablemente
+  NO puede: (a) **read-denial de secretos** — `.env`/`.env.*` se
+  descubren y se **bind-montan con una máscara `chmod 0`** (o
+  `--ro-bind /dev/null`), así el tool literalmente no los puede leer;
+  (b) **política de FS por-comando** (`.git` read-only salvo para git).
+  Es el blueprint concreto del ítem futuro de braze; implementable en
+  Rust shelleando a `bwrap` con args-file (pasan args por fd 8 para
+  esquivar ARG_MAX). Detalles a robar: ordenar mounts por largo de dest
+  (padres antes que hijos), pre-crear los governance files para poder
+  protegerlos. **Esto reemplaza al "trabajo futuro" difuso del module
+  doc de sandbox.rs por un diseño de referencia real.**
+- **Carga JIT de AGENTS.md por subdirectorio** (`memoryDiscovery.ts
+  loadJitSubdirectoryMemory`): cuando un tool toca un subdir, carga el
+  GEMINI.md más cercano hacia arriba (techo = git root) on-demand, en vez
+  de todo el árbol al inicio. Mantiene el system prompt chico — justo la
+  restricción del modelo chico. Sobre el AGENTS.md que braze ya tiene.
+  `@import` con guardas de ciclo/profundidad es un nice-to-have.
+- **Versiones determinísticas de**: (a) truncado de tool-output por
+  presupuesto-de-tokens-inverso con spill-to-file (ataca el "un grep
+  gigante domina el contexto"); (b) el schema de slots `<state_snapshot>`
+  (goal/constraints/knowledge/artifact_trail/task_state con
+  [DONE]/[IN PROGRESS]/[TODO]) como PLANTILLA que braze llena
+  determinístico, no pidiéndole prosa al modelo.
+- **`omissionPlaceholderDetector`** (rechaza `// ... rest unchanged ...`
+  en ediciones): braze YA tiene su análogo (`elision_marker` en
+  edit_file), así que acá braze está a la par — confirmarlo, no
+  reconstruirlo.
+- **Bench**: Dynamic Baseline Verification (ante un fallo de A/B,
+  re-corre el baseline para distinguir regresión de fallo preexistente),
+  la escalera ALWAYS/USUALLY para checks flaky, e IQR+mediana+warmup para
+  métricas de walltime/costo. La estadística de braze (pass^k, McNemar)
+  es MÁS rigurosa; tomar solo su manejo de no-determinismo, no sus
+  umbrales.
+
+**Cite, don't build:** el sandbox por contenedor (Docker/Podman/Seatbelt/
+gVisor — elección de escala/consumidor, no encaja con el binario chico de
+braze; robar solo el truco "montar el workspace en la MISMA ruta absoluta
+host↔contenedor"); el policy engine TOML declarativo + **hashing de
+integridad de la política** (análogo a execpolicy de codex; el hashing es
+una frase linda para la sección de seguridad del paper); el compactor
+LLM-summarizing con probe de auto-verificación (contraste: braze es
+determinístico; un modelo chico produce snapshots débiles). Contraste
+para el paper: gemini usa tool-calling nativo de la API → NO hace rescate
+textual; braze DEBE hacerlo para modelos locales — motiva la escalera de
+rescate de braze.
+
+**Skip:** `packages/a2a-server` (protocolo Agent2Agent sobre HTTP,
+"experimental") y la capa de subagentes remotos/anidados
+(`remote-subagent-protocol.ts`, sin cap de profundidad) — es la
+orquestación multi-agente genérica que braze rechaza. Sus subagentes
+investigadores read-only nombrados (`codebase-investigator`, `generalist`)
+mapean 1:1 al `explore` de braze — valida el diseño depth-1 (cita).
