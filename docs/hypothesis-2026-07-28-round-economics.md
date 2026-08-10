@@ -1,12 +1,21 @@
 # Hipótesis: el eje no es la escala del modelo, es el precio de una ronda
 
 Fecha: 2026-07-28
-Estado: **piloto de costo CORRIDO (2026-08-08)** — instrumento construido
-y verificado, manipulación de precio fuerte (4,4× por ronda), pero la
-interacción quedó **dentro del ruido del régimen**: se materializó el
-asesino #2 de este documento. El factorial completo NO se corre como
-está diseñado hasta resolver el poder. Ver
-`docs/round-economics-pilot-costo-2026-08-08.md`.
+Estado: **LÍNEA CERRADA como no-medible (2026-08-09)** — la salida que
+este documento contempla en "Qué mataría el paper" #2. Secuencia: el
+piloto de costo (2026-08-08) verificó el instrumento y una manipulación
+de precio fuerte (4,4× por ronda), pero la interacción quedó dentro del
+ruido; el análisis de poder (2026-08-09) mostró que las réplicas NO
+compran poder (meseta ~25-30% de R=3 a R=20 — la inferencia es por
+tarea y la varianza dominante es entre tareas) y que la palanca real es
+autorar 150-300 ítems discriminantes nuevos, con retorno incierto si el
+efecto real es menor que el observado (probable, por winner's curse).
+Queda en pie como nulo piloteado: instrumento, afirmación de mecanismo,
+piso de ruido del régimen y dimensionamiento. **El gate hacia
+metaheurísticas queda cerrado.** Reapertura solo si aparece un banco
+grande compatible ya autorado. Ver
+`docs/round-economics-pilot-costo-2026-08-08.md` y
+`docs/round-economics-power-2026-08-09.md`.
 Línea: round-economics (renombrada desde `paper3-round-economics` el
 2026-07-29 — chocaba con el Paper 3 que el framework ya asignaba a
 RL/bandits; ver `docs/research-discipline-framework-2026-07-16.md`)
