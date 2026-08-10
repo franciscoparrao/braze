@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sweep Gemma Diagnostic Minimal 1rep — Braze</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #20231f;
+      --muted: #62685f;
+      --quiet: #8a9186;
+      --paper: #f7f5ef;
+      --panel: #fffdf7;
+      --line: #ded8c9;
+      --line-strong: #b9ad94;
+      --olive: #617047;
+      --olive-deep: #39452b;
+      --clay: #b75d45;
+      --amber: #d39c3f;
+      --blue: #4d6f91;
+      --green: #5d8a5f;
+      --bad: #b5493f;
+      --shadow: 0 18px 45px rgba(49, 44, 33, 0.10);
+      --radius: 8px;
+      font-family: "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(97,112,71,.06) 1px, transparent 1px) 0 0 / 36px 36px,
+        linear-gradient(0deg, rgba(97,112,71,.04) 1px, transparent 1px) 0 0 / 36px 36px,
+        var(--paper);
+      color: var(--ink);
+      line-height: 1.52;
+    }
+
+    a { color: var(--olive-deep); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code { font-family: "SFMono-Regular", Consolas, ui-monospace, monospace; font-size: .92em; }
+
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 32px 28px;
+      border-right: 1px solid var(--line);
+      background: color-mix(in srgb, var(--paper) 88%, white);
+      overflow-y: auto;
+    }
+
+    .brand {
+      display: grid;
+      gap: 10px;
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand .kicker {
+      color: var(--olive);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .brand h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(28px, 3vw, 42px);
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+    .brand p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    nav { display: grid; gap: 8px; margin-top: 28px; }
+    nav a {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 9px 0;
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+      font-size: 14px;
+    }
+    nav a:hover { color: var(--ink); }
+    nav span { color: var(--quiet); font-variant-numeric: tabular-nums; }
+
+    main { padding: clamp(28px, 5vw, 72px); max-width: 1240px; }
+    section { margin-top: clamp(38px, 6vw, 78px); }
+    .lead {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
+      gap: clamp(28px, 5vw, 72px);
+      align-items: end;
+    }
+    .lead h2 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(40px, 7vw, 92px);
+      line-height: .95;
+      letter-spacing: 0;
+      max-width: 9.5ch;
+    }
+    .lead-copy {
+      max-width: 660px;
+      color: var(--muted);
+      font-size: clamp(17px, 1.7vw, 21px);
+    }
+    .meta-list {
+      border-top: 3px solid var(--ink);
+      display: grid;
+      gap: 0;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .meta-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 18px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+    .meta-row b { color: var(--olive-deep); }
+    .meta-row span { color: var(--muted); }
+
+    .callout {
+      margin-top: 34px;
+      padding: clamp(18px, 3vw, 28px);
+      border: 1px solid var(--line-strong);
+      border-left: 8px solid var(--olive);
+      background: color-mix(in srgb, var(--panel) 86%, var(--paper));
+    }
+    .callout strong { color: var(--olive-deep); }
+
+    .section-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 22px;
+      margin-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+    }
+    .section-title h3 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(26px, 3vw, 40px);
+      letter-spacing: 0;
+    }
+    .section-title p { margin: 0; color: var(--muted); max-width: 520px; }
+
+    .ranking {
+      display: grid;
+      gap: 12px;
+    }
+    .model-row {
+      display: grid;
+      grid-template-columns: 170px minmax(160px, 1fr) minmax(160px, 1fr) 90px 90px;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    .model-row.header {
+      background: transparent;
+      border: 0;
+      color: var(--quiet);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      padding-top: 0;
+      padding-bottom: 4px;
+    }
+    .model-name { font-weight: 800; color: var(--ink); }
+    .bar {
+      position: relative;
+      height: 26px;
+      background: color-mix(in srgb, var(--line) 65%, white);
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+      background: var(--olive);
+    }
+    .bar.behavior > i { background: var(--blue); }
+    .bar span {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      padding-left: 10px;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--ink);
+    }
+    .number { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 22px;
+      min-height: 180px;
+    }
+    .card h4 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--olive-deep);
+    }
+    .card p { margin: 0; color: var(--muted); }
+    .metric {
+      display: block;
+      margin: 10px 0 12px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 44px;
+      line-height: 1;
+      color: var(--ink);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      font-size: 14px;
+    }
+    th, td {
+      padding: 12px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      color: var(--olive-deep);
+      font-size: 12px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      background: color-mix(in srgb, var(--paper) 70%, white);
+    }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tr:last-child td { border-bottom: 0; }
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--line-strong);
+      padding: 2px 7px;
+      font-size: 12px;
+      color: var(--olive-deep);
+      background: color-mix(in srgb, var(--paper) 72%, white);
+    }
+    .bad { color: var(--bad); font-weight: 800; }
+    .good { color: var(--green); font-weight: 800; }
+    .warn { color: var(--clay); font-weight: 800; }
+
+    .consequence-grid {
+      display: grid;
+      grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+      gap: 22px;
+    }
+    .steps {
+      counter-reset: step;
+      display: grid;
+      gap: 12px;
+    }
+    .step {
+      counter-increment: step;
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 14px;
+      padding: 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    .step::before {
+      content: counter(step, decimal-leading-zero);
+      font-weight: 900;
+      color: var(--clay);
+      border-top: 2px solid var(--clay);
+      padding-top: 5px;
+    }
+    .step h4 { margin: 0 0 6px; font-size: 17px; }
+    .step p { margin: 0; color: var(--muted); }
+
+    .codeblock {
+      background: #24251f;
+      color: #f1eadc;
+      padding: 18px;
+      overflow-x: auto;
+      border: 1px solid #3b3a31;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    footer {
+      margin-top: 64px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--quiet);
+      font-size: 13px;
+    }
+
+    @media (max-width: 920px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .lead, .consequence-grid { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      .model-row { grid-template-columns: 1fr; gap: 8px; }
+      .model-row.header { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand">
+        <div class="kicker">Braze Bench</div>
+        <h1>Gemma Diagnostic</h1>
+        <p>Sweep minimo de seleccion para modelos pequenos en Ollama/Nitro.</p>
+      </div>
+      <nav aria-label="Secciones">
+        <a href="#resumen">Resumen <span>01</span></a>
+        <a href="#ranking">Ranking <span>02</span></a>
+        <a href="#consecuencias">Consecuencias <span>03</span></a>
+        <a href="#tool-search">Tool search <span>04</span></a>
+        <a href="#assertions">Assertions <span>05</span></a>
+        <a href="#siguiente">Siguiente <span>06</span></a>
+      </nav>
+    </aside>
+
+    <main>
+      <section class="lead" id="resumen">
+        <div>
+          <h2>La senal no es tamano, es ajuste.</h2>
+          <p class="lead-copy">`gemma4:e2b` fue el mejor executor Gemma del barrido, mientras `qwen2.5:3b` quedo como control eficiente. El resultado practico: Braze debe perfilar familias y roles, no elegir modelos solo por parametros.</p>
+        </div>
+        <div class="meta-list" aria-label="Metadatos del sweep">
+          <div class="meta-row"><b>Fuente</b><span>docs/sweep-gemma-diagnostic-minimal-1rep-2026-07-11.json</span></div>
+          <div class="meta-row"><b>Suite</b><span>crates/braze-bench/suites/gemma-diagnostic.toml</span></div>
+          <div class="meta-row"><b>Reps</b><span>1, para seleccion inicial</span></div>
+          <div class="meta-row"><b>Estado</b><span>Sin harness_err ni model_backend_error</span></div>
+        </div>
+      </section>
+
+      <div class="callout">
+        <strong>Conclusion operativa:</strong> correr 3 repeticiones solo en `gemma4:e2b`, `qwen2.5:3b` y `gemma4:e4b`. `lfm2.5:8b` queda para investigar el fallo de `search_tools`, no como candidato principal.
+      </div>
+
+      <section id="ranking">
+        <div class="section-title">
+          <h3>Ranking</h3>
+          <p>El pass de comportamiento cuenta como aciertos los casos que fallaron solo por presupuesto de tokens, con el texto esperado presente.</p>
+        </div>
+        <div class="ranking" role="table" aria-label="Ranking por backend">
+          <div class="model-row header" role="row">
+            <div>Backend</div><div>Pass bruto</div><div>Pass comportamiento</div><div>Tiempo</div><div>Out tok</div>
+          </div>
+          <div class="model-row" role="row">
+            <div class="model-name">gemma4:e2b</div>
+            <div class="bar"><i style="width:75%"></i><span>9 / 12</span></div>
+            <div class="bar behavior"><i style="width:91.7%"></i><span>11 / 12</span></div>
+            <div class="number">6569 ms</div><div class="number">268</div>
+          </div>
+          <div class="model-row" role="row">
+            <div class="model-name">qwen2.5:3b</div>
+            <div class="bar"><i style="width:75%"></i><span>9 / 12</span></div>
+            <div class="bar behavior"><i style="width:75%"></i><span>9 / 12</span></div>
+            <div class="number">2317 ms</div><div class="number">58</div>
+          </div>
+          <div class="model-row" role="row">
+            <div class="model-name">gemma4:e4b</div>
+            <div class="bar"><i style="width:58.3%"></i><span>7 / 12</span></div>
+            <div class="bar behavior"><i style="width:66.7%"></i><span>8 / 12</span></div>
+            <div class="number">12350 ms</div><div class="number">325</div>
+          </div>
+          <div class="model-row" role="row">
+            <div class="model-name">lfm2.5:8b</div>
+            <div class="bar"><i style="width:58.3%"></i><span>7 / 12</span></div>
+            <div class="bar behavior"><i style="width:66.7%"></i><span>8 / 12</span></div>
+            <div class="number">16135 ms</div><div class="number">957</div>
+          </div>
+          <div class="model-row" role="row">
+            <div class="model-name">granite4.1:3b</div>
+            <div class="bar"><i style="width:50%"></i><span>6 / 12</span></div>
+            <div class="bar behavior"><i style="width:50%"></i><span>6 / 12</span></div>
+            <div class="number">1959 ms</div><div class="number">35</div>
+          </div>
+          <div class="model-row" role="row">
+            <div class="model-name">ministral-3:3b</div>
+            <div class="bar"><i style="width:50%"></i><span>6 / 12</span></div>
+            <div class="bar behavior"><i style="width:50%"></i><span>6 / 12</span></div>
+            <div class="number">3240 ms</div><div class="number">48</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="consecuencias">
+        <div class="section-title">
+          <h3>Consecuencias practicas</h3>
+          <p>Que cambia para Braze, no solo que modelo gano la tabla.</p>
+        </div>
+        <div class="consequence-grid">
+          <div class="cards">
+            <div class="card">
+              <h4>Executor Gemma</h4>
+              <span class="metric">e2b</span>
+              <p>`gemma4:e2b` debe ser el primer candidato executor Gemma. No conviene asumir que `e4b` sera mejor solo por ser mas grande.</p>
+            </div>
+            <div class="card">
+              <h4>Control fuerte</h4>
+              <span class="metric">3b</span>
+              <p>`qwen2.5:3b` es el baseline practico: menos rondas, menor latencia y mucha menos salida.</p>
+            </div>
+            <div class="card">
+              <h4>Riesgo harness</h4>
+              <span class="metric">tools</span>
+              <p>Los `AssertionToolCall` no se pueden explicar completamente sin guardar nombres de herramienta en el JSON.</p>
+            </div>
+          </div>
+          <div class="steps">
+            <div class="step"><div><h4>Separar rol lead de rol executor</h4><p>`gemma4:e4b` esta validado como lead, pero como executor no domino este suite. Braze necesita perfiles por rol, no un ranking unico por familia.</p></div></div>
+            <div class="step"><div><h4>Medir verbosidad como costo, no como fallo de capacidad</h4><p>Los fallos `assertion_max_tokens` de Gemma contenian el texto esperado. La consecuencia es agregar scoring separado: correctness, eficiencia y disciplina de respuesta.</p></div></div>
+            <div class="step"><div><h4>Instrumentar nombres de herramientas</h4><p>Agregar `tool_call_names` a `TaskResult` evita confundir respuestas correctas por herramienta alternativa con fallos reales de tool-use.</p></div></div>
+            <div class="step"><div><h4>Tratar `search_tools` por familia</h4><p>`lfm2.5:8b` y `ministral-3:3b` formularon busquedas con `hits=0`; para modelos pequenos conviene aliases, sinonimos o hints mas directos.</p></div></div>
+            <div class="step"><div><h4>Ejecutar 3rep solo en finalistas</h4><p>El sweep 1rep reduce el espacio. La proxima inversion debe ir a `gemma4:e2b`, `qwen2.5:3b` y `gemma4:e4b`.</p></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tool-search">
+        <div class="section-title">
+          <h3>Tool search</h3>
+          <p>El caso ruidoso separo bien a los modelos que sobreviven al catalogo diferido.</p>
+        </div>
+        <table>
+          <thead><tr><th>Backend</th><th>Pass</th><th>Fallo</th><th>Rounds</th><th>Tool calls</th><th>Compactions</th><th>Input tok</th><th>Output tok</th></tr></thead>
+          <tbody>
+            <tr><td><code>gemma4:e2b</code></td><td class="good">yes</td><td></td><td class="num">2</td><td class="num">1</td><td class="num">0</td><td class="num">2469</td><td class="num">392</td></tr>
+            <tr><td><code>gemma4:e4b</code></td><td class="good">yes</td><td></td><td class="num">2</td><td class="num">1</td><td class="num">0</td><td class="num">2471</td><td class="num">326</td></tr>
+            <tr><td><code>qwen2.5:3b</code></td><td class="good">yes</td><td></td><td class="num">2</td><td class="num">1</td><td class="num">0</td><td class="num">2477</td><td class="num">38</td></tr>
+            <tr><td><code>granite4.1:3b</code></td><td class="bad">no</td><td><span class="tag">assertion_tool_call</span></td><td class="num">2</td><td class="num">1</td><td class="num">0</td><td class="num">2472</td><td class="num">31</td></tr>
+            <tr><td><code>ministral-3:3b</code></td><td class="bad">no</td><td><span class="tag">assertion_tool_call</span></td><td class="num">2</td><td class="num">1</td><td class="num">0</td><td class="num">2341</td><td class="num">69</td></tr>
+            <tr><td><code>lfm2.5:8b</code></td><td class="bad">no</td><td><span class="tag">assertion_text</span></td><td class="num">10</td><td class="num">9</td><td class="num">8</td><td class="num">21754</td><td class="num">3847</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="assertions">
+        <div class="section-title">
+          <h3>AssertionToolCall</h3>
+          <p>El JSON actual no conserva los nombres exactos de herramienta; esta es la principal deuda de observabilidad del diagnostico.</p>
+        </div>
+        <table>
+          <thead><tr><th>Backend</th><th>Tarea</th><th>Text ok</th><th>Lectura</th></tr></thead>
+          <tbody>
+            <tr><td><code>gemma4:e4b</code></td><td><code>gemma_simple_read_lines</code></td><td class="good">yes</td><td>Probable herramienta alternativa con respuesta correcta.</td></tr>
+            <tr><td><code>gemma4:e4b</code></td><td><code>gemma_distractor_exact_file</code></td><td class="good">yes</td><td>Correctness textual, mecanismo no identificable post-hoc.</td></tr>
+            <tr><td><code>lfm2.5:8b</code></td><td><code>gemma_plan_prose_stress</code></td><td class="good">yes</td><td>Uso de herramienta distinta a `read_file`, pero respuesta final correcta.</td></tr>
+            <tr><td><code>ministral-3:3b</code></td><td><code>gemma_permission_boundary</code></td><td class="good">yes</td><td>Hubo denegacion, pero no quedo registrado `write_file` esperado.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="siguiente">
+        <div class="section-title">
+          <h3>Siguiente corrida</h3>
+          <p>El siguiente sweep debe gastar repeticiones solo donde el 1rep mostro senal.</p>
+        </div>
+        <pre class="codeblock"><code>BRAZE_OLLAMA_BASE_URL=http://192.168.1.8:11434 \
+RUST_LOG=braze_engine=info \
+cargo run -p braze-bench -- crates/braze-bench/suites/gemma-diagnostic.toml \
+  --backends ollama:gemma4:e2b,ollama:qwen2.5:3b,ollama:gemma4:e4b \
+  --repetitions 3 \
+  --temperature 0.2 \
+  --task-timeout-secs 120 \
+  --no-ollama-stop \
+  --output docs/sweep-gemma-diagnostic-finalists-3rep-2026-07-11.json</code></pre>
+      </section>
+
+      <footer>
+        Generado desde el diagnostico local de Braze. No incluye inferencia adicional; solo presenta el JSON y el analisis ya producidos.
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

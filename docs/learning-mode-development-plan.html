@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plan de desarrollo: modo aprendizaje para braze</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #5b6472;
+      --line: #dfe4ec;
+      --accent: #0f766e;
+      --accent-2: #7c3aed;
+      --code-bg: #f1f5f9;
+      --warn-bg: #fff7ed;
+      --warn-line: #fed7aa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 40px 0 64px;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 4vw, 3.6rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 34px 0 12px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+      border-top: 1px solid var(--line);
+      padding-top: 24px;
+    }
+    h3 {
+      margin: 24px 0 8px;
+      font-size: 1.08rem;
+    }
+    p { margin: 0 0 14px; }
+    a { color: var(--accent); }
+    .meta {
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      margin-top: 8px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+      margin: 24px 0;
+    }
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .panel strong {
+      color: var(--accent);
+      display: block;
+      margin-bottom: 6px;
+    }
+    .callout {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-line);
+      border-radius: 8px;
+      padding: 16px;
+      margin: 18px 0;
+    }
+    blockquote {
+      margin: 16px 0;
+      padding: 14px 18px;
+      border-left: 4px solid var(--accent);
+      background: var(--paper);
+      color: #24303d;
+    }
+    code {
+      background: var(--code-bg);
+      border-radius: 4px;
+      padding: 0.1rem 0.28rem;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      overflow-x: auto;
+      background: #111827;
+      color: #e5e7eb;
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 0.9rem;
+    }
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      display: table;
+      margin: 14px 0 22px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #eef6f5;
+      color: #123d39;
+      font-weight: 700;
+    }
+    tr:last-child td { border-bottom: 0; }
+    ul, ol { padding-left: 22px; }
+    li { margin: 5px 0; }
+    .phase {
+      border-left: 4px solid var(--accent-2);
+      padding-left: 14px;
+      margin: 18px 0;
+    }
+    .phase h3 { margin-top: 0; }
+    footer {
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      margin-top: 36px;
+      padding-top: 18px;
+      font-size: 0.95rem;
+    }
+    @media (max-width: 760px) {
+      main { width: min(100% - 24px, 1120px); padding-top: 24px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Plan de desarrollo: modo aprendizaje para <code>braze</code></h1>
+      <div class="meta">
+        <span>Fecha: 2026-07-16</span>
+        <span>Estado: propuesta de arquitectura</span>
+        <span>Nombre: <code>learning mode</code> / memoria procedimental destilada</span>
+      </div>
+    </header>
+
+    <section class="summary" aria-label="Resumen ejecutivo">
+      <div class="panel"><strong>Idea central</strong>El modelo local no aprende pesos: reutiliza playbooks destilados por un tutor cloud cuando hubo un fallo real.</div>
+      <div class="panel"><strong>Regla de seguridad</strong>Todo playbook nace como <code>candidate</code>; no se inyecta automaticamente hasta aprobarse o validarse.</div>
+      <div class="panel"><strong>Medicion</strong>La prueba clave es multi-sesion: tarea A crea metodologia, tarea B mide transferencia local.</div>
+      <div class="panel"><strong>Integracion</strong>Reutiliza <code>OpenRouterBackend</code>, <code>EscalatingBackend</code>, <code>braze-memory</code>, hooks y <code>braze-bench</code>.</div>
+    </section>
+
+    <h2>Tesis</h2>
+    <p>El modo aprendizaje convierte una escalacion puntual a un modelo superior en una unidad reutilizable de memoria procedimental: un <code>playbook</code> estructurado, verificable, versionado y recuperable por el modelo local.</p>
+    <blockquote>Cuando el modelo local falla, <code>braze</code> no solo consulta al modelo superior para resolver la tarea; le pide que explique que metodologia deberia haber seguido el modelo local, guarda esa metodologia como candidato y la valida antes de confiar en ella.</blockquote>
+
+    <h2>Principios</h2>
+    <ol>
+      <li>Procedimientos, no notas libres.</li>
+      <li>Off por default y siempre medible en <code>braze-bench</code>.</li>
+      <li>Candidatos antes que verdad.</li>
+      <li>Privacidad explicita antes de enviar contexto a OpenRouter.</li>
+      <li>Retrieval antes de nueva escalacion.</li>
+      <li>Validacion objetiva primero: tests, checks, schema validation o aserciones del bench.</li>
+      <li>Token budget fijo y truncado por lineas completas.</li>
+      <li>Sin auto-envenenamiento: el modelo local no escribe memoria confiable sobre si mismo.</li>
+    </ol>
+
+    <h2>Arquitectura que se reutiliza</h2>
+    <table>
+      <thead><tr><th>Pieza existente</th><th>Uso</th></tr></thead>
+      <tbody>
+        <tr><td><code>OpenRouterBackend</code></td><td>Modelo tutor superior.</td></tr>
+        <tr><td><code>EscalatingBackend</code></td><td>Enrutamiento reactivo lead/worker ya disponible.</td></tr>
+        <tr><td><code>ProjectMemory</code></td><td>Patron de memoria JSON pequena, estable y presupuestada.</td></tr>
+        <tr><td><code>EngineHook</code></td><td>Observacion segura de eventos y requests.</td></tr>
+        <tr><td><code>ProjectMemoryHook</code></td><td>Ejemplo de captura deterministica desde <code>AgentEvent</code>.</td></tr>
+        <tr><td><code>braze-skills</code></td><td>Precedente conceptual de instrucciones procedimentales.</td></tr>
+        <tr><td><code>braze-bench</code></td><td>Ablations, metricas y validacion multi-sesion.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Unidad central: <code>LearnedPlaybook</code></h2>
+    <pre><code>{
+  "schema_version": 1,
+  "id": "rust-borrow-checker-restructure-before-clone",
+  "title": "Resolver errores de borrow checker reestructurando ownership antes de clonar",
+  "lifecycle": "candidate",
+  "task_family": "rust_edit_compile_fix",
+  "applies_when": ["La tarea modifica codigo Rust", "cargo check reporta E0499, E0502 o E0382"],
+  "failure_signals": ["ToolResult contiene error de compilacion repetido"],
+  "method_steps": ["Leer la funcion completa", "Reducir el scope del borrow", "Aplicar cambio minimo"],
+  "verification": ["cargo check --quiet --message-format=short"],
+  "avoid": ["Agregar clone como primer reflejo"],
+  "escalate_if": ["El mismo error sigue tras dos ediciones verificadas"],
+  "source": {
+    "session_id": "uuid",
+    "tutor_backend": "openrouter",
+    "tutor_model": "anthropic/claude-sonnet-5"
+  },
+  "evidence": { "validated_runs": 0, "failed_runs": 0 }
+}</code></pre>
+
+    <h2>Ciclo de vida</h2>
+    <table>
+      <thead><tr><th>Estado</th><th>Significado</th><th>Inyeccion automatica</th></tr></thead>
+      <tbody>
+        <tr><td><code>candidate</code></td><td>Propuesto por tutor, no aprobado.</td><td>No</td></tr>
+        <tr><td><code>approved</code></td><td>Revisado por usuario o comando explicito.</td><td>Si, baja prioridad</td></tr>
+        <tr><td><code>validated</code></td><td>Ayudo en una tarea posterior con verificacion objetiva.</td><td>Si</td></tr>
+        <tr><td><code>trusted</code></td><td>Varias validaciones sin fallos recientes.</td><td>Si, prioridad alta</td></tr>
+        <tr><td><code>retired</code></td><td>Obsoleto, erroneo o demasiado especifico.</td><td>No</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Flujo operacional</h2>
+    <h3>1. Tarea nueva</h3>
+    <p><code>LearningRetriever</code> busca playbooks relevantes por tags, extension de archivos, herramientas esperadas y texto de la tarea. Renderiza hasta <code>N</code> playbooks aprobados dentro de presupuesto y el modelo local intenta resolver.</p>
+    <h3>2. Fallo local</h3>
+    <p><code>LearningTrigger</code> observa eventos tipados: schema failures repetidos, tool errors, <code>max_turn_iterations</code>, <code>TurnBudgetExhausted</code>, escalacion reactiva o fallo objetivo del bench.</p>
+    <h3>3. Tutor cloud</h3>
+    <p>Si la politica lo permite, <code>LearningController</code> envia un paquete redacted al tutor con objetivo, ultimos eventos relevantes, errores, checks y playbooks ya intentados. El tutor devuelve solucion inmediata y playbook JSON.</p>
+    <h3>4. Persistencia</h3>
+    <p>El JSON se valida contra schema. Si pasa, se guarda como <code>candidate</code> en <code>.braze/playbooks/candidates/&lt;id&gt;.json</code>. Si falla, solo queda evento de fallo.</p>
+    <h3>5. Futuras tareas</h3>
+    <p>Los playbooks aprobados se recuperan antes de escalar de nuevo. Si ayudan a una verificacion objetiva, suben su evidencia.</p>
+
+    <h2>Componentes nuevos</h2>
+    <table>
+      <thead><tr><th>Crate</th><th>Cambios</th></tr></thead>
+      <tbody>
+        <tr><td><code>braze-memory</code></td><td><code>LearnedPlaybook</code>, lifecycle, store por archivo, renderer token-budgeted.</td></tr>
+        <tr><td><code>braze-engine</code></td><td><code>LearningController</code>, trigger, context builder, retriever y tracker de uso.</td></tr>
+        <tr><td><code>braze-events</code></td><td>Eventos de match, inyeccion, trigger, tutor y lifecycle.</td></tr>
+        <tr><td><code>braze-model</code></td><td>Helper de tutor sobre <code>ModelBackend</code>; no requiere backend nuevo.</td></tr>
+        <tr><td><code>braze-config</code></td><td>Seccion <code>[learning]</code> con politica cloud, modelo tutor, presupuesto e inyeccion.</td></tr>
+        <tr><td><code>braze-cli</code></td><td><code>braze learn list/show/approve/retire/stats</code>.</td></tr>
+        <tr><td><code>braze-bench</code></td><td>Ablations y metricas multi-sesion.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Persistencia propuesta</h2>
+    <pre><code>.braze/
+  memory.json
+  playbooks/
+    candidates/
+      &lt;id&gt;.json
+    approved/
+      &lt;id&gt;.json
+    retired/
+      &lt;id&gt;.json</code></pre>
+
+    <h2>Configuracion propuesta</h2>
+    <pre><code>[learning]
+enabled = false
+mode = "suggest" # off | suggest | approved_only | auto_candidate
+tutor_backend = "openrouter"
+tutor_model = "anthropic/claude-sonnet-5"
+max_tutor_calls_per_turn = 1
+max_cost_usd_per_turn = 0.25
+inject_max_playbooks = 2
+inject_budget_tokens = 500
+allow_cloud_context = "ask" # never | ask | always
+store_candidates = true
+auto_inject_lifecycle = ["approved", "validated", "trusted"]</code></pre>
+
+    <h2>Plan por fases</h2>
+    <div class="phase">
+      <h3>Fase 0: congelar alcance</h3>
+      <p>Documento de diseno, JSON Schema, politica de redaccion y metricas. Sin llamadas cloud ni inyeccion automatica.</p>
+    </div>
+    <div class="phase">
+      <h3>Fase 1: store y renderer</h3>
+      <p>Persistir playbooks manuales en <code>braze-memory</code> y renderizarlos dentro de presupuesto. Check: <code>cargo test -p braze-memory</code>.</p>
+    </div>
+    <div class="phase">
+      <h3>Fase 2: retrieval e inyeccion controlada</h3>
+      <p>Matching deterministico, wiring en CLI/bench y eventos <code>PlaybookMatched</code>/<code>PlaybookInjected</code>.</p>
+    </div>
+    <div class="phase">
+      <h3>Fase 3: deteccion de fallos</h3>
+      <p>Detectar triggers y construir paquetes redacted sin llamar todavia al tutor.</p>
+    </div>
+    <div class="phase">
+      <h3>Fase 4: destilacion con OpenRouter</h3>
+      <p>Prompt de tutor, parseo JSON estricto, validacion schema y guardado en <code>candidates/</code>.</p>
+    </div>
+    <div class="phase">
+      <h3>Fase 5: CLI de revision</h3>
+      <p><code>braze learn list/show/approve/retire/stats</code> y movimiento atomico entre lifecycle directories.</p>
+    </div>
+    <div class="phase">
+      <h3>Fase 6: bench multi-sesion</h3>
+      <p>Comparar local, lead fallback, learning candidate, learning approved y human playbook.</p>
+    </div>
+    <div class="phase">
+      <h3>Fase 7: promocion controlada</h3>
+      <p>Auto-inyectar solo <code>approved</code>, <code>validated</code> y <code>trusted</code>, bajando confianza ante fallos.</p>
+    </div>
+    <div class="phase">
+      <h3>Fase 8: export futuro</h3>
+      <p>Exportar buenos playbooks a skills, dataset de fine-tuning y deduplicacion revisada.</p>
+    </div>
+
+    <h2>Bench</h2>
+    <table>
+      <thead><tr><th>Brazo</th><th>Descripcion</th></tr></thead>
+      <tbody>
+        <tr><td><code>local</code></td><td>Modelo local sin tutor ni playbooks.</td></tr>
+        <tr><td><code>lead-fallback</code></td><td>Escalacion reactiva sin persistir metodologia.</td></tr>
+        <tr><td><code>learning-candidate</code></td><td>El tutor crea candidato, pero no se inyecta.</td></tr>
+        <tr><td><code>learning-approved</code></td><td>Playbook aprobado se inyecta en tarea posterior.</td></tr>
+        <tr><td><code>human-playbook</code></td><td>Procedimiento escrito manualmente como techo practico.</td></tr>
+      </tbody>
+    </table>
+    <p>Metricas primarias: success rate local en tarea B, reduccion de <code>leader_escalations</code>, tokens totales, costo cloud y rondas hasta exito.</p>
+
+    <h2>Riesgos</h2>
+    <table>
+      <thead><tr><th>Riesgo</th><th>Mitigacion</th></tr></thead>
+      <tbody>
+        <tr><td>Playbook demasiado especifico</td><td><code>applies_when</code> estricto y tarea B no identica.</td></tr>
+        <tr><td>Auto-envenenamiento</td><td>Lifecycle <code>candidate</code> + aprobacion/validacion.</td></tr>
+        <tr><td>Exfiltracion</td><td>Redaccion, allowlist y permiso explicito.</td></tr>
+        <tr><td>Sobrecosto cloud</td><td>Maximo de llamadas tutor y presupuesto por turno.</td></tr>
+        <tr><td>Inflar contexto</td><td>Top-N y presupuesto de tokens.</td></tr>
+        <tr><td>Falsos positivos</td><td>Medir hits falsos y bajar confianza.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <strong>MVP recomendado:</strong>
+      <ol>
+        <li><code>LearnedPlaybook</code> + store + renderer.</li>
+        <li>Inyeccion de playbooks manualmente aprobados.</li>
+        <li>Deteccion de fallos sin tutor.</li>
+        <li>Tutor OpenRouter que solo escribe <code>candidate</code>.</li>
+        <li>CLI <code>braze learn approve</code>.</li>
+        <li>Bench multi-sesion pequeno.</li>
+      </ol>
+    </div>
+
+    <h2>Pregunta de investigacion</h2>
+    <blockquote>Puede un harness local-first reducir escalaciones futuras destilando intervenciones cloud en memoria procedimental validada?</blockquote>
+    <p>La pregunta mide transferencia procedimental, no solo fallback. Esa es la diferencia importante frente a "usar OpenRouter cuando falla".</p>
+
+    <footer>
+      Version HTML del plan en Markdown: <code>docs/learning-mode-development-plan.md</code>.
+    </footer>
+  </main>
+</body>
+</html>

@@ -23,3 +23,7 @@ braze-bench-preserved-sessions/
 .Rhistory
 # Logs de sweeps abortados.
 *.log.killed
+
+# Basura de tooling local
+__pycache__/
+wiki/.last-distill

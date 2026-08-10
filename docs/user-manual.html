@@ -1,0 +1,686 @@
+<title>Manual de usuario — braze</title>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #f6f3ec;
+    --surface: #efe8d8;
+    --surface-2: #e6ddc7;
+    --ink: #221f19;
+    --ink-muted: #6e6656;
+    --accent: #1f6f6b;
+    --accent-soft: #d8e8e6;
+    --rule: #ddd2ba;
+    --ok: #3f7d4a;
+    --warn: #a06a12;
+    --crit: #a13c2f;
+    --font-display: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181a; --surface: #1b2123; --surface-2: #212829;
+      --ink: #e8e4da; --ink-muted: #97948b; --accent: #59c2bb;
+      --accent-soft: #1d3634; --rule: #2b3234;
+      --ok: #6fc47e; --warn: #d8a13c; --crit: #e07361;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14181a; --surface: #1b2123; --surface-2: #212829;
+    --ink: #e8e4da; --ink-muted: #97948b; --accent: #59c2bb;
+    --accent-soft: #1d3634; --rule: #2b3234;
+    --ok: #6fc47e; --warn: #d8a13c; --crit: #e07361;
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f3ec; --surface: #efe8d8; --surface-2: #e6ddc7;
+    --ink: #221f19; --ink-muted: #6e6656; --accent: #1f6f6b;
+    --accent-soft: #d8e8e6; --rule: #ddd2ba;
+    --ok: #3f7d4a; --warn: #a06a12; --crit: #a13c2f;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16.5px;
+    line-height: 1.6;
+  }
+
+  body {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 76ch);
+    gap: 3rem;
+    justify-content: center;
+    padding: 3rem 1.5rem 6rem;
+  }
+
+  @media (max-width: 950px) {
+    body { grid-template-columns: minmax(0, 76ch); }
+    nav.toc { display: none; }
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 2.5rem;
+    align-self: start;
+    max-height: calc(100vh - 5rem);
+    overflow-y: auto;
+    font-size: 0.83rem;
+  }
+
+  nav.toc .eyebrow {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-muted);
+    font-size: 0.7rem;
+    margin: 0 0 0.8rem;
+  }
+
+  nav.toc .group-title {
+    font-weight: 700;
+    margin: 1.1rem 0 0.4rem;
+  }
+  nav.toc .group-title:first-of-type { margin-top: 0; }
+
+  nav.toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  nav.toc a {
+    display: block;
+    color: var(--ink-muted);
+    text-decoration: none;
+    border-left: 2px solid var(--rule);
+    padding-left: 0.8rem;
+  }
+  nav.toc a:hover, nav.toc a:focus-visible {
+    color: var(--ink);
+    border-left-color: var(--accent);
+  }
+
+  main { min-width: 0; }
+
+  h1 {
+    font-family: var(--font-display);
+    font-size: 2.1rem;
+    font-weight: 600;
+    line-height: 1.15;
+    margin: 0 0 0.4rem;
+    text-wrap: balance;
+  }
+
+  .subtitle { color: var(--ink-muted); font-size: 1.02rem; margin: 0 0 1rem; max-width: 60ch; }
+
+  .meta {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--ink-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    padding-bottom: 1.5rem;
+    margin-bottom: 2.2rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  h2 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 3.2rem 0 0.3rem;
+    text-wrap: balance;
+    scroll-margin-top: 2rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  h2 .num { font-family: var(--font-mono); color: var(--accent); font-weight: 500; margin-right: 0.5rem; }
+
+  h3 {
+    font-family: var(--font-body);
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 1.8rem 0 0.6rem;
+    scroll-margin-top: 2rem;
+  }
+
+  h3 code { font-size: 0.95em; }
+
+  p { margin: 0 0 1rem; }
+  ul { margin: 0 0 1rem; padding-left: 1.3rem; }
+  li { margin-bottom: 0.35rem; }
+  a { color: var(--accent); }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.87em;
+    background: var(--surface);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.83rem;
+    line-height: 1.55;
+    background: var(--surface-2);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    padding: 0.85rem 1.05rem;
+    overflow-x: auto;
+    margin: 0 0 1.2rem;
+  }
+  pre code { background: none; padding: 0; font-size: 1em; }
+
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    margin: 0 0 1.4rem;
+  }
+  .callout .eyebrow {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+    color: var(--accent);
+    margin: 0 0 0.5rem;
+  }
+  .callout p:last-child, .callout pre:last-child { margin-bottom: 0; }
+
+  .warn-callout {
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+    border: 1px solid var(--warn);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    margin: 0 0 1.4rem;
+  }
+  .warn-callout p:last-child { margin-bottom: 0; }
+
+  /* Command / flag dictionary */
+  dl.flags { margin: 0 0 1.6rem; border-top: 1px solid var(--rule); }
+  dl.flags > div {
+    display: grid;
+    grid-template-columns: minmax(11rem, 16rem) 1fr;
+    gap: 0.2rem 1.4rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  @media (max-width: 640px) {
+    dl.flags > div { grid-template-columns: 1fr; }
+  }
+  dl.flags dt {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--ink);
+    align-self: start;
+  }
+  dl.flags dt .type {
+    display: block;
+    font-weight: 400;
+    color: var(--ink-muted);
+    font-size: 0.76rem;
+    margin-top: 0.15rem;
+  }
+  dl.flags dd { margin: 0; font-size: 0.92rem; }
+  dl.flags dd code { font-size: 0.85em; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin: 0 0 1.2rem;
+  }
+  .table-wrap { overflow-x: auto; margin: 0 0 1.2rem; }
+  .table-wrap table { margin-bottom: 0; }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-muted);
+  }
+  td code, th code { white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; }
+
+  kbd {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0.05em 0.45em;
+  }
+
+  .pill {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .pill-req { background: color-mix(in srgb, var(--crit) 15%, transparent); color: var(--crit); }
+  .pill-opt { background: color-mix(in srgb, var(--ink-muted) 18%, transparent); color: var(--ink-muted); }
+  .pill-ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-muted);
+    font-size: 0.8rem;
+  }
+</style>
+
+<nav class="toc">
+  <p class="eyebrow">Manual — índice</p>
+  <p class="group-title">Empezar</p>
+  <ol>
+    <li><a href="#instalacion">Instalación</a></li>
+    <li><a href="#inicio-rapido">Inicio rápido</a></li>
+  </ol>
+  <p class="group-title">Diccionario de comandos</p>
+  <ol>
+    <li><a href="#cmd-chat"><code>braze chat</code></a></li>
+    <li><a href="#cmd-run"><code>braze run</code></a></li>
+    <li><a href="#cmd-slash">Slash commands</a></li>
+    <li><a href="#cmd-keys">Atajos de teclado</a></li>
+  </ol>
+  <p class="group-title">Configuración</p>
+  <ol>
+    <li><a href="#config-archivo"><code>config.json</code></a></li>
+    <li><a href="#config-campos">Campos y variables de entorno</a></li>
+    <li><a href="#config-mcp">Servidores MCP</a></li>
+    <li><a href="#config-backends">Backends soportados</a></li>
+  </ol>
+  <p class="group-title">Qué puede hacer braze</p>
+  <ol>
+    <li><a href="#tools">Herramientas del modelo</a></li>
+    <li><a href="#permisos">Modelo de permisos</a></li>
+    <li><a href="#sesiones">Sesiones</a></li>
+  </ol>
+  <p class="group-title">Referencia</p>
+  <ol>
+    <li><a href="#observabilidad">Observabilidad</a></li>
+    <li><a href="#errores">Errores y códigos de salida</a></li>
+    <li><a href="#ver-tambien">Ver también</a></li>
+  </ol>
+</nav>
+
+<main>
+  <h1>Manual de usuario</h1>
+  <p class="subtitle">Referencia completa de <code>braze</code> — todo flag, todo comando, toda variable de configuración. Pensado para buscar (Ctrl+F), no para leer de corrido.</p>
+  <div class="meta">
+    <span>commit de referencia: 69a4527</span>
+    <span>proyecto: /home/franciscoparrao/proyectos/braze</span>
+    <span>ver también: docs/usability-testing-guide.html, docs/self-improvement-guide.html</span>
+  </div>
+
+  <h2 id="instalacion"><span class="num">§</span>Instalación</h2>
+
+  <p><code>braze</code> es un target del workspace (<code>crates/braze-cli</code>, binario <code>braze</code>), no algo instalado a nivel del sistema. Dos formas de tenerlo disponible:</p>
+
+  <div class="callout">
+    <p class="eyebrow">Sin instalar nada</p>
+    <pre><code>cargo run -p braze-cli --release -- chat --tui</code></pre>
+  </div>
+
+  <div class="callout">
+    <p class="eyebrow">Instalado en <code>~/.cargo/bin</code> (recomendado para uso frecuente)</p>
+    <pre><code>cargo install --path crates/braze-cli --locked</code></pre>
+    <p>Después de esto, <code>braze</code> queda disponible directo. Si el código cambia, hay que repetir el <code>cargo install</code>.</p>
+  </div>
+
+  <h2 id="inicio-rapido"><span class="num">§</span>Inicio rápido</h2>
+
+  <p>Sin ningún archivo de configuración, <code>braze</code> apunta a Ollama local (<code>http://localhost:11434</code>, modelo <code>llama3.1</code>) por defecto — no gasta ninguna API sin que lo pidas explícitamente:</p>
+  <pre><code>braze chat --tui</code></pre>
+
+  <p>Contra un backend en la nube, con la key ya en <code>config.json</code> (ver <a href="#config-archivo">§ Configuración</a>):</p>
+  <pre><code>braze chat --tui --backend anthropic --model claude-opus-4-6-20260805</code></pre>
+
+  <p>Un solo prompt, sin sesión interactiva:</p>
+  <pre><code>braze run "lee main.rs y dime qué hace"</code></pre>
+
+  <h2 id="cmd-chat"><span class="num">§</span><code>braze chat</code></h2>
+  <p>Sesión interactiva — lee líneas de stdin hasta EOF (Ctrl+D) o las palabras literales <code>exit</code>/<code>quit</code>. Con <code>--tui</code>, usa la interfaz de terminal completa en su lugar.</p>
+
+  <dl class="flags">
+    <div>
+      <dt>--resume <span class="type">&lt;session-id&gt;</span></dt>
+      <dd>Retoma una sesión existente por id en vez de empezar una nueva. El id se imprime al arrancar cualquier <code>chat</code>/<code>run</code>. Un id que no existe no es un error — arranca una sesión nueva vacía con un aviso a stderr.</dd>
+    </div>
+    <div>
+      <dt>--backend <span class="type">&lt;anthropic|ollama|openrouter&gt;</span></dt>
+      <dd>Sobreescribe el backend configurado por defecto para esta corrida.</dd>
+    </div>
+    <div>
+      <dt>--model <span class="type">&lt;nombre&gt;</span></dt>
+      <dd>Sobreescribe el modelo configurado para esta corrida.</dd>
+    </div>
+    <div>
+      <dt>--ollama-url <span class="type">&lt;url&gt;</span></dt>
+      <dd>Sobreescribe la URL base del servidor Ollama — p.ej. <code>--ollama-url http://192.168.1.8:11434</code> para usar un nodo LAN en vez de localhost. Pisa el archivo de config y <code>BRAZE_OLLAMA_BASE_URL</code>.</dd>
+    </div>
+    <div>
+      <dt>--tui</dt>
+      <dd>Usa la interfaz de terminal completa en vez del loop de texto plano por stdin/stdout. Opt-in. Las acciones irreversibles muestran un overlay de aprobación real (y/n) con teclado.</dd>
+    </div>
+    <div>
+      <dt>--theme <span class="type">&lt;dark|light|high-contrast&gt;</span></dt>
+      <dd>Preset de color para <code>--tui</code> (default <code>dark</code>). Ignorado sin <code>--tui</code>.</dd>
+    </div>
+    <div>
+      <dt>--planner <span class="type">&lt;backend[:modelo]&gt;</span></dt>
+      <dd>Activa el split planificador/ejecutor: un modelo más fuerte planea una vez por turno, el backend primario ejecuta. Ej.: <code>--planner openrouter:deepseek/deepseek-v4-flash</code>. Sobreescribe <code>planner_backend</code>/<code>planner_model</code>.</dd>
+    </div>
+    <div>
+      <dt>--lead <span class="type">&lt;backend[:modelo]&gt;</span></dt>
+      <dd>Activa la escalación reactiva lead/worker (estilo Goose): el lead abre la sesión y vuelve cuando el backend primario encadena observaciones fallidas. Compone con <code>--planner</code> (proactivo vs. reactivo). Sobreescribe <code>lead_backend</code>/<code>lead_model</code>.</dd>
+    </div>
+    <div>
+      <dt>--supervised</dt>
+      <dd>Fuerza toda acción a pasar por confirmación interactiva, sin importar lo que diría el clasificador por defecto — ni siquiera un <code>write_file</code> dentro del propio proyecto se aplica sin preguntar. Ver <a href="#permisos">§ Modelo de permisos</a> y <code>docs/self-improvement-guide.html</code>.</dd>
+    </div>
+  </dl>
+
+  <h2 id="cmd-run"><span class="num">§</span><code>braze run &lt;prompt&gt;</code></h2>
+  <p>Un solo prompt, una sola respuesta, sale. Mismos flags que <code>chat</code> excepto <code>--resume</code>, <code>--tui</code> y <code>--theme</code> (no aplican a una corrida de un solo turno).</p>
+
+  <dl class="flags">
+    <div>
+      <dt>prompt</dt>
+      <dd>Posicional, obligatorio. El texto a enviar.</dd>
+    </div>
+    <div><dt>--backend <span class="type">&lt;anthropic|ollama|openrouter&gt;</span></dt><dd>Igual que <code>chat --backend</code>.</dd></div>
+    <div><dt>--model <span class="type">&lt;nombre&gt;</span></dt><dd>Igual que <code>chat --model</code>.</dd></div>
+    <div><dt>--ollama-url <span class="type">&lt;url&gt;</span></dt><dd>Igual que <code>chat --ollama-url</code>.</dd></div>
+    <div><dt>--planner <span class="type">&lt;backend[:modelo]&gt;</span></dt><dd>Igual que <code>chat --planner</code>.</dd></div>
+    <div><dt>--lead <span class="type">&lt;backend[:modelo]&gt;</span></dt><dd>Igual que <code>chat --lead</code>.</dd></div>
+    <div><dt>--supervised</dt><dd>Igual que <code>chat --supervised</code>.</dd></div>
+  </dl>
+
+  <p><code>--help</code>/<code>-h</code> y <code>--version</code>/<code>-V</code> están disponibles en la raíz y en cada subcomando (provistos por <code>clap</code>, sin lógica propia). No hay más subcomandos que <code>chat</code> y <code>run</code>.</p>
+
+  <h2 id="cmd-slash"><span class="num">§</span>Slash commands (solo <code>--tui</code>)</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Comando</th><th>Qué hace</th></tr></thead>
+      <tbody>
+        <tr><td><code>/help</code></td><td>Muestra los atajos de teclado y comandos disponibles.</td></tr>
+        <tr><td><code>/model</code></td><td>Abre un picker interactivo con los backends configurados más los modelos instalados en el servidor Ollama en uso.</td></tr>
+        <tr><td><code>/model &lt;backend[:modelo]&gt;</code></td><td>Cambia de modelo directo, sin el picker — p.ej. <code>/model ollama:qwen2.5:3b</code>. Reconstruye el motor con el mismo <code>session id</code>, sin perder la conversación.</td></tr>
+        <tr><td><code>/quit</code>, <code>/exit</code></td><td>Salir de braze (alias entre sí).</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>El match de <code>/</code> es por <strong>prefijo</strong> (no substring) mientras escribís, para autocompletar.</p>
+
+  <h2 id="cmd-keys"><span class="num">§</span>Atajos de teclado (solo <code>--tui</code>)</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Tecla</th><th>Efecto</th></tr></thead>
+      <tbody>
+        <tr><td><kbd>Enter</kbd></td><td>Enviar el mensaje.</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>J</kbd></td><td>Salto de línea dentro del composer (sin enviar).</td></tr>
+        <tr><td><kbd>Esc</kbd> <em>(turno en curso)</em></td><td>Interrumpe el turno.</td></tr>
+        <tr><td><kbd>Esc</kbd> <em>(aprobación pendiente)</em></td><td>Deniega la acción (equivalente a <kbd>n</kbd>).</td></tr>
+        <tr><td><kbd>y</kbd> / <kbd>n</kbd></td><td>Aprobar/denegar una acción pendiente de confirmación.</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>Ver el output completo (sin truncar) de la última tool call.</td></tr>
+        <tr><td><kbd>Esc</kbd> <kbd>Esc</kbd> <em>(dos veces, composer ocioso, &lt;600ms entre pulsaciones)</em></td><td>Backtrack: retrocede a un mensaje anterior para editarlo.</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>Salir (global, en cualquier momento).</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd> <em>(composer vacío)</em></td><td>Salir.</td></tr>
+        <tr><td><kbd>@</kbd> + texto</td><td>Abre el buscador de menciones de archivo.</td></tr>
+        <tr><td><kbd>↑</kbd>/<kbd>↓</kbd>, <kbd>Tab</kbd> <em>(dentro de un popup)</em></td><td>Navegar y aceptar una selección (picker de <code>/model</code>, menciones, backtrack).</td></tr>
+        <tr><td>Pegar texto (paste)</td><td>Bracketed paste: el texto pegado se inserta completo de una vez en el composer (con sus saltos de línea internos), en vez de reproducirse tecla por tecla — nunca dispara un envío por sí solo, aunque el texto pegado contenga <code>\n</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="warn-callout">
+    <p class="eyebrow">Lo que no existe (a propósito)</p>
+    <ul>
+      <li><strong>No hay scroll propio de braze</strong> (ni <kbd>PageUp</kbd>/<kbd>PageDown</kbd> ni mouse wheel manejados por la TUI) — la TUI corre sin pantalla alternativa a propósito, así que todo lo ya finalizado queda en el <strong>scrollback nativo de tu terminal</strong>. Para ver algo que pasó hace rato, usá el scroll de tu propio emulador de terminal (mouse wheel, o el modo copia de <code>tmux</code>/<code>screen</code> si corrés adentro de uno), no un atajo de braze.</li>
+      <li><strong>No hay historial de mensajes por flechas</strong> — <kbd>↑</kbd>/<kbd>↓</kbd> con el composer vacío y sin popup abierto no recuperan un mensaje anterior (a diferencia de una shell). La única forma de volver a un mensaje previo es <kbd>Esc</kbd> <kbd>Esc</kbd> (backtrack).</li>
+      <li><strong>Sin soporte de mouse</strong> más allá de lo que tu terminal haga por su cuenta — braze no captura clicks ni selección con el mouse.</li>
+    </ul>
+  </div>
+
+  <h2 id="config-archivo"><span class="num">§</span><code>config.json</code></h2>
+
+  <p>Ubicación: <code>$XDG_CONFIG_HOME/braze/config.json</code>, si no <code>~/.config/braze/config.json</code>. Si no existe, o ninguna de las dos variables de entorno está seteada, <code>braze</code> simplemente omite esta capa (no es un error). Un JSON inválido sí es un error de arranque; una clave desconocida solo genera un warning y se ignora.</p>
+
+  <p>Precedencia (de menor a mayor prioridad): defaults hardcodeados → <code>config.json</code> → variables de entorno <code>BRAZE_*</code> → flags de línea de comando.</p>
+
+  <pre><code>{
+  "default_backend": "ollama",
+  "ollama_base_url": "http://192.168.1.8:11434",
+  "ollama_model": "qwen3.5-coder:latest",
+  "anthropic_api_key": "sk-ant-...",
+  "anthropic_model": "claude-opus-4-6-20260805",
+  "openrouter_api_key": "sk-or-...",
+  "openrouter_model": "deepseek/deepseek-v4-flash",
+  "max_tokens": 4096,
+  "tui_theme": "dark",
+  "mcp_servers": [
+    {"name": "mi-servidor", "command": "npx", "args": ["-y", "algun-mcp-server"]}
+  ]
+}</code></pre>
+
+  <h2 id="config-campos"><span class="num">§</span>Campos y variables de entorno</h2>
+
+  <p>Cada campo también acepta una variable de entorno <code>BRAZE_*</code> equivalente (excepto <code>mcp_servers</code>, que solo existe en el archivo).</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Campo</th><th>Tipo</th><th>Default</th><th>Variable de entorno</th></tr></thead>
+      <tbody>
+        <tr><td><code>default_backend</code></td><td>string</td><td><code>"ollama"</code></td><td><code>BRAZE_DEFAULT_BACKEND</code></td></tr>
+        <tr><td><code>anthropic_api_key</code></td><td>string</td><td>—</td><td><code>BRAZE_ANTHROPIC_API_KEY</code></td></tr>
+        <tr><td><code>anthropic_model</code></td><td>string</td><td>—</td><td><code>BRAZE_ANTHROPIC_MODEL</code></td></tr>
+        <tr><td><code>ollama_base_url</code></td><td>string</td><td><code>"http://localhost:11434"</code></td><td><code>BRAZE_OLLAMA_BASE_URL</code></td></tr>
+        <tr><td><code>ollama_model</code></td><td>string</td><td><code>"llama3.1"</code></td><td><code>BRAZE_OLLAMA_MODEL</code></td></tr>
+        <tr><td><code>ollama_num_ctx</code></td><td>u32</td><td><code>8192</code></td><td><code>BRAZE_OLLAMA_NUM_CTX</code></td></tr>
+        <tr><td><code>ollama_temperature</code></td><td>f32</td><td>—</td><td><code>BRAZE_OLLAMA_TEMPERATURE</code></td></tr>
+        <tr><td><code>ollama_seed</code></td><td>u64</td><td>—</td><td><code>BRAZE_OLLAMA_SEED</code></td></tr>
+        <tr><td><code>ollama_top_p</code></td><td>f32</td><td>—</td><td><code>BRAZE_OLLAMA_TOP_P</code></td></tr>
+        <tr><td><code>ollama_top_k</code></td><td>u32</td><td>—</td><td><code>BRAZE_OLLAMA_TOP_K</code></td></tr>
+        <tr><td><code>ollama_repeat_penalty</code></td><td>f32</td><td>—</td><td><code>BRAZE_OLLAMA_REPEAT_PENALTY</code></td></tr>
+        <tr><td><code>openrouter_api_key</code></td><td>string</td><td>—</td><td><code>BRAZE_OPENROUTER_API_KEY</code></td></tr>
+        <tr><td><code>openrouter_model</code></td><td>string</td><td>—</td><td><code>BRAZE_OPENROUTER_MODEL</code></td></tr>
+        <tr><td><code>openrouter_base_url</code></td><td>string</td><td><code>"https://openrouter.ai/api/v1"</code></td><td><code>BRAZE_OPENROUTER_BASE_URL</code></td></tr>
+        <tr><td><code>max_tokens</code></td><td>u32</td><td><code>4096</code></td><td><code>BRAZE_MAX_TOKENS</code></td></tr>
+        <tr><td><code>system_prompt</code></td><td>string</td><td>(el default interno de braze)</td><td><code>BRAZE_SYSTEM_PROMPT</code></td></tr>
+        <tr><td><code>session_dir</code></td><td>path</td><td><code>$XDG_DATA_HOME/braze/sessions</code></td><td><code>BRAZE_SESSION_DIR</code></td></tr>
+        <tr><td><code>tactical_window</code></td><td>usize</td><td><code>20</code></td><td><code>BRAZE_TACTICAL_WINDOW</code></td></tr>
+        <tr><td><code>tactical_compaction_threshold</code></td><td>usize</td><td><code>40</code></td><td><code>BRAZE_TACTICAL_COMPACTION_THRESHOLD</code></td></tr>
+        <tr><td><code>mcp_servers</code></td><td>array</td><td><code>[]</code></td><td><em>solo config.json</em></td></tr>
+        <tr><td><code>best_of_n</code></td><td>usize</td><td><code>1</code></td><td><code>BRAZE_BEST_OF_N</code></td></tr>
+        <tr><td><code>tui_theme</code></td><td>string</td><td><code>"dark"</code></td><td><code>BRAZE_TUI_THEME</code></td></tr>
+        <tr><td><code>disable_textual_tool_call_rescue</code></td><td>bool</td><td><code>false</code></td><td><code>BRAZE_DISABLE_TEXTUAL_TOOL_CALL_RESCUE</code></td></tr>
+        <tr><td><code>disable_post_edit_check</code></td><td>bool</td><td><code>false</code></td><td><code>BRAZE_DISABLE_POST_EDIT_CHECK</code></td></tr>
+        <tr><td><code>planner_backend</code></td><td>string</td><td>—</td><td><code>BRAZE_PLANNER_BACKEND</code></td></tr>
+        <tr><td><code>planner_model</code></td><td>string</td><td>—</td><td><code>BRAZE_PLANNER_MODEL</code></td></tr>
+        <tr><td><code>lead_backend</code></td><td>string</td><td>—</td><td><code>BRAZE_LEAD_BACKEND</code></td></tr>
+        <tr><td><code>lead_model</code></td><td>string</td><td>—</td><td><code>BRAZE_LEAD_MODEL</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><code>tactical_window</code> debe ser menor que <code>tactical_compaction_threshold</code> (si no, error de validación al arrancar); <code>ollama_num_ctx</code> y <code>max_tokens</code> deben ser mayores que 0. Con <code>default_backend: "ollama"</code>, si <code>max_tokens × 2 ≥ ollama_num_ctx</code>, braze avisa (no falla) que el presupuesto de contexto puede quedar muy ajustado.</p>
+
+  <h2 id="config-mcp"><span class="num">§</span>Servidores MCP</h2>
+
+  <p>Se configuran únicamente en <code>config.json</code> (no hay flag ni variable de entorno), como un array bajo <code>mcp_servers</code>:</p>
+
+  <pre><code>{
+  "mcp_servers": [
+    {"name": "filesystem", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/ruta"]}
+  ]
+}</code></pre>
+
+  <p>Cada entrada: <code>name</code> (string, usado para namespacing <code>mcp__&lt;name&gt;__&lt;tool&gt;</code> — dos entradas con el mismo nombre generan un warning de colisión), <code>command</code> (string, el ejecutable), <code>args</code> (array de strings, default <code>[]</code>). Un servidor caído o mal configurado no aborta el arranque de braze — queda simplemente no disponible, con un warning.</p>
+
+  <h2 id="config-backends"><span class="num">§</span>Backends soportados</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Backend</th><th>Requiere</th><th>Modelo por defecto</th><th>Notas</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>anthropic</code></td>
+          <td><span class="pill pill-req">API key</span> + <span class="pill pill-req">modelo</span></td>
+          <td>ninguno — error de arranque si falta</td>
+          <td>Sin <code>anthropic_model</code>/<code>--model</code>, braze rehúsa adivinar.</td>
+        </tr>
+        <tr>
+          <td><code>ollama</code></td>
+          <td><span class="pill pill-ok">nada</span></td>
+          <td><code>llama3.1</code></td>
+          <td>Sin API key. Único backend con presupuesto de contexto calculado automáticamente (<code>ollama_num_ctx</code>).</td>
+        </tr>
+        <tr>
+          <td><code>openrouter</code></td>
+          <td><span class="pill pill-req">API key</span> + <span class="pill pill-req">modelo</span></td>
+          <td>ninguno — error de arranque si falta</td>
+          <td>No calcula presupuesto de contexto del lado cliente — un modelo con ventana chica puede truncar/fallar server-side sin aviso previo.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 id="tools"><span class="num">§</span>Herramientas del modelo</h2>
+
+  <p>Seis tools, siempre disponibles (más las que agregue cada servidor MCP configurado). Todo resultado de cualquier tool se trunca a <strong>8000 bytes</strong> antes de volver al modelo, con un aviso a narrower la consulta si se cortó.</p>
+
+  <h3><code>read_file</code></h3>
+  <dl class="flags">
+    <div><dt>path <span class="type">string, requerido</span></dt><dd>Ruta absoluta o relativa al directorio de trabajo.</dd></div>
+    <div><dt>offset <span class="type">integer, opcional</span></dt><dd>Línea desde la que empezar a leer, 1-indexado. <code>0</code> se rechaza explícitamente.</dd></div>
+    <div><dt>limit <span class="type">integer, opcional</span></dt><dd>Máximo de líneas a devolver desde <code>offset</code>.</dd></div>
+  </dl>
+  <p>Archivos de hasta 200 líneas se devuelven completos sin paginar. Más allá de eso, cada página trae un encabezado <code>[lines X-Y of N]</code> y, si queda más contenido, un pie indicando el próximo <code>offset</code> a usar.</p>
+
+  <h3><code>write_file</code></h3>
+  <dl class="flags">
+    <div><dt>path <span class="type">string, requerido</span></dt><dd>Ruta del archivo a crear o sobreescribir.</dd></div>
+    <div><dt>content <span class="type">string, requerido</span></dt><dd>Contenido completo del archivo.</dd></div>
+  </dl>
+  <p>Si el archivo previo era considerablemente más grande que el contenido nuevo, agrega una advertencia sobre posible pérdida de contenido por sobrescritura parcial.</p>
+
+  <h3><code>edit_file</code></h3>
+  <dl class="flags">
+    <div><dt>path <span class="type">string, requerido</span></dt><dd>Archivo a editar (debe existir).</dd></div>
+    <div><dt>old_string <span class="type">string, requerido</span></dt><dd>Texto a reemplazar — debe aparecer <strong>exactamente una vez</strong>.</dd></div>
+    <div><dt>new_string <span class="type">string, requerido</span></dt><dd>Texto de reemplazo.</dd></div>
+  </dl>
+  <p>Escalera de matching: (1) substring exacto — siempre gana si es único; (2) línea completa ignorando espacios finales; (3) línea completa ignorando espacios al inicio y al final, reindentando según la indentación real del archivo. Ambigüedad (2+ ocurrencias) o ausencia total del texto es un error explícito, nunca una suposición.</p>
+
+  <h3><code>shell_exec</code></h3>
+  <dl class="flags">
+    <div><dt>command <span class="type">array de strings, requerido, mínimo 1 elemento</span></dt><dd>Estilo argv: <code>command[0]</code> es el programa, el resto son sus argumentos. Nunca un string de shell crudo.</dd></div>
+  </dl>
+  <p>Un código de salida distinto de 0 no es un error de la tool — vuelve como JSON con <code>exit_code</code>/<code>stdout</code>/<code>stderr</code>. Sin timeout propio (corre hasta terminar); sí puede ser cancelado si la tarea que lo espera se aborta.</p>
+
+  <h3><code>grep</code></h3>
+  <dl class="flags">
+    <div><dt>pattern <span class="type">string, requerido</span></dt><dd>Texto o expresión a buscar.</dd></div>
+    <div><dt>path <span class="type">string, opcional</span></dt><dd>Default <code>.</code>.</dd></div>
+    <div><dt>regex <span class="type">bool, opcional</span></dt><dd>Default <code>false</code> (substring literal). <code>true</code> usa expresiones regulares POSIX extendidas.</dd></div>
+  </dl>
+  <p>Sin coincidencias no es un error — devuelve <code>"no matches found"</code>.</p>
+
+  <h3><code>glob</code></h3>
+  <dl class="flags">
+    <div><dt>pattern <span class="type">string, requerido</span></dt><dd>Patrón de nombre de archivo (p.ej. <code>*.rs</code>).</dd></div>
+    <div><dt>path <span class="type">string, opcional</span></dt><dd>Default <code>.</code>.</dd></div>
+  </dl>
+  <p>Sin coincidencias devuelve <code>"no files matched"</code>, no un error.</p>
+
+  <div class="callout">
+    <p class="eyebrow">Guardrail post-edición</p>
+    <p>Tras un <code>write_file</code>/<code>edit_file</code> exitoso sobre un archivo <code>.rs</code> dentro de un proyecto Cargo, braze corre <code>cargo check</code> automáticamente (timeout 60s) y agrega el feedback al resultado de la tool si falla — el modelo ve el error de compilación en el mismo turno, sin que se lo tengas que pegar vos. Desactivable con <code>disable_post_edit_check</code>.</p>
+  </div>
+
+  <h2 id="permisos"><span class="num">§</span>Modelo de permisos</h2>
+
+  <p>Cada acción (escribir, borrar, correr un comando) se clasifica <strong>Reversible</strong> o <strong>Irreversible</strong> antes de ejecutarse. Reversible pasa sin preguntar; Irreversible muestra un overlay/prompt y espera tu aprobación.</p>
+
+  <ul>
+    <li><strong>Dentro del directorio de trabajo</strong>: escrituras y borrados son Reversible.</li>
+    <li><strong>Fuera del directorio de trabajo</strong>: siempre Irreversible, sin excepción.</li>
+    <li><strong>Comandos de shell</strong>: default-deny. Solo un conjunto explícito de comandos de solo lectura (<code>ls</code>, <code>pwd</code>, <code>wc</code>, <code>whoami</code>, <code>date</code>, <code>which</code>, más <code>cat</code>/<code>head</code>/<code>tail</code>/<code>grep</code>/<code>find</code>/<code>diff</code>/<code>git</code>/<code>env</code> con validación adicional de argumentos) es Reversible. Todo lo demás — <code>mv</code>, <code>dd</code>, <code>curl</code>, <code>chmod</code>, un <code>rm</code> sin flags, cualquier programa no reconocido — es Irreversible.</li>
+    <li><strong>Tool de un servidor MCP</strong>: siempre Irreversible (código de terceros sin auditar).</li>
+  </ul>
+
+  <p>Con <code>--supervised</code>, todo lo anterior se ignora — cada acción, sin excepción, pasa por confirmación. Ver <code>docs/self-improvement-guide.html</code> para el caso de uso pensado para este modo.</p>
+
+  <h2 id="sesiones"><span class="num">§</span>Sesiones</h2>
+
+  <p>Cada sesión es un archivo <code>&lt;session-dir&gt;/&lt;uuid&gt;.jsonl</code> — una línea JSON por evento, append-only. No existe un comando <code>braze sessions list</code>; para eso está <code>tools/braze_sessions.py</code>:</p>
+
+  <pre><code>python3 tools/braze_sessions.py list
+python3 tools/braze_sessions.py show &lt;session-id&gt; [--full]</code></pre>
+
+  <p><code>--resume &lt;id&gt;</code> retoma una sesión existente, incluyendo permisos ya aprobados (no se vuelven a preguntar).</p>
+
+  <h2 id="observabilidad"><span class="num">§</span>Observabilidad</h2>
+
+  <p>Toda traza va a <code>stderr</code> (nunca se mezcla con la conversación en <code>stdout</code>), gateada por <code>RUST_LOG</code>:</p>
+  <pre><code>RUST_LOG=braze_engine=info braze chat --tui
+RUST_LOG=debug braze run "..."</code></pre>
+  <p><code>braze_engine=info</code> expone cuándo se activan las palancas de confiabilidad (rescate textual de tool calls, compactación de contexto) sin inundar la salida.</p>
+
+  <h2 id="errores"><span class="num">§</span>Errores y códigos de salida</h2>
+
+  <p>Solo dos códigos de salida posibles: <code>0</code> (éxito) o <code>1</code> (cualquier error de arranque). Un turno individual que falla dentro de una sesión <code>chat</code> ya en curso <strong>no</strong> mata el proceso — se imprime <code>"braze: turn failed: ..."</code> y la sesión sigue.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Situación</th><th>Mensaje</th></tr></thead>
+      <tbody>
+        <tr><td>Falta la API key de Anthropic</td><td><code>falta ANTHROPIC_API_KEY (config file, BRAZE_ANTHROPIC_API_KEY, o --backend anthropic sin key configurada)</code></td></tr>
+        <tr><td>Falta el modelo de Anthropic</td><td><code>falta --model o BRAZE_ANTHROPIC_MODEL para el backend anthropic</code></td></tr>
+        <tr><td>Falta la API key de OpenRouter</td><td><code>falta OPENROUTER_API_KEY (config file, BRAZE_OPENROUTER_API_KEY, o --backend openrouter sin key configurada)</code></td></tr>
+        <tr><td>Backend desconocido</td><td><code>unknown backend '{other}' (expected 'anthropic', 'ollama', or 'openrouter')</code></td></tr>
+        <tr><td>Tema de TUI desconocido</td><td><code>tema de TUI desconocido: '{tema}' (esperado 'dark', 'light', o 'high-contrast')</code></td></tr>
+        <tr><td><code>--resume</code> con un id que no existe</td><td><code>braze: aviso: no se encontró la sesión {id} — iniciando una nueva sesión vacía</code> (no es fatal)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 id="ver-tambien"><span class="num">§</span>Ver también</h2>
+  <ul>
+    <li><code>docs/usability-testing-guide.html</code> — 40 escenarios de prueba copy-paste, para evaluar braze como usuario real.</li>
+    <li><code>docs/self-improvement-guide.html</code> — cómo usar <code>--supervised</code> para que braze edite su propio código en un worktree aislado.</li>
+    <li><code>tools/braze_sessions.py</code> — inspector de sesiones (<code>list</code>/<code>show</code>).</li>
+    <li><code>PLAN.md</code> — arquitectura interna, decisiones de diseño, historial de incrementos.</li>
+  </ul>
+
+  <footer>
+    Este manual documenta el comportamiento tal como está implementado al commit de referencia — si algo no coincide con lo que ves en la práctica, el código fuente (citado en cada sección) es la fuente de verdad final, no este documento.
+  </footer>
+</main>
