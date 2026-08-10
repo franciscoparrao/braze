@@ -1,7 +1,17 @@
 # Diseño pre-registrado: A/B del impuesto JSON — edición como tool-arg vs SEARCH/REPLACE textual
 
 Fecha: 2026-08-10
-Estado: **PRE-REGISTRADO, mecanismo implementado, sweep pendiente.**
+Estado: **CERRADO — RECHAZADO el mismo día, por el criterio exacto de
+abajo.** B ≤ A en los tres débiles (−4,2 / −8,4 / −1,1pp); mecanismo
+limpio pero revelador: llama3.2:1b y qwen2.5:3b emitieron CERO fences
+válidos en 190 corridas del brazo B — para SLM tool-tuned el JSON es
+la modalidad entrenada, no un impuesto, y quitarles `edit_file` les
+quitó capacidad (−6/15 en tareas `edit` cada uno). La cláusula de
+iteración única no se disparó. Tercer nulo de la familia sintáctica
+(constrained decoding, stencil, edit-fence). Detalle completo:
+`docs/sweep-json-tax-edit-fence-2026-08-10.md`. Ninguna regla se
+modificó después de correr el sweep; el análisis quedó commiteado
+(`92850d9`) antes de que el JSON existiera.
 Ninguna regla de este documento se modifica después de correr ningún
 sweep (disciplina de `docs/constrained-decoding-ab-design.md`, el
 template estructural de este diseño). Origen: survey de referencia

@@ -21,9 +21,13 @@
 > agente; cinco arreglos de harness salieron de ahí, el principal
 > verificado en vivo (deadlock de 20 rondas/25m → rechazo honesto en
 > 4/7m31s) — ver `docs/roam-metrics-memoria-2026-07-28.md` y el párrafo
-> nuevo del paper en Discussion. Dos palancas más medidas y muertas con
+> nuevo del paper en Discussion. Tres palancas más medidas y muertas con
 > nulos limpios (H2 verificación: piloto positivo era falso positivo,
-> potenciado REJECT; stencil: empate ×3). Suite **discriminante v2**
+> potenciado REJECT; stencil: empate ×3; **A/B edit-fence 2026-08-10:
+> RECHAZADO pre-registrado** — para SLM tool-tuned el JSON es la
+> modalidad entrenada, no un impuesto: los chicos emiten cero fences y
+> pierden las tareas `edit`; ver
+> `docs/sweep-json-tax-edit-fence-2026-08-10.md`). Suite **discriminante v2**
 > (34 tareas, 2,9 pp/ítem) + piso de ruido medido. Línea nueva
 > **round-economics** pre-registrada (¿manda la escala del modelo o el
 > precio de la ronda?), con gate explícito hacia metaheurísticas.
