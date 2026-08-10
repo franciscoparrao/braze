@@ -372,6 +372,15 @@ pub struct Config {
     /// project's `cargo check` is too slow to run per-edit.
     #[serde(default)]
     pub disable_post_edit_check: bool,
+    /// Opt-out del gate sintáctico pre-aplicación (survey 2026-08-10,
+    /// `braze_tools_local::syntactic_gate`): por default una edición que
+    /// introduciría un error de sintaxis en un `.rs` que parseaba se
+    /// RECHAZA sin escribir (parse `syn` instantáneo, complementa al
+    /// `cargo check` de después). `true` lo apaga — naming en negativo
+    /// como `disable_post_edit_check`: el default-on ES el comportamiento
+    /// que el survey recomienda para modelos chicos.
+    #[serde(default)]
+    pub disable_syntactic_edit_gate: bool,
     /// Backend for the optional planner model (PLAN.md § "Split
     /// planificador/ejecutor"): `"anthropic"`, `"ollama"` or
     /// `"openrouter"`. `None` (the default) disables the split entirely.
@@ -651,6 +660,7 @@ impl Default for Config {
             disable_textual_tool_call_rescue: false,
             enable_prompt_caching: true,
             disable_post_edit_check: false,
+            disable_syntactic_edit_gate: false,
             planner_backend: None,
             planner_model: None,
             lead_backend: None,
@@ -863,6 +873,9 @@ impl Config {
         }
         if let Some(v) = overrides.disable_post_edit_check {
             self.disable_post_edit_check = v;
+        }
+        if let Some(v) = overrides.disable_syntactic_edit_gate {
+            self.disable_syntactic_edit_gate = v;
         }
         if let Some(v) = overrides.planner_backend {
             self.planner_backend = Some(v);

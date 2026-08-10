@@ -62,6 +62,15 @@ pub struct LocalToolsProvider {
     /// is an ablation knob for `braze-bench`, not something a real
     /// `braze` invocation has a reason to set.
     edit_strict_mode: bool,
+    /// Gate sintáctico pre-aplicación (`syntactic_gate.rs`): rechaza una
+    /// edición que introduciría un error de sintaxis en un `.rs` ANTES de
+    /// escribirla, dejando el archivo siempre válido. On by default — el
+    /// hallazgo Tier-1 del survey de referencia (SWE-agent
+    /// reject-before-apply). `Config::disable_syntactic_edit_gate` (vía
+    /// `braze-cli`) es el opt-out; complementa, no reemplaza, al
+    /// `post_edit_check` (parse instantáneo antes vs `cargo check`
+    /// después).
+    syntactic_edit_gate: bool,
     /// Per-tool-result byte budget before `wrap` truncates and appends
     /// an actionable "narrow your query" trailer. Defaults to
     /// [`MAX_TOOL_OUTPUT_BYTES`] (v4 P2.4 — configurable via
@@ -97,6 +106,7 @@ impl LocalToolsProvider {
             workdir,
             post_edit_check: true,
             edit_strict_mode: false,
+            syntactic_edit_gate: true,
             output_budget: MAX_TOOL_OUTPUT_BYTES,
             output_max_lines: None,
             formatters: crate::post_edit_check::default_rust_formatters(),
@@ -113,6 +123,7 @@ impl LocalToolsProvider {
             workdir: workdir.into(),
             post_edit_check: true,
             edit_strict_mode: false,
+            syntactic_edit_gate: true,
             output_budget: MAX_TOOL_OUTPUT_BYTES,
             output_max_lines: None,
             formatters: crate::post_edit_check::default_rust_formatters(),
@@ -131,6 +142,14 @@ impl LocalToolsProvider {
     /// `edit_strict_mode`'s field doc comment.
     pub fn with_edit_strict_mode(mut self, strict: bool) -> Self {
         self.edit_strict_mode = strict;
+        self
+    }
+
+    /// Enables/disables the pre-application syntactic gate — chainable,
+    /// same shape as [`Self::with_post_edit_check`]. See
+    /// `syntactic_edit_gate`'s field doc comment.
+    pub fn with_syntactic_edit_gate(mut self, enabled: bool) -> Self {
+        self.syntactic_edit_gate = enabled;
         self
     }
 
@@ -182,7 +201,10 @@ impl LocalToolsProvider {
         args.path = self.resolve(&args.path);
         self.check_write(call, &args.path).await?;
         let path = args.path.clone();
-        let result = self.wrap(call, write_file::write_file(args).await);
+        let result = self.wrap(
+            call,
+            write_file::write_file(args, self.syntactic_edit_gate).await,
+        );
         Ok(self.append_post_edit_feedback(result, &path).await)
     }
 
@@ -193,7 +215,7 @@ impl LocalToolsProvider {
         let path = args.path.clone();
         let result = self.wrap(
             call,
-            edit_file::edit_file(args, self.edit_strict_mode).await,
+            edit_file::edit_file(args, self.edit_strict_mode, self.syntactic_edit_gate).await,
         );
         Ok(self.append_post_edit_feedback(result, &path).await)
     }
@@ -756,6 +778,79 @@ mod tests {
             .expect("read back");
         assert_eq!(contents, "hello braze");
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Gate sintáctico end-to-end por el provider (on by default): una
+    /// edición que rompería la sintaxis de un `.rs` que compilaba se
+    /// rechaza SIN tocar disco — el archivo queda intacto y el resultado
+    /// es un error accionable.
+    #[tokio::test]
+    async fn a_syntax_breaking_edit_is_rejected_and_the_file_is_unchanged() {
+        let dir = unique_temp_dir("provider-syntactic-gate");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let file_path = dir.join("lib.rs");
+        let good = "pub fn a() -> i32 {\n    1\n}\n";
+        tokio::fs::write(&file_path, good)
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::new(allow_guard(&dir));
+        let result = provider
+            .invoke(&call(
+                "edit_file",
+                serde_json::json!({
+                    "path": file_path.to_string_lossy(),
+                    "old_string": "    1\n}",
+                    "new_string": "    1\n" // borra la llave de cierre → sintaxis rota
+                }),
+            ))
+            .await
+            .expect("invoke devuelve Ok con un ToolResult de error, no un Err duro");
+
+        assert!(result.is_error, "la edición que rompe sintaxis debe fallar");
+        assert!(
+            result.content.contains("NOT applied") && result.content.contains("syntax error"),
+            "mensaje accionable, got: {}",
+            result.content
+        );
+        let after = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read back");
+        assert_eq!(after, good, "el archivo NO debe haber cambiado en disco");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Con el gate apagado, la MISMA edición aterriza (rompe el archivo) —
+    /// confirma que el opt-out realmente desactiva el gate.
+    #[tokio::test]
+    async fn the_syntactic_gate_can_be_disabled() {
+        let dir = unique_temp_dir("provider-gate-off");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .expect("create temp dir");
+        let file_path = dir.join("lib.rs");
+        tokio::fs::write(&file_path, "pub fn a() -> i32 {\n    1\n}\n")
+            .await
+            .expect("write fixture");
+
+        let provider = LocalToolsProvider::new(allow_guard(&dir)).with_syntactic_edit_gate(false);
+        let result = provider
+            .invoke(&call(
+                "edit_file",
+                serde_json::json!({
+                    "path": file_path.to_string_lossy(),
+                    "old_string": "    1\n}",
+                    "new_string": "    1\n"
+                }),
+            ))
+            .await
+            .expect("invoke ok");
+
+        assert!(!result.is_error, "con el gate off la edición aplica");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 

@@ -27,6 +27,7 @@ thiserror = { workspace = true }
 # reasons (cargo missing, timeout) at trace level only — they must never
 # surface as tool-result noise.
 tracing = { workspace = true }
+syn = { version = "3.0.3", features = ["full", "parsing"] }
 
 [dev-dependencies]
 # Unique throwaway fixture-project dirs for the post-edit check tests.

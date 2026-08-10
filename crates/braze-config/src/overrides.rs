@@ -73,6 +73,8 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub disable_post_edit_check: Option<bool>,
     #[serde(default)]
+    pub disable_syntactic_edit_gate: Option<bool>,
+    #[serde(default)]
     pub planner_backend: Option<String>,
     #[serde(default)]
     pub planner_model: Option<String>,
@@ -524,6 +526,17 @@ impl ConfigOverrides {
                             })?;
                     overrides.disable_post_edit_check = Some(parsed);
                 }
+                "DISABLE_SYNTACTIC_EDIT_GATE" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.disable_syntactic_edit_gate = Some(parsed);
+                }
                 "ENABLE_LANDLOCK_WRITE_SANDBOX" => {
                     let parsed =
                         value
@@ -697,6 +710,13 @@ mod tests {
         let overrides =
             ConfigOverrides::from_env([("BRAZE_DISABLE_POST_EDIT_CHECK", "true")]).unwrap();
         assert_eq!(overrides.disable_post_edit_check, Some(true));
+    }
+
+    #[test]
+    fn from_env_parses_disable_syntactic_edit_gate() {
+        let overrides =
+            ConfigOverrides::from_env([("BRAZE_DISABLE_SYNTACTIC_EDIT_GATE", "true")]).unwrap();
+        assert_eq!(overrides.disable_syntactic_edit_gate, Some(true));
     }
 
     #[test]

@@ -650,6 +650,9 @@ pub struct AblationOverrides {
     /// `+ablate:no-post-edit-check` — disables the post-edit `cargo
     /// check` guardrail (`LocalToolsProvider::with_post_edit_check(false)`).
     pub disable_post_edit_check: bool,
+    /// `+ablate:no-syntactic-gate` — disables the pre-application
+    /// syntactic gate (`LocalToolsProvider::with_syntactic_edit_gate(false)`).
+    pub disable_syntactic_edit_gate: bool,
     /// `+ablate:strict-edit` — disables `edit_file`'s fuzzy matching
     /// ladder, rungs 2-3 (`LocalToolsProvider::with_edit_strict_mode(true)`).
     pub edit_strict_mode: bool,
@@ -826,7 +829,7 @@ impl AblationOverrides {
     /// keys got "help" that implied the lever didn't exist —
     /// `recognized_keys_lists_every_parseable_key` now pins the two in
     /// sync.
-    const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, strict-edit, \
+    const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, no-syntactic-gate, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
          task-list, explore, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
@@ -847,6 +850,7 @@ impl AblationOverrides {
             match key {
                 "no-rescue" => out.disable_textual_rescue = true,
                 "no-post-edit-check" => out.disable_post_edit_check = true,
+                "no-syntactic-gate" => out.disable_syntactic_edit_gate = true,
                 "strict-edit" => out.edit_strict_mode = true,
                 "no-caching" => out.disable_prompt_caching = true,
                 "no-prune" => out.disable_observation_collapse = true,
@@ -951,6 +955,9 @@ impl AblationOverrides {
         }
         if self.disable_post_edit_check {
             parts.push("no-post-edit-check".to_string());
+        }
+        if self.disable_syntactic_edit_gate {
+            parts.push("no-syntactic-gate".to_string());
         }
         if self.edit_strict_mode {
             parts.push("strict-edit".to_string());

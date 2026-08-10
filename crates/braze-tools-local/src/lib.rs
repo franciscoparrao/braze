@@ -24,6 +24,7 @@ mod provider;
 mod read_file;
 mod schema;
 mod shell_exec;
+mod syntactic_gate;
 mod write_file;
 
 #[cfg(test)]

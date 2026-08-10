@@ -627,6 +627,7 @@ async fn build_engine(
 
     let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard)
         .with_post_edit_check(!config.disable_post_edit_check)
+        .with_syntactic_edit_gate(!config.disable_syntactic_edit_gate)
         .with_output_budget(config.tool_output_max_bytes as usize)
         .with_output_max_lines(config.tool_output_max_lines)
         .with_formatters(config.formatters.clone());

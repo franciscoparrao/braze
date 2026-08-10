@@ -38,9 +38,24 @@ const SHRINK_PREFLIGHT_THRESHOLD_BYTES: usize = 500;
 /// `Ok(summary)` on success. `Err(message)` is a recoverable tool-level
 /// failure (parent directory doesn't exist, or a destructive shrink
 /// without `allow_shrink: true`) — see `provider.rs::wrap`.
-pub async fn write_file(args: WriteFileArgs) -> Result<String, String> {
+pub async fn write_file(args: WriteFileArgs, gate: bool) -> Result<String, String> {
     let path = PathBuf::from(&args.path);
     let len = args.content.len();
+
+    // Gate sintáctico pre-aplicación (survey 2026-08-10): crear o
+    // sobrescribir un `.rs` con sintaxis rota se rechaza SIN escribir,
+    // salvo que el archivo previo ya estuviera roto. Solo se lee el
+    // original para `.rs` (el gate es no-op fuera de Rust). Ver
+    // `crate::syntactic_gate`.
+    if gate && crate::syntactic_gate::is_rust(&path) {
+        let original = tokio::fs::read_to_string(&path).await.ok();
+        crate::syntactic_gate::check_rust_edit(
+            &path,
+            original.as_deref(),
+            &args.content,
+            "content",
+        )?;
+    }
 
     // Read the previous size *before* writing — this is the only point
     // where "what was there before" is still observable. A model that
@@ -117,11 +132,14 @@ mod tests {
             .expect("create temp dir");
         let file_path = dir.join("nuevo-crate").join("src").join("lib.rs");
 
-        let result = write_file(WriteFileArgs {
-            path: file_path.to_string_lossy().into_owned(),
-            content: "pub fn hola() {}\n".to_string(),
-            allow_shrink: false,
-        })
+        let result = write_file(
+            WriteFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                content: "pub fn hola() {}\n".to_string(),
+                allow_shrink: false,
+            },
+            false,
+        )
         .await;
 
         assert!(result.is_ok(), "got: {result:?}");
@@ -141,11 +159,14 @@ mod tests {
             .expect("create temp dir");
         let file_path = dir.join("out.txt");
 
-        let result = write_file(WriteFileArgs {
-            path: file_path.to_string_lossy().into_owned(),
-            content: "payload".to_string(),
-            allow_shrink: false,
-        })
+        let result = write_file(
+            WriteFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                content: "payload".to_string(),
+                allow_shrink: false,
+            },
+            false,
+        )
         .await;
 
         assert!(result.is_ok());
@@ -168,11 +189,14 @@ mod tests {
             .await
             .expect("create target dir");
 
-        let result = write_file(WriteFileArgs {
-            path: target.to_string_lossy().into_owned(),
-            content: "payload".to_string(),
-            allow_shrink: false,
-        })
+        let result = write_file(
+            WriteFileArgs {
+                path: target.to_string_lossy().into_owned(),
+                content: "payload".to_string(),
+                allow_shrink: false,
+            },
+            false,
+        )
         .await;
 
         assert!(result.is_err());
@@ -194,11 +218,14 @@ mod tests {
             .await
             .expect("write fixture");
 
-        let result = write_file(WriteFileArgs {
-            path: file_path.to_string_lossy().into_owned(),
-            content: "short".to_string(),
-            allow_shrink: false,
-        })
+        let result = write_file(
+            WriteFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                content: "short".to_string(),
+                allow_shrink: false,
+            },
+            false,
+        )
         .await;
 
         let err = result.expect_err("a destructive shrink must be refused");
@@ -225,11 +252,14 @@ mod tests {
             .await
             .expect("write fixture");
 
-        let result = write_file(WriteFileArgs {
-            path: file_path.to_string_lossy().into_owned(),
-            content: "short".to_string(),
-            allow_shrink: true,
-        })
+        let result = write_file(
+            WriteFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                content: "short".to_string(),
+                allow_shrink: true,
+            },
+            false,
+        )
         .await
         .expect("an explicitly allowed shrink must succeed");
 
@@ -253,11 +283,14 @@ mod tests {
             .await
             .expect("write fixture");
 
-        let result = write_file(WriteFileArgs {
-            path: file_path.to_string_lossy().into_owned(),
-            content: "updated content".to_string(),
-            allow_shrink: false,
-        })
+        let result = write_file(
+            WriteFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                content: "updated content".to_string(),
+                allow_shrink: false,
+            },
+            false,
+        )
         .await;
 
         assert!(result.is_ok(), "got: {result:?}");
@@ -271,11 +304,14 @@ mod tests {
             .expect("create temp dir");
         let file_path = dir.join("brand-new.txt");
 
-        let result = write_file(WriteFileArgs {
-            path: file_path.to_string_lossy().into_owned(),
-            content: "hello".to_string(),
-            allow_shrink: false,
-        })
+        let result = write_file(
+            WriteFileArgs {
+                path: file_path.to_string_lossy().into_owned(),
+                content: "hello".to_string(),
+                allow_shrink: false,
+            },
+            false,
+        )
         .await;
 
         assert!(result.is_ok(), "got: {result:?}");

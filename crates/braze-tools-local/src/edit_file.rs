@@ -98,7 +98,7 @@ fn write_file_steering(original: &str) -> String {
 /// recoverable tool-level failures, see `provider.rs::wrap`. `strict`
 /// disables the fuzzy rungs (2-3) of the matching ladder — see the module
 /// doc comment's "Strict mode" section.
-pub async fn edit_file(args: EditFileArgs, strict: bool) -> Result<String, String> {
+pub async fn edit_file(args: EditFileArgs, strict: bool, gate: bool) -> Result<String, String> {
     if args.old_string.is_empty() {
         return Err("old_string must not be empty".to_string());
     }
@@ -133,6 +133,13 @@ pub async fn edit_file(args: EditFileArgs, strict: bool) -> Result<String, Strin
 
     let (updated, strategy) = apply_edit(&original, &args.old_string, &args.new_string, strict)
         .map_err(|kind| kind.into_message(&path, &original, &args.old_string))?;
+
+    // Gate sintáctico pre-aplicación (survey 2026-08-10): si la edición
+    // rompería la sintaxis de un `.rs` que sí parseaba, se rechaza SIN
+    // escribir — el archivo queda válido. Ver `crate::syntactic_gate`.
+    if gate {
+        crate::syntactic_gate::check_rust_edit(&path, Some(&original), &updated, "new_string")?;
+    }
 
     tokio::fs::write(&path, updated.as_bytes())
         .await
@@ -696,7 +703,7 @@ mod tests {
     /// the behavior every test below except the dedicated strict-mode
     /// ones was written to exercise.
     async fn edit_file_fuzzy(args: EditFileArgs) -> Result<String, String> {
-        edit_file(args, false).await
+        edit_file(args, false, false).await
     }
 
     /// Incidente roam #12: la llamada exacta que gpt-oss:20b produjo
@@ -1194,6 +1201,7 @@ mod tests {
                 new_string: "braze".to_string(),
             },
             true,
+            false, // gate: estos tests miden el matching, no el gate
         )
         .await;
 
@@ -1221,6 +1229,7 @@ mod tests {
                 new_string: "fn main() {\n    chao();".to_string(),
             },
             true,
+            false, // gate: estos tests miden el matching, no el gate
         )
         .await;
 
@@ -1255,6 +1264,7 @@ mod tests {
                 new_string: "    fn f() {\n        dos();\n    }".to_string(),
             },
             true,
+            false, // gate: estos tests miden el matching, no el gate
         )
         .await;
 
@@ -1427,6 +1437,7 @@ mod tests {
                 new_string: "    // borrado\n".to_string(),
             },
             false,
+            false, // gate
         )
         .await
         .expect("fuzzy debe recuperarlo");
@@ -1439,6 +1450,7 @@ mod tests {
                 new_string: "    // borrado\n".to_string(),
             },
             true,
+            false, // gate: estos tests miden el matching, no el gate
         )
         .await
         .expect_err("strict debe apagar el peldaño 4");
