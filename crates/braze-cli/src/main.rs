@@ -820,6 +820,7 @@ async fn build_engine(
     // C′.2: task list tipada — off salvo config explícita.
     .with_task_list_enabled(config.enable_task_list)
     .with_exploration_enabled(config.enable_exploration)
+    .with_editor_enabled(config.enable_editor)
     // v4 P0.2: circuit breaker por tokens acumulados por turno — None
     // (default) lo deshabilita.
     .with_max_turn_total_tokens(config.max_turn_total_tokens)

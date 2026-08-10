@@ -729,6 +729,10 @@ pub struct AblationOverrides {
     /// OFF (one extra tool is a potential SLM distractor), so its
     /// suffix enables rather than disables.
     pub enable_exploration: bool,
+    /// `+ablate:editor` — ENABLES el subagente editor SWE-Edit
+    /// (`docs/editor-subagent-design-2026-08-10.md`). Misma excepción de
+    /// clave-que-habilita que `explore`: el lever es OFF por default.
+    pub enable_editor: bool,
     /// `+ablate:prompt-tools` — brazo B del A/B pre-registrado de
     /// constrained decoding (docs/constrained-decoding-ab-design.md): el
     /// request Ollama va SIN el campo `tools` (inventario como addendum
@@ -882,6 +886,7 @@ impl AblationOverrides {
                 }
                 "task-list" => out.enable_task_list = true,
                 "explore" => out.enable_exploration = true,
+                "editor" => out.enable_editor = true,
                 "prompt-tools" => out.enable_prompt_tools = true,
                 "constrained-tools" => out.enable_constrained_tools = true,
                 "project-memory" => out.enable_project_memory = true,
@@ -985,6 +990,9 @@ impl AblationOverrides {
         }
         if self.enable_exploration {
             parts.push("explore".to_string());
+        }
+        if self.enable_editor {
+            parts.push("editor".to_string());
         }
         if self.enable_prompt_tools {
             parts.push("prompt-tools".to_string());

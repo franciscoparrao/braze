@@ -547,6 +547,12 @@ pub struct Config {
     /// y se promueve solo si su A/B pre-registrado la valida.
     #[serde(default)]
     pub enable_exploration: bool,
+    /// SWE-Edit #17 — subagente `editor` de contexto angosto
+    /// (`docs/editor-subagent-design-2026-08-10.md`). OFF por default,
+    /// mismo posicionamiento que `enable_exploration`: entra apagada y se
+    /// promueve solo si su A/B la valida.
+    #[serde(default)]
+    pub enable_editor: bool,
     /// E′ I.6 (docs/harness-engineering-hooks-skills-2026-07-10.md):
     /// anexa al system prompt un snapshot del entorno (branch + git
     /// status recortado + fecha + OS) generado por el composition root —
@@ -667,6 +673,7 @@ impl Default for Config {
             tool_search_threshold: default_tool_search_threshold(),
             enable_task_list: false,
             enable_exploration: false,
+            enable_editor: false,
             environment_block: false,
             enable_project_memory: false,
             enable_lead_summary: false,
@@ -927,6 +934,9 @@ impl Config {
         }
         if let Some(v) = overrides.enable_exploration {
             self.enable_exploration = v;
+        }
+        if let Some(v) = overrides.enable_editor {
+            self.enable_editor = v;
         }
         if let Some(v) = overrides.environment_block {
             self.environment_block = v;

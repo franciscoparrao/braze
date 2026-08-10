@@ -353,6 +353,11 @@ impl Engine {
             if self.exploration_enabled {
                 tool_stubs.push(crate::exploration::explore_tool_stub());
             }
+            // SWE-Edit #17: el editor entra al inventario solo con el
+            // lever — misma postura opt-in que explore.
+            if self.editor_enabled {
+                tool_stubs.push(crate::editor::editor_tool_stub());
+            }
             if self.task_list_enabled {
                 tool_stubs.extend(crate::task_list::task_tool_stubs());
                 let task_list = self.task_list.lock().unwrap();

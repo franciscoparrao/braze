@@ -130,6 +130,9 @@ pub struct ConfigOverrides {
     /// I.7 — explorador aislado (`BRAZE_ENABLE_EXPLORATION`).
     #[serde(default)]
     pub enable_exploration: Option<bool>,
+    /// SWE-Edit #17 — subagente editor (`BRAZE_ENABLE_EDITOR`).
+    #[serde(default)]
+    pub enable_editor: Option<bool>,
     /// E′ I.6 — snapshot de entorno en el system prompt
     /// (`BRAZE_ENVIRONMENT_BLOCK`).
     #[serde(default)]
@@ -377,6 +380,17 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.enable_exploration = Some(parsed);
+                }
+                "ENABLE_EDITOR" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.enable_editor = Some(parsed);
                 }
                 "ENABLE_PROJECT_MEMORY" => {
                     let parsed =

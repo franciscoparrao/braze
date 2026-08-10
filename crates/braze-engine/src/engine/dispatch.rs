@@ -448,6 +448,109 @@ impl Engine {
                 continue;
             }
 
+            // SWE-Edit #17 (crate::editor): el subagente editor — mismo
+            // patrón de intercepción inline que explore, pero MUTA, así
+            // que además del doble-entry hay bookkeeping del padre
+            // (turn flags + seen_calls) que explore, read-only, no hace.
+            if self.editor_enabled && call.name == crate::editor::EDITOR_TOOL {
+                let path = call
+                    .arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let instruction = call
+                    .arguments
+                    .get("instruction")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let outcome = if path.trim().is_empty() || instruction.trim().is_empty() {
+                    crate::editor::EditorOutcome {
+                        content: "editor needs non-empty 'path' and 'instruction' strings"
+                            .to_string(),
+                        is_error: true,
+                        landed: false,
+                        compiles: crate::editor::CompileStatus::Unknown,
+                        child_rounds: 0,
+                        child_input_tokens: 0,
+                        child_output_tokens: 0,
+                    }
+                } else {
+                    self.run_editor(&path, &instruction).await
+                };
+
+                // Bookkeeping del padre: una mutación pasó FUERA de su
+                // dispatch, así que hay que replicar lo que
+                // `dispatch_tool_calls` hace tras una edición directa —
+                // sin esto, la salvage de ronda vacía y las notas de
+                // convergencia de turn.rs malinterpretan el turno.
+                self.turn_attempted_edit
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                if outcome.landed {
+                    self.turn_did_edit
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    // F6: una mutación exitosa invalida la caché de
+                    // repetición del turno.
+                    seen_calls.clear();
+                    // L-10: una edición que aterrizó resetea el contador
+                    // del padre para esa ruta (el modelo recuperó la
+                    // edición dirigida, aunque haya sido vía el hijo).
+                    edit_failures_by_path.remove(&path);
+                }
+
+                let child_tokens = outcome.child_input_tokens + outcome.child_output_tokens;
+                let compiles = match outcome.compiles {
+                    crate::editor::CompileStatus::Pass => "pass",
+                    crate::editor::CompileStatus::Fail => "fail",
+                    crate::editor::CompileStatus::Unknown => "unknown",
+                };
+                // Doble entrada como explore: Usage agregado (para que
+                // toda contabilidad de tokens lo cuente gratis) + evento
+                // de auditoría con el ground truth que el A/B lee.
+                if child_tokens > 0 {
+                    self.append_and_notify(
+                        session,
+                        &AgentEvent::Usage {
+                            input_tokens: outcome.child_input_tokens.min(u32::MAX as u64) as u32,
+                            output_tokens: outcome.child_output_tokens.min(u32::MAX as u64) as u32,
+                            stop_reason: Some("editor_child".to_string()),
+                            cache_read_tokens: None,
+                            cache_write_tokens: None,
+                        },
+                        observer,
+                    )
+                    .await?;
+                }
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::EditorDelegated {
+                        path,
+                        instruction,
+                        landed: outcome.landed,
+                        compiles: compiles.to_string(),
+                        child_rounds: outcome.child_rounds,
+                        child_tokens,
+                    },
+                    observer,
+                )
+                .await?;
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result: ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: outcome.content,
+                            is_error: outcome.is_error,
+                        },
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
+            }
+
             // C′.2 (crate::task_list): the two task tools are
             // harness-owned state mutations — same inline treatment as
             // `search_tools` (no registry schema, no permission guard:
@@ -1095,6 +1198,235 @@ impl Engine {
         }
 
         failed(rounds, input_tokens, output_tokens)
+    }
+
+    /// SWE-Edit #17 — el mini-loop del subagente `editor`
+    /// (`docs/editor-subagent-design-2026-08-10.md`). Espejo de
+    /// [`Engine::run_exploration`] con capacidad de MUTACIÓN, así que:
+    /// despacha `edit_file`/`write_file` por `self.tools.dispatch` (hereda
+    /// guard + workdir + post-edit check + Landlock del provider),
+    /// mantiene su PROPIO interlock L-10 (el del padre vive en
+    /// `TurnDispatchState`, inalcanzable acá), y devuelve un
+    /// [`EditorOutcome`] estructurado con ground truth (`landed`,
+    /// `compiles`) para que el padre sepa el estado del workspace sin
+    /// releer. Toda falla degrada a un resultado recuperable: el lever
+    /// nunca mata el turno del padre.
+    pub(super) async fn run_editor(
+        &self,
+        path: &str,
+        instruction: &str,
+    ) -> crate::editor::EditorOutcome {
+        use crate::editor::{
+            CHILD_EDIT_TOOLS, CHILD_PROMPT_ADDENDUM, CompileStatus, EDITOR_FAILED_RESULT,
+            EditorOutcome, MAX_EDITOR_CHILD_ROUNDS, compile_status_from_result,
+        };
+
+        // Estado del hijo, acumulado a través de sus rondas.
+        let mut input_tokens: u64 = 0;
+        let mut output_tokens: u64 = 0;
+        let mut rounds: u32 = 0;
+        let mut landed = false;
+        let mut compiles = CompileStatus::Unknown;
+        // Interlock L-10 propio del hijo (fresco por delegación).
+        let mut edit_failures: u32 = 0;
+
+        // No-convergencia: el archivo puede haber quedado a medias si ya
+        // hubo una edición exitosa — se lo decimos al padre para que
+        // relea en vez de asumir estado limpio (el peor caso del diseño).
+        let not_converged =
+            |rounds: u32, input: u64, output: u64, landed: bool, compiles: CompileStatus| {
+                let mut content = EDITOR_FAILED_RESULT.to_string();
+                if landed {
+                    content.push_str(&format!(
+                        "; the file '{path}' was left partially modified — read it before retrying."
+                    ));
+                }
+                EditorOutcome {
+                    content,
+                    is_error: true,
+                    landed,
+                    compiles,
+                    child_rounds: rounds,
+                    child_input_tokens: input,
+                    child_output_tokens: output,
+                }
+            };
+
+        let child_stubs: Vec<ToolStub> = match self.tools.all_stubs().await {
+            Ok(stubs) => stubs
+                .into_iter()
+                .filter(|s| CHILD_EDIT_TOOLS.contains(&s.name.as_str()))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        let system_prompt = format!("{}{}", self.system_prompt, CHILD_PROMPT_ADDENDUM);
+        let seed = format!("File to edit: {path}\n\nInstruction: {instruction}");
+        let mut messages = vec![Message::text(Role::User, seed)];
+
+        while rounds < MAX_EDITOR_CHILD_ROUNDS {
+            rounds += 1;
+            let req = CompletionRequest {
+                messages: messages.clone(),
+                tool_stubs: child_stubs.clone(),
+                system_prompt: system_prompt.clone(),
+                max_tokens: self.max_tokens,
+            };
+            let mut stream = match self.model.complete(req).await {
+                Ok(stream) => stream,
+                Err(err) => {
+                    tracing::warn!(error = %err, "editor child: completion failed");
+                    return not_converged(rounds, input_tokens, output_tokens, landed, compiles);
+                }
+            };
+
+            let mut text = String::new();
+            let mut calls: Vec<ToolCall> = Vec::new();
+            let mut stream_failed = false;
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(CompletionEvent::TextDelta(delta)) => text.push_str(&delta),
+                    Ok(CompletionEvent::ToolCallRequested {
+                        id,
+                        name,
+                        arguments,
+                    }) => calls.push(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    }),
+                    Ok(CompletionEvent::Usage {
+                        input_tokens: it,
+                        output_tokens: ot,
+                        ..
+                    }) => {
+                        input_tokens += u64::from(it);
+                        output_tokens += u64::from(ot);
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        tracing::warn!(error = %err, "editor child: stream failed");
+                        stream_failed = true;
+                        break;
+                    }
+                }
+            }
+            if stream_failed {
+                return not_converged(rounds, input_tokens, output_tokens, landed, compiles);
+            }
+
+            // Convergencia: el hijo respondió sin tool calls — su texto es
+            // el resumen de estado. Un árbol roto (compiles==Fail) es un
+            // error aunque el hijo diga "listo": nunca devolver limpio
+            // sobre código que no compila.
+            if calls.is_empty() {
+                let conclusion = text.trim();
+                if conclusion.is_empty() {
+                    return not_converged(rounds, input_tokens, output_tokens, landed, compiles);
+                }
+                let is_error = compiles == CompileStatus::Fail;
+                let mut content = conclusion.to_string();
+                if is_error {
+                    content.push_str(
+                        "\n\n[harness] the edit was applied but the file does NOT compile — \
+                         read it and fix or revert before continuing.",
+                    );
+                }
+                return EditorOutcome {
+                    content,
+                    is_error,
+                    landed,
+                    compiles,
+                    child_rounds: rounds,
+                    child_input_tokens: input_tokens,
+                    child_output_tokens: output_tokens,
+                };
+            }
+
+            let mut assistant_content: Vec<ContentBlock> = Vec::new();
+            if !text.is_empty() {
+                assistant_content.push(ContentBlock::Text { text: text.clone() });
+            }
+            for call in &calls {
+                assistant_content.push(ContentBlock::ToolUse {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    input: call.arguments.clone(),
+                });
+            }
+            messages.push(Message {
+                role: Role::Assistant,
+                content: assistant_content,
+            });
+
+            let mut result_content: Vec<ContentBlock> = Vec::new();
+            for call in &calls {
+                let result = if !CHILD_EDIT_TOOLS.contains(&call.name.as_str()) {
+                    ToolResult {
+                        tool_call_id: call.id.clone(),
+                        content: format!(
+                            "'{}' is not available here — this edit helper can only use \
+                             read_file, edit_file, and write_file",
+                            call.name
+                        ),
+                        is_error: true,
+                    }
+                } else if call.name == "write_file"
+                    && edit_failures >= EDIT_FAILURE_WRITE_INTERLOCK_THRESHOLD
+                {
+                    // Interlock L-10 propio del hijo: reescribir el archivo
+                    // entero tras ediciones fallidas es donde el contenido
+                    // se corrompe en silencio.
+                    tracing::warn!(
+                        path,
+                        "editor child: write_file blocked after repeated edit_file failures"
+                    );
+                    ToolResult {
+                        tool_call_id: call.id.clone(),
+                        content: format!(
+                            "write_file is blocked: edit_file already failed {edit_failures} \
+                             times here, and rewriting the whole file after failed edits is how \
+                             content gets silently corrupted. Retry edit_file with a shorter \
+                             old_string copied exactly, or stop and report you cannot make the \
+                             edit."
+                        ),
+                        is_error: true,
+                    }
+                } else {
+                    match self.tools.dispatch(call).await {
+                        Ok(result) => result,
+                        Err(err) => ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: err.to_string(),
+                            is_error: true,
+                        },
+                    }
+                };
+
+                // Ground truth desde el dispatch, no del auto-reporte:
+                // acredita landed/compiles y el interlock del hijo.
+                if call.name == "edit_file" || call.name == "write_file" {
+                    if result.is_error {
+                        edit_failures += 1;
+                    } else {
+                        landed = true;
+                        edit_failures = 0;
+                        compiles = compile_status_from_result(&result.content);
+                    }
+                }
+
+                result_content.push(ContentBlock::ToolResult {
+                    tool_use_id: result.tool_call_id,
+                    content: result.content,
+                    is_error: result.is_error,
+                });
+            }
+            messages.push(Message {
+                role: Role::User,
+                content: result_content,
+            });
+        }
+
+        not_converged(rounds, input_tokens, output_tokens, landed, compiles)
     }
 }
 
@@ -2096,6 +2428,361 @@ mod tests {
             write_invocations.load(Ordering::SeqCst),
             1,
             "con el contador reseteado por el éxito, el write_file debe despachar"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+}
+
+// SWE-Edit #17: tests del subagente editor. Provider de juguete
+// configurable: edit_file tiene éxito o falla según un umbral, write_file
+// cuenta sus despachos reales (el assert central del interlock), read_file
+// devuelve un stub. edit_file exitoso anexa un bloque [post-edit check]
+// para ejercitar la derivación de CompileStatus.
+#[cfg(test)]
+mod editor_tests {
+    use super::*;
+    use crate::editor::EDITOR_TOOL;
+    use crate::engine::Engine;
+    use crate::engine::test_support::*;
+    use braze_events::{AgentEvent, NoopObserver};
+    use braze_model::CompletionEvent;
+    use braze_session::{FileSessionStore, SimpleContextCompactor};
+    use braze_types::SessionId;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    struct EditorToyProvider {
+        /// Los primeros `edit_fails` despachos de edit_file fallan; el
+        /// resto tiene éxito. `u32::MAX` = siempre falla.
+        edit_fails: u32,
+        edit_calls: AtomicU32,
+        write_invocations: Arc<AtomicU32>,
+        /// Bloque que edit_file exitoso anexa (para CompileStatus).
+        check_block: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl braze_tools_core::ToolProvider for EditorToyProvider {
+        fn provider_id(&self) -> &str {
+            "test:editor-toy"
+        }
+
+        async fn list_stubs(
+            &self,
+        ) -> Result<Vec<braze_types::ToolStub>, braze_tools_core::ToolError> {
+            Ok(["read_file", "edit_file", "write_file"]
+                .iter()
+                .map(|name| braze_types::ToolStub {
+                    name: name.to_string(),
+                    summary: format!("{name} de juguete"),
+                    source: "test:editor-toy".to_string(),
+                    input_schema: None,
+                })
+                .collect())
+        }
+
+        async fn resolve_schema(
+            &self,
+            name: &str,
+        ) -> Result<Option<braze_tools_core::ToolSchema>, braze_tools_core::ToolError> {
+            Ok(Some(braze_tools_core::ToolSchema {
+                name: name.to_string(),
+                description: format!("{name} de juguete"),
+                input_schema: serde_json::json!({"type": "object"}),
+            }))
+        }
+
+        async fn invoke(
+            &self,
+            call: &braze_types::ToolCall,
+        ) -> Result<braze_types::ToolResult, braze_tools_core::ToolError> {
+            match call.name.as_str() {
+                "read_file" => Ok(braze_types::ToolResult {
+                    tool_call_id: call.id.clone(),
+                    content: "fn foo() {}".to_string(),
+                    is_error: false,
+                }),
+                "edit_file" => {
+                    let n = self.edit_calls.fetch_add(1, Ordering::SeqCst);
+                    if n < self.edit_fails {
+                        Ok(braze_types::ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: "edit_file failed: old_string not found".to_string(),
+                            is_error: true,
+                        })
+                    } else {
+                        Ok(braze_types::ToolResult {
+                            tool_call_id: call.id.clone(),
+                            content: format!("edited{}", self.check_block),
+                            is_error: false,
+                        })
+                    }
+                }
+                _ => {
+                    self.write_invocations.fetch_add(1, Ordering::SeqCst);
+                    Ok(braze_types::ToolResult {
+                        tool_call_id: call.id.clone(),
+                        content: format!("written{}", self.check_block),
+                        is_error: false,
+                    })
+                }
+            }
+        }
+    }
+
+    const CHECK_OK: &str = "\n\n[post-edit check] `cargo check` passed in 1s — the code COMPILES.";
+
+    fn editor_call(id: &str, path: &str, instruction: &str) -> CompletionEvent {
+        CompletionEvent::ToolCallRequested {
+            id: id.to_string(),
+            name: EDITOR_TOOL.to_string(),
+            arguments: serde_json::json!({ "path": path, "instruction": instruction }),
+        }
+    }
+
+    fn child_edit(id: &str, path: &str) -> CompletionEvent {
+        CompletionEvent::ToolCallRequested {
+            id: id.to_string(),
+            name: "edit_file".to_string(),
+            arguments: serde_json::json!({ "path": path, "old_string": "foo", "new_string": "bar" }),
+        }
+    }
+
+    fn child_write(id: &str, path: &str) -> CompletionEvent {
+        CompletionEvent::ToolCallRequested {
+            id: id.to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({ "path": path, "content": "fn bar() {}" }),
+        }
+    }
+
+    fn engine_with(
+        model: ScriptedModel,
+        provider: EditorToyProvider,
+        store: FileSessionStore,
+    ) -> Engine {
+        Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(provider)]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_editor_enabled(true)
+    }
+
+    /// Happy path: el padre delega, el hijo edita y converge, el archivo
+    /// aterriza y compila. El transcript del hijo (su edit_file) NO llega
+    /// al log del padre — solo el editor call, su resultado, el
+    /// EditorDelegated (landed=true, compiles=pass) y un Usage editor_child.
+    #[tokio::test]
+    async fn a_delegated_edit_lands_and_keeps_the_child_transcript_out_of_the_parent_log() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                editor_call("d1", "src/lib.rs", "rename foo to bar"),
+                CompletionEvent::Done,
+            ],
+            // rondas del hijo (mismo backend) — con Usage, como un
+            // backend real, para que el agregado editor_child se emita:
+            vec![
+                child_edit("c1", "src/lib.rs"),
+                CompletionEvent::Usage {
+                    input_tokens: 40,
+                    output_tokens: 12,
+                    stop_reason: Some("tool_use".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta(
+                    "State: fully edited. Compiles: yes. Change: renamed foo to bar.".to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            // ronda final del padre:
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let writes = Arc::new(AtomicU32::new(0));
+        let engine = engine_with(
+            model,
+            EditorToyProvider {
+                edit_fails: 0,
+                edit_calls: AtomicU32::new(0),
+                write_invocations: Arc::clone(&writes),
+                check_block: CHECK_OK,
+            },
+            store,
+        );
+
+        engine
+            .run_turn(&session, "edita src/lib.rs", &mut NoopObserver)
+            .await
+            .expect("el turno converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        let delegated = events.iter().find_map(|e| match e {
+            AgentEvent::EditorDelegated {
+                landed,
+                compiles,
+                path,
+                ..
+            } => Some((*landed, compiles.clone(), path.clone())),
+            _ => None,
+        });
+        assert_eq!(
+            delegated,
+            Some((true, "pass".to_string(), "src/lib.rs".to_string()))
+        );
+
+        // El editor call del padre SÍ está; el edit_file del hijo NO.
+        assert!(
+            events.iter().any(
+                |e| matches!(e, AgentEvent::AssistantToolCall { name, .. } if name == EDITOR_TOOL)
+            ),
+            "el editor call del padre debe estar persistido"
+        );
+        assert!(
+            !events.iter().any(
+                |e| matches!(e, AgentEvent::AssistantToolCall { name, .. } if name == "edit_file")
+            ),
+            "el edit_file del HIJO no debe llegar al log del padre (aislamiento)"
+        );
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::Usage { stop_reason: Some(r), .. } if r == "editor_child")),
+            "el Usage agregado del hijo debe estar"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// El interlock L-10 propio del hijo: tras 2 edit_file fallidos, un
+    /// write_file del hijo se bloquea sin despachar (el provider nunca lo
+    /// ve) y la delegación reporta landed=false.
+    #[tokio::test]
+    async fn the_child_interlock_blocks_write_file_after_two_failed_edits() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                editor_call("d1", "src/lib.rs", "cambio imposible"),
+                CompletionEvent::Done,
+            ],
+            vec![child_edit("c1", "src/lib.rs"), CompletionEvent::Done], // falla 1
+            vec![child_edit("c2", "src/lib.rs"), CompletionEvent::Done], // falla 2
+            vec![child_write("c3", "src/lib.rs"), CompletionEvent::Done], // bloqueado
+            vec![
+                CompletionEvent::TextDelta(
+                    "State: unchanged. Compiles: n/a. Change: none.".to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("no pude".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let writes = Arc::new(AtomicU32::new(0));
+        let engine = engine_with(
+            model,
+            EditorToyProvider {
+                edit_fails: u32::MAX, // edit_file siempre falla
+                edit_calls: AtomicU32::new(0),
+                write_invocations: Arc::clone(&writes),
+                check_block: "",
+            },
+            store,
+        );
+
+        engine
+            .run_turn(&session, "edita src/lib.rs", &mut NoopObserver)
+            .await
+            .expect("el turno converge: el interlock devuelve error de tool, no mata el turno");
+
+        assert_eq!(
+            writes.load(Ordering::SeqCst),
+            0,
+            "el write_file del hijo tras 2 edits fallidos NO debe llegar al provider"
+        );
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let landed = events.iter().find_map(|e| match e {
+            AgentEvent::EditorDelegated { landed, .. } => Some(*landed),
+            _ => None,
+        });
+        assert_eq!(landed, Some(false), "ninguna edición aterrizó");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// No-convergencia CON una edición previa exitosa: el outcome es error
+    /// y le dice al padre que el archivo quedó a medias — la línea de
+    /// seguridad del diseño (releer antes de asumir estado limpio).
+    #[tokio::test]
+    async fn a_non_converging_child_that_already_edited_warns_the_parent_to_reread() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // El hijo edita con éxito cada ronda y NUNCA converge (siempre
+        // llama tool) → agota MAX_EDITOR_CHILD_ROUNDS con landed=true.
+        let mut rounds = vec![vec![
+            editor_call("d1", "src/lib.rs", "editar en loop"),
+            CompletionEvent::Done,
+        ]];
+        for i in 0..crate::editor::MAX_EDITOR_CHILD_ROUNDS {
+            rounds.push(vec![
+                child_edit(&format!("c{i}"), "src/lib.rs"),
+                CompletionEvent::Done,
+            ]);
+        }
+        rounds.push(vec![
+            CompletionEvent::TextDelta("ok".to_string()),
+            CompletionEvent::Done,
+        ]);
+        let model = ScriptedModel::new(rounds);
+        let writes = Arc::new(AtomicU32::new(0));
+        let engine = engine_with(
+            model,
+            EditorToyProvider {
+                edit_fails: 0,
+                edit_calls: AtomicU32::new(0),
+                write_invocations: Arc::clone(&writes),
+                check_block: CHECK_OK,
+            },
+            store,
+        );
+
+        engine
+            .run_turn(&session, "edita", &mut NoopObserver)
+            .await
+            .expect("el turno converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let result = events.iter().find_map(|e| match e {
+            AgentEvent::ToolCallCompleted { id, result } if id == "d1" => Some(result.clone()),
+            _ => None,
+        });
+        let result = result.expect("el editor call persiste su resultado");
+        assert!(result.is_error, "no-convergencia es error");
+        assert!(
+            result.content.contains("partially modified") && result.content.contains("read it"),
+            "debe avisar que el archivo quedó a medias, got: {}",
+            result.content
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

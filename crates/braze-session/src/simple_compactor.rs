@@ -357,6 +357,9 @@ impl ContextCompactor for SimpleContextCompactor {
                 // delegation — the child's conclusion already lives in
                 // its ToolCallCompleted, which the digest covers above.
                 | AgentEvent::ExplorationDelegated { .. }
+                // SWE-Edit #17: audit-only, same as exploration — the
+                // child's state summary lives in its ToolCallCompleted.
+                | AgentEvent::EditorDelegated { .. }
                 | AgentEvent::Unknown => {}
             }
         }

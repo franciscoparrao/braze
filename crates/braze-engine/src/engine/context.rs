@@ -226,6 +226,7 @@ pub(crate) fn event_text_len(event: &AgentEvent) -> usize {
         | AgentEvent::SkillLoadSkipped { .. }
         | AgentEvent::TaskCompleted { .. }
         | AgentEvent::ExplorationDelegated { .. }
+        | AgentEvent::EditorDelegated { .. }
         | AgentEvent::Unknown => 0,
     }
 }

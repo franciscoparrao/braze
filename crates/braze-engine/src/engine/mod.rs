@@ -293,6 +293,11 @@ pub struct Engine {
     /// la decide el A/B pre-registrado
     /// (`docs/explorador-aislado-ab-design.md`).
     exploration_enabled: bool,
+    /// Habilita el subagente `editor` (SWE-Edit #17, `crate::editor`) —
+    /// la mitad escritora del par Viewer/Editor. Off por default;
+    /// `Config::enable_editor` / `+ablate:editor`. Su A/B decide su
+    /// adopción (`docs/editor-subagent-design-2026-08-10.md`).
+    editor_enabled: bool,
     /// El estado de la lista (por turno, en memoria — se resetea al
     /// inicio de cada `run_turn`, J-4 docs/AUDITORIA-2026-07-v7.md: sin
     /// el reset, los planes de turnos/temas distintos se mezclaban y un
@@ -441,6 +446,7 @@ impl Engine {
             activated_deferred_tools: std::sync::Mutex::new(std::collections::HashSet::new()),
             task_list_enabled: false,
             exploration_enabled: false,
+            editor_enabled: false,
             task_list: std::sync::Mutex::new(crate::task_list::TaskList::default()),
             turn_harness_notes: std::sync::Mutex::new(Vec::new()),
             turn_did_edit: std::sync::atomic::AtomicBool::new(false),
@@ -704,6 +710,14 @@ impl Engine {
     /// Chainable.
     pub fn with_exploration_enabled(mut self, enabled: bool) -> Self {
         self.exploration_enabled = enabled;
+        self
+    }
+
+    /// Enables the SWE-Edit `editor` child loop (`crate::editor`) — the
+    /// harness-owned `editor` tool. Off by default;
+    /// `Config::enable_editor` / `+ablate:editor`. Chainable.
+    pub fn with_editor_enabled(mut self, enabled: bool) -> Self {
+        self.editor_enabled = enabled;
         self
     }
 

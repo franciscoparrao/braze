@@ -479,6 +479,10 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         // the model as the explore call's ToolCallCompleted, rendered
         // above like any other observation.
         | AgentEvent::ExplorationDelegated { .. }
+        // SWE-Edit #17: audit-only cost trace — the child's state summary
+        // reaches the model as the editor call's ToolCallCompleted,
+        // rendered above like any other observation.
+        | AgentEvent::EditorDelegated { .. }
         | AgentEvent::Unknown => None,
     }
 }

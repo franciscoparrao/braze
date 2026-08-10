@@ -7,6 +7,7 @@
 //! `braze-events` — everything else in the workspace is a seam this crate
 //! reconciles, per PLAN.md's dependency graph.
 
+mod editor;
 mod engine;
 mod error;
 mod exploration;

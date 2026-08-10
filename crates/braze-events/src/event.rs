@@ -272,6 +272,32 @@ pub enum AgentEvent {
     VerificationFailed {
         output: String,
     },
+    /// SWE-Edit #17: a self-contained edit was delegated to the isolated
+    /// `editor` child loop (`editor` in braze-engine,
+    /// `docs/editor-subagent-design-2026-08-10.md`). Sibling of
+    /// [`AgentEvent::ExplorationDelegated`] — audit-only, the child's
+    /// transcript is discarded (that isolation IS the lever); this event
+    /// plus an aggregate `Usage` are the log's only trace of the
+    /// delegation. Extends the exploration shape with the two
+    /// ground-truth fields the A/B needs: whether the child actually
+    /// mutated the file (`landed`) and whether it compiles afterwards
+    /// (`compiles`: `"pass"`/`"fail"`/`"unknown"`).
+    EditorDelegated {
+        /// The target file, verbatim.
+        path: String,
+        /// The edit instruction the parent gave, verbatim.
+        instruction: String,
+        /// Whether any of the child's edits succeeded (ground truth from
+        /// the dispatch, not the child's self-report).
+        landed: bool,
+        /// Compile status of the file on disk after the delegation,
+        /// derived from the post-edit-check verdict.
+        compiles: String,
+        /// Completion rounds the child used (capped by the engine).
+        child_rounds: u32,
+        /// Input+output tokens the child consumed, summed.
+        child_tokens: u64,
+    },
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only
@@ -546,6 +572,46 @@ mod tests {
                 assert_eq!(child_tokens, 1500);
             }
             other => panic!("expected ExplorationDelegated, got {other:?}"),
+        }
+    }
+
+    /// SWE-Edit #17: `EditorDelegated` round-trips with its snake_case
+    /// tag and its ground-truth fields (`landed`, `compiles`) the A/B
+    /// reads back to tell a delegation that changed code from one that
+    /// punted.
+    #[test]
+    fn editor_delegated_round_trips_through_json() {
+        let event = AgentEvent::EditorDelegated {
+            path: "src/lib.rs".to_string(),
+            instruction: "rename foo to bar".to_string(),
+            landed: true,
+            compiles: "pass".to_string(),
+            child_rounds: 2,
+            child_tokens: 900,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"editor_delegated\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        match decoded {
+            AgentEvent::EditorDelegated {
+                path,
+                instruction,
+                landed,
+                compiles,
+                child_rounds,
+                child_tokens,
+            } => {
+                assert_eq!(path, "src/lib.rs");
+                assert_eq!(instruction, "rename foo to bar");
+                assert!(landed);
+                assert_eq!(compiles, "pass");
+                assert_eq!(child_rounds, 2);
+                assert_eq!(child_tokens, 900);
+            }
+            other => panic!("expected EditorDelegated, got {other:?}"),
         }
     }
 
