@@ -196,19 +196,31 @@ pub(crate) async fn discover_secrets(workspace: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Crea el archivo-máscara `chmod 000` en un directorio temporal propio y
-/// devuelve su ruta. El bind r/w de este archivo sobre un secreto hace
-/// que `open()` falle con EACCES (por permisos DAC), pero el archivo
-/// sigue *existiendo* — un `test -f .env` ve que está, solo no lo puede
-/// leer. `None` si no se pudo crear (se degrada a no enmascarar).
+/// Devuelve el archivo-máscara `chmod 000` del proceso, creándolo la
+/// primera vez y REUSÁNDOLO después. El bind r/w de este archivo sobre un
+/// secreto hace que `open()` falle con EACCES (por permisos DAC), pero el
+/// archivo sigue *existiendo* — un `test -f .env` ve que está, solo no lo
+/// puede leer. `None` si no se pudo crear (se degrada a no enmascarar).
+///
+/// Cacheado por proceso (`OnceLock`): crear el archivo una vez es correcto
+/// —es un `chmod 000` vacío, idéntico entre invocaciones— y necesario,
+/// porque re-crearlo fallaría: `std::fs::write` sobre un archivo de modo
+/// 000 ya existente da EACCES, así que la SEGUNDA llamada de un mismo
+/// proceso devolvería `None` y dejaría los secretos sin enmascarar. Bug
+/// encontrado en la verificación en vivo en Nitro (el probe previo ya
+/// había creado el mask).
 pub(crate) fn create_mask_file() -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("braze-bwrap-mask-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).ok()?;
-    let mask = dir.join("mask");
-    std::fs::write(&mask, b"").ok()?;
-    std::fs::set_permissions(&mask, std::fs::Permissions::from_mode(0o000)).ok()?;
-    Some(mask)
+    static MASK: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    MASK.get_or_init(|| {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("braze-bwrap-mask-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).ok()?;
+        let mask = dir.join("mask");
+        std::fs::write(&mask, b"").ok()?;
+        std::fs::set_permissions(&mask, std::fs::Permissions::from_mode(0o000)).ok()?;
+        Some(mask)
+    })
+    .clone()
 }
 
 /// Pre-crea los governance files (`.gitignore`, `.git`) vacíos si no
@@ -334,13 +346,17 @@ mod tests {
     }
 
     #[test]
-    fn mask_file_is_created_unreadable() {
+    fn mask_file_is_created_unreadable_and_cached() {
         use std::os::unix::fs::PermissionsExt;
         let Some(mask) = create_mask_file() else {
             return; // entorno sin /tmp escribible — no fallar el test
         };
         let mode = std::fs::metadata(&mask).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o000);
-        let _ = std::fs::remove_file(&mask);
+        // Cacheado por proceso: una segunda llamada devuelve el MISMO
+        // path sin re-crear (re-crear fallaría sobre un archivo 000). No
+        // se borra el archivo — otros tests del proceso comparten el
+        // caché.
+        assert_eq!(create_mask_file().as_deref(), Some(mask.as_path()));
     }
 }
