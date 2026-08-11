@@ -43,13 +43,37 @@ preferencia por shell se expresa siempre.
    identificado y no es de runtime. Pendiente cerrado sin gastar Nitro.
 2. **gpt-oss:20b retiene el default** por la vía original; el
    desafío de e4b no se materializa vía 0.32.1.
-3. **Decisión de banco abierta (del autor)**: `read_file_basic` mide
-   hoy "¿elige la tool canónica?" y no "¿puede leer un archivo?". Las
-   opciones — (a) dejarlo así (mide selección de tool, que es una
-   habilidad real y el resto de la familia single_tool lo corrobora),
-   (b) aceptar equivalencia funcional en el grader, o (c) endurecer el
-   prompt ("usa read_file") — cambian la comparabilidad histórica de
-   TODOS los sweeps previos, así que no se toca sin decidirlo
-   explícitamente. Hasta entonces, leer los números de e4b en
-   `default.toml` sabiendo que ~1 tarea (≈5,3% del banco) es esta
-   clase.
+3. **Decisión de banco — RESUELTA (2026-08-11): opción (b), equivalencia
+   funcional acotada.** El principio: **el logro de la tarea decide el
+   pass; la elección de tool es orientativa donde hay equivalencia
+   genuina para el tamaño de la entrada.** Mecanismo: campo aditivo
+   `accept_tool_calls: Vec<String>` en `TaskDef` — la aserción de tool
+   pasa si el modelo llamó `expect_tool_call` O cualquiera de esos
+   equivalentes. Vacío (el default de toda otra tarea) = estricto como
+   antes, así que la mayoría del banco no cambia.
+   - `read_file_basic`: `accept_tool_calls = ["shell_exec"]` (contar
+     líneas con `wc -l` logra la tarea; la respuesta "3" ya se verifica).
+   - `grep_basic`: `accept_tool_calls = ["read_file"]` **y** se le AGREGÓ
+     el chequeo de respuesta que le faltaba (`expect_text_contains = "2"`)
+     — antes su única aserción era la tool, así que un grep con respuesta
+     equivocada pasaba. Hueco cerrado de paso.
+
+   Por qué (b) y no (a)/(c): (a) medía flakiness de selección en tareas
+   demasiado triviales para que la selección importe (1/5 reps, ruido no
+   señal); (c) convertía la tarea en "seguir instrucciones" en vez de
+   "elegir tool", degradándola (un usuario real no dice "usa grep"). La
+   equivalencia es EXPLÍCITA por-tarea y sólo donde las tools son
+   genuinamente intercambiables para ese tamaño — sobre un archivo grande
+   `read_file` trunca (y ahora spillea) y `grep` no, así que ahí NO se
+   listaría. Toda tarea con `accept_tool_calls` debe verificar la
+   respuesta, o la relajación la dejaría sin ningún chequeo.
+
+   **Sobre la comparabilidad histórica** (la razón por la que estaba
+   abierta): ya no es un riesgo silencioso. El cambio bumpea
+   `braze_git_commit` (grader en código) y `suite_fingerprint` (suite
+   TOML), y **Dynamic Baseline Verification** (`--baseline-ref`,
+   implementado el 2026-08-11) marca INVÁLIDA cualquier comparación
+   cross-invocación contra un baseline pre-cambio. La herramienta que
+   hacía este cambio inseguro ahora lo hace auditable — cerrar esta
+   decisión y construir DBV eran, sin planearlo, el mismo trabajo.
+   docs/dynamic-baseline-verification-design-2026-08-11.md.

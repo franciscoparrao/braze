@@ -156,6 +156,7 @@ mod tests {
             prompt: "do it".to_string(),
             setup_files: HashMap::new(),
             expect_tool_call: None,
+            accept_tool_calls: Vec::new(),
             expect_no_tool_call: false,
             expect_text_contains: None,
             expect_file_contains: HashMap::new(),

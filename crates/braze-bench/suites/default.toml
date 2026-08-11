@@ -23,6 +23,11 @@
 id = "read_file_basic"
 prompt = "Lee el archivo notas.txt del directorio actual y dime cuántas líneas tiene."
 expect_tool_call = "read_file"
+# Decisión de banco 2026-08-11: contar líneas con `wc -l` vía shell_exec
+# logra la tarea igual que read_file. La respuesta ("3") ya se verifica,
+# así que la elección de tool es orientativa (gemma4:e4b resuelve por
+# shell_exec — ver el diagnóstico).
+accept_tool_calls = ["shell_exec"]
 expect_text_contains = "3"
 skill = "single_tool"
 
@@ -33,6 +38,14 @@ skill = "single_tool"
 id = "grep_basic"
 prompt = "Busca la palabra ERROR en el archivo datos.txt y dime en qué línea aparece."
 expect_tool_call = "grep"
+# Decisión de banco 2026-08-11: sobre un archivo de 3 líneas, leerlo
+# entero y decir en qué línea está ERROR logra la tarea igual que grep —
+# read_file es equivalente para este tamaño. El logro decide (ver
+# expect_text_contains); la tool es orientativa.
+accept_tool_calls = ["read_file"]
+# Faltaba: sin esto la ÚNICA aserción era la tool, así que un grep con
+# respuesta equivocada pasaba. La respuesta correcta es la línea 2.
+expect_text_contains = "2"
 skill = "single_tool"
 
 [tasks.setup_files]

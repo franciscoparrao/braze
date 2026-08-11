@@ -278,6 +278,7 @@ mod tests {
             prompt: "irrelevant".to_string(),
             setup_files: HashMap::new(),
             expect_tool_call: None,
+            accept_tool_calls: Vec::new(),
             expect_no_tool_call,
             expect_text_contains: expect_text_contains.map(str::to_string),
             expect_file_contains: HashMap::new(),

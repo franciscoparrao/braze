@@ -88,6 +88,7 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect::<HashMap<_, _>>(),
             expect_tool_call: None,
+            accept_tool_calls: Vec::new(),
             expect_no_tool_call: false,
             expect_text_contains: None,
             expect_file_contains: HashMap::new(),

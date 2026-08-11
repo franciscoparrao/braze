@@ -670,10 +670,15 @@ pub fn compute_metrics(
         }
     };
 
-    let expected_tool_called = task
-        .expect_tool_call
-        .as_deref()
-        .map(|expected| tool_call_names.iter().any(|name| name == expected));
+    // La aserción de tool pasa si el modelo llamó `expect_tool_call` O
+    // cualquiera de los equivalentes de `accept_tool_calls` (decisión de
+    // banco 2026-08-11: el logro decide, la tool es orientativa donde hay
+    // equivalencia genuina para el tamaño de la entrada).
+    let expected_tool_called = task.expect_tool_call.as_deref().map(|expected| {
+        tool_call_names
+            .iter()
+            .any(|name| name == expected || task.accept_tool_calls.iter().any(|a| a == name))
+    });
 
     let expected_text_found = task.expect_text_contains.as_deref().map(|expected| {
         contains_as_a_bounded_token(&final_text.to_lowercase(), &expected.to_lowercase())
@@ -853,6 +858,7 @@ mod tests {
             prompt: "irrelevant".to_string(),
             setup_files: HashMap::new(),
             expect_tool_call: expect_tool_call.map(str::to_string),
+            accept_tool_calls: Vec::new(),
             expect_no_tool_call,
             expect_text_contains: expect_text_contains.map(str::to_string),
             expect_file_contains: HashMap::new(),
@@ -987,6 +993,58 @@ mod tests {
         assert!(!result.passed);
         assert_eq!(result.expected_tool_called, Some(false));
         assert_eq!(result.failure_cause, Some(FailureCause::AssertionToolCall));
+    }
+
+    /// Decisión de banco 2026-08-11: un tool en `accept_tool_calls`
+    /// satisface la aserción igual que `expect_tool_call` — el logro
+    /// decide, la tool es orientativa donde hay equivalencia. Es la clase
+    /// gpt-oss/grep_basic (usa read_file en vez de grep) y gemma4/
+    /// read_file_basic (usa shell_exec en vez de read_file).
+    #[test]
+    fn an_accepted_equivalent_tool_satisfies_the_assertion() {
+        let mut t = task(Some("grep"), false, None);
+        t.accept_tool_calls = vec!["read_file".to_string()];
+        // El modelo usó read_file (un equivalente), no grep.
+        let events = vec![
+            AgentEvent::AssistantToolCall {
+                id: "1".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({"path": "datos.txt"}),
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "1".to_string(),
+                    content: "linea 2: ERROR".to_string(),
+                    is_error: false,
+                },
+            },
+            AgentEvent::AssistantText {
+                text: "ERROR está en la línea 2".to_string(),
+            },
+        ];
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        assert_eq!(
+            result.expected_tool_called,
+            Some(true),
+            "un equivalente aceptado satisface la aserción"
+        );
+        assert_ne!(result.failure_cause, Some(FailureCause::AssertionToolCall));
+    }
+
+    /// Un tool que NO es ni el esperado ni un equivalente aceptado sigue
+    /// fallando — la equivalencia es explícita por-tarea, no un pase libre.
+    #[test]
+    fn a_non_equivalent_tool_still_fails_the_assertion() {
+        let mut t = task(Some("grep"), false, None);
+        t.accept_tool_calls = vec!["read_file".to_string()];
+        let events = vec![AgentEvent::AssistantToolCall {
+            id: "1".to_string(),
+            name: "write_file".to_string(), // ni grep ni read_file
+            arguments: serde_json::json!({}),
+        }];
+        let result = metrics(&t, &events, RunOutcome::Converged);
+        assert_eq!(result.expected_tool_called, Some(false));
     }
 
     #[test]

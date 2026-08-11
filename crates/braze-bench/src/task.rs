@@ -31,6 +31,23 @@ pub struct TaskDef {
     /// tasks that only care which tool got reached for.
     #[serde(default)]
     pub expect_tool_call: Option<String>,
+    /// Herramientas ADICIONALES que satisfacen `expect_tool_call` —
+    /// funcionalmente equivalentes para ESTA tarea (decisión de banco
+    /// 2026-08-11, docs/gemma4-e4b-diagnostico-read-file-basic-2026-08-10.md).
+    /// El logro de la tarea decide el pass; la elección de tool es
+    /// orientativa cuando la respuesta se verifica aparte. Ej.: contar
+    /// líneas de un archivo de 3 líneas se logra igual con `read_file`
+    /// que con `shell_exec` (`wc -l`); buscar una palabra en un archivo
+    /// trivial, con `grep` o `read_file`. La aserción pasa si el modelo
+    /// llamó `expect_tool_call` O CUALQUIERA de estas. Vacío (el default)
+    /// = comportamiento estricto de antes; solo se afloja donde las tools
+    /// son genuinamente equivalentes PARA EL TAMAÑO de la entrada (sobre
+    /// un archivo grande, `read_file` trunca y `grep` no — ahí NO se
+    /// listan). Toda tarea con esto DEBE verificar la respuesta
+    /// (`expect_text_contains`/`expect_file_contains`), o la aserción de
+    /// tool sería el único chequeo y aflojarla dejaría la tarea sin nada.
+    #[serde(default)]
+    pub accept_tool_calls: Vec<String>,
     /// If true, the task only passes if NO tool was called at all — e.g.
     /// to check a small model doesn't reach for a tool on a trivial
     /// question it could just answer directly.
