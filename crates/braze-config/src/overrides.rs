@@ -101,6 +101,10 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub enable_landlock_write_sandbox: Option<bool>,
     #[serde(default)]
+    pub enable_bwrap_tool_sandbox: Option<bool>,
+    #[serde(default)]
+    pub bwrap_allow_network: Option<bool>,
+    #[serde(default)]
     pub disable_agents_md: Option<bool>,
     #[serde(default)]
     pub tool_output_max_bytes: Option<u32>,
@@ -562,6 +566,28 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.enable_landlock_write_sandbox = Some(parsed);
+                }
+                "ENABLE_BWRAP_TOOL_SANDBOX" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.enable_bwrap_tool_sandbox = Some(parsed);
+                }
+                "BWRAP_ALLOW_NETWORK" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.bwrap_allow_network = Some(parsed);
                 }
                 "DISABLE_AGENTS_MD" => {
                     let parsed =

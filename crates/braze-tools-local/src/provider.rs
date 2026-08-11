@@ -91,6 +91,19 @@ pub struct LocalToolsProvider {
     /// [`LocalToolsProvider::with_formatters`] from
     /// `Config::formatters`.
     formatters: Vec<braze_config::FormatterConfig>,
+    /// Encierra cada `shell_exec` del modelo en un mount namespace
+    /// bubblewrap (`crate::bwrap`, design doc
+    /// `docs/bwrap-tool-sandbox-design-2026-08-10.md`). Off by default;
+    /// `Config::enable_bwrap_tool_sandbox` / `+ablate` no aplica (es
+    /// seguridad, no palanca de bench). Cuando está on pero `bwrap` no
+    /// está en el PATH, se degrada corriendo sin encierro con un warning
+    /// una sola vez (`bwrap_degraded_warned`).
+    bwrap_sandbox: bool,
+    /// Permite red del host dentro del sandbox bwrap
+    /// (`Config::bwrap_allow_network`). Sin efecto si `bwrap_sandbox` es
+    /// off. Off by default: un `shell_exec` del modelo no tiene por qué
+    /// alcanzar la red salvo que el usuario lo habilite.
+    bwrap_allow_network: bool,
 }
 
 impl LocalToolsProvider {
@@ -110,6 +123,8 @@ impl LocalToolsProvider {
             output_budget: MAX_TOOL_OUTPUT_BYTES,
             output_max_lines: None,
             formatters: crate::post_edit_check::default_rust_formatters(),
+            bwrap_sandbox: false,
+            bwrap_allow_network: false,
         }
     }
 
@@ -127,6 +142,8 @@ impl LocalToolsProvider {
             output_budget: MAX_TOOL_OUTPUT_BYTES,
             output_max_lines: None,
             formatters: crate::post_edit_check::default_rust_formatters(),
+            bwrap_sandbox: false,
+            bwrap_allow_network: false,
         }
     }
 
@@ -175,6 +192,22 @@ impl LocalToolsProvider {
     /// [`Self::with_output_budget`].
     pub fn with_formatters(mut self, formatters: Vec<braze_config::FormatterConfig>) -> Self {
         self.formatters = formatters;
+        self
+    }
+
+    /// Enables the bubblewrap out-of-process sandbox for `shell_exec` —
+    /// chainable, same shape as [`Self::with_post_edit_check`]. See
+    /// `bwrap_sandbox`'s field doc comment and
+    /// `docs/bwrap-tool-sandbox-design-2026-08-10.md`.
+    pub fn with_bwrap_sandbox(mut self, enabled: bool) -> Self {
+        self.bwrap_sandbox = enabled;
+        self
+    }
+
+    /// Allows host network inside the bwrap sandbox — chainable. No-op
+    /// unless [`Self::with_bwrap_sandbox`] is also on.
+    pub fn with_bwrap_allow_network(mut self, allow: bool) -> Self {
+        self.bwrap_allow_network = allow;
         self
     }
 
@@ -258,7 +291,7 @@ impl LocalToolsProvider {
     }
 
     async fn invoke_shell_exec(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
-        let args: ShellExecArgs = parse_args(call)?;
+        let mut args: ShellExecArgs = parse_args(call)?;
         let action = ActionDescriptor::ShellCommand {
             command: args.command.clone(),
         };
@@ -269,7 +302,59 @@ impl LocalToolsProvider {
                 name: call.name.clone(),
                 message: Self::denied_message(&err),
             })?;
+        // Cuarta capa de seguridad (design doc
+        // bwrap-tool-sandbox-design-2026-08-10): encerrar la ejecución ya
+        // autorizada en un mount namespace. Se compone DEBAJO del guard
+        // (que ya decidió) reescribiendo `command` a `bwrap <argv> --
+        // <cmd>`; `shell_exec` spawnea `command[0]` con el resto, así que
+        // hereda gratis su timeout y `kill_on_drop` (que con
+        // `--die-with-parent` mata el árbol entero).
+        if self.bwrap_sandbox {
+            args.command = self.maybe_wrap_in_bwrap(args.command).await;
+        }
         Ok(self.wrap(call, shell_exec::shell_exec(args, &self.workdir).await))
+    }
+
+    /// Reescribe `command` para correr bajo `bwrap`, o lo devuelve intacto
+    /// si `bwrap` no está disponible (degradación con warning único —
+    /// design doc § "degradar con warning"). El comando ya pasó el guard.
+    async fn maybe_wrap_in_bwrap(&self, command: Vec<String>) -> Vec<String> {
+        if !crate::bwrap::bwrap_available() {
+            // Warning una sola vez por proceso: repetirlo por comando
+            // ahogaría los logs y no aporta.
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                tracing::warn!(
+                    "bwrap sandbox requested but `bwrap` is not on PATH; shell_exec runs \
+                     WITHOUT the out-of-process sandbox"
+                );
+            });
+            return command;
+        }
+        let Some((program, rest)) = command.split_first() else {
+            return command;
+        };
+        crate::bwrap::ensure_governance_files(&self.workdir);
+        let secrets = crate::bwrap::discover_secrets(&self.workdir).await;
+        // Sin mask file no se pueden enmascarar secretos: se degrada a no
+        // montarlos (el resto del encierro sigue), en vez de abortar.
+        let mask_file = crate::bwrap::create_mask_file().unwrap_or_default();
+        let spec = crate::bwrap::BwrapSpec {
+            workspace: self.workdir.clone(),
+            git_writable: crate::bwrap::is_git_command(program),
+            secrets: if mask_file.as_os_str().is_empty() {
+                Vec::new()
+            } else {
+                secrets
+            },
+            mask_file,
+            allow_network: self.bwrap_allow_network,
+        };
+        let argv = crate::bwrap::build_bwrap_argv(&spec, program, rest);
+        let mut wrapped = Vec::with_capacity(argv.len() + 1);
+        wrapped.push("bwrap".to_string());
+        wrapped.extend(argv);
+        wrapped
     }
 
     async fn invoke_grep(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
@@ -481,6 +566,116 @@ mod tests {
             name: name.to_string(),
             arguments,
         }
+    }
+
+    /// Extrae `exit_code`/`stdout`/`stderr` del JSON que `shell_exec`
+    /// serializa, esté en el `Ok` o el `Err` de la tool.
+    fn shell_result(result: &ToolResult) -> (i64, String) {
+        let v: serde_json::Value = serde_json::from_str(&result.content).expect("json de shell");
+        (
+            v["exit_code"].as_i64().unwrap_or(-999),
+            format!("{}{}", v["stdout"].as_str().unwrap_or(""), v["stderr"].as_str().unwrap_or("")),
+        )
+    }
+
+    /// Verificación EN VIVO del sandbox bwrap (design doc §
+    /// "Verificación"): con bwrap real, un `shell_exec` (a) no puede
+    /// leer un `.env` plantado, (b) no puede escribir fuera del
+    /// workspace, (c) sí puede escribir dentro. Gated por disponibilidad
+    /// de bwrap + user namespaces: en una máquina sin ellos el test se
+    /// salta (no falla — la degradación es parte del diseño).
+    #[tokio::test]
+    async fn bwrap_sandbox_denies_secret_read_and_outside_write() {
+        if !crate::bwrap::bwrap_available() {
+            eprintln!("bwrap no disponible; se salta la verificación en vivo");
+            return;
+        }
+        let dir = unique_temp_dir("bwrap-live");
+        std::fs::create_dir_all(&dir).expect("workspace");
+        std::fs::write(dir.join(".env"), "SECRET=hunter2\n").expect("plantar .env");
+
+        let provider = LocalToolsProvider::with_workdir(allow_guard(dir.clone()), dir.clone())
+            .with_bwrap_sandbox(true);
+
+        // Sanity: si el propio bwrap no puede crear el namespace (userns
+        // deshabilitado), abortamos el test sin marcarlo fallido —
+        // `bwrap true` sale ≠0 con un mensaje de setup, no de política.
+        let probe = provider
+            .invoke(&call("shell_exec", serde_json::json!({ "command": ["true"] })))
+            .await;
+        if let Ok(r) = &probe {
+            let (_, out) = shell_result(r);
+            if out.contains("namespace") || out.contains("Operation not permitted") {
+                eprintln!("user namespaces deshabilitados; se salta: {out}");
+                return;
+            }
+        }
+
+        // (a) LEER el secreto: dentro del sandbox el .env está montado
+        // sobre un archivo chmod 000 → EACCES / permission denied.
+        let read = provider
+            .invoke(&call(
+                "shell_exec",
+                serde_json::json!({ "command": ["cat", ".env"] }),
+            ))
+            .await;
+        let read = read.expect("la tool devuelve resultado (aunque el comando falle)");
+        let (code, out) = shell_result(&read);
+        assert_ne!(code, 0, "cat .env NO debe tener éxito dentro del sandbox: {out}");
+        assert!(
+            out.to_lowercase().contains("permission denied") || out.to_lowercase().contains("denied"),
+            "el fallo debe ser por permiso, no otra cosa: {out}"
+        );
+        assert!(!out.contains("hunter2"), "el secreto NO debe leerse: {out}");
+
+        // (b) ESCRIBIR fuera del workspace: el FS es read-only salvo el
+        // workspace, así que tocar /etc falla.
+        let outside = provider
+            .invoke(&call(
+                "shell_exec",
+                serde_json::json!({ "command": ["touch", "/etc/braze-escape-probe"] }),
+            ))
+            .await
+            .expect("resultado");
+        let (code, out) = shell_result(&outside);
+        assert_ne!(code, 0, "escribir en /etc debe fallar (FS read-only): {out}");
+        assert!(!std::path::Path::new("/etc/braze-escape-probe").exists());
+
+        // (c) ESCRIBIR dentro del workspace: el bind r/w lo permite.
+        let inside = provider
+            .invoke(&call(
+                "shell_exec",
+                serde_json::json!({ "command": ["touch", "adentro.txt"] }),
+            ))
+            .await
+            .expect("resultado");
+        let (code, out) = shell_result(&inside);
+        assert_eq!(code, 0, "escribir dentro del workspace debe funcionar: {out}");
+        assert!(dir.join("adentro.txt").exists(), "el archivo debió crearse en el host");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Con el sandbox OFF (default), el mismo `cat .env` SÍ lee el
+    /// secreto — confirma que el encierro es lo que hace la diferencia,
+    /// no otra cosa del entorno.
+    #[tokio::test]
+    async fn without_sandbox_secret_is_readable() {
+        let dir = unique_temp_dir("bwrap-off");
+        std::fs::create_dir_all(&dir).expect("workspace");
+        std::fs::write(dir.join(".env"), "SECRET=hunter2\n").expect("plantar .env");
+        let provider = LocalToolsProvider::with_workdir(allow_guard(dir.clone()), dir.clone());
+        let r = provider
+            .invoke(&call(
+                "shell_exec",
+                serde_json::json!({ "command": ["cat", ".env"] }),
+            ))
+            .await
+            .expect("resultado");
+        let (code, out) = shell_result(&r);
+        assert_eq!(code, 0);
+        assert!(out.contains("hunter2"), "sin sandbox el secreto se lee normal");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

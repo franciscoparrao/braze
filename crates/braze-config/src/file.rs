@@ -99,6 +99,14 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "enable_project_memory",
     // D′ — skills locales explicit-only (paths + caps).
     "skills",
+    // Sandbox (v9 Paquete 4 + bwrap 2026-08-10). Los dos primeros
+    // FALTABAN de esta lista aunque `apply_overrides` sí los honra — un
+    // config file que los usara disparaba "unrecognized key; ignored"
+    // pese a aplicarse el valor. Encontrado al mapear el sandbox bwrap.
+    "enable_landlock_write_sandbox",
+    "disable_agents_md",
+    "enable_bwrap_tool_sandbox",
+    "bwrap_allow_network",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

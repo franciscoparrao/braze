@@ -16,6 +16,7 @@
 //! reads.
 
 mod ask_user;
+mod bwrap;
 mod edit_file;
 mod glob;
 mod grep;

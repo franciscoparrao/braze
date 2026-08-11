@@ -488,6 +488,21 @@ pub struct Config {
     /// (en otros SO se loguea y se sigue sin sandbox).
     #[serde(default)]
     pub enable_landlock_write_sandbox: bool,
+    /// Sandbox out-of-process por-tool con bubblewrap
+    /// (`docs/bwrap-tool-sandbox-design-2026-08-10.md`): encierra cada
+    /// `shell_exec` del modelo en un mount namespace — FS read-only por
+    /// defecto, workspace escribible, `.git` read-only salvo git, y
+    /// secretos (`.env`) enmascarados. La cuarta capa, independiente del
+    /// Landlock in-process: expresa el read-denial de secretos que
+    /// Landlock (allowlist-only) no puede. Opt-in; si `bwrap` no está en
+    /// el PATH se degrada corriendo sin encierro con un warning. Linux.
+    #[serde(default)]
+    pub enable_bwrap_tool_sandbox: bool,
+    /// Permite red del host dentro del sandbox bwrap. Sin efecto si
+    /// `enable_bwrap_tool_sandbox` es off. Off by default: un comando del
+    /// modelo no alcanza la red salvo habilitación explícita.
+    #[serde(default)]
+    pub bwrap_allow_network: bool,
     /// Interop AGENTS.md (v8/v9): por default braze lee `AGENTS.md` de la
     /// raíz del working directory y lo inyecta como sección del system
     /// prompt — el context file estándar entre harnesses, versionado en
@@ -684,6 +699,8 @@ impl Default for Config {
             max_turn_wall_clock_secs: None,
             max_round_wall_clock_secs: None,
             enable_landlock_write_sandbox: false,
+            enable_bwrap_tool_sandbox: false,
+            bwrap_allow_network: false,
             disable_agents_md: false,
             tool_output_max_bytes: default_tool_output_max_bytes(),
             tool_output_max_lines: None,
@@ -926,6 +943,12 @@ impl Config {
         }
         if let Some(v) = overrides.enable_landlock_write_sandbox {
             self.enable_landlock_write_sandbox = v;
+        }
+        if let Some(v) = overrides.enable_bwrap_tool_sandbox {
+            self.enable_bwrap_tool_sandbox = v;
+        }
+        if let Some(v) = overrides.bwrap_allow_network {
+            self.bwrap_allow_network = v;
         }
         if let Some(v) = overrides.disable_agents_md {
             self.disable_agents_md = v;
