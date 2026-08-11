@@ -159,8 +159,17 @@ compilar ≠ funcionar. Técnica pty reusable: responder `ESC[6n`,
 
 Regla operativa (2026-07-06, evidencia en PLAN.md): los sweeps de
 `braze-bench` corren contra el nodo LAN **Nitro**
-(`BRAZE_OLLAMA_BASE_URL=http://192.168.1.8:11434` + `--no-ollama-stop`;
-la IP es DHCP — fijarla en el router sigue pendiente). Benchear en la
+(`BRAZE_OLLAMA_BASE_URL=http://192.168.1.8:11434`; la IP es DHCP —
+fijarla en el router sigue pendiente). **Regla nueva (2026-08-10):
+`--no-ollama-stop` SOLO para sweeps de un modelo único** — en un sweep
+multi-modelo sobre los 14Gi de Nitro, apilar residentes terminó en
+OOM-kill del servicio Ollama a mitad de sweep (20:03, `journalctl`;
+el circuit breaker de braze clasificó el resto como HarnessError fuera
+del denominador — la estadística sobrevivió, el sweep no). Sin el flag,
+el bench para cada modelo al cerrar su brazo, que es lo correcto ahí.
+Hardening preparado en `nitro:~/nitro-ollama-hardening.sh`
+(KEEP_ALIVE=2m + MAX_LOADED_MODELS=2; aplicar con Nitro ocioso —
+reinicia el servicio). Benchear en la
 máquina de trabajo con builds/tests concurrentes contamina los números
 (misma config+seed: 2/6 vs 0/6), y Nitro corre qwen2.5:3b ~50× más
 rápido (~2s vs ~90-100s por tarea). `RUST_LOG=braze_engine=info` sobre

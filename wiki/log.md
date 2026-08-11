@@ -112,3 +112,6 @@ Consultas típicas:
 ## [2026-08-10 19:44] nota | Pre-registro lead-summary + TTC lanzado — las dos últimas palancas v8 sin veredicto
 - 6 filas sobre default.toml; lead-summary aislado con tactical-threshold=4 en ambos brazos (smoke: compact=8, el mecanismo dispara); TTC=3 en qwen2.5:3b y llama3.2:1b por headroom (75,8%/25,3% hoy). Higiene: la frase nulo del lead-summary del roadmap 2026-08-06 NO tiene sweep detrás en repo ni Nitro — este experimento la salda. docs/hypothesis-2026-08-10-lead-summary-ttc.md
 
+## [2026-08-10 20:36] infra | Overlay ask_user de la TUI verificado EN VIVO (backlog v8) — y tres lecciones de asserts pty
+- pty+pyte contra el binario real con openrouter:deepseek/deepseek-v4-flash: overlay a 3,8s con opciones numeradas generadas por el modelo, selección 1+Enter consumida, elección citada en [MAYÚSCULAS], salida status=0 por waitpid. El guion falló 3 veces por falsos verdes ANTES de pasar de verdad — (1) el eco del composer satisface cualquier palabra tecleada (fix: opciones por paráfrasis, el modelo genera las palabras); (2) v0.1.0 del banner matchea patrones numerados [12][).] (fix: anclar en texto exclusivo del overlay, Enter responder); (3) el overlay pide dígito Y Enter, el dígito solo deja la selección colgada. Regla destilada: cada assert pty necesita un texto que NADIE más pinta. docs/pty-ask-user-verify-2026-08-10.py
+
