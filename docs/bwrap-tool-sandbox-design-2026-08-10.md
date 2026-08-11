@@ -140,7 +140,15 @@ el valor se aplique — bug latente encontrado en el mapeo). Más
   que (a) intenta LEER un `.env` plantado en el workspace → EACCES; (b)
   intenta ESCRIBIR fuera del workspace (`/etc`, `$HOME`) → read-only FS;
   (c) escribe DENTRO del workspace → funciona. Las tres aserciones sobre
-  el binario real, no mocks.
+  el binario real, no mocks. **VERIFICADO en Nitro (2026-08-10)**: las
+  tres pasan (`bwrap_sandbox_denies_secret_read_and_outside_write`). La
+  máquina de trabajo corre anidada en un namespace restringido y bwrap
+  no puede crear el netns ahí — el test se auto-salta con diagnóstico y
+  la degradación cubre ese caso; por eso la verificación en vivo se hizo
+  en Nitro (misma doctrina que las palancas GPU). El primer intento
+  destapó un bug real (mask file no idempotente entre invocaciones del
+  mismo proceso), corregido con `OnceLock` — exactamente lo que la
+  verificación en vivo existe para cazar.
 
 ## Riesgos anotados
 
