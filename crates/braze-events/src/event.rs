@@ -248,6 +248,21 @@ pub enum AgentEvent {
         name: String,
         reason: String,
     },
+    /// A subdirectory `AGENTS.md` was discovered just-in-time (a tool
+    /// touched a file under it) and its body injected into the system
+    /// prompt for the rest of the session (JIT context files,
+    /// docs/agents-md-jit-design-2026-08-11.md). Audit-only, same posture
+    /// as [`AgentEvent::SkillLoaded`]: the body is request-scoped (re-read
+    /// from disk, never persisted as conversation), so this event is the
+    /// rollout log's only trace of WHICH project instructions the model
+    /// was given mid-turn — and what `rehydrate_agents_md_from_log` reads
+    /// to restore them on `--resume`. Additive amendment to the frozen
+    /// contract, same precedent as `SkillLoaded`: an older binary reading
+    /// a log with this event deserializes it as [`Self::Unknown`].
+    AgentsMdLoaded {
+        /// Absolute (canonical) path of the discovered `AGENTS.md`.
+        path: String,
+    },
     /// I.7: a broad read-only exploration was delegated to the isolated
     /// child loop (`exploration` in braze-engine,
     /// `docs/explorador-aislado-ab-design.md`). Audit-only — the

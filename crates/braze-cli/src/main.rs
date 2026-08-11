@@ -757,6 +757,22 @@ async fn build_engine(
     } else {
         braze_config::load_agents_md(cwd)
     };
+    // Carga JIT de AGENTS.md por subdirectorio
+    // (docs/agents-md-jit-design-2026-08-11.md): salvo `disable_agents_md`,
+    // el engine descubre los AGENTS.md de subdir cuando un tool los toca,
+    // con techo en el git root. Se pasa el techo y el path del raíz (para
+    // sembrar el dedup y no re-inyectarlo). Feature solo-CLI: el bench no
+    // cablea el techo.
+    let agents_md_jit_root = if config.disable_agents_md {
+        None
+    } else {
+        Some((
+            braze_memory::resolve_project_root(cwd),
+            agents_md_snapshot
+                .as_ref()
+                .map(|_| cwd.join("AGENTS.md")),
+        ))
+    };
     let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {
         braze_config::default_system_prompt(
             cwd,
@@ -862,6 +878,11 @@ async fn build_engine(
             .max_round_wall_clock_secs
             .map(std::time::Duration::from_secs),
     );
+    // Carga JIT de AGENTS.md por subdir — techo en el git root, dedup
+    // sembrado con el raíz. Solo si `disable_agents_md` no lo apagó.
+    if let Some((root, root_md)) = agents_md_jit_root {
+        engine = engine.with_agents_md_jit(root, root_md);
+    }
     // J-13 (docs/AUDITORIA-2026-07-v7.md): ask_user espera a un HUMANO —
     // dispatch inline, exento del timeout de 120s de los background
     // tools (bajo ese reloj, una respuesta lenta se cancelaba y la línea

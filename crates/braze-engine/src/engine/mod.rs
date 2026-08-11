@@ -337,6 +337,26 @@ pub struct Engine {
     /// system prompt de cada request (reconstruidos del registry, nunca
     /// persistidos como conversación).
     loaded_skills: std::sync::Mutex<Vec<braze_skills::LoadedSkill>>,
+    /// Techo del walk-up de la carga JIT de AGENTS.md por subdirectorio
+    /// (`docs/agents-md-jit-design-2026-08-11.md`). `Some(root)` prende la
+    /// feature: cuando un tool toca un archivo bajo `root`, se descubre el
+    /// `AGENTS.md` más cercano subiendo hasta `root` y se inyecta. `None`
+    /// (el default, y el bench siempre) = feature apagada. Lo setea la CLI
+    /// con `braze_memory::resolve_project_root(cwd)` salvo
+    /// `disable_agents_md`.
+    agents_md_root: Option<std::path::PathBuf>,
+    /// Rutas canónicas de los `AGENTS.md` ya cargados esta sesión — dedup
+    /// del descubrimiento JIT. Sembrado con el `AGENTS.md` raíz (ya en el
+    /// system prompt) para no re-inyectarlo. Session-scoped como
+    /// `loaded_skills` (NO se resetea por turno). El `Vec` de bodies
+    /// paralelo (`loaded_agents_md_bodies`) guarda el orden de
+    /// descubrimiento para la inyección; el `HashSet` es solo el dedup.
+    loaded_agents_md: std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>,
+    /// Cuerpos de los `AGENTS.md` de subdir descubiertos, en orden, para
+    /// anexar al system prompt de cada request. Paralelo a
+    /// `loaded_agents_md` (que dedupe por path); el raíz NO está acá (vive
+    /// en `self.system_prompt`).
+    loaded_agents_md_bodies: std::sync::Mutex<Vec<String>>,
     /// Cap de tokens por body inyectado (config `skills.max_body_tokens`).
     skills_max_body_tokens: usize,
     /// Cuántas skills puede cargar la mención de UN turno (config
@@ -461,6 +481,9 @@ impl Engine {
             turn_attempted_edit: std::sync::atomic::AtomicBool::new(false),
             skill_registry: None,
             loaded_skills: std::sync::Mutex::new(Vec::new()),
+            agents_md_root: None,
+            loaded_agents_md: std::sync::Mutex::new(std::collections::HashSet::new()),
+            loaded_agents_md_bodies: std::sync::Mutex::new(Vec::new()),
             skills_max_body_tokens: 1200,
             skills_max_loaded_per_turn: 2,
             textual_rescue_enabled: true,
@@ -759,6 +782,29 @@ impl Engine {
         self.skill_registry = Some(registry);
         self.skills_max_body_tokens = max_body_tokens;
         self.skills_max_loaded_per_turn = max_loaded_per_turn.max(1);
+        self
+    }
+
+    /// Enables just-in-time discovery of subdirectory `AGENTS.md` files
+    /// (`docs/agents-md-jit-design-2026-08-11.md`): `root` is the ceiling
+    /// of the walk-up (typically `braze_memory::resolve_project_root(cwd)`)
+    /// and `root_agents_md` the canonical path of the root `AGENTS.md`
+    /// already baked into the system prompt — seeded into the loaded set
+    /// so the walk never re-injects it. When a tool touches a file under
+    /// `root`, the nearest `AGENTS.md` up to `root` is loaded and appended
+    /// to the system prompt for the rest of the session. Not calling this
+    /// (the default; the bench always) keeps the feature fully off.
+    /// Chainable.
+    pub fn with_agents_md_jit(
+        mut self,
+        root: std::path::PathBuf,
+        root_agents_md: Option<std::path::PathBuf>,
+    ) -> Self {
+        if let Some(root_md) = root_agents_md {
+            let canonical = std::fs::canonicalize(&root_md).unwrap_or(root_md);
+            self.loaded_agents_md.lock().unwrap().insert(canonical);
+        }
+        self.agents_md_root = Some(root);
         self
     }
 

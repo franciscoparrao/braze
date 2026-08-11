@@ -224,6 +224,7 @@ pub(crate) fn event_text_len(event: &AgentEvent) -> usize {
         | AgentEvent::SummaryFallbackAttempted
         | AgentEvent::HookErrored { .. }
         | AgentEvent::SkillLoaded { .. }
+        | AgentEvent::AgentsMdLoaded { .. }
         | AgentEvent::SkillLoadSkipped { .. }
         | AgentEvent::TaskCompleted { .. }
         | AgentEvent::ExplorationDelegated { .. }

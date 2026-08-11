@@ -149,6 +149,9 @@ impl Engine {
         // those bodies before this turn's own mentions resolve, so the
         // system prompt keeps carrying what the transcript assumes.
         self.rehydrate_skills_from_log(&existing_events);
+        // Idem para los AGENTS.md descubiertos JIT en turnos previos: sus
+        // bodies vuelven al system prompt de este turno resumido.
+        self.rehydrate_agents_md_from_log(&existing_events);
 
         // D′: `$skill` mentions resolve before anything else this turn —
         // the study's point is loading the guidance BEFORE the executor's
@@ -984,12 +987,25 @@ impl Engine {
     /// `SkillLoaded` event).
     fn system_prompt_with_skills(&self) -> String {
         let loaded = self.loaded_skills.lock().unwrap();
-        if loaded.is_empty() {
+        let agents_md = self.loaded_agents_md_bodies.lock().unwrap();
+        if loaded.is_empty() && agents_md.is_empty() {
             return self.system_prompt.clone();
         }
         let mut prompt = self.system_prompt.clone();
         for skill in loaded.iter() {
             prompt.push_str(&skill.prompt_addendum());
+        }
+        // Carga JIT de AGENTS.md por subdirectorio
+        // (docs/agents-md-jit-design-2026-08-11.md): los bodies
+        // descubiertos se anexan en orden, bajo el mismo header que el
+        // raíz usa en `braze_config::default_system_prompt`, para que el
+        // modelo los lea como instrucciones del proyecto (que es lo que
+        // son). El raíz NO está acá — vive en `self.system_prompt`.
+        for body in agents_md.iter() {
+            prompt.push_str(
+                "\n\n## Project instructions (AGENTS.md, versioned in this repository):\n\n",
+            );
+            prompt.push_str(body);
         }
         prompt
     }
@@ -1036,6 +1052,47 @@ impl Engine {
                         skill = %name,
                         "skill recorded in session log is no longer loadable — \
                          proceeding without its guidance"
+                    );
+                }
+            }
+        }
+    }
+
+    /// El espejo de [`Self::rehydrate_skills_from_log`] para la carga JIT
+    /// de AGENTS.md (docs/agents-md-jit-design-2026-08-11.md): al resumir,
+    /// re-siembra el set de dedup y recarga los bodies de cada
+    /// `AgentsMdLoaded` del log, en orden. Persiste nada (el log ya los
+    /// registra; re-emitir duplicaría el conteo). Un archivo que
+    /// desapareció desde entonces degrada a warn y se sigue sin ese
+    /// addendum — misma postura que el rehidratado de skills. No-op si la
+    /// feature está apagada (`agents_md_root` None) o si un descubrimiento
+    /// ya está en memoria (idempotente ante `/model`-rebuild).
+    fn rehydrate_agents_md_from_log(&self, events: &[AgentEvent]) {
+        if self.agents_md_root.is_none() {
+            return;
+        }
+        for event in events {
+            let AgentEvent::AgentsMdLoaded { path } = event else {
+                continue;
+            };
+            let path = std::path::PathBuf::from(path);
+            {
+                let mut loaded = self.loaded_agents_md.lock().unwrap();
+                if loaded.contains(&path) {
+                    continue;
+                }
+                loaded.insert(path.clone());
+            }
+            let Some(dir) = path.parent() else { continue };
+            match braze_config::load_agents_md_from(dir) {
+                Some(body) => {
+                    tracing::info!(path = %path.display(), "AGENTS.md JIT rehidratado del log");
+                    self.loaded_agents_md_bodies.lock().unwrap().push(body);
+                }
+                None => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        "AGENTS.md registrado en el log ya no es legible — se sigue sin él"
                     );
                 }
             }

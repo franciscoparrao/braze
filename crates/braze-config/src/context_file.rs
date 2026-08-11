@@ -21,6 +21,47 @@ use std::path::Path;
 /// para que el modelo sepa que hay más.
 const AGENTS_MD_MAX_BYTES: usize = 8_000;
 
+/// Encuentra el `AGENTS.md` más cercano subiendo desde `from` (un
+/// directorio) hasta `ceiling` INCLUSIVE, sin pasarse: el primer
+/// directorio de la cadena `from → … → ceiling` que contenga un
+/// `AGENTS.md` legible. `None` si ninguno lo tiene, o si `from` no está
+/// bajo `ceiling` (el walk se corta al llegar al techo y jamás sube por
+/// encima — garantía de confianza: nunca alcanza un `AGENTS.md` de
+/// `$HOME` o del sistema). Devuelve la ruta del archivo, sin leerlo —
+/// el caller decide con [`load_agents_md_from`] (dedup por path primero).
+///
+/// Las rutas se comparan canonicalizadas para que el techo se detecte
+/// aunque `from` traiga `..`/symlinks; si la canonicalización falla
+/// (ruta inexistente), se usa la ruta lexical y el walk se corta igual
+/// por el conteo de ancestros.
+pub fn find_nearest_agents_md(from: &Path, ceiling: &Path) -> Option<std::path::PathBuf> {
+    let ceiling = std::fs::canonicalize(ceiling).unwrap_or_else(|_| ceiling.to_path_buf());
+    let mut dir = std::fs::canonicalize(from).unwrap_or_else(|_| from.to_path_buf());
+    loop {
+        let candidate = dir.join("AGENTS.md");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        if dir == ceiling {
+            // Llegamos al techo sin encontrar nada: no se sube más.
+            return None;
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => return None,
+        }
+        // Salvaguarda: si `from` no era descendiente de `ceiling`, el
+        // bucle igual termina al agotar los ancestros (parent = None).
+    }
+}
+
+/// Lee y prepara (trim + cap) el `AGENTS.md` en `dir` — el mismo
+/// tratamiento que [`load_agents_md`] da al raíz, factorizado para que la
+/// carga JIT por subdirectorio lo reutilice sobre cualquier directorio.
+pub fn load_agents_md_from(dir: &Path) -> Option<String> {
+    load_agents_md(dir)
+}
+
 /// Lee `AGENTS.md` del directorio dado. `None` si no existe, no se puede
 /// leer (un context file ilegible no debe abortar el arranque — se traza
 /// y se sigue) o está vacío tras trim.
@@ -102,5 +143,49 @@ mod tests {
         assert!(loaded.contains("[AGENTS.md truncado"));
         assert!(loaded.len() < big.len());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nearest_agents_md_is_found_walking_up_to_the_ceiling() {
+        let root = temp_dir("jit-root");
+        let sub = root.join("crates/foo/src");
+        std::fs::create_dir_all(&sub).unwrap();
+        // AGENTS.md intermedio en crates/foo.
+        std::fs::write(root.join("crates/foo/AGENTS.md"), "# foo rules").unwrap();
+        // Un touch en crates/foo/src encuentra el de crates/foo.
+        let found = find_nearest_agents_md(&sub, &root).expect("debe encontrar el intermedio");
+        assert_eq!(found, std::fs::canonicalize(root.join("crates/foo/AGENTS.md")).unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn walk_up_stops_at_the_ceiling_and_never_goes_above() {
+        let root = temp_dir("jit-ceiling");
+        let sub = root.join("a/b");
+        std::fs::create_dir_all(&sub).unwrap();
+        // AGENTS.md solo POR ENCIMA del techo (en el padre de root).
+        std::fs::write(root.join("AGENTS.md"), "# root").unwrap();
+        let above = root.parent().unwrap().join("AGENTS.md");
+        let _ = std::fs::write(&above, "# fuera del proyecto");
+        // Con techo = root, un touch en a/b encuentra el root, no el de arriba.
+        let found = find_nearest_agents_md(&sub, &root).expect("encuentra el root");
+        assert_eq!(found, std::fs::canonicalize(root.join("AGENTS.md")).unwrap());
+        // Sin ningún AGENTS.md dentro del árbol: None, jamás el de arriba.
+        std::fs::remove_file(root.join("AGENTS.md")).unwrap();
+        assert_eq!(
+            find_nearest_agents_md(&sub, &root),
+            None,
+            "no debe escapar el techo hacia el AGENTS.md de afuera"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn no_agents_md_anywhere_is_none() {
+        let root = temp_dir("jit-none");
+        let sub = root.join("x/y");
+        std::fs::create_dir_all(&sub).unwrap();
+        assert_eq!(find_nearest_agents_md(&sub, &root), None);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

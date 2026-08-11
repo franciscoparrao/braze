@@ -745,6 +745,14 @@ impl Engine {
                 if call.name == "edit_file" {
                     id_to_edit_path.insert(call.id.clone(), path.clone());
                 }
+                // Carga JIT de AGENTS.md por subdirectorio
+                // (docs/agents-md-jit-design-2026-08-11.md): el tool tocó
+                // `path`; descubrir el AGENTS.md más cercano subiendo
+                // hasta el techo del proyecto e inyectarlo para las
+                // rondas siguientes. Solo con el lever prendido
+                // (`agents_md_root.is_some()`); no-op barato si no.
+                self.maybe_discover_agents_md(session, &path, observer)
+                    .await?;
                 if MUTATING_TOOL_NAMES.contains(&call.name.as_str()) {
                     reads_by_path.remove(&path);
                 } else if call.name == "read_file" {
@@ -1428,7 +1436,94 @@ impl Engine {
 
         not_converged(rounds, input_tokens, output_tokens, landed, compiles)
     }
+
+    /// Carga JIT de AGENTS.md por subdirectorio
+    /// (docs/agents-md-jit-design-2026-08-11.md). Un tool tocó `raw_path`;
+    /// si la feature está prendida (`agents_md_root.is_some()`), descubre
+    /// el `AGENTS.md` más cercano subiendo hasta el techo del proyecto,
+    /// y —si es nuevo y no se pasó del tope de la sesión— lo carga en
+    /// `loaded_agents_md_bodies` (inyectado por
+    /// `system_prompt_with_skills` en las rondas siguientes) y persiste
+    /// `AgentsMdLoaded` para auditoría y rehidratación en `--resume`.
+    ///
+    /// Barato y silencioso cuando no hay nada que descubrir: el caso
+    /// común (proyecto sin AGENTS.md de subdir) es un walk-up que no
+    /// encuentra archivo y no toca estado.
+    pub(super) async fn maybe_discover_agents_md(
+        &self,
+        session: &SessionId,
+        raw_path: &str,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<(), EngineError> {
+        let Some(root) = &self.agents_md_root else {
+            return Ok(());
+        };
+        // El directorio del archivo tocado — el "piso" del walk-up.
+        // Resuelto contra el techo si es relativo (el `path` de una tool
+        // puede venir relativo al workdir, que ES el proyecto).
+        let path = std::path::Path::new(raw_path);
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            root.join(path)
+        };
+        let Some(from_dir) = abs.parent() else {
+            return Ok(());
+        };
+        let Some(found) = braze_config::find_nearest_agents_md(from_dir, root) else {
+            return Ok(());
+        };
+        // Dedup por path canónico; el raíz ya está sembrado.
+        {
+            let mut loaded = self.loaded_agents_md.lock().unwrap();
+            if loaded.contains(&found) {
+                return Ok(());
+            }
+            // Tope de cuenta por sesión: no inflar el prompt sin límite —
+            // el prompt chico es el punto de la feature. `len()-1` porque
+            // el raíz sembrado ocupa un slot que no es un body inyectado.
+            if self.loaded_agents_md_bodies.lock().unwrap().len() >= AGENTS_MD_JIT_MAX_FILES {
+                // Se marca como visto para no reintentar el mismo cada
+                // ronda, pero no se inyecta.
+                loaded.insert(found.clone());
+                tracing::warn!(
+                    path = %found.display(),
+                    max = AGENTS_MD_JIT_MAX_FILES,
+                    "AGENTS.md JIT alcanzó el tope de archivos por sesión; se ignora este"
+                );
+                return Ok(());
+            }
+            loaded.insert(found.clone());
+        }
+        // Leer el body (fuera del lock — I/O). Si desapareció entre el
+        // find y ahora, se descarta silencioso (ya está en el set, no se
+        // reintenta).
+        let Some(dir) = found.parent() else {
+            return Ok(());
+        };
+        let Some(body) = braze_config::load_agents_md_from(dir) else {
+            return Ok(());
+        };
+        self.loaded_agents_md_bodies.lock().unwrap().push(body);
+        self.append_and_notify(
+            session,
+            &AgentEvent::AgentsMdLoaded {
+                path: found.to_string_lossy().into_owned(),
+            },
+            observer,
+        )
+        .await?;
+        tracing::info!(path = %found.display(), "AGENTS.md de subdirectorio cargado JIT");
+        Ok(())
+    }
 }
+
+/// Tope de `AGENTS.md` de subdirectorio que la carga JIT inyecta por
+/// sesión (docs/agents-md-jit-design-2026-08-11.md): una sesión que barre
+/// medio repo no puede inflar el system prompt sin límite — el prompt
+/// chico es justo lo que la feature protege. Descubrimientos más allá de
+/// este tope se marcan como vistos (no se reintentan) pero no se inyectan.
+const AGENTS_MD_JIT_MAX_FILES: usize = 8;
 
 /// Sugerencia "¿quisiste decir X?" para una tool inexistente — incidente
 /// roam #9 (2026-07-20): gpt-oss:20b llamó tres veces en un mismo turno
@@ -2430,6 +2525,146 @@ mod tests {
             "con el contador reseteado por el éxito, el write_file debe despachar"
         );
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Carga JIT de AGENTS.md por subdir
+    /// (docs/agents-md-jit-design-2026-08-11.md): un `read_file` sobre un
+    /// archivo en un subdir con AGENTS.md hace que (a) el request de la
+    /// ronda siguiente lleve ese AGENTS.md en su system prompt, (b) se
+    /// persista `AgentsMdLoaded`, (c) el raíz NUNCA se re-inyecte, y (d)
+    /// un segundo touch no duplique.
+    #[tokio::test]
+    async fn a_subdir_agents_md_is_discovered_and_injected_next_round() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Proyecto: raíz con AGENTS.md + subdir crates/foo con el suyo.
+        let root = dir.join("proj");
+        let sub = root.join("crates/foo");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap(); // techo = git root
+        std::fs::write(root.join("AGENTS.md"), "REGLA RAIZ").unwrap();
+        std::fs::write(sub.join("AGENTS.md"), "REGLA-DE-FOO-SUBDIR").unwrap();
+
+        // Ronda 1: read_file de crates/foo/bar.rs → dispara descubrimiento.
+        // Ronda 2: texto final (su request debe llevar el addendum).
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "r1".to_string(),
+                        name: "read_file".to_string(),
+                        arguments: serde_json::json!({ "path": "crates/foo/bar.rs" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::new(std::sync::Mutex::new(Vec::new())),
+        };
+        let requests = Arc::clone(&model.requests);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            // El system prompt YA lleva el raíz (como en producción).
+            "system prompt\n\nREGLA RAIZ".to_string(),
+            1024,
+        )
+        .with_agents_md_jit(root.clone(), Some(root.join("AGENTS.md")));
+
+        engine
+            .run_turn(&session, "lee crates/foo/bar.rs", &mut NoopObserver)
+            .await
+            .expect("turno converge");
+
+        let reqs = requests.lock().unwrap().clone();
+        assert!(reqs.len() >= 2, "debe haber al menos dos rondas");
+        // (a) El request de la ronda 2 lleva el AGENTS.md del subdir.
+        assert!(
+            reqs[1].system_prompt.contains("REGLA-DE-FOO-SUBDIR"),
+            "el AGENTS.md del subdir debe entrar al system prompt de la ronda 2"
+        );
+        // (c) El raíz aparece UNA vez (el sembrado del dedup evita
+        // re-inyectarlo como si fuera un descubrimiento).
+        assert_eq!(
+            reqs[1].system_prompt.matches("REGLA RAIZ").count(),
+            1,
+            "el AGENTS.md raíz no debe duplicarse"
+        );
+
+        // (b) Se persistió AgentsMdLoaded, exactamente una vez (d: dedup).
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let loads: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::AgentsMdLoaded { .. }))
+            .collect();
+        assert_eq!(loads.len(), 1, "un solo AgentsMdLoaded para el subdir");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Con la feature apagada (sin `with_agents_md_jit`), tocar un subdir
+    /// con AGENTS.md NO inyecta nada — el default es no-op estricto.
+    #[tokio::test]
+    async fn without_the_lever_no_subdir_agents_md_is_loaded() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let sub = dir.join("proj/crates/foo");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("AGENTS.md"), "REGLA-DE-FOO-SUBDIR").unwrap();
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "r1".to_string(),
+                        name: "read_file".to_string(),
+                        arguments: serde_json::json!({ "path": "proj/crates/foo/bar.rs" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::new(std::sync::Mutex::new(Vec::new())),
+        };
+        let requests = Arc::clone(&model.requests);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ReadWriteToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "lee bar.rs", &mut NoopObserver)
+            .await
+            .expect("turno converge");
+
+        let reqs = requests.lock().unwrap().clone();
+        assert!(
+            !reqs.iter().any(|r| r.system_prompt.contains("REGLA-DE-FOO-SUBDIR")),
+            "sin el lever, ningún AGENTS.md de subdir debe cargarse"
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }

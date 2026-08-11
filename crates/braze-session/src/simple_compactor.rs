@@ -349,6 +349,7 @@ impl ContextCompactor for SimpleContextCompactor {
                 | AgentEvent::HarnessNote { .. }
                 | AgentEvent::HookErrored { .. }
                 | AgentEvent::SkillLoaded { .. }
+        | AgentEvent::AgentsMdLoaded { .. }
                 | AgentEvent::SkillLoadSkipped { .. }
                 // Audit-only trace for downstream consumers (braze-memory's
                 // ProjectMemoryHook) — not conversational content, nothing

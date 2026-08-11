@@ -472,6 +472,7 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         | AgentEvent::SummaryFallbackAttempted
         | AgentEvent::HookErrored { .. }
         | AgentEvent::SkillLoaded { .. }
+        | AgentEvent::AgentsMdLoaded { .. }
         | AgentEvent::SkillLoadSkipped { .. }
         // Audit-only trace for downstream consumers (braze-memory's
         // ProjectMemoryHook) — never rendered back to the model.
