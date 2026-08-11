@@ -137,7 +137,13 @@ IRT de la #2) con un modelo no saturado.
 
 **Descartadas por ahora** (con razón): beta-binomial jerárquico para
 flakiness (pass^k ya cumple ese rol), selección submodular para compactación
-(necesita embeddings; prior débil tras el nulo del lead-summary).
+(necesita embeddings; ~~prior débil tras el nulo del lead-summary~~ —
+corrección 2026-08-10: esa frase no tenía sweep detrás cuando se
+escribió; el A/B real dio NO-ADOPTADO con señal direccional POSITIVA
+(+6,3pp, 6/0 discordantes, p=0,031 — ver
+`docs/sweep-lead-summary-ttc-2026-08-10.md`), así que el prior de esta
+línea es algo menos débil de lo que este doc asumió; sigue descartada
+por la dependencia de embeddings).
 
 **Estado al 2026-08-07**: #1, #2 y #3 ejecutadas; las dos adopciones que
 dejaron (#1 `--sequential-stop`, #2 chequeo de salud de banco) están en

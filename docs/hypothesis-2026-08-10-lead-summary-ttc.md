@@ -1,7 +1,16 @@
 # Pre-registro: A/B de lead-summary y TTC local — las dos palancas v8 sin veredicto
 
 Fecha: 2026-08-10
-Estado: **PRE-REGISTRADO, sweep por lanzar.** Criterios fijados ANTES de
+Estado: **CERRADO el mismo día — TTC RECHAZADO (Δ≤0 en ambos; en llama
+significativamente dañino: 0/8 discordantes, p=0,0078 — el modo de un
+modelo débil es un error estable que gana la votación), lead-summary
+NO-ADOPTADO por tamaño (+6,3pp, IC cruza cero) con señal direccional
+positiva (6/0 discordantes, p=0,031).** Mecanismo validado en ambos.
+El sweep original sufrió OOM-kill de Ollama en Nitro a mitad de camino
+(breaker protegió la estadística); brazos dañados re-corridos con seed
+pareado. Ninguna regla se modificó después de correr. Detalle:
+`docs/sweep-lead-summary-ttc-2026-08-10.md`.
+Criterios fijados ANTES de
 correr, disciplina de `docs/constrained-decoding-ab-design.md`. Ambas
 palancas están implementadas desde v8 (§ 6 summary-por-lead `c47c478`,
 § 6.15 TTC `908348b`) y nunca se midieron — son las últimas palancas del
