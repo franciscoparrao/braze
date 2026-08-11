@@ -27,3 +27,6 @@ braze-bench-preserved-sessions/
 # Basura de tooling local
 __pycache__/
 wiki/.last-distill
+
+# Runtime del harness (memoria de proyecto + spill de tool output)
+.braze/
