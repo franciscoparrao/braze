@@ -653,6 +653,13 @@ pub struct AblationOverrides {
     /// `+ablate:no-syntactic-gate` — disables the pre-application
     /// syntactic gate (`LocalToolsProvider::with_syntactic_edit_gate(false)`).
     pub disable_syntactic_edit_gate: bool,
+    /// `+ablate:no-spill` — disables spill-to-file of truncated tool
+    /// output (`LocalToolsProvider::with_tool_output_spill(false)`), so
+    /// the model can't recover a truncated grep/build from
+    /// `.braze/spill/` — the ablation for measuring whether lossless
+    /// truncation actually helps (docs/tool-output-spill-design-2026-08-11.md).
+    /// The head+tail truncation stays on either way.
+    pub disable_tool_output_spill: bool,
     /// `+ablate:strict-edit` — disables `edit_file`'s fuzzy matching
     /// ladder, rungs 2-3 (`LocalToolsProvider::with_edit_strict_mode(true)`).
     pub edit_strict_mode: bool,
@@ -838,7 +845,7 @@ impl AblationOverrides {
     /// `recognized_keys_lists_every_parseable_key` now pins the two in
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, no-syntactic-gate, strict-edit, \
-         no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, \
+         no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, no-spill, \
          task-list, explore, editor, edit-fence, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
          tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N, \
@@ -859,6 +866,7 @@ impl AblationOverrides {
                 "no-rescue" => out.disable_textual_rescue = true,
                 "no-post-edit-check" => out.disable_post_edit_check = true,
                 "no-syntactic-gate" => out.disable_syntactic_edit_gate = true,
+                "no-spill" => out.disable_tool_output_spill = true,
                 "strict-edit" => out.edit_strict_mode = true,
                 "no-caching" => out.disable_prompt_caching = true,
                 "no-prune" => out.disable_observation_collapse = true,
@@ -967,6 +975,9 @@ impl AblationOverrides {
         }
         if self.disable_syntactic_edit_gate {
             parts.push("no-syntactic-gate".to_string());
+        }
+        if self.disable_tool_output_spill {
+            parts.push("no-spill".to_string());
         }
         if self.edit_strict_mode {
             parts.push("strict-edit".to_string());

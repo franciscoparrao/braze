@@ -104,6 +104,15 @@ pub struct LocalToolsProvider {
     /// off. Off by default: un `shell_exec` del modelo no tiene por qué
     /// alcanzar la red salvo que el usuario lo habilite.
     bwrap_allow_network: bool,
+    /// Spill-to-file del tool output truncado
+    /// (`docs/tool-output-spill-design-2026-08-11.md`): al truncar, el
+    /// output completo se guarda en `.braze/spill/<call_id>.txt` y el
+    /// trailer apunta ahí para que el modelo lo recupere con `read_file`
+    /// (offset/limit) en vez de re-correr el comando. On by default (es
+    /// sin pérdida y el path es leíble sin fricción);
+    /// `Config::enable_tool_output_spill` / `+ablate:no-spill` lo apaga.
+    /// El head+tail del truncado es siempre-on, independiente de este flag.
+    spill_enabled: bool,
 }
 
 impl LocalToolsProvider {
@@ -125,6 +134,7 @@ impl LocalToolsProvider {
             formatters: crate::post_edit_check::default_rust_formatters(),
             bwrap_sandbox: false,
             bwrap_allow_network: false,
+            spill_enabled: true,
         }
     }
 
@@ -144,6 +154,7 @@ impl LocalToolsProvider {
             formatters: crate::post_edit_check::default_rust_formatters(),
             bwrap_sandbox: false,
             bwrap_allow_network: false,
+            spill_enabled: true,
         }
     }
 
@@ -208,6 +219,15 @@ impl LocalToolsProvider {
     /// unless [`Self::with_bwrap_sandbox`] is also on.
     pub fn with_bwrap_allow_network(mut self, allow: bool) -> Self {
         self.bwrap_allow_network = allow;
+        self
+    }
+
+    /// Enables/disables spill-to-file of truncated tool output —
+    /// chainable, same shape as [`Self::with_post_edit_check`]. See
+    /// `spill_enabled`'s field doc comment and
+    /// `docs/tool-output-spill-design-2026-08-11.md`.
+    pub fn with_tool_output_spill(mut self, enabled: bool) -> Self {
+        self.spill_enabled = enabled;
         self
     }
 
@@ -467,17 +487,22 @@ impl LocalToolsProvider {
     /// second. Either side gets an actionable trailer telling a small
     /// model *what to do differently*, never just "truncated".
     fn wrap(&self, call: &ToolCall, outcome: Result<String, String>) -> ToolResult {
-        match outcome {
-            Ok(content) => ToolResult {
-                tool_call_id: call.id.clone(),
-                content: truncate_output(content, self.output_budget, self.output_max_lines),
-                is_error: false,
-            },
-            Err(content) => ToolResult {
-                tool_call_id: call.id.clone(),
-                content: truncate_output(content, self.output_budget, self.output_max_lines),
-                is_error: true,
-            },
+        let spill = self
+            .spill_enabled
+            .then_some((call.id.as_str(), self.workdir.as_path()));
+        let (content, is_error) = match outcome {
+            Ok(content) => (content, false),
+            Err(content) => (content, true),
+        };
+        ToolResult {
+            tool_call_id: call.id.clone(),
+            content: truncate_output_with_spill(
+                content,
+                self.output_budget,
+                self.output_max_lines,
+                spill,
+            ),
+            is_error,
         }
     }
 }
@@ -509,11 +534,44 @@ pub(crate) const MAX_TOOL_OUTPUT_BYTES: usize = 8_000;
 /// `budget` even though this doc comment already promised the byte cap
 /// applies second. Both truncations can now fire on the same call — the
 /// trailer says so explicitly instead of only reporting one.
+/// Atajo sin spill — solo lo usan los tests del truncado puro
+/// (producción siempre pasa por [`truncate_output_with_spill`] desde
+/// `wrap`).
+#[cfg(test)]
 fn truncate_output(content: String, budget: usize, max_lines: Option<u32>) -> String {
+    truncate_output_with_spill(content, budget, max_lines, None)
+}
+
+/// Fracción del presupuesto de bytes que se reserva para el HEAD del
+/// output; el resto es el TAIL (blueprint gemini-cli `headRatio = 0.2`).
+/// El tail pesa más a propósito: en grep/logs/builds el resultado o el
+/// error suele estar al FINAL, y el head-only anterior lo tiraba.
+const HEAD_BUDGET_NUM: usize = 2;
+const HEAD_BUDGET_DEN: usize = 10;
+
+/// Como [`truncate_output`], pero conservando HEAD+TAIL (no solo head) al
+/// pasar el presupuesto de bytes, y —si `spill` es `Some`— escribiendo el
+/// output COMPLETO (pre-truncado) a un archivo para que el modelo lo
+/// recupere con `read_file` en vez de re-correr el comando (design doc
+/// `docs/tool-output-spill-design-2026-08-11.md`).
+///
+/// `spill = Some((call_id, workdir))`: al truncar, se escribe
+/// `workdir/.braze/spill/<call_id>.txt` con el `content` original. Un
+/// fallo de escritura degrada al trailer "narrow your query" sin abortar.
+/// El cap de líneas se aplica ANTES del head+tail, igual que antes.
+fn truncate_output_with_spill(
+    content: String,
+    budget: usize,
+    max_lines: Option<u32>,
+    spill: Option<(&str, &Path)>,
+) -> String {
     let max_lines = max_lines.unwrap_or(0) as usize;
     let total_lines = content.lines().count();
+    // El output ORIGINAL, antes de cualquier truncado — lo que se
+    // spillea (sin pérdida) si algo se recorta.
+    let original_len = content.len();
 
-    let (mut working, lines_omitted) = if max_lines > 0 && total_lines > max_lines {
+    let (working, lines_omitted) = if max_lines > 0 && total_lines > max_lines {
         let retained = content
             .lines()
             .take(max_lines)
@@ -521,38 +579,95 @@ fn truncate_output(content: String, budget: usize, max_lines: Option<u32>) -> St
             .join("\n");
         (retained, total_lines - max_lines)
     } else {
-        (content, 0)
+        (content.clone(), 0)
     };
 
     let bytes_before_cap = working.len();
-    if working.len() > budget {
-        let mut cut = budget;
-        while !working.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        working.truncate(cut);
+    let (rendered, bytes_omitted) = if working.len() > budget {
+        (head_tail(&working, budget), bytes_before_cap.saturating_sub(budget))
+    } else {
+        (working, 0)
+    };
+
+    if lines_omitted == 0 && bytes_omitted == 0 {
+        return rendered;
     }
-    let bytes_omitted = bytes_before_cap - working.len();
+
+    // Algo se recortó: intentar el spill del output completo.
+    let recovery = match spill {
+        Some((call_id, workdir)) => match write_spill_file(workdir, call_id, &content) {
+            Some(rel) => format!(
+                "Full output ({original_len} bytes) saved to {rel} — read specific ranges \
+                 with read_file (offset/limit) instead of re-running this command."
+            ),
+            None => NARROW_HINT.to_string(),
+        },
+        None => NARROW_HINT.to_string(),
+    };
 
     match (lines_omitted, bytes_omitted) {
-        (0, 0) => working,
+        (0, 0) => unreachable!("cubierto por el early-return de arriba"),
         (lines, 0) => format!(
-            "{working}\n\n[output truncated: {lines} of {total_lines} lines omitted. Narrow \
-             your query — a more specific path/pattern, or a smaller file — instead of \
-             retrying this exact call.]"
+            "{rendered}\n\n[output truncated: {lines} of {total_lines} lines omitted. {recovery}]"
         ),
         (0, bytes) => format!(
-            "{working}\n\n[output truncated: {bytes} of {bytes_before_cap} bytes omitted. \
-             Narrow your query — a more specific path/pattern, or a smaller file — instead of \
-             retrying this exact call.]"
+            "{rendered}\n\n[output truncated: {bytes} of {bytes_before_cap} bytes omitted from \
+             the middle (head and tail kept). {recovery}]"
         ),
         (lines, bytes) => format!(
-            "{working}\n\n[output truncated: {lines} of {total_lines} lines omitted, then \
-             {bytes} more of the retained {bytes_before_cap} bytes cut to fit the output \
-             budget. Narrow your query — a more specific path/pattern, or a smaller file — \
-             instead of retrying this exact call.]"
+            "{rendered}\n\n[output truncated: {lines} of {total_lines} lines omitted, then \
+             {bytes} more of the retained {bytes_before_cap} bytes cut from the middle (head \
+             and tail kept). {recovery}]"
         ),
     }
+}
+
+/// El consejo cuando no hay spill (o falló): el modelo debe acotar, no
+/// re-intentar igual. Terse errors get retried verbatim (AUDITORIA-2026-07).
+const NARROW_HINT: &str =
+    "Narrow your query — a more specific path/pattern, or a smaller file — instead of \
+     retrying this exact call.";
+
+/// Conserva el HEAD (`HEAD_BUDGET_NUM/HEAD_BUDGET_DEN` del budget) y el
+/// TAIL (el resto) de `s`, con un marcador `...` en el medio, todo en
+/// bordes de char UTF-8. `s.len()` DEBE ser > `budget` (el caller lo
+/// garantiza).
+fn head_tail(s: &str, budget: usize) -> String {
+    let head_budget = budget * HEAD_BUDGET_NUM / HEAD_BUDGET_DEN;
+    let tail_budget = budget - head_budget;
+    // Fin del head en borde de char <= head_budget.
+    let mut head_end = head_budget.min(s.len());
+    while head_end > 0 && !s.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    // Inicio del tail en borde de char >= len - tail_budget, y nunca
+    // antes del fin del head (si se solaparan, no hay medio que cortar).
+    let mut tail_start = s.len().saturating_sub(tail_budget).max(head_end);
+    while tail_start < s.len() && !s.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+    format!("{}\n...\n{}", &s[..head_end], &s[tail_start..])
+}
+
+/// Escribe `content` a `workdir/.braze/spill/<call_id>.txt` y devuelve la
+/// ruta RELATIVA (`.braze/spill/<id>.txt`) para el trailer — relativa
+/// porque el modelo la pasa a `read_file`, que resuelve contra el mismo
+/// workdir. `None` si no se pudo escribir (dir no escribible, etc.) — el
+/// caller degrada a solo-truncado. Escritura directa (no vía la tool
+/// `write_file`): el harness no pasa por el `PermissionGuard`, y una
+/// LECTURA posterior de `.braze/` es `Reversible` (silenciosa).
+fn write_spill_file(workdir: &Path, call_id: &str, content: &str) -> Option<String> {
+    // Sanitiza el id por si acaso (los ids del engine son uuid/rescued-…,
+    // pero un `/` o `..` en un nombre de archivo sería un escape de dir).
+    let safe: String = call_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let dir = workdir.join(".braze").join("spill");
+    std::fs::create_dir_all(&dir).ok()?;
+    let file = dir.join(format!("{safe}.txt"));
+    std::fs::write(&file, content).ok()?;
+    Some(format!(".braze/spill/{safe}.txt"))
 }
 
 #[cfg(test)]
@@ -876,7 +991,9 @@ mod tests {
             .await
             .expect("write fixture");
 
-        let provider = LocalToolsProvider::new(allow_guard(&dir));
+        // Spill off: este test cubre el truncado puro (con spill on, el
+        // trailer sería el del spill — cubierto por su propio test).
+        let provider = LocalToolsProvider::new(allow_guard(&dir)).with_tool_output_spill(false);
         let result = provider
             .invoke(&call(
                 "read_file",
@@ -893,6 +1010,47 @@ mod tests {
             "expected an actionable trailer, got: {}",
             result.content
         );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Spill-to-file (docs/tool-output-spill-design-2026-08-11.md): al
+    /// truncar con el spill on, el output COMPLETO queda en
+    /// `.braze/spill/<id>.txt` bajo el workdir y el trailer apunta ahí.
+    #[tokio::test]
+    async fn spill_writes_the_full_output_and_points_to_it() {
+        let dir = unique_temp_dir("spill");
+        tokio::fs::create_dir_all(&dir).await.expect("workdir");
+        let file_path = dir.join("big.txt");
+        let big = "x".repeat(MAX_TOOL_OUTPUT_BYTES * 2);
+        tokio::fs::write(&file_path, &big).await.expect("fixture");
+
+        // `with_workdir` = el spill aterriza bajo `dir`, no bajo el cwd.
+        let provider = LocalToolsProvider::with_workdir(allow_guard(&dir), dir.clone());
+        let result = provider
+            .invoke(&call(
+                "read_file",
+                serde_json::json!({ "path": file_path.to_string_lossy() }),
+            ))
+            .await
+            .expect("invoke ok");
+
+        assert!(result.content.contains("output truncated"));
+        assert!(
+            result.content.contains(".braze/spill/call-1.txt"),
+            "el trailer debe apuntar al spill: {}",
+            result.content
+        );
+        assert!(
+            !result.content.contains("Narrow your query"),
+            "con spill no se usa el hint de acotar"
+        );
+        // El archivo de spill existe y contiene el output COMPLETO (el
+        // archivo leído es una sola línea gigante, sin cap de líneas).
+        let spilled = tokio::fs::read_to_string(dir.join(".braze/spill/call-1.txt"))
+            .await
+            .expect("spill file existe");
+        assert_eq!(spilled.len(), big.len(), "el spill guarda el output completo");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -1264,18 +1422,23 @@ mod tests {
 
     #[test]
     fn oversized_content_is_truncated_with_an_actionable_trailer() {
-        let original_len = MAX_TOOL_OUTPUT_BYTES * 3;
-        let content = "x".repeat(original_len);
+        // Head+tail: distinguir extremos para verificar que AMBOS
+        // sobreviven. Head 'h', medio 'm' (lo que se corta), tail 't'.
+        let head = "h".repeat(MAX_TOOL_OUTPUT_BYTES);
+        let mid = "m".repeat(MAX_TOOL_OUTPUT_BYTES);
+        let tail = "t".repeat(MAX_TOOL_OUTPUT_BYTES);
+        let original_len = head.len() + mid.len() + tail.len();
+        let content = format!("{head}{mid}{tail}");
         let truncated = truncate_output(content, MAX_TOOL_OUTPUT_BYTES, None);
-        // Retained content is capped exactly at MAX_TOOL_OUTPUT_BYTES; the
-        // trailer on top is small relative to the (much larger) original.
         assert!(truncated.len() < original_len);
-        assert!(truncated.starts_with(&"x".repeat(MAX_TOOL_OUTPUT_BYTES)));
+        // El body (antes del trailer) empieza con 'h' y termina con 't':
+        // el tail sobrevive, que es la mejora sobre el head-only.
+        let body = truncated.split("\n\n[output truncated").next().unwrap();
+        assert!(body.starts_with('h'));
+        assert!(body.ends_with('t'), "el tail debe sobrevivir");
+        assert!(!body.contains('m'), "el medio se cortó");
         assert!(truncated.contains("output truncated"));
-        assert!(truncated.contains(&format!(
-            "{} of {original_len} bytes",
-            MAX_TOOL_OUTPUT_BYTES * 2
-        )));
+        assert!(truncated.contains("omitted from the middle"));
     }
 
     #[test]
@@ -1303,8 +1466,11 @@ mod tests {
         let small_budget = 100usize;
         let content = "x".repeat(500);
         let truncated = truncate_output(content.clone(), small_budget, None);
-        assert!(truncated.starts_with(&"x".repeat(small_budget)));
+        // El contenido retenido (head+tail, sin el trailer) cabe en el
+        // budget; el trailer va encima como siempre.
+        assert!(truncated.starts_with('x'));
         assert!(truncated.contains("output truncated"));
+        // 500 - 100 de budget = 400 bytes cortados del medio.
         assert!(truncated.contains("400 of 500 bytes"));
     }
 
@@ -1375,10 +1541,14 @@ mod tests {
             .find("\n\n[output truncated")
             .expect("must be truncated");
         let retained = &truncated[..trailer_start];
+        // Head+tail: el contenido retenido son los bytes del budget más el
+        // marcador `\n...\n` del medio (5 bytes). Debe respetar el budget
+        // salvo por ese marcador constante.
+        const MIDDLE_MARKER: usize = 5; // "\n...\n"
         assert!(
-            retained.len() <= small_budget,
-            "retained content must respect the byte budget even after max_lines kept a few \
-             oversized lines: {} bytes retained, budget was {small_budget}",
+            retained.len() <= small_budget + MIDDLE_MARKER,
+            "retained content must respect the byte budget (plus the middle marker) even after \
+             max_lines kept a few oversized lines: {} bytes retained, budget was {small_budget}",
             retained.len()
         );
         assert!(
@@ -1389,5 +1559,39 @@ mod tests {
             truncated.contains("bytes"),
             "must report the byte truncation too: {truncated}"
         );
+    }
+
+    #[test]
+    fn head_tail_keeps_both_ends_and_marks_the_middle() {
+        let head = "A".repeat(1000);
+        let tail = "Z".repeat(1000);
+        let content = format!("{head}{}{tail}", "M".repeat(5000));
+        let truncated = truncate_output(content, 1000, None);
+        // Ambos extremos presentes; el medio ('M') NO.
+        let body = truncated.split("\n\n[output truncated").next().unwrap();
+        assert!(body.starts_with('A'), "head presente");
+        assert!(body.ends_with('Z'), "tail presente");
+        assert!(!body.contains('M'), "el medio se cortó");
+        assert!(truncated.contains("head and tail kept"));
+    }
+
+    #[test]
+    fn content_within_budget_passes_through_untouched() {
+        let content = "pequeño".to_string();
+        assert_eq!(truncate_output(content.clone(), 1000, None), content);
+    }
+
+    #[test]
+    fn tail_ratio_favors_the_end_where_errors_live() {
+        // Budget 100: head ~20 bytes, tail ~80. El tail (donde vive el
+        // error de un build) debe ser más grande que el head.
+        let head = "H".repeat(500);
+        let tail = "T".repeat(500);
+        let content = format!("{head}{tail}");
+        let truncated = truncate_output(content, 100, None);
+        let body = truncated.split("\n\n[output truncated").next().unwrap();
+        let n_head = body.matches('H').count();
+        let n_tail = body.matches('T').count();
+        assert!(n_tail > n_head, "el tail debe pesar más: head={n_head} tail={n_tail}");
     }
 }

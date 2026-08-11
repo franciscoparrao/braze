@@ -104,6 +104,10 @@ pub struct ConfigOverrides {
     pub enable_bwrap_tool_sandbox: Option<bool>,
     #[serde(default)]
     pub bwrap_allow_network: Option<bool>,
+    /// Spill-to-file del tool output truncado
+    /// (`BRAZE_ENABLE_TOOL_OUTPUT_SPILL`).
+    #[serde(default)]
+    pub enable_tool_output_spill: Option<bool>,
     #[serde(default)]
     pub disable_agents_md: Option<bool>,
     #[serde(default)]
@@ -588,6 +592,17 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.bwrap_allow_network = Some(parsed);
+                }
+                "ENABLE_TOOL_OUTPUT_SPILL" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.enable_tool_output_spill = Some(parsed);
                 }
                 "DISABLE_AGENTS_MD" => {
                     let parsed =

@@ -632,7 +632,8 @@ async fn build_engine(
         .with_output_max_lines(config.tool_output_max_lines)
         .with_formatters(config.formatters.clone())
         .with_bwrap_sandbox(config.enable_bwrap_tool_sandbox)
-        .with_bwrap_allow_network(config.bwrap_allow_network);
+        .with_bwrap_allow_network(config.bwrap_allow_network)
+        .with_tool_output_spill(config.enable_tool_output_spill);
     let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
         vec![Box::new(local_provider)];
 

@@ -307,7 +307,10 @@ pub async fn run_task(
     let tools_provider = braze_tools_local::LocalToolsProvider::with_workdir(guard, sandbox.path())
         .with_post_edit_check(post_edit_check_enabled)
         .with_syntactic_edit_gate(syntactic_gate_enabled)
-        .with_edit_strict_mode(ablation.edit_strict_mode);
+        .with_edit_strict_mode(ablation.edit_strict_mode)
+        // Spill-to-file on por default; `+ablate:no-spill` lo apaga para
+        // el A/B de si el truncado sin pérdida ayuda de verdad.
+        .with_tool_output_spill(!ablation.disable_tool_output_spill);
     // C′.1: el fixture del A/B de search_tools — un catálogo sintético
     // de ruido junto a las tools locales reales, solo cuando la tarea lo
     // pide (`noise_tools > 0`); las suites existentes no cambian.

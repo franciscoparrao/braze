@@ -503,6 +503,14 @@ pub struct Config {
     /// modelo no alcanza la red salvo habilitación explícita.
     #[serde(default)]
     pub bwrap_allow_network: bool,
+    /// Spill-to-file del tool output truncado
+    /// (`docs/tool-output-spill-design-2026-08-11.md`): al truncar, el
+    /// output completo se guarda en `.braze/spill/<id>.txt` y el modelo lo
+    /// recupera con `read_file` (offset/limit) en vez de re-correr el
+    /// comando. On by default (sin pérdida, leíble sin fricción); el
+    /// head+tail del truncado es siempre-on aparte de este flag.
+    #[serde(default = "default_true")]
+    pub enable_tool_output_spill: bool,
     /// Interop AGENTS.md (v8/v9): por default braze lee `AGENTS.md` de la
     /// raíz del working directory y lo inyecta como sección del system
     /// prompt — el context file estándar entre harnesses, versionado en
@@ -701,6 +709,7 @@ impl Default for Config {
             enable_landlock_write_sandbox: false,
             enable_bwrap_tool_sandbox: false,
             bwrap_allow_network: false,
+            enable_tool_output_spill: true,
             disable_agents_md: false,
             tool_output_max_bytes: default_tool_output_max_bytes(),
             tool_output_max_lines: None,
@@ -949,6 +958,9 @@ impl Config {
         }
         if let Some(v) = overrides.bwrap_allow_network {
             self.bwrap_allow_network = v;
+        }
+        if let Some(v) = overrides.enable_tool_output_spill {
+            self.enable_tool_output_spill = v;
         }
         if let Some(v) = overrides.disable_agents_md {
             self.disable_agents_md = v;

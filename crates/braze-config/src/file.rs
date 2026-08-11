@@ -107,6 +107,7 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "disable_agents_md",
     "enable_bwrap_tool_sandbox",
     "bwrap_allow_network",
+    "enable_tool_output_spill",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].
