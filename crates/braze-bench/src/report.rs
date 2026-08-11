@@ -226,21 +226,37 @@ fn binomial(n: u32, k: u32) -> f64 {
 /// pareado que el Wilson pooleado de arriba ignora. El test es McNemar
 /// exacto: solo los pares DISCORDANTES (uno pasa, el otro no) llevan
 /// información; bajo H0 se reparten Binomial(b+c, ½).
-struct PairedComparison {
-    arm: String,
+pub(crate) struct PairedComparison {
+    pub(crate) arm: String,
     /// Pares donde ambos brazos tienen fila contable — los pares con
     /// `HarnessError` en cualquiera de los dos lados se excluyen y se
     /// reportan en `dropped_pairs` (no silent caps).
-    n_pairs: u32,
-    dropped_pairs: u32,
+    pub(crate) n_pairs: u32,
+    pub(crate) dropped_pairs: u32,
     /// Discordantes: solo el control pasó (`b`) / solo el brazo pasó (`c`).
-    control_only: u32,
-    arm_only: u32,
-    p_exact: f64,
+    pub(crate) control_only: u32,
+    pub(crate) arm_only: u32,
+    pub(crate) p_exact: f64,
     /// Ajustado por Holm-Bonferroni sobre la familia "todos los brazos
     /// vs el control" de este sweep — sin esto, 4-5 comparaciones a
     /// α=0.05 esperan ≥1 falso positivo por sweep (v8 K-19).
-    p_holm: f64,
+    pub(crate) p_holm: f64,
+}
+
+/// Imprime una fila de comparación pareada — compartido por el pareo
+/// intra-sweep y el cross-invocación de DBV (`crate::dbv`), para que las
+/// dos tablas se lean idénticas.
+pub(crate) fn print_comparison_row(c: &PairedComparison) {
+    let significance = if c.p_holm < 0.05 { "  *" } else { "" };
+    let dropped_note = if c.dropped_pairs > 0 {
+        format!("  [pares sin contraparte: {}]", c.dropped_pairs)
+    } else {
+        String::new()
+    };
+    println!(
+        "{:<24} pares={:<4} solo-control={:<3} solo-brazo={:<3} p={:.4} p_holm={:.4}{significance}{dropped_note}",
+        c.arm, c.n_pairs, c.control_only, c.arm_only, c.p_exact, c.p_holm
+    );
 }
 
 /// p exacto (dos colas) de McNemar: con `b`+`c` discordantes, bajo H0
@@ -279,31 +295,36 @@ fn holm_adjust(p_values: &[f64]) -> Vec<f64> {
 /// Construye las comparaciones pareadas de cada brazo contra el PRIMER
 /// brazo del sweep (la convención del proyecto: el control va primero
 /// en `--backends`). `None` si hay menos de dos brazos.
-fn paired_comparisons(
-    results: &[TaskResult],
-    backend_order: &[&str],
-) -> Option<Vec<PairedComparison>> {
-    let (&control, arms) = backend_order.split_first()?;
-    if arms.is_empty() {
-        return None;
-    }
+/// Celdas contables de un brazo: `(task_id, repetition) -> passed`. Alias
+/// compartido por el pareo intra-sweep y el cross-invocación de DBV.
+pub(crate) type OutcomeCells = std::collections::HashMap<(String, u32), bool>;
 
-    // (task_id, repetition) -> passed, solo filas contables (sin
-    // harness_error) — el mismo criterio N-37 del resto del reporte.
-    let outcomes_for = |backend: &str| -> std::collections::HashMap<(String, u32), bool> {
-        results
-            .iter()
-            .filter(|r| r.backend == backend)
-            .filter(|r| r.failure_cause != Some(FailureCause::HarnessError))
-            .map(|r| ((r.task_id.clone(), r.repetition), r.passed))
-            .collect()
-    };
-    let control_outcomes = outcomes_for(control);
-
-    let mut comparisons: Vec<PairedComparison> = arms
+/// Celdas contables de un brazo: `(task_id, repetition) -> passed`,
+/// excluyendo las filas `HarnessError` (mismo criterio N-37 que el resto
+/// del reporte — un fallo de infra no es señal de capacidad). Compartido
+/// por el pareo intra-sweep y el cross-invocación de DBV
+/// (`crate::dbv`).
+pub(crate) fn outcomes_map(results: &[TaskResult], backend: &str) -> OutcomeCells {
+    results
         .iter()
-        .map(|&arm| {
-            let arm_outcomes = outcomes_for(arm);
+        .filter(|r| r.backend == backend)
+        .filter(|r| r.failure_cause != Some(FailureCause::HarnessError))
+        .map(|r| ((r.task_id.clone(), r.repetition), r.passed))
+        .collect()
+}
+
+/// El núcleo del pareo de McNemar: compara cada brazo (por sus celdas
+/// contra `control_outcomes`) y llena el Holm sobre la familia. El origen
+/// del control lo decide el caller — el primer brazo de ESTA corrida
+/// (`paired_comparisons`) o el baseline de un JSON previo
+/// (`crate::dbv`, cross-invocación).
+pub(crate) fn compare_against_control(
+    control_outcomes: &OutcomeCells,
+    arm_outcomes: &[(String, OutcomeCells)],
+) -> Vec<PairedComparison> {
+    let mut comparisons: Vec<PairedComparison> = arm_outcomes
+        .iter()
+        .map(|(arm, arm_outcomes)| {
             let total_keys: std::collections::HashSet<&(String, u32)> =
                 control_outcomes.keys().chain(arm_outcomes.keys()).collect();
             let mut n_pairs = 0u32;
@@ -320,29 +341,42 @@ fn paired_comparisons(
                             _ => {}
                         }
                     }
-                    // Un lado sin fila contable (harness_error o suite
-                    // distinta): el par no existe.
                     _ => dropped_pairs += 1,
                 }
             }
             PairedComparison {
-                arm: arm.to_string(),
+                arm: arm.clone(),
                 n_pairs,
                 dropped_pairs,
                 control_only,
                 arm_only,
                 p_exact: mcnemar_exact_p(control_only, arm_only),
-                p_holm: 0.0, // se llena abajo, sobre la familia completa
+                p_holm: 0.0,
             }
         })
         .collect();
-
     let p_values: Vec<f64> = comparisons.iter().map(|c| c.p_exact).collect();
     let adjusted = holm_adjust(&p_values);
     for (comparison, p_holm) in comparisons.iter_mut().zip(adjusted) {
         comparison.p_holm = p_holm;
     }
-    Some(comparisons)
+    comparisons
+}
+
+fn paired_comparisons(
+    results: &[TaskResult],
+    backend_order: &[&str],
+) -> Option<Vec<PairedComparison>> {
+    let (&control, arms) = backend_order.split_first()?;
+    if arms.is_empty() {
+        return None;
+    }
+    let control_outcomes = outcomes_map(results, control);
+    let arm_outcomes: Vec<(String, OutcomeCells)> = arms
+        .iter()
+        .map(|&arm| (arm.to_string(), outcomes_map(results, arm)))
+        .collect();
+    Some(compare_against_control(&control_outcomes, &arm_outcomes))
 }
 
 /// Sums optional per-row USD costs into an optional total — `None` only
@@ -498,16 +532,7 @@ pub fn print_table(results: &[TaskResult]) {
             backend_order_refs[0]
         );
         for c in &comparisons {
-            let significance = if c.p_holm < 0.05 { "  *" } else { "" };
-            let dropped_note = if c.dropped_pairs > 0 {
-                format!("  [pares sin contraparte: {}]", c.dropped_pairs)
-            } else {
-                String::new()
-            };
-            println!(
-                "{:<24} pares={:<4} solo-control={:<3} solo-brazo={:<3} p={:.4} p_holm={:.4}{significance}{dropped_note}",
-                c.arm, c.n_pairs, c.control_only, c.arm_only, c.p_exact, c.p_holm
-            );
+            print_comparison_row(c);
         }
         println!(
             "(* p_holm < 0.05; solo los pares discordantes llevan información — \

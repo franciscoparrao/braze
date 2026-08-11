@@ -8,11 +8,11 @@
 //! without this context can't be compared against a later run with any
 //! confidence that "same config" is actually true.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::backend_spec::SamplingSpec;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunMetadata {
     pub sampling: SamplingSpec,
     pub repetitions: u32,
@@ -91,7 +91,7 @@ pub fn collect_local_env(
         .collect()
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaModelDigest {
     pub model: String,
     /// `None` when the model isn't installed under that exact name, or

@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use braze_events::AgentEvent;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::task::TaskDef;
 
@@ -30,7 +30,7 @@ pub(crate) fn fnv1a_hex(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureCause {
     /// The task exceeded its wall-clock budget (see `runner::run_task`'s
@@ -137,7 +137,7 @@ pub struct MemoryRunMetrics {
     pub memory_tokens: u32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskResult {
     pub backend: String,
     pub task_id: String,

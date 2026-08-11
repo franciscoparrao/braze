@@ -1070,7 +1070,7 @@ impl AblationOverrides {
 /// Sampling parameters applied uniformly across every backend in a sweep
 /// — see [`BackendSpec::build`]'s doc comment for why uniformity is the
 /// point (N-34, docs/AUDITORIA-2026-07-v2.md).
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SamplingSpec {
     pub temperature: f32,
     /// Ignored for an `anthropic` spec — the Messages API has no `seed`

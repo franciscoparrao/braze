@@ -5,6 +5,7 @@
 
 mod backend_spec;
 mod bare_lead_baseline;
+mod dbv;
 mod error;
 mod external;
 mod memory;
@@ -183,6 +184,18 @@ struct Cli {
     /// `--external "bare-lead:ollama:llama3.2:1b+lead:ollama:gemma4:e4b"`.
     #[arg(long, value_delimiter = ',')]
     external: Vec<String>,
+    /// Dynamic Baseline Verification
+    /// (docs/dynamic-baseline-verification-design-2026-08-11.md): ruta al
+    /// `results.json` de un sweep PREVIO cuyo primer brazo es el baseline.
+    /// Al terminar, se compara la metadata del ref contra la de esta
+    /// corrida (drift de entorno: suite, commit del harness, digests de
+    /// modelo, versión del server Ollama, `local_env`, sampling) y se
+    /// parean los brazos de ESTA corrida contra el baseline del ref con
+    /// McNemar exacto + Holm — el flujo "3 invocaciones por brazo" hecho
+    /// first-class. Si el entorno derivó, la comparación se imprime igual
+    /// pero marcada INVÁLIDA. No aborta (over-inform, no bloquear).
+    #[arg(long)]
+    baseline_ref: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -767,7 +780,10 @@ async fn run() -> Result<(), BenchError> {
         println!("[secuencial] {note}");
     }
 
-    if let Some(output_path) = &cli.output {
+    // La metadata se construye si vamos a escribir JSON (`--output`) O si
+    // DBV la necesita para el drift check (`--baseline-ref`). Antes solo
+    // el primer caso la armaba; el segundo la comparte.
+    let metadata = if cli.output.is_some() || cli.baseline_ref.is_some() {
         // E6 (docs/AUDITORIA-2026-07-v3.md): the digest lookups only
         // run when actually writing a JSON file. The suite fingerprint
         // and git commit, in contrast, were captured at sweep START —
@@ -823,9 +839,25 @@ async fn run() -> Result<(), BenchError> {
                 .map(|(_, spec)| spec.display_name(&config))
                 .collect(),
         };
+        Some(metadata)
+    } else {
+        None
+    };
 
-        report::write_json(&metadata, &results, output_path)?;
+    if let (Some(output_path), Some(metadata)) = (&cli.output, &metadata) {
+        report::write_json(metadata, &results, output_path)?;
         println!("\nResultados JSON escritos en {}", output_path.display());
+    }
+
+    // Dynamic Baseline Verification: carga el sweep previo, verifica el
+    // drift del entorno y parea los brazos actuales contra su baseline
+    // (docs/dynamic-baseline-verification-design-2026-08-11.md).
+    if let Some(ref_path) = &cli.baseline_ref {
+        let reference = dbv::load_baseline_ref(ref_path)?;
+        // `metadata` es Some por construcción cuando baseline_ref está.
+        if let Some(metadata) = &metadata {
+            dbv::run_dbv_report(&reference, &results, metadata);
+        }
     }
 
     Ok(())
