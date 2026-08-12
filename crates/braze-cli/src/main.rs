@@ -399,6 +399,9 @@ fn build_model_backend(
             if let Some(repeat_penalty) = config.ollama_repeat_penalty {
                 backend = backend.with_repeat_penalty(repeat_penalty);
             }
+            if let Some(keep_alive) = &config.ollama_keep_alive {
+                backend = backend.with_keep_alive(keep_alive.clone());
+            }
             Ok(Box::new(backend))
         }
         "openrouter" => {

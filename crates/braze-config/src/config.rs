@@ -278,6 +278,17 @@ pub struct Config {
     /// Ollama `options.repeat_penalty` — see `ollama_temperature`.
     #[serde(default)]
     pub ollama_repeat_penalty: Option<f32>,
+    /// Ollama `keep_alive` por-request (e.g. `"2m"`, `"0"`, `"-1"`):
+    /// cuánto queda residente el modelo tras cada request, ganándole a la
+    /// env `OLLAMA_KEEP_ALIVE` del server. Existe para que la política de
+    /// residencia de un sweep multi-modelo viaje con el request en vez de
+    /// depender de cómo quedó configurado el servicio remoto la última vez
+    /// (con el servicio en `-1`, apilar dos modelos grandes OOM-kileó
+    /// Ollama en Nitro a mitad de sweep, 2026-08-10 — CLAUDE.md §
+    /// Benchmarking). `None` (default) omite el campo y manda la config
+    /// del server.
+    #[serde(default)]
+    pub ollama_keep_alive: Option<String>,
     /// OpenRouter API key. Never hardcoded — comes from the config file or
     /// `BRAZE_OPENROUTER_API_KEY`. `ApiKey`, same rationale as
     /// `anthropic_api_key`.
@@ -675,6 +686,7 @@ impl Default for Config {
             ollama_top_p: None,
             ollama_top_k: None,
             ollama_repeat_penalty: None,
+            ollama_keep_alive: None,
             openrouter_api_key: None,
             openrouter_model: None,
             openrouter_base_url: "https://openrouter.ai/api/v1".to_string(),
@@ -800,6 +812,18 @@ impl Config {
                 "max_tokens must be greater than 0".to_string(),
             ));
         }
+        // Un `""` viajaría tal cual al server (`skip_serializing_if` solo
+        // salta `None`) y Ollama lo rechaza como duración inválida — mejor
+        // fallar en el arranque con la instrucción correcta.
+        if let Some(keep_alive) = &self.ollama_keep_alive
+            && keep_alive.trim().is_empty()
+        {
+            return Err(ConfigError::Invalid(
+                "ollama_keep_alive must not be empty — omit it to defer to the server's own \
+                 configuration"
+                    .to_string(),
+            ));
+        }
         // B5 (docs/AUDITORIA-2026-07-v3.md): `max_tokens` is shared across
         // every backend, so lowering its *default* to suit Ollama's small
         // `num_ctx` would silently truncate legitimate long completions on
@@ -868,6 +892,9 @@ impl Config {
         }
         if let Some(v) = overrides.ollama_repeat_penalty {
             self.ollama_repeat_penalty = Some(v);
+        }
+        if let Some(v) = overrides.ollama_keep_alive {
+            self.ollama_keep_alive = Some(v);
         }
         if let Some(v) = overrides.openrouter_api_key {
             self.openrouter_api_key = Some(v);

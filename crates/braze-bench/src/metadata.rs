@@ -78,6 +78,15 @@ pub struct RunMetadata {
     /// the LocalBackend), and omitted from the JSON then.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub local_env: std::collections::BTreeMap<String, String>,
+    /// El `keep_alive` por-request efectivo del sweep (`--keep-alive` o
+    /// `ollama_keep_alive` de config/env), cuando hubo uno — procedencia
+    /// de la política de residencia: bajo presión de RAM cambia qué
+    /// modelos conviven residentes, o sea la clase de [Timeout]/OOM del
+    /// incidente Nitro 2026-08-10, sin tocar ni un token de la
+    /// generación. `None` (omitido del JSON) = mandó la config del
+    /// server, el régimen de todo sweep anterior a este campo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_keep_alive: Option<String>,
 }
 
 /// Collects the env-only deployment tier for [`RunMetadata::local_env`]

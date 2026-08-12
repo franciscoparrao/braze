@@ -45,6 +45,8 @@ pub struct ConfigOverrides {
     #[serde(default)]
     pub ollama_repeat_penalty: Option<f32>,
     #[serde(default)]
+    pub ollama_keep_alive: Option<String>,
+    #[serde(default)]
     pub openrouter_api_key: Option<ApiKey>,
     #[serde(default)]
     pub openrouter_model: Option<String>,
@@ -271,6 +273,7 @@ impl ConfigOverrides {
                             })?;
                     overrides.ollama_repeat_penalty = Some(parsed);
                 }
+                "OLLAMA_KEEP_ALIVE" => overrides.ollama_keep_alive = Some(value.to_string()),
                 "OPENROUTER_API_KEY" => overrides.openrouter_api_key = Some(ApiKey::new(value)),
                 "OPENROUTER_MODEL" => overrides.openrouter_model = Some(value.to_string()),
                 "OPENROUTER_BASE_URL" => overrides.openrouter_base_url = Some(value.to_string()),
@@ -713,6 +716,16 @@ mod tests {
         assert_eq!(overrides.ollama_top_p, Some(0.8));
         assert_eq!(overrides.ollama_top_k, Some(20));
         assert_eq!(overrides.ollama_repeat_penalty, Some(1.05));
+    }
+
+    /// Fix keep-alive por-request (2026-08-12): la env llega como string
+    /// tal cual — `"2m"` es una duración Go, no un número parseable aquí;
+    /// validar el formato es del server (y `Config::validate` solo veta
+    /// el string vacío).
+    #[test]
+    fn from_env_parses_ollama_keep_alive() {
+        let overrides = ConfigOverrides::from_env([("BRAZE_OLLAMA_KEEP_ALIVE", "2m")]).unwrap();
+        assert_eq!(overrides.ollama_keep_alive.as_deref(), Some("2m"));
     }
 
     #[test]

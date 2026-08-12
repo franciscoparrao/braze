@@ -667,6 +667,7 @@ mod tests {
                 "ollama:qwen2.5:3b+lead:ollama:x+ablate:no-lead".to_string(),
             ],
             local_env: std::collections::BTreeMap::new(),
+            ollama_keep_alive: None,
         }
     }
 

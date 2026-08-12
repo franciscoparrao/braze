@@ -107,6 +107,11 @@ pub struct OllamaBackend {
     /// only `braze-bench`'s `+ablate:` keys set them.
     prompt_tools: bool,
     constrained_tools: bool,
+    /// `keep_alive` por-request (e.g. `"2m"`, `"0"`, `"-1"`): cuánto queda
+    /// residente el modelo tras cada request. `None` (default) omite el
+    /// campo del wire y manda la config del server. Ver
+    /// [`OllamaBackend::with_keep_alive`].
+    keep_alive: Option<String>,
 }
 
 impl OllamaBackend {
@@ -124,6 +129,7 @@ impl OllamaBackend {
             repeat_penalty: None,
             prompt_tools: false,
             constrained_tools: false,
+            keep_alive: None,
         }
     }
 
@@ -142,6 +148,7 @@ impl OllamaBackend {
             repeat_penalty: None,
             prompt_tools: false,
             constrained_tools: false,
+            keep_alive: None,
         }
     }
 
@@ -187,6 +194,22 @@ impl OllamaBackend {
     /// Sets `options.repeat_penalty` — see [`OllamaBackend::with_top_p`].
     pub fn with_repeat_penalty(mut self, repeat_penalty: f32) -> Self {
         self.repeat_penalty = Some(repeat_penalty);
+        self
+    }
+
+    /// Sets the request-level `keep_alive` (a Go duration like `"2m"`, or
+    /// `"0"`/`"-1"` for unload-now/keep-forever): how long the model stays
+    /// resident after each request, overriding the server's
+    /// `OLLAMA_KEEP_ALIVE` env per-request. The point (2026-08-12): a
+    /// multi-model sweep's residency policy must travel with the request
+    /// instead of depending on how the remote service was last configured
+    /// — with the service env at `-1`, stacking two large models on
+    /// Nitro's 14Gi OOM-killed Ollama mid-sweep (2026-08-10, CLAUDE.md §
+    /// Benchmarking). Unset (the default), the field is omitted and the
+    /// server's own configuration keeps applying. Chainable, same shape
+    /// as [`OllamaBackend::with_temperature`].
+    pub fn with_keep_alive(mut self, keep_alive: impl Into<String>) -> Self {
+        self.keep_alive = Some(keep_alive.into());
         self
     }
 
@@ -252,6 +275,7 @@ impl ModelBackend for OllamaBackend {
                 repeat_penalty: self.repeat_penalty,
             },
             self.tool_transport(),
+            self.keep_alive.as_deref(),
         );
         tracing::info!(
             tool_count = body.tools.len(),

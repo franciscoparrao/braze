@@ -44,6 +44,9 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "ollama_top_p",
     "ollama_top_k",
     "ollama_repeat_penalty",
+    // Fix keep-alive por-request (2026-08-12): residencia del modelo por
+    // request, para que la env del servicio Ollama deje de importar.
+    "ollama_keep_alive",
     "openrouter_api_key",
     "openrouter_model",
     "openrouter_base_url",

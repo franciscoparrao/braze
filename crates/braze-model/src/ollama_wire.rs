@@ -36,6 +36,16 @@ pub(crate) struct OllamaRequest {
     /// `None` omits the field entirely, leaving decoding unconstrained.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<Value>,
+    /// Ollama `keep_alive`: how long the model stays resident after this
+    /// request (a Go duration like `"2m"`, or `"0"`/`"-1"` for
+    /// unload-now/forever). Per-request it overrides the server's
+    /// `OLLAMA_KEEP_ALIVE` env — the point: a sweep's residency policy
+    /// should travel with the request, not depend on how a remote
+    /// service was last configured (incidente OOM Nitro 2026-08-10,
+    /// CLAUDE.md § Benchmarking). `None` omits the field so the server's
+    /// own configuration keeps applying.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep_alive: Option<String>,
 }
 
 /// How the request advertises tools to the model
@@ -150,8 +160,8 @@ pub(crate) struct OllamaFunctionDef {
 /// Anthropic's — the system prompt is just the first message in the array,
 /// with `role: "system"`.
 ///
-/// `num_ctx`/`sampling` are backend-level configuration (not part of
-/// [`CompletionRequest`], which is provider-agnostic) — see
+/// `num_ctx`/`sampling`/`keep_alive` are backend-level configuration (not
+/// part of [`CompletionRequest`], which is provider-agnostic) — see
 /// [`OllamaBackend`](crate::ollama::OllamaBackend)'s fields.
 pub(crate) fn build_request(
     req: &CompletionRequest,
@@ -159,6 +169,7 @@ pub(crate) fn build_request(
     num_ctx: u32,
     sampling: OllamaSampling,
     transport: ToolTransport,
+    keep_alive: Option<&str>,
 ) -> OllamaRequest {
     let mut messages = Vec::new();
 
@@ -202,6 +213,7 @@ pub(crate) fn build_request(
         messages,
         tools,
         format,
+        keep_alive: keep_alive.map(str::to_string),
         stream: true,
         options: OllamaOptions {
             num_ctx,
@@ -698,6 +710,7 @@ mod tests {
                 repeat_penalty: Some(1.05),
             },
             ToolTransport::Native,
+            None,
         );
         let json = serde_json::to_value(wire.options).unwrap();
         assert_eq!(json["temperature"], 0.699999988079071); // f32 0.7
@@ -711,12 +724,52 @@ mod tests {
             8192,
             sampling_02(None),
             ToolTransport::Native,
+            None,
         );
         let json = serde_json::to_value(wire.options).unwrap();
         assert!(json.get("top_p").is_none());
         assert!(json.get("top_k").is_none());
         assert!(json.get("repeat_penalty").is_none());
         assert!(json.get("seed").is_none());
+    }
+
+    /// El fix keep-alive por-request (2026-08-12): fijado debe llegar al
+    /// wire tal cual, y sin fijar debe serializar a NADA — un request sin
+    /// el campo deja mandar la config del server (`OLLAMA_KEEP_ALIVE` o
+    /// su default), que es el contrato de compatibilidad hacia atrás.
+    #[test]
+    fn keep_alive_reaches_the_wire_when_set_and_vanishes_when_unset() {
+        let req = CompletionRequest {
+            messages: vec![Message::text(Role::User, "hi")],
+            tool_stubs: vec![],
+            system_prompt: String::new(),
+            max_tokens: 100,
+        };
+
+        let wire = build_request(
+            &req,
+            "qwen2.5:3b",
+            8192,
+            sampling_02(None),
+            ToolTransport::Native,
+            Some("2m"),
+        );
+        let json = serde_json::to_value(&wire).unwrap();
+        assert_eq!(json["keep_alive"], "2m");
+
+        let wire = build_request(
+            &req,
+            "qwen2.5:3b",
+            8192,
+            sampling_02(None),
+            ToolTransport::Native,
+            None,
+        );
+        let json = serde_json::to_value(&wire).unwrap();
+        assert!(
+            json.get("keep_alive").is_none(),
+            "unset keep_alive must serialize to no field"
+        );
     }
 
     #[test]
@@ -733,6 +786,7 @@ mod tests {
             8192,
             sampling_02(None),
             ToolTransport::Native,
+            None,
         );
         assert_eq!(wire.messages.len(), 2);
         assert_eq!(wire.messages[0].role, "system");
@@ -760,6 +814,7 @@ mod tests {
             8192,
             sampling_02(None),
             ToolTransport::Native,
+            None,
         );
         assert_eq!(wire.options.num_predict, i32::MAX);
     }
@@ -781,6 +836,7 @@ mod tests {
             8192,
             sampling_02(Some(42)),
             ToolTransport::Native,
+            None,
         );
         assert_eq!(wire.options.seed, Some(42));
     }
@@ -858,6 +914,7 @@ mod tests {
             8192,
             sampling_02(None),
             ToolTransport::Prompt { constrained: false },
+            None,
         );
 
         assert!(wire.tools.is_empty());
@@ -896,6 +953,7 @@ mod tests {
             8192,
             sampling_02(None),
             ToolTransport::Prompt { constrained: true },
+            None,
         );
 
         assert!(wire.tools.is_empty());
@@ -987,6 +1045,7 @@ mod tests {
             8192,
             sampling_02(None),
             ToolTransport::Prompt { constrained: false },
+            None,
         );
         assert_eq!(wire.messages[0].role, "system");
         assert!(wire.messages[0].content.starts_with("## Tool calling"));
@@ -1002,6 +1061,7 @@ mod tests {
             8192,
             sampling_02(None),
             ToolTransport::Native,
+            None,
         );
         assert_eq!(wire.tools.len(), 2);
         assert!(wire.format.is_none());

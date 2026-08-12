@@ -151,6 +151,18 @@ struct Cli {
     /// `options.repeat_penalty` para backends Ollama — ver `--top-p`.
     #[arg(long)]
     repeat_penalty: Option<f32>,
+    /// `keep_alive` por-request para backends Ollama (e.g. "2m", "0",
+    /// "-1"): cuánto queda residente el modelo tras cada request,
+    /// ganándole a la env `OLLAMA_KEEP_ALIVE` del server — la política de
+    /// residencia del sweep viaja con el request en vez de depender de
+    /// cómo quedó configurado el servicio remoto (con el servicio en
+    /// `-1`, apilar dos modelos grandes OOM-kileó Ollama en Nitro a mitad
+    /// de sweep, 2026-08-10). Gana sobre `ollama_keep_alive` de
+    /// config/`BRAZE_OLLAMA_KEEP_ALIVE`. Sin flag ni config, manda la del
+    /// server. Ignorado por backends anthropic/openrouter y por `local`
+    /// (in-process, sin server que mantenga residencia).
+    #[arg(long, value_parser = clap::builder::NonEmptyStringValueParser::new())]
+    keep_alive: Option<String>,
     /// No ejecutar 'ollama stop <modelo>' al terminar con un backend Ollama.
     /// Por defecto el sweep sí lo hace: en esta máquina (38GB RAM, ~1.4GB
     /// libres bajo carga) un modelo grande que queda residente mientras
@@ -229,6 +241,14 @@ async fn run() -> Result<(), BenchError> {
         ));
     }
     let mut config = braze_config::Config::load()?;
+    // `--keep-alive` gana sobre `ollama_keep_alive` de archivo/env — la
+    // misma precedencia flag-sobre-config de todo el bench. Se aplica
+    // sobre `config` (no como parámetro aparte) para que TODO camino que
+    // construya un backend Ollama —executor, mitades planner/lead— lo
+    // herede sin enhebrado extra.
+    if let Some(keep_alive) = &cli.keep_alive {
+        config.ollama_keep_alive = Some(keep_alive.clone());
+    }
     let tasks = task::load_suite(&cli.suite)?;
 
     // La identidad del sweep se captura al INICIO, no al escribir el
@@ -314,6 +334,24 @@ async fn run() -> Result<(), BenchError> {
                      ignora en: {}. Ese brazo corre con el sampling default de su proveedor \
                      en esas dimensiones.",
                     ollama_only_knobs.join("/"),
+                    spec.display_name(&config),
+                    ignoring.join(", ")
+                );
+            }
+        }
+    }
+
+    // Mismo patrón H-13 para `--keep-alive`, con un corte distinto al de
+    // arriba: `keep_alive` es residencia en un *server* Ollama, así que
+    // `local` (in-process) también lo ignora aunque honre el sampling.
+    if cli.keep_alive.is_some() {
+        for (_, spec) in &specs {
+            let ignoring = spec.keep_alive_ignoring_halves();
+            if !ignoring.is_empty() {
+                eprintln!(
+                    "braze-bench: advertencia: --keep-alive solo aplica a backends Ollama — \
+                     '{}' lo ignora en: {}. Esa mitad corre con la política de residencia \
+                     de su proveedor/proceso.",
                     spec.display_name(&config),
                     ignoring.join(", ")
                 );
@@ -838,6 +876,9 @@ async fn run() -> Result<(), BenchError> {
                 .iter()
                 .map(|(_, spec)| spec.display_name(&config))
                 .collect(),
+            // El valor EFECTIVO (flag ya aplicado sobre config arriba),
+            // no el flag crudo — es lo que viajó en cada request.
+            ollama_keep_alive: config.ollama_keep_alive.clone(),
         };
         Some(metadata)
     } else {

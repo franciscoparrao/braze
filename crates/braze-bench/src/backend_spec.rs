@@ -291,6 +291,28 @@ impl BackendSpec {
         halves
     }
 
+    /// Las mitades que **ignoran** `--keep-alive`, etiquetadas por rol —
+    /// el gemelo de [`BackendSpec::non_ollama_halves`] con un corte
+    /// distinto: `keep_alive` es residencia en un *server* Ollama, así
+    /// que aquí `local` (in-process, sin server) SÍ cuenta como ignorante
+    /// aunque honre los knobs de sampling desde 2026-07-26.
+    pub fn keep_alive_ignoring_halves(&self) -> Vec<String> {
+        let mut halves = Vec::new();
+        let mut push_if_ignoring = |role: &str, spec: &BackendSpec| {
+            if spec.provider != Provider::Ollama {
+                halves.push(format!("{role} ({})", spec.provider_name()));
+            }
+        };
+        push_if_ignoring("executor", self);
+        if let Some(planner) = &self.planner {
+            push_if_ignoring("planner", planner);
+        }
+        if let Some(lead) = &self.lead {
+            push_if_ignoring("lead", lead);
+        }
+        halves
+    }
+
     /// The executor's resolved model name (override, or `config`'s
     /// default for its provider) — no provider prefix, unlike
     /// `display_name`. Used to pick the model-family system-prompt hint
@@ -503,6 +525,13 @@ impl BackendSpec {
                 }
                 if let Some(repeat_penalty) = sampling.repeat_penalty {
                     backend = backend.with_repeat_penalty(repeat_penalty);
+                }
+                // keep_alive por-request (2026-08-12): llega vía config
+                // (`--keep-alive` de main ya ganó sobre archivo/env al
+                // aplicarse encima), y cubre también las mitades
+                // planner/lead Ollama porque `build` corre para ellas.
+                if let Some(keep_alive) = &config.ollama_keep_alive {
+                    backend = backend.with_keep_alive(keep_alive.clone());
                 }
                 Ok(Box::new(backend))
             }

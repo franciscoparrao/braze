@@ -127,6 +127,15 @@ pub fn drift_report(reference: &RunMetadata, current: &RunMetadata) -> Vec<Drift
             .join(", ")
     };
     check("local_env", fmt_env(reference), fmt_env(current));
+    // keep_alive por-request (2026-08-12): bajo presión de RAM cambia qué
+    // modelos conviven residentes — la clase [Timeout]/OOM del incidente
+    // Nitro 2026-08-10 — sin tocar la generación. Distinta política de
+    // residencia entre ref y actual = los timeouts no son comparables.
+    check(
+        "ollama_keep_alive",
+        format!("{:?}", reference.ollama_keep_alive),
+        format!("{:?}", current.ollama_keep_alive),
+    );
     drift
 }
 
@@ -243,7 +252,19 @@ mod tests {
             ollama_server_version: Some("0.32.1".to_string()),
             backend_specs: vec!["ollama:qwen2.5:3b".to_string()],
             local_env: std::collections::BTreeMap::new(),
+            ollama_keep_alive: Some("2m".to_string()),
         }
+    }
+
+    #[test]
+    fn a_different_keep_alive_policy_is_drift() {
+        // Distinta residencia = distinta presión de RAM = timeouts no
+        // comparables (incidente Nitro 2026-08-10).
+        let reference = meta();
+        let mut current = meta();
+        current.ollama_keep_alive = None;
+        let drift = drift_report(&reference, &current);
+        assert!(drift.iter().any(|d| d.field == "ollama_keep_alive"));
     }
 
     #[test]
