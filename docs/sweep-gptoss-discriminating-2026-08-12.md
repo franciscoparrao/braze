@@ -79,3 +79,19 @@ discriminador; la infra de Nitro es la que no aguanta el tope.
 - O aceptar la lectura parcial: gpt-oss no se satura por el lado
   fácil-medio de discriminating, y el tope pesado queda como "requiere
   infra que Nitro hoy no da".
+
+## Decisión (2026-08-12): lectura parcial ACEPTADA
+
+El autor acepta la lectura parcial. NO se persigue el re-run del tope
+(mover_*/borrar_30/tareas 24-34). Conclusión operativa congelada:
+
+- gpt-oss:20b NO se satura por el lado fácil-medio de la suite
+  discriminante (localización/consistencia/preservación/error-fixing-
+  chico/floors ~100% o alto-plano) — la suite discrimina donde
+  default.toml ya no.
+- El tope pesado (movimientos de bloque, coordinación multi-archivo)
+  queda BLOQUEADO POR INFRA (RAM de Nitro al límite + wall-clock corto),
+  no por el método. Se mide cuando Nitro suba a 32GB, no antes.
+- El hallazgo roam (gpt-oss falla movimientos de bloque) queda como la
+  hipótesis vigente para esa familia, consistente con el 0/3 observado
+  pero sin el aislamiento capacidad-vs-régimen.
