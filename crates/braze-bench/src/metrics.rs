@@ -357,7 +357,19 @@ pub struct TaskResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_cost_usd: Option<f64>,
     pub wall_time_ms: u128,
+    /// La métrica OFICIAL desde la decisión de banco 2026-08-12:
+    /// equivalencia funcional — ver el comentario del grading en
+    /// `build_task_result`. Es lo que pass rate, pass^k y McNemar miden.
     pub passed: bool,
+    /// Pass ESTRICTO: `passed` Y la ruta de tool pedida
+    /// (`expect_tool_call`/`accept_tool_calls`) se respetó. Difiere de
+    /// `passed` exactamente en las filas que logran el resultado por una
+    /// tool no listada (la clase e4b/ornith). `default` para que los
+    /// results.json anteriores a la métrica dual deserialicen (en ellos
+    /// `passed` ERA estricto; su `passed_strict` leído como `false` no
+    /// es dato — no usar para comparar sweeps viejos).
+    #[serde(default)]
+    pub passed_strict: bool,
 }
 
 /// Builds a [`TaskResult`] for a task that never got to run at all — the
@@ -425,6 +437,7 @@ pub fn harness_error_result(
         estimated_cost_usd: None,
         wall_time_ms: 0,
         passed: false,
+        passed_strict: false,
     }
 }
 
@@ -729,16 +742,35 @@ pub fn compute_metrics(
         _ => None,
     };
 
-    let assertions_passed = expected_tool_called.unwrap_or(true)
-        && (!task.expect_no_tool_call || tool_call_names.is_empty())
+    // Decisión de banco 2026-08-12 (segundo caso de la arista
+    // MODEL—BENCH: ornith:9b logró `edit_file_basic` vía
+    // read_file+write_file con archivo final correcto 5/5, como e4b
+    // logró `read_file_basic` vía shell_exec —
+    // docs/ornith-9b-diagnostico-edit-file-basic-2026-08-12.md): la
+    // métrica OFICIAL (`passed`) acepta equivalencia funcional — la
+    // aserción de ruta (`expect_tool_call`) se exime del pass cuando
+    // OTRA aserción verifica el logro (texto/archivos/cargo check). Sin
+    // aserción de logro la ruta sigue vinculante: eximirla dejaría la
+    // tarea sin ningún chequeo. Los presupuestos (rounds/tokens/costo)
+    // no eximen — miden eficiencia, no logro. `expect_no_tool_call`
+    // tampoco se exime nunca: mide disciplina de ruta a secas y no hay
+    // "logro equivalente" que la sustituya. La adherencia a la ruta no
+    // se pierde: viaja aparte como `passed_strict` (columna `strict`).
+    let tool_route_ok = expected_tool_called.unwrap_or(true);
+    let route_exempt = expected_text_found.is_some()
+        || expected_files_found.is_some()
+        || expected_cargo_check_passed.is_some();
+    let non_route_assertions_passed = (!task.expect_no_tool_call || tool_call_names.is_empty())
         && expected_text_found.unwrap_or(true)
         && expected_files_found.unwrap_or(true)
         && expected_cargo_check_passed.unwrap_or(true)
         && expected_rounds_within_budget.unwrap_or(true)
         && expected_tokens_within_budget.unwrap_or(true)
         && expected_cost_within_budget.unwrap_or(true);
+    let assertions_passed = non_route_assertions_passed && (route_exempt || tool_route_ok);
 
     let passed = converged && assertions_passed;
+    let passed_strict = passed && tool_route_ok;
 
     // v8 § 6.15: la huella del artefacto — la de archivos si el runner
     // la computó (tareas con expect_file_contains), la del texto final
@@ -756,7 +788,10 @@ pub fn compute_metrics(
         if !converged || assertions_passed {
             return None;
         }
-        if expected_tool_called == Some(false) {
+        // La ruta solo puede ser LA causa del fallo oficial cuando no
+        // estaba eximida (sin aserción de logro) — eximida, un route-miss
+        // no falla la fila y la causa real es la aserción de logro.
+        if expected_tool_called == Some(false) && !route_exempt {
             Some(FailureCause::AssertionToolCall)
         } else if expected_text_found == Some(false) {
             Some(FailureCause::AssertionText)
@@ -819,6 +854,7 @@ pub fn compute_metrics(
         estimated_cost_usd,
         wall_time_ms: wall_time.as_millis(),
         passed,
+        passed_strict,
     }
 }
 
@@ -995,11 +1031,116 @@ mod tests {
         assert_eq!(result.failure_cause, Some(FailureCause::AssertionToolCall));
     }
 
+    /// Decisión de banco 2026-08-12 (métrica dual): con una aserción de
+    /// LOGRO presente (aquí texto), un route-miss ya no falla la fila —
+    /// `passed` (funcional, oficial) es true, `passed_strict` registra
+    /// la desviación de ruta, y no hay `failure_cause`. La clase
+    /// ornith:9b/edit_file_basic (write_file en vez de edit_file con
+    /// archivo final correcto).
+    #[test]
+    fn a_route_miss_with_a_verified_outcome_passes_functionally_not_strictly() {
+        let events = vec![
+            AgentEvent::AssistantToolCall {
+                id: "1".to_string(),
+                name: "write_file".to_string(),
+                arguments: serde_json::json!({"path": "config.txt"}),
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "1".to_string(),
+                    content: "ok".to_string(),
+                    is_error: false,
+                },
+            },
+            AgentEvent::AssistantText {
+                text: "listo".to_string(),
+            },
+        ];
+        let result = metrics(
+            &task(Some("edit_file"), false, Some("listo")),
+            &events,
+            RunOutcome::Converged,
+        );
+        assert!(result.passed, "el logro verificado decide el pass oficial");
+        assert!(
+            !result.passed_strict,
+            "la ruta no respetada debe quedar registrada en la métrica estricta"
+        );
+        assert_eq!(result.failure_cause, None);
+    }
+
+    /// El complemento: sin aserción de logro, la ruta sigue vinculante —
+    /// eximirla dejaría la tarea sin ningún chequeo.
+    #[test]
+    fn a_route_miss_without_any_outcome_assertion_still_fails() {
+        let events = vec![AgentEvent::AssistantToolCall {
+            id: "1".to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({}),
+        }];
+        let result = metrics(
+            &task(Some("edit_file"), false, None),
+            &events,
+            RunOutcome::Converged,
+        );
+        assert!(!result.passed);
+        assert!(!result.passed_strict);
+        assert_eq!(result.failure_cause, Some(FailureCause::AssertionToolCall));
+    }
+
+    /// Con ruta eximida Y el logro fallado, la causa reportada es la
+    /// aserción de logro — no `AssertionToolCall`, que no decidió nada.
+    #[test]
+    fn an_exempt_route_miss_with_a_failed_outcome_reports_the_outcome_cause() {
+        let events = vec![
+            AgentEvent::AssistantToolCall {
+                id: "1".to_string(),
+                name: "write_file".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            AgentEvent::AssistantText {
+                text: "otra cosa".to_string(),
+            },
+        ];
+        let result = metrics(
+            &task(Some("edit_file"), false, Some("listo")),
+            &events,
+            RunOutcome::Converged,
+        );
+        assert!(!result.passed);
+        assert_eq!(result.failure_cause, Some(FailureCause::AssertionText));
+    }
+
+    /// Con la ruta respetada, estricto == funcional.
+    #[test]
+    fn strict_equals_functional_when_the_route_is_respected() {
+        let events = vec![
+            AgentEvent::AssistantToolCall {
+                id: "1".to_string(),
+                name: "edit_file".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            AgentEvent::AssistantText {
+                text: "listo".to_string(),
+            },
+        ];
+        let result = metrics(
+            &task(Some("edit_file"), false, Some("listo")),
+            &events,
+            RunOutcome::Converged,
+        );
+        assert!(result.passed);
+        assert!(result.passed_strict);
+    }
+
     /// Decisión de banco 2026-08-11: un tool en `accept_tool_calls`
     /// satisface la aserción igual que `expect_tool_call` — el logro
     /// decide, la tool es orientativa donde hay equivalencia. Es la clase
     /// gpt-oss/grep_basic (usa read_file en vez de grep) y gemma4/
-    /// read_file_basic (usa shell_exec en vez de read_file).
+    /// read_file_basic (usa shell_exec en vez de read_file). Nota
+    /// 2026-08-12: un equivalente aceptado cuenta como ruta RESPETADA —
+    /// también para `passed_strict`.
     #[test]
     fn an_accepted_equivalent_tool_satisfies_the_assertion() {
         let mut t = task(Some("grep"), false, None);

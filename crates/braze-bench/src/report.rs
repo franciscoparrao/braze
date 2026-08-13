@@ -10,7 +10,13 @@ use crate::metrics::{FailureCause, TaskResult};
 struct BackendSummary {
     backend: String,
     total: u32,
+    /// Pass FUNCIONAL — la métrica oficial (decisión de banco
+    /// 2026-08-12): ver `TaskResult::passed`.
     passed: u32,
+    /// Pass ESTRICTO (funcional Y ruta de tool respetada) — la segunda
+    /// métrica del reporte dual; difiere de `passed` exactamente en las
+    /// filas clase e4b/ornith (logro por tool no listada).
+    passed_strict: u32,
     /// Rows excluded from every other field below (N-37,
     /// docs/AUDITORIA-2026-07-v2.md) — reported here, not silently
     /// dropped, per the "no silent caps" principle: a harness-level
@@ -133,6 +139,7 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
 
     let total = counted.len() as u32;
     let passed = counted.iter().filter(|r| r.passed).count() as u32;
+    let passed_strict = counted.iter().filter(|r| r.passed_strict).count() as u32;
     let sum_wall_time: u128 = counted.iter().map(|r| r.wall_time_ms).sum();
     let sum_input: u64 = counted.iter().map(|r| r.input_tokens as u64).sum();
     let sum_output: u64 = counted.iter().map(|r| r.output_tokens as u64).sum();
@@ -151,6 +158,7 @@ fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
         backend: backend.to_string(),
         total,
         passed,
+        passed_strict,
         harness_errors,
         avg_wall_time_ms: sum_wall_time as f64 / n,
         median_wall_time_ms: median(&wall_times),
@@ -413,6 +421,14 @@ pub fn print_table(results: &[TaskResult]) {
             .failure_cause
             .map(|c| format!(" [{c:?}]"))
             .unwrap_or_default();
+        // Fila funcional-pass con ruta no respetada (clase e4b/ornith) —
+        // visible en el detalle para que la brecha pass/strict de la
+        // tabla sea rastreable a filas concretas.
+        let route_suffix = if result.passed && !result.passed_strict {
+            " [RouteMiss]"
+        } else {
+            ""
+        };
         let error_suffix = result
             .run_error
             .as_ref()
@@ -424,7 +440,7 @@ pub fn print_table(results: &[TaskResult]) {
             String::new()
         };
         println!(
-            "[{status}] {:<24} {:<20}{rep_suffix} {:>6}ms  rounds={} tool_calls={}  schema_fail={}  exec_fail={}  denied={}  tokens_in={} tokens_out={}{cause_suffix}{error_suffix}",
+            "[{status}] {:<24} {:<20}{rep_suffix} {:>6}ms  rounds={} tool_calls={}  schema_fail={}  exec_fail={}  denied={}  tokens_in={} tokens_out={}{route_suffix}{cause_suffix}{error_suffix}",
             result.task_id,
             result.backend,
             result.wall_time_ms,
@@ -451,10 +467,15 @@ pub fn print_table(results: &[TaskResult]) {
     // own column instead of silently dropped, since a harness-level
     // failure isn't a model result at all (see
     // `BackendSummary::harness_errors`'s doc comment).
+    // Reporte dual (decisión de banco 2026-08-12): `pass_rate` es la
+    // métrica FUNCIONAL oficial; `strict` es la misma cuenta exigiendo
+    // además la ruta de tool pedida — la brecha entre ambas es
+    // exactamente la clase e4b/ornith (logro por tool no listada).
     println!(
-        "{:<24} {:>16} {:>8} {:>12} {:>10} {:>14} {:>16} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",
+        "{:<24} {:>16} {:>8} {:>8} {:>12} {:>10} {:>14} {:>16} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",
         "backend",
         "pass_rate[95%CI]",
+        "strict",
         "avg_rounds",
         "avg_ms",
         "median_ms",
@@ -481,10 +502,12 @@ pub fn print_table(results: &[TaskResult]) {
             summary.pass_rate_ci_low_pct,
             summary.pass_rate_ci_high_pct
         );
+        let strict_cell = format!("{}/{}", summary.passed_strict, summary.total);
         println!(
-            "{:<24} {:>16} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",
+            "{:<24} {:>16} {:>8} {:>8.1} {:>12.0} {:>10.0} {:>14.0} {:>16.0} {:>17} {:>14} {:>10} {:>12} {:>9} {:>9} {:>9} {:>9} {:>10}",
             summary.backend,
             pass_rate_cell,
+            strict_cell,
             summary.avg_rounds,
             summary.avg_wall_time_ms,
             summary.median_wall_time_ms,
@@ -668,6 +691,7 @@ mod tests {
             ],
             local_env: std::collections::BTreeMap::new(),
             ollama_keep_alive: None,
+            grading: Some(crate::metadata::GRADING_FUNCTIONAL_DUAL.to_string()),
         }
     }
 
@@ -914,6 +938,7 @@ mod tests {
             estimated_cost_usd: None,
             wall_time_ms,
             passed,
+            passed_strict: passed,
         }
     }
 

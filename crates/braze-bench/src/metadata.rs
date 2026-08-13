@@ -87,7 +87,20 @@ pub struct RunMetadata {
     /// server, el régimen de todo sweep anterior a este campo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ollama_keep_alive: Option<String>,
+    /// Semántica de grading del sweep (decisión de banco 2026-08-12):
+    /// `Some(GRADING_FUNCTIONAL_DUAL)` desde que `passed` es la métrica
+    /// funcional y `passed_strict` viaja aparte. `None` = results.json
+    /// anterior al cambio, donde `passed` ERA estricto — comparar un ref
+    /// viejo contra una corrida nueva cruza semánticas distintas
+    /// exactamente en las filas clase e4b/ornith, así que DBV lo trata
+    /// como drift.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grading: Option<String>,
 }
+
+/// El identificador de la semántica de grading vigente — ver
+/// [`RunMetadata::grading`].
+pub const GRADING_FUNCTIONAL_DUAL: &str = "functional-primary+strict-secondary/2026-08-12";
 
 /// Collects the env-only deployment tier for [`RunMetadata::local_env`]
 /// from an explicit iterator — the same testability pattern as

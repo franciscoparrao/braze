@@ -147,6 +147,7 @@ pub fn external_outcome_to_task_result(
             estimated_cost_usd: None,
             wall_time_ms: outcome.wall_time.as_millis(),
             passed: false,
+            passed_strict: false,
         };
     }
 
@@ -222,6 +223,9 @@ pub fn external_outcome_to_task_result(
         estimated_cost_usd: None,
         wall_time_ms: outcome.wall_time.as_millis(),
         passed: assertions_passed,
+        // La ruta nunca se evalúa en un harness externo black-box
+        // (`expected_tool_called: None` arriba) — estricto == funcional.
+        passed_strict: assertions_passed,
     }
 }
 

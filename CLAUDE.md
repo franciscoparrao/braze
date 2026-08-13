@@ -376,9 +376,20 @@ sistemático" resultó NO ser de tool calling — e4b responde bien
 `read_file_basic` pero vía `shell_exec` (`wc -l`) en vez del
 `read_file` que la aserción exige (5/5 con seed fijo; era preferencia
 de política, no capacidad — arista MODEL—BENCH, lado banco). No había
-nada que 0.32.1 pudiera reparar; gpt-oss:20b retiene el default y la
-decisión de banco (aceptar equivalencia funcional o no) queda abierta:
-ver `docs/gemma4-e4b-diagnostico-read-file-basic-2026-08-10.md`.
+nada que 0.32.1 pudiera reparar; gpt-oss:20b retiene el default. La
+decisión de banco quedó **RESUELTA el 2026-08-12** tras el segundo caso
+de la misma arista (ornith:9b logra `edit_file_basic` vía
+read_file+write_file, archivo final correcto 5/5 —
+`docs/ornith-9b-diagnostico-edit-file-basic-2026-08-12.md`): métrica
+dual — `passed` oficial acepta equivalencia funcional (la ruta se exime
+solo si otra aserción verifica el logro), `passed_strict` + columna
+`strict` + marcador `[RouteMiss]` preservan la adherencia de ruta, y
+`metadata.grading` versiona la semántica (DBV trata refs pre-duales
+como drift). Bajo la métrica oficial ornith:9b (dense 9B, 5.6GB) queda
+95/95 en default.toml — segundo modelo que satura la suite; ver
+`docs/sweep-nuevos-locales-2026-08-12.json` (sweep pre-dual, graded
+estricto). Ver también
+`docs/gemma4-e4b-diagnostico-read-file-basic-2026-08-10.md`.
 
 Nota infra (2026-07-20): Nitro corre **Ollama 0.32.1** (era 0.30.7). El
 upgrade resolvió además la recurrencia del incidente #1 del testbed roam

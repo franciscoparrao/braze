@@ -879,6 +879,7 @@ async fn run() -> Result<(), BenchError> {
             // El valor EFECTIVO (flag ya aplicado sobre config arriba),
             // no el flag crudo — es lo que viajó en cada request.
             ollama_keep_alive: config.ollama_keep_alive.clone(),
+            grading: Some(metadata::GRADING_FUNCTIONAL_DUAL.to_string()),
         };
         Some(metadata)
     } else {

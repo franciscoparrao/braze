@@ -136,6 +136,14 @@ pub fn drift_report(reference: &RunMetadata, current: &RunMetadata) -> Vec<Drift
         format!("{:?}", reference.ollama_keep_alive),
         format!("{:?}", current.ollama_keep_alive),
     );
+    // Semántica de grading (2026-08-12): un ref anterior a la métrica
+    // dual tiene `passed` estricto; la corrida nueva lo tiene funcional
+    // — pareo inválido exactamente en las filas clase e4b/ornith.
+    check(
+        "grading",
+        format!("{:?}", reference.grading),
+        format!("{:?}", current.grading),
+    );
     drift
 }
 
@@ -253,7 +261,20 @@ mod tests {
             backend_specs: vec!["ollama:qwen2.5:3b".to_string()],
             local_env: std::collections::BTreeMap::new(),
             ollama_keep_alive: Some("2m".to_string()),
+            grading: Some(crate::metadata::GRADING_FUNCTIONAL_DUAL.to_string()),
         }
+    }
+
+    #[test]
+    fn a_pre_dual_grading_reference_is_drift() {
+        // Un ref viejo (grading: None => `passed` era estricto) contra
+        // una corrida nueva (funcional) no parea la misma pregunta.
+        let reference = RunMetadata {
+            grading: None,
+            ..meta()
+        };
+        let drift = drift_report(&reference, &meta());
+        assert!(drift.iter().any(|d| d.field == "grading"));
     }
 
     #[test]
