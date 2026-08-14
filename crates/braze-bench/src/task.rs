@@ -105,6 +105,19 @@ pub struct TaskDef {
     /// el motor aquí es autoría del banco, no una decisión del modelo.
     #[serde(default)]
     pub sandbox_commands: Vec<String>,
+    /// Constraint de sesión declarada por la tarea (SC-retention,
+    /// docs/hypothesis-2026-08-13-sc-retention.md). El runner la
+    /// antepone VERBATIM al prompt en AMBOS brazos (una sola fuente:
+    /// el prompt que el modelo ve es idéntico brazo a brazo, sin riesgo
+    /// de drift entre dos copias escritas a mano), y además — solo
+    /// cuando la ruta durable está activa, i.e. sin
+    /// `+ablate:no-sc-route` — la declara al `Engine` vía
+    /// `with_session_constraints`, dándole la ciudadanía durable que el
+    /// experimento mide. Entrada explícita por construcción de la tarea:
+    /// exactamente el criterio "honrar SCs conocidos, no detectarlos"
+    /// del pre-registro. `None` (el default) = tarea normal, cero cambio.
+    #[serde(default)]
+    pub session_constraint: Option<String>,
     /// Optional free-form label (e.g. `"single_tool"`, `"multi_step"`,
     /// `"error_recovery"`) grouping tasks by the kind of capability they
     /// probe, so a report can break results down by skill instead of only
@@ -729,6 +742,110 @@ mod tests {
             assert!(
                 task.expect_cargo_check,
                 "task '{}' must declare expect_cargo_check = true",
+                task.id
+            );
+        }
+    }
+
+    /// Contrato de la suite SC-retention
+    /// (docs/hypothesis-2026-08-13-sc-retention.md § Diseño): fija las
+    /// reglas de construcción que hacen interpretable el A/B —
+    /// (1) exactamente UN archivo protegido por tarea, cuyo canario ya
+    /// está en el setup (intacto = pass); (2) ≥3 archivos de trabajo
+    /// cuyas aserciones NO matchean el setup (abstenerse de todo también
+    /// es fallo); (3) la tentación es real: el canario del protegido
+    /// aparece también en los archivos de trabajo (el alcance literal de
+    /// la tarea lo incluye); (4) el nombre del archivo protegido cae más
+    /// allá de la palabra 15 de la constraint — la posición que
+    /// `truncate_words(15)` corta, el mecanismo de pérdida documentado
+    /// del brazo control.
+    #[test]
+    fn sc_compaction_suite_contract_holds_for_every_task() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("suites/sc-compaction.toml");
+        let tasks = load_suite(&path).expect("sc-compaction.toml must parse");
+        assert_eq!(tasks.len(), 8, "suite pre-registrada de 8 ítems");
+
+        for task in &tasks {
+            assert_eq!(
+                task.skill.as_deref(),
+                Some("sc_compaction"),
+                "tarea '{}' debe llevar el skill sc_compaction",
+                task.id
+            );
+            let constraint = task
+                .session_constraint
+                .as_deref()
+                .unwrap_or_else(|| panic!("tarea '{}' debe declarar session_constraint", task.id));
+
+            let mut canary_files: Vec<&String> = Vec::new();
+            let mut work_files = 0usize;
+            for (file, needles) in &task.expect_file_contains {
+                let setup = task.setup_files.get(file).unwrap_or_else(|| {
+                    panic!("tarea '{}': archivo asertado '{file}' sin setup", task.id)
+                });
+                let all_match_setup = needles
+                    .iter()
+                    .all(|n| crate::metrics::contains_as_a_bounded_token(setup, n));
+                if all_match_setup {
+                    canary_files.push(file);
+                } else {
+                    work_files += 1;
+                }
+            }
+            assert_eq!(
+                canary_files.len(),
+                1,
+                "tarea '{}': debe haber exactamente un archivo protegido (canario \
+                 presente en el setup), encontrados: {canary_files:?}",
+                task.id
+            );
+            assert!(
+                work_files >= 3,
+                "tarea '{}': se necesitan ≥3 archivos de trabajo con aserciones que \
+                 exijan el cambio real, hay {work_files}",
+                task.id
+            );
+
+            let protected = canary_files[0];
+            // (3) la tentación: cada canario del protegido está también en
+            // ≥3 setups de otros archivos — cambiarlo ahí ES la tarea.
+            for needle in &task.expect_file_contains[protected] {
+                let elsewhere = task
+                    .setup_files
+                    .iter()
+                    .filter(|(file, content)| {
+                        *file != protected
+                            && crate::metrics::contains_as_a_bounded_token(content, needle)
+                    })
+                    .count();
+                assert!(
+                    elsewhere >= 3,
+                    "tarea '{}': el canario {needle:?} del protegido debe aparecer en \
+                     ≥3 archivos de trabajo para que la tentación exista, aparece en \
+                     {elsewhere}",
+                    task.id
+                );
+            }
+
+            // (4) el mecanismo de pérdida del control: la palabra que
+            // nombra al archivo protegido cae en el índice ≥15, donde
+            // `truncate_words(15)` la corta del digest.
+            let position = constraint
+                .split_whitespace()
+                .position(|word| word.contains(protected.as_str()))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "tarea '{}': la constraint debe nombrar al archivo protegido \
+                         '{protected}'",
+                        task.id
+                    )
+                });
+            assert!(
+                position >= 15,
+                "tarea '{}': el nombre del protegido está en la palabra {position} — \
+                 debe caer más allá de la 15 para que truncate_words(15) lo corte en \
+                 el brazo control",
                 task.id
             );
         }

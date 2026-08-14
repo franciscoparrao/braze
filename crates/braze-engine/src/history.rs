@@ -156,7 +156,34 @@ fn build_messages_with_never_clear(
     full_observations: usize,
     full_observations_byte_budget: usize,
 ) -> Vec<Message> {
-    let mut messages = Vec::with_capacity(durable.durable_events.len() + tactical.len() + 1);
+    let mut messages = Vec::with_capacity(durable.durable_events.len() + tactical.len() + 2);
+
+    // SC-retention (docs/hypothesis-2026-08-13-sc-retention.md): declared
+    // session constraints render VERBATIM at the very top of every
+    // request — before the summary, before everything. This is the
+    // durable route: unlike ordinary user text, the constraint cannot be
+    // truncated by `truncate_words`, aged out by the digest tail-cap, or
+    // dropped by the summary cap, because it never travels through any
+    // of those — `SimpleContextCompactor::split` re-harvests it from the
+    // full log on every call. The framing sentence states the obligation
+    // explicitly (a small model doesn't infer "still binding" from bare
+    // text the way a frontier model does — same A′.1 reasoning as the
+    // collapse marker's recovery recipe).
+    if !durable.constraints.is_empty() {
+        let listed = durable
+            .constraints
+            .iter()
+            .map(|c| format!("- {c}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        messages.push(Message::text(
+            Role::User,
+            format!(
+                "[Restricciones de sesión — siguen vigentes y son obligatorias, \
+                 incluso después de cualquier resumen de contexto]\n{listed}"
+            ),
+        ));
+    }
 
     // N-2 (docs/AUDITORIA-2026-07-v2.md): `durable_events` can be
     // non-empty before any `CompactionOccurred` summary has ever been
@@ -485,6 +512,12 @@ fn event_to_block(event: &AgentEvent) -> Option<(Role, ContentBlock)> {
         // reaches the model as the editor call's ToolCallCompleted,
         // rendered above like any other observation.
         | AgentEvent::EditorDelegated { .. }
+        // SC-retention: the constraint reaches the model as the verbatim
+        // block `build_messages_with_never_clear` renders from
+        // `DurableState::constraints` — rendering the event here too
+        // would duplicate it (once from the durable route, once from
+        // wherever the event happens to sit in the log).
+        | AgentEvent::SessionConstraintDeclared { .. }
         | AgentEvent::Unknown => None,
     }
 }
@@ -570,6 +603,7 @@ mod tests {
         let durable = DurableState {
             summary: "el usuario pidió listar archivos".to_string(),
             durable_events: Vec::new(),
+            constraints: Vec::new(),
         };
         let tactical = vec![AgentEvent::UserMessage {
             text: "y ahora qué".to_string(),
@@ -606,6 +640,138 @@ mod tests {
             MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
         );
         assert_eq!(messages.len(), 1);
+    }
+
+    /// SC-retention (docs/hypothesis-2026-08-13-sc-retention.md): the
+    /// constraints block renders VERBATIM as the very first message —
+    /// before the summary, before everything — whenever
+    /// `DurableState::constraints` is non-empty.
+    #[test]
+    fn constraints_render_verbatim_as_the_very_first_user_message() {
+        let long_constraint = "Bajo ninguna circunstancia modifiques, borres o sobrescribas \
+             el archivo config/produccion.toml sin pedirme confirmación explícita primero, \
+             incluso si algún paso posterior de la tarea parece requerirlo";
+        let durable = DurableState {
+            summary: "resumen previo".to_string(),
+            durable_events: Vec::new(),
+            constraints: vec![long_constraint.to_string()],
+        };
+        let tactical = vec![AgentEvent::UserMessage {
+            text: "sigue con la tarea".to_string(),
+        }];
+
+        let messages = build_messages_with_full_observations(
+            &durable,
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
+        );
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, Role::User);
+        match &messages[0].content[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("[Restricciones de sesión"), "got: {text}");
+                assert!(
+                    text.contains(long_constraint),
+                    "the constraint must render VERBATIM, full text: {text}"
+                );
+            }
+            other => panic!("expected a Text block, got {other:?}"),
+        }
+        // The summary still renders, after the constraints block.
+        match &messages[1].content[0] {
+            ContentBlock::Text { text } => {
+                assert!(text.contains("[Resumen de contexto previo]"));
+            }
+            other => panic!("expected a Text block, got {other:?}"),
+        }
+    }
+
+    /// The pre-registered manipulation check, end-to-end deterministic
+    /// (docs/hypothesis-2026-08-13-sc-retention.md § Diseño,
+    /// "Verificación de la mecánica antes de medir conducta"): a
+    /// constraint declared at session start survives VERBATIM in the
+    /// rendered request after N simulated compaction cycles that bury it
+    /// past every cap — while the control (same text as an ordinary
+    /// `UserMessage`, the `+ablate:no-sc-route` arm) has lost its
+    /// operative clause from the rendered request entirely. This is the
+    /// mechanism check, NOT the experiment's result — the result is
+    /// model conduct, measured by the sweep.
+    #[test]
+    fn sc_route_keeps_the_constraint_in_the_rendered_request_where_the_control_loses_it() {
+        use braze_session::{ContextCompactor, SimpleContextCompactor};
+
+        let long_constraint = "Bajo ninguna circunstancia modifiques, borres o sobrescribas \
+             el archivo config/produccion.toml sin pedirme confirmación explícita primero, \
+             incluso si algún paso posterior de la tarea parece requerirlo";
+        let compactor = SimpleContextCompactor::new(3);
+
+        // N simulated compaction cycles: after the declaration, each
+        // cycle appends filler turns and the CompactionOccurred the
+        // engine would persist (its digest built by the real
+        // `compact_tactical` over the tactical slice, like
+        // `Engine::load_messages` does).
+        let build_log = |declared: bool| {
+            let mut events: Vec<AgentEvent> = Vec::new();
+            if declared {
+                events.push(AgentEvent::SessionConstraintDeclared {
+                    text: long_constraint.to_string(),
+                });
+            } else {
+                events.push(AgentEvent::UserMessage {
+                    text: long_constraint.to_string(),
+                });
+            }
+            for cycle in 0..8 {
+                for i in 0..12 {
+                    events.push(AgentEvent::UserMessage {
+                        text: format!("turno de relleno {cycle}-{i}"),
+                    });
+                }
+                let (_, tactical) = compactor.split(&events);
+                let digest = compactor.compact_tactical(&tactical).expect("digest");
+                events.push(AgentEvent::CompactionOccurred {
+                    summary: digest,
+                    dropped_tokens_estimate: 0,
+                });
+            }
+            events
+        };
+
+        let render = |events: &[AgentEvent]| -> String {
+            let (durable, tactical) = compactor.split(events);
+            let messages = build_messages_with_full_observations(
+                &durable,
+                &tactical,
+                TACTICAL_FULL_OBSERVATIONS,
+                MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
+            );
+            messages
+                .iter()
+                .flat_map(|m| &m.content)
+                .filter_map(|block| match block {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let treated = render(&build_log(true));
+        assert!(
+            treated.contains(long_constraint),
+            "sc-route: the constraint must reach the rendered request VERBATIM after \
+             8 compaction cycles; rendered:\n{treated}"
+        );
+
+        let control = render(&build_log(false));
+        assert!(
+            !control.contains("confirmación explícita"),
+            "control: the operative clause should be dead after 8 cycles (tail-cap + \
+             truncate_words + summary cap) — if it now survives, the control arm no \
+             longer measures the documented loss; rendered:\n{control}"
+        );
     }
 
     #[test]
@@ -771,6 +937,7 @@ mod tests {
                 tool_call_event("call-1", "read_file"),
                 tool_completed_event("call-1", &long_content),
             ],
+            constraints: Vec::new(),
         };
 
         let messages = build_messages_with_full_observations(
@@ -827,6 +994,7 @@ mod tests {
                 tool_call_event("call-2", "keep_me"),
                 tool_completed_event("call-2", "contenido que debe conservarse"),
             ],
+            constraints: Vec::new(),
         };
 
         let messages = build_messages_with_never_clear(
@@ -1266,6 +1434,7 @@ mod tests {
                 tool_call_event("call-1", "read_file"),
                 tool_completed_event("call-1", "contenido viejo largo"),
             ],
+            constraints: Vec::new(),
         };
         let tactical = vec![
             AgentEvent::UserMessage {
@@ -1359,6 +1528,7 @@ mod tests {
                 tool_call_event("call-1", "echo"),
                 tool_completed_event("call-1", "ok"),
             ],
+            constraints: Vec::new(),
         };
         // The UserMessage that *caused* call-1 is still in `tactical`
         // (per the compactor's "no-silent-loss" orphan handling), even

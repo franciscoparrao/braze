@@ -852,6 +852,17 @@ pub struct AblationOverrides {
     /// y quedar pareadas por (tarea, repetición) para McNemar. Con la
     /// llave acá, el factorial entero cabe en un sweep.
     pub max_turn_iterations: Option<usize>,
+    /// `+ablate:no-sc-route` — brazo control del A/B pre-registrado de
+    /// SC-retention (docs/hypothesis-2026-08-13-sc-retention.md):
+    /// desactiva la ruta durable de Session Constraints para esta fila
+    /// (el runner NO llama `Engine::with_session_constraints`, así que
+    /// el constraint de la tarea viaja solo como texto del prompt y
+    /// muere por los tres mecanismos que la sonda del 13-ago confirmó:
+    /// `truncate_words`, tail-cap del digest, cap de summaries). El
+    /// prompt que el modelo ve es idéntico en ambos brazos — la única
+    /// diferencia es la ciudadanía durable. Disabler clásico (default =
+    /// ruta activa cuando la tarea declara `session_constraint`).
+    pub disable_sc_route: bool,
     /// `+ablate:gpu-layers=N` — capas ofloadeadas a GPU del `LocalBackend`
     /// para ESTA fila, equivalente por brazo a `BRAZE_LOCAL_GPU_LAYERS`
     /// (que es del proceso y por lo tanto del sweep entero).
@@ -874,7 +885,7 @@ impl AblationOverrides {
     /// `recognized_keys_lists_every_parseable_key` now pins the two in
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, no-syntactic-gate, strict-edit, \
-         no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, no-spill, \
+         no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, no-spill, no-sc-route, \
          task-list, explore, editor, edit-fence, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
          tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N, \
@@ -903,6 +914,7 @@ impl AblationOverrides {
                 "no-lead" => out.disable_lead = true,
                 "no-compaction" => out.disable_compaction = true,
                 "no-harness-notes" => out.disable_harness_notes = true,
+                "no-sc-route" => out.disable_sc_route = true,
                 "best-of-n" => out.best_of_n = Some(Self::parse_usize(key, value)?),
                 "ttc" => {
                     let n = Self::parse_usize(key, value)? as u32;
@@ -1028,6 +1040,9 @@ impl AblationOverrides {
         }
         if self.disable_harness_notes {
             parts.push("no-harness-notes".to_string());
+        }
+        if self.disable_sc_route {
+            parts.push("no-sc-route".to_string());
         }
         if let Some(n) = self.best_of_n {
             parts.push(format!("best-of-n={n}"));
@@ -1843,5 +1858,25 @@ mod tests {
             spec.display_name(&config()),
             "ollama:qwen2.5:3b+ablate:no-rescue"
         );
+    }
+
+    /// SC-retention (docs/hypothesis-2026-08-13-sc-retention.md): el
+    /// brazo control del A/B se expresa con `no-sc-route`, y su
+    /// identidad tiene que sobrevivir al `display_name` — sin eso el
+    /// reader agregando sweeps mezclaría filas tratadas y control bajo
+    /// el mismo nombre (la clase de silent-mix que el suffix existe
+    /// para impedir).
+    #[test]
+    fn no_sc_route_parses_and_stays_distinguishable_in_the_display_name() {
+        let control = BackendSpec::parse("ollama:qwen2.5:3b+ablate:no-sc-route").unwrap();
+        assert!(control.ablation().disable_sc_route);
+        assert_eq!(
+            control.display_name(&config()),
+            "ollama:qwen2.5:3b+ablate:no-sc-route"
+        );
+
+        let treated = BackendSpec::parse("ollama:qwen2.5:3b").unwrap();
+        assert!(!treated.ablation().disable_sc_route);
+        assert_ne!(control.display_name(&config()), treated.display_name(&config()));
     }
 }

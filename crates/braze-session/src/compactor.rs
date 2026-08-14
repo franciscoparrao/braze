@@ -10,6 +10,15 @@ use crate::error::SessionError;
 pub struct DurableState {
     pub summary: String,
     pub durable_events: Vec<AgentEvent>,
+    /// Session constraints harvested VERBATIM from every
+    /// `AgentEvent::SessionConstraintDeclared` in the log — the durable
+    /// route of docs/hypothesis-2026-08-13-sc-retention.md. Deliberately
+    /// exempt from all three mechanisms that kill an ordinary user-text
+    /// constraint (`truncate_words`, the digest tail-cap, the summary
+    /// cap): no truncation, no cap, no re-summarization. Rendered by
+    /// `braze-engine::history::build_messages*` at the top of every
+    /// request. Order-preserving, exact-duplicate-free.
+    pub constraints: Vec<String>,
 }
 
 /// Splits a raw event log into durable state (never re-summarized) and a

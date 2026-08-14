@@ -159,6 +159,32 @@ impl Engine {
         self.load_mentioned_skills(session, user_input, observer)
             .await?;
 
+        // SC-retention (docs/hypothesis-2026-08-13-sc-retention.md):
+        // declared constraints enter the log BEFORE this turn's
+        // `UserMessage` — the natural position (rules are stated up
+        // front), and the position the route must survive: everything
+        // this old dies by the digest tail-cap without it. Idempotent
+        // against the log so `--resume` / multi-turn sessions don't
+        // re-append the same declaration.
+        for constraint in &self.session_constraints {
+            let already_declared = existing_events.iter().any(|event| {
+                matches!(
+                    event,
+                    AgentEvent::SessionConstraintDeclared { text } if text == constraint
+                )
+            });
+            if !already_declared {
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::SessionConstraintDeclared {
+                        text: constraint.clone(),
+                    },
+                    observer,
+                )
+                .await?;
+            }
+        }
+
         self.append_and_notify(
             session,
             &AgentEvent::UserMessage {
@@ -1362,6 +1388,69 @@ mod tests {
                 |e| matches!(e, AgentEvent::AssistantText { text } if text.contains("really fixed"))
             ),
             "the post-verification round should have run"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// SC-retention (docs/hypothesis-2026-08-13-sc-retention.md): a
+    /// configured session constraint is persisted as
+    /// `SessionConstraintDeclared` BEFORE the first turn's `UserMessage`
+    /// (rules are stated up front — the position the durable route must
+    /// survive), and idempotently: a second turn on the same session
+    /// does NOT re-append it.
+    #[tokio::test]
+    async fn a_session_constraint_is_declared_before_the_first_user_message_and_only_once() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let model = ScriptedModel::new(vec![final_text("listo"), final_text("listo de nuevo")]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_session_constraints(vec!["no borres config/produccion.toml".to_string()]);
+
+        engine
+            .run_turn(&session, "primera tarea", &mut NoopObserver)
+            .await
+            .expect("first turn");
+        engine
+            .run_turn(&session, "segunda tarea", &mut NoopObserver)
+            .await
+            .expect("second turn");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load");
+
+        let declared: Vec<usize> = events
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                matches!(e, AgentEvent::SessionConstraintDeclared { text }
+                    if text == "no borres config/produccion.toml")
+                .then_some(i)
+            })
+            .collect();
+        assert_eq!(
+            declared.len(),
+            1,
+            "the declaration must be idempotent across turns: {events:#?}"
+        );
+        let first_user = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::UserMessage { .. }))
+            .expect("a UserMessage must exist");
+        assert!(
+            declared[0] < first_user,
+            "the constraint must precede the first UserMessage \
+             (declared at {}, first user at {first_user})",
+            declared[0]
         );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

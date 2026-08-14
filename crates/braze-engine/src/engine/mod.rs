@@ -166,6 +166,16 @@ pub struct Engine {
     /// token-budget triggers) — see
     /// [`Engine::with_compaction_enabled`] (`+ablate:no-compaction`).
     compaction_enabled: bool,
+    /// Session constraints to declare durably at the start of the next
+    /// `run_turn` — the explicit entry point of the SC-retention route
+    /// (docs/hypothesis-2026-08-13-sc-retention.md). Each becomes an
+    /// idempotent `AgentEvent::SessionConstraintDeclared` in the log
+    /// (skipped if an identical one is already declared there, so
+    /// `--resume` and multi-turn sessions don't re-append), which the
+    /// compactor then harvests verbatim into `DurableState::constraints`
+    /// on every request. Empty (the default) = route inactive, zero
+    /// behavior change. See [`Engine::with_session_constraints`].
+    session_constraints: Vec<String>,
     /// Cumulative per-turn token circuit breaker (v4 P0.2): once a
     /// turn's summed `input + output` across rounds exceeds this, the
     /// loop stops gracefully instead of re-sending an ever-growing
@@ -457,6 +467,7 @@ impl Engine {
             tactical_full_observations: crate::history::TACTICAL_FULL_OBSERVATIONS,
             observation_collapse_enabled: true,
             compaction_enabled: true,
+            session_constraints: Vec::new(),
             max_turn_total_tokens: None,
             max_turn_wall_clock: None,
             max_round_wall_clock: None,
@@ -542,6 +553,23 @@ impl Engine {
     /// `true` (the default) keeps the existing behavior. Chainable.
     pub fn with_compaction_enabled(mut self, enabled: bool) -> Self {
         self.compaction_enabled = enabled;
+        self
+    }
+
+    /// Declares session constraints for the SC-retention durable route
+    /// (docs/hypothesis-2026-08-13-sc-retention.md): each string is
+    /// persisted at the start of the next `run_turn` as an
+    /// `AgentEvent::SessionConstraintDeclared` (idempotently — an
+    /// identical constraint already in the log is not re-appended), and
+    /// from then on renders VERBATIM at the top of every request via
+    /// `DurableState::constraints`, immune to `truncate_words`, the
+    /// digest tail-cap and the summary cap. Explicit-entry only, by
+    /// design: this lever honors *known* constraints; detecting them in
+    /// free text is a separate claim (CompInt RQ4) it deliberately does
+    /// not make. Empty (the default) = no route, byte-identical behavior.
+    /// Chainable, same shape as [`Engine::with_compaction_enabled`].
+    pub fn with_session_constraints(mut self, constraints: Vec<String>) -> Self {
+        self.session_constraints = constraints;
         self
     }
 

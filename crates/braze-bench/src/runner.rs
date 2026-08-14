@@ -626,10 +626,26 @@ pub async fn run_task(
         engine = engine.with_hook(hook.clone());
     }
 
+    // SC-retention (docs/hypothesis-2026-08-13-sc-retention.md): el
+    // constraint declarado por la tarea se antepone VERBATIM al prompt
+    // en AMBOS brazos (una sola fuente — el modelo ve exactamente el
+    // mismo texto brazo a brazo), y solo el brazo con la ruta activa
+    // (sin `+ablate:no-sc-route`) lo declara además al engine, que es
+    // la única diferencia que el A/B mide.
+    let prompt = match &task.session_constraint {
+        Some(constraint) => format!("{constraint}\n\n{}", task.prompt),
+        None => task.prompt.clone(),
+    };
+    if let Some(constraint) = &task.session_constraint
+        && !ablation.disable_sc_route
+    {
+        engine = engine.with_session_constraints(vec![constraint.clone()]);
+    }
+
     let started = Instant::now();
     let run_outcome = match tokio::time::timeout(
         timeout,
-        engine.run_turn(&session, &task.prompt, &mut braze_events::NoopObserver),
+        engine.run_turn(&session, &prompt, &mut braze_events::NoopObserver),
     )
     .await
     {
@@ -983,6 +999,7 @@ mod tests {
             let mut r = crate::metrics::harness_error_result(
                 "ollama:x",
                 &crate::task::TaskDef {
+                    session_constraint: None,
                     id: "t".to_string(),
                     prompt: "p".to_string(),
                     setup_files: Default::default(),
@@ -1065,6 +1082,7 @@ mod tests {
         setup_files.insert("src/lib.rs".to_string(), "pub fn f() {}".to_string());
         setup_files.insert("notas.txt".to_string(), "hola".to_string());
         let task = crate::task::TaskDef {
+            session_constraint: None,
             id: "seed-test".to_string(),
             prompt: "p".to_string(),
             setup_files,

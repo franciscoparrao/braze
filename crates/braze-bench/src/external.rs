@@ -278,7 +278,7 @@ mod tests {
 
     fn task(expect_text_contains: Option<&str>, expect_no_tool_call: bool) -> TaskDef {
         TaskDef {
-            id: "t".to_string(),
+            session_constraint: None,            id: "t".to_string(),
             prompt: "irrelevant".to_string(),
             setup_files: HashMap::new(),
             expect_tool_call: None,

@@ -81,7 +81,7 @@ mod tests {
 
     fn task_with_files(files: &[(&str, &str)]) -> TaskDef {
         TaskDef {
-            id: "sandbox-test".to_string(),
+            session_constraint: None,            id: "sandbox-test".to_string(),
             prompt: "irrelevant".to_string(),
             setup_files: files
                 .iter()

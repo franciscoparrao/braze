@@ -87,6 +87,14 @@ fn is_settled_durable(event: &AgentEvent) -> bool {
             // `braze-engine::history` now renders both sides
             // (`event_to_message_cleared`).
             | AgentEvent::AssistantToolCall { .. }
+            // SC-retention (docs/hypothesis-2026-08-13-sc-retention.md):
+            // a declared constraint is settled the moment it's declared —
+            // its text is harvested verbatim into
+            // `DurableState::constraints` (see `split`), and the event
+            // itself renders to nothing, so aging it into
+            // `durable_events` just keeps the no-silent-loss accounting
+            // intact without ever exposing it to re-summarization.
+            | AgentEvent::SessionConstraintDeclared { .. }
     )
 }
 
@@ -197,6 +205,23 @@ impl ContextCompactor for SimpleContextCompactor {
             })
             .collect();
 
+        // SC-retention: constraints are harvested from the ENTIRE log in
+        // one pre-pass, independent of window position or compaction
+        // coverage — the whole point of the route is that no position in
+        // the log (and no number of later compactions) can make a
+        // declared constraint disappear from `DurableState`. Verbatim,
+        // order-preserving, exact duplicates skipped (the engine's
+        // idempotent declaration makes duplicates unexpected, but a
+        // replayed/backtracked log must not render the block twice).
+        let mut constraints: Vec<String> = Vec::new();
+        for event in events {
+            if let AgentEvent::SessionConstraintDeclared { text } = event
+                && !constraints.iter().any(|c| c == text)
+            {
+                constraints.push(text.clone());
+            }
+        }
+
         let mut durable_events = Vec::new();
         let mut summary_parts = Vec::new();
         let mut tactical = Vec::new();
@@ -260,6 +285,7 @@ impl ContextCompactor for SimpleContextCompactor {
             // doc comment for why this must be capped.
             summary: tail_capped(&summary_parts, MAX_SUMMARIES_KEPT).join(" "),
             durable_events,
+            constraints,
         };
         (durable, tactical)
     }
@@ -362,6 +388,12 @@ impl ContextCompactor for SimpleContextCompactor {
                 // SWE-Edit #17: audit-only, same as exploration — the
                 // child's state summary lives in its ToolCallCompleted.
                 | AgentEvent::EditorDelegated { .. }
+                // SC-retention: the constraint travels by its own durable
+                // route (`DurableState::constraints`, harvested in
+                // `split`) — folding it into the digest too would
+                // duplicate the verbatim copy the model already sees at
+                // the top of every request.
+                | AgentEvent::SessionConstraintDeclared { .. }
                 | AgentEvent::Unknown => {}
             }
         }
@@ -851,6 +883,139 @@ mod tests {
         // matter how large the folded backlog is.
         assert!(!summary.contains("pedido numero 0"));
         assert!(summary.contains(&format!("pedido numero {}", DIGEST_MAX_USER_REQUESTS + 4)));
+    }
+
+    fn constraint(text: &str) -> AgentEvent {
+        AgentEvent::SessionConstraintDeclared {
+            text: text.to_string(),
+        }
+    }
+
+    /// The operative clause the 2026-08-13 probe showed dying at word 15
+    /// (`truncate_words(15)` kept "no borres ni sobrescribas ningún
+    /// archivo sin..." and lost the "sin QUÉ") — long enough that any
+    /// truncation is detectable, worded like the real bench tasks.
+    const LONG_CONSTRAINT: &str = "Bajo ninguna circunstancia modifiques, borres o sobrescribas \
+         el archivo config/produccion.toml sin pedirme confirmación explícita primero, \
+         incluso si algún paso posterior de la tarea parece requerirlo";
+
+    /// SC-retention mechanism check, part 1 (the pre-registered
+    /// manipulation check, docs/hypothesis-2026-08-13-sc-retention.md §
+    /// Diseño): a declared constraint survives VERBATIM in
+    /// `DurableState::constraints` across every mechanism the 13-ago
+    /// probe confirmed kills the plain-text copy — the digest tail-cap
+    /// (more than `DIGEST_MAX_USER_REQUESTS` later user turns), the
+    /// summary cap (more than `MAX_SUMMARIES_KEPT` later compactions),
+    /// and aging out of the tactical window entirely.
+    #[test]
+    fn declared_constraint_survives_verbatim_across_caps_window_and_many_compactions() {
+        let compactor = SimpleContextCompactor::new(3);
+        let mut events = vec![constraint(LONG_CONSTRAINT)];
+        // Bury it under far more user turns than the digest tail-cap...
+        for i in 0..(DIGEST_MAX_USER_REQUESTS * 2) {
+            events.push(user(&format!("turno posterior {i}")));
+        }
+        // ...and far more compactions than the summary cap.
+        for i in 0..(MAX_SUMMARIES_KEPT * 2) {
+            events.push(compaction(&format!("digest {i}")));
+        }
+
+        let (durable, tactical) = compactor.split(&events);
+
+        assert_eq!(
+            durable.constraints,
+            vec![LONG_CONSTRAINT.to_string()],
+            "the constraint must survive verbatim — no truncation, no cap"
+        );
+        // The no-silent-loss invariant still holds with the new variant:
+        // the constraint event itself is settled durable (it renders to
+        // nothing, but stays accounted).
+        assert!(
+            durable
+                .durable_events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::SessionConstraintDeclared { .. }))
+                || tactical
+                    .iter()
+                    .any(|e| matches!(e, AgentEvent::SessionConstraintDeclared { .. }))
+                // Covered-by-a-later-compaction orphans are dropped — but a
+                // settled durable type never takes that path.
+                ,
+            "the event itself must remain accounted in durable_events or tactical"
+        );
+    }
+
+    /// SC-retention mechanism check, part 2 — the CONTROL side of the
+    /// probe: the same constraint entering as ordinary user text (the
+    /// `+ablate:no-sc-route` arm) is killed by `truncate_words(15)` in
+    /// the digest — the operative tail is gone. This is exactly the gap
+    /// CompInt quantifies and the route closes; if this test ever fails
+    /// because the digest stops truncating, the A/B's control arm no
+    /// longer measures what the pre-registration says it does.
+    #[test]
+    fn plain_text_constraint_loses_its_operative_clause_in_the_digest() {
+        let compactor = SimpleContextCompactor::default();
+        let digest = compactor
+            .compact_tactical(&[user(LONG_CONSTRAINT)])
+            .expect("digest");
+
+        // Word 15 of LONG_CONSTRAINT falls right after "primero," — the
+        // exception clause ("incluso si algún paso posterior...") is
+        // what `truncate_words(15)` cuts, the exact class the 13-ago
+        // probe documented (the digest keeps the prohibition's head and
+        // loses its scope).
+        assert!(
+            !digest.contains("incluso si"),
+            "expected truncate_words(15) to cut the trailing clause; if this now \
+             survives, the control arm's loss mechanism changed: {digest}"
+        );
+        assert!(
+            digest.contains("Bajo ninguna circunstancia"),
+            "the head should survive — it's the tail that dies: {digest}"
+        );
+    }
+
+    /// The constraint's own event must NOT leak into the digest — the
+    /// verbatim copy travels by its own route (`DurableState::constraints`)
+    /// and duplicating it in the summary would double-render it.
+    #[test]
+    fn compact_tactical_treats_a_declared_constraint_as_audit_only() {
+        let compactor = SimpleContextCompactor::default();
+        let digest = compactor
+            .compact_tactical(&[constraint(LONG_CONSTRAINT), user("otra cosa")])
+            .expect("digest");
+
+        assert!(
+            !digest.contains("Bajo ninguna circunstancia"),
+            "the declared constraint must not be folded into the digest: {digest}"
+        );
+    }
+
+    /// Exact duplicates (a replayed/backtracked log) harvest once;
+    /// distinct constraints keep declaration order.
+    #[test]
+    fn split_dedups_exact_duplicate_constraints_and_preserves_order() {
+        let compactor = SimpleContextCompactor::new(2);
+        let events = vec![
+            constraint("no toques a.txt"),
+            constraint("no toques a.txt"),
+            constraint("no borres b.txt"),
+            user("hola"),
+        ];
+
+        let (durable, _tactical) = compactor.split(&events);
+
+        assert_eq!(
+            durable.constraints,
+            vec!["no toques a.txt".to_string(), "no borres b.txt".to_string()]
+        );
+    }
+
+    #[test]
+    fn split_without_constraints_yields_an_empty_constraints_vec() {
+        let compactor = SimpleContextCompactor::default();
+        let (durable, _) = compactor.split(&[user("hola"), tool_completed("1")]);
+        assert!(durable.constraints.is_empty());
     }
 
     #[test]

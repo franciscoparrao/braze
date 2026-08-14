@@ -890,7 +890,7 @@ mod tests {
         expect_text_contains: Option<&str>,
     ) -> TaskDef {
         TaskDef {
-            id: "t".to_string(),
+            session_constraint: None,            id: "t".to_string(),
             prompt: "irrelevant".to_string(),
             setup_files: HashMap::new(),
             expect_tool_call: expect_tool_call.map(str::to_string),

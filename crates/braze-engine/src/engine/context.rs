@@ -229,6 +229,12 @@ pub(crate) fn event_text_len(event: &AgentEvent) -> usize {
         | AgentEvent::TaskCompleted { .. }
         | AgentEvent::ExplorationDelegated { .. }
         | AgentEvent::EditorDelegated { .. }
+        // SC-retention: the constraint is never dropped by a compaction —
+        // its verbatim copy re-renders from `DurableState::constraints`
+        // on every request — so it counts 0 here (nothing is lost) and
+        // is instead counted by `estimate_prompt_tokens` on the durable
+        // side.
+        | AgentEvent::SessionConstraintDeclared { .. }
         | AgentEvent::Unknown => 0,
     }
 }
@@ -413,6 +419,11 @@ pub(crate) fn estimate_prompt_tokens(
     full_observations_byte_budget: usize,
 ) -> u32 {
     let summary_tokens = (durable.summary.len() / 4) as u32;
+    // SC-retention: the constraints block renders on every request, so
+    // the budget must see it — same ~4 chars/token heuristic as the
+    // summary (the framing header is small enough to ignore).
+    let constraints_tokens =
+        (durable.constraints.iter().map(String::len).sum::<usize>() / 4) as u32;
     let durable_events_tokens =
         estimate_message_tokens(&render_durable_events(&durable.durable_events));
     let tactical_tokens = estimate_message_tokens(&render_tactical_events(
@@ -420,7 +431,7 @@ pub(crate) fn estimate_prompt_tokens(
         full_observations,
         full_observations_byte_budget,
     ));
-    summary_tokens + durable_events_tokens + tactical_tokens
+    summary_tokens + constraints_tokens + durable_events_tokens + tactical_tokens
 }
 
 /// Rough token estimate (~4 chars/token) over already-rendered `Message`s

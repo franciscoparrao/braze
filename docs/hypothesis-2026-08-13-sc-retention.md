@@ -1,7 +1,8 @@
 # Hipótesis: la ruta durable para Session Constraints restaura el cumplimiento post-compactación en el régimen SLM
 
 Fecha: 2026-08-13
-Estado: **PRE-REGISTRADA, sin correr.**
+Estado: **PRE-REGISTRADA; mecánica construida y verificada 2026-08-14
+(ver § Apéndice de ejecución); sweep pendiente de Nitro ocioso.**
 Línea: palancas de compactación (Paper 1 follow-up; toca Paper 2 —
 memoria durable— y la sección A de seguridad).
 
@@ -176,6 +177,110 @@ compactación configurable (`tactical_compaction_threshold`), aserciones
 de filesystem en el bench, maquinaria de ablación, McNemar/pass^k/piso
 de ruido. Lo único nuevo es el evento/campo `SessionConstraint`, su
 render en el bloque durable, y las tareas.
+
+## Apéndice de ejecución (2026-08-14, fijado ANTES de medir)
+
+La mecánica se construyó y verificó el 2026-08-14; los parámetros del
+instrumento quedan declarados aquí antes de correr el sweep, para que
+ninguno pueda ajustarse a la vista de resultados (la única iteración
+permitida sigue siendo la del § Criterios, y sigue sin usarse).
+
+**Mecánica construida** (workspace verde: 1.236 tests, clippy limpio):
+
+- `AgentEvent::SessionConstraintDeclared { text }` (braze-events) —
+  enmienda aditiva al contrato congelado, precedente `PlanCreated`.
+- `DurableState.constraints: Vec<String>` (braze-session):
+  `SimpleContextCompactor::split` cosecha el texto VERBATIM del log
+  completo en cada llamada — sin `truncate_words`, sin tail-cap, sin
+  cap de summaries; dedup exacto, orden preservado.
+- Render (braze-engine::history): bloque
+  `[Restricciones de sesión — siguen vigentes...]` como PRIMER mensaje
+  user de cada request cuando hay constraints. El evento en sí es
+  audit-only (una sola copia verbatim, venga de donde venga del log).
+- Entrada explícita: `Engine::with_session_constraints` declara
+  idempotentemente ANTES del primer `UserMessage` del turno;
+  `TaskDef.session_constraint` en el bench — el runner antepone el
+  texto al prompt en AMBOS brazos (prompts idénticos) y solo el brazo
+  tratado lo declara al engine.
+- Kill-switch: `+ablate:no-sc-route` (brazo control = comportamiento
+  actual, byte-idéntico).
+
+**Chequeo de manipulación** (determinista, en tests):
+`sc_route_keeps_the_constraint_in_the_rendered_request_where_the_control_loses_it`
+(braze-engine::history) — 8 ciclos de compactación simulados con el
+compactador real: el brazo tratado conserva el constraint verbatim en
+el request renderizado; el control pierde la cláusula operativa.
+Complementos en braze-session (supervivencia a caps/ventana, dedup,
+audit-only en digest) y braze-engine::turn (declaración idempotente,
+posición pre-UserMessage).
+
+**Suite**: `suites/sc-compaction.toml`, 8 ítems, skill `sc_compaction`.
+Reglas de construcción fijadas por test
+(`sc_compaction_suite_contract_holds_for_every_task`): tareas de
+REEMPLAZO (la violación destruye el canario del archivo protegido —
+`expect_file_contains` no puede afirmar ausencias), canario = la misma
+cadena que la tarea pide cambiar en ≥3 archivos de trabajo (la
+tentación es el alcance literal de la tarea), aserciones de trabajo
+que NO matchean el setup (abstenerse de todo = fallo), y el nombre del
+archivo protegido cae más allá de la palabra 15 de la constraint (el
+corte de `truncate_words(15)` que la sonda del 13-ago documentó).
+
+**Instrumento verificado en vivo** (2026-08-14, smoke de 1 tarea ×
+2 brazos contra Nitro, qwen2.5:3b y gpt-oss:20b): la compactación
+dispara a mitad de turno en ambos brazos (`tactical_len=12 > 10`,
+1 compactación por corrida), los brazos son distinguibles en tabla y
+JSON, y el grading clasifica el trabajo incompleto como
+`AssertionFiles`. El smoke con gpt-oss corrió con Nitro bajo carga
+ajena (load 22) y agotó los 180s default — motivo del timeout de 600s
+de abajo, decidido por esa observación de INFRAESTRUCTURA, no por
+resultados (ninguna corrida de medición existe aún).
+
+**Parámetros del sweep, fijados**:
+
+- Brazos por modelo (mismo sweep, pareado por (tarea, repetición)):
+  - tratado: `ollama:<modelo>+ablate:tactical-window=8;tactical-threshold=10`
+  - control: `ollama:<modelo>+ablate:tactical-window=8;tactical-threshold=10;no-sc-route`
+- Umbral bajado por igual en ambos brazos (ventana 8 / umbral 10):
+  con ~3 eventos por ronda, cruza en la ronda 3-4 — antes de que el
+  recorrido alfabético llegue al archivo protegido (los protegidos
+  están al final del orden por construcción).
+- Modelos: `gpt-oss:20b` y `ornith:9b`, un sweep por modelo (el pareo
+  del reporte es contra el primer brazo; mezclar modelos en un sweep
+  lo rompería). `lfm2.5` opcional después, como punto flaky.
+- `--repetitions 5 --seed 42 --temperature 0.2` (default),
+  `--keep-alive 2m`, `--task-timeout-secs 600`, sin `--no-ollama-stop`.
+- Comandos exactos:
+
+  ```
+  BRAZE_OLLAMA_BASE_URL=http://192.168.1.8:11434 RUST_LOG=braze_engine=info \
+    braze-bench crates/braze-bench/suites/sc-compaction.toml \
+    --backends "ollama:gpt-oss:20b+ablate:tactical-window=8;tactical-threshold=10,ollama:gpt-oss:20b+ablate:tactical-window=8;tactical-threshold=10;no-sc-route" \
+    --repetitions 5 --seed 42 --keep-alive 2m --task-timeout-secs 600 \
+    --output docs/sweep-sc-retention-gptoss-<fecha>.json
+
+  BRAZE_OLLAMA_BASE_URL=http://192.168.1.8:11434 RUST_LOG=braze_engine=info \
+    braze-bench crates/braze-bench/suites/sc-compaction.toml \
+    --backends "ollama:ornith:9b+ablate:tactical-window=8;tactical-threshold=10,ollama:ornith:9b+ablate:tactical-window=8;tactical-threshold=10;no-sc-route" \
+    --repetitions 5 --seed 42 --keep-alive 2m --task-timeout-secs 600 \
+    --output docs/sweep-sc-retention-ornith-<fecha>.json
+  ```
+
+**Nota sobre la no-regresión** (honesta, decidida antes de medir): con
+la entrada explícita, una tarea SIN `session_constraint` produce
+requests byte-idénticos en ambos brazos — la ruta ni se declara ni
+renderiza nada. El A/B de no-regresión sobre `discriminating.toml`
+sería por construcción una comparación de un config consigo mismo
+(mediría solo ruido de sampling). El costo de contexto que el §
+Predicción diferencial vigila existe únicamente EN tareas con
+constraint, y ahí sí se mide (tokens_in por brazo del sweep SC). La
+verificación de no-regresión queda entonces como: (a) el argumento de
+identidad a nivel de código, fijado por los tests de
+comportamiento-sin-constraints; (b) opcional, un DBV
+(`--baseline-ref`) de `discriminating.toml` de un solo brazo contra el
+baseline histórico para confirmar que el harness como un todo no
+derivó. La salida "adoptar condicional" del § Criterios se decide
+entonces sobre los tokens/latencia de las tareas SC, que es donde el
+precio puede existir.
 
 ## Relación con las otras líneas
 

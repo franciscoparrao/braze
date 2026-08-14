@@ -331,6 +331,32 @@ pub enum AgentEvent {
         /// Input+output tokens the child consumed, summed.
         child_tokens: u64,
     },
+    /// A session-scoped constraint the user declared explicitly ("under
+    /// no circumstances modify X") — the durable route of the
+    /// pre-registered SC-retention experiment
+    /// (docs/hypothesis-2026-08-13-sc-retention.md). CompInt (Wang et
+    /// al. 2026, "Lost in Compaction") quantifies the class this route
+    /// closes: session constraints survive context compaction ~17% of
+    /// the time, because they enter as ordinary user text and die by
+    /// `truncate_words`, the digest's tail-cap, or the summary cap.
+    /// This event gives them the same privileged citizenship
+    /// [`Self::PlanCreated`] already has, but stronger: the compactor
+    /// harvests the text VERBATIM into `DurableState::constraints`
+    /// (never truncated, never capped, never re-summarized) and
+    /// `braze-engine::history` renders it at the top of every request.
+    /// The event itself is audit-only in rendering (like
+    /// `CompactionOccurred`) — the model sees the harvested copy, so
+    /// exactly one verbatim copy survives regardless of where the event
+    /// sits in the log. Entry is explicit-only (an `Engine` builder /
+    /// bench task field) — detecting constraints in free text is a
+    /// separate claim this route deliberately does not make. Additive
+    /// amendment to the frozen contract, same precedent as
+    /// `PlanCreated`: an older binary reading a log with this event
+    /// deserializes it as [`Self::Unknown`].
+    SessionConstraintDeclared {
+        /// The constraint, verbatim — what the durable block renders.
+        text: String,
+    },
     /// Catch-all for a `"type"` tag this binary's enum doesn't have a
     /// variant for (C9, docs/AUDITORIA-2026-07.md). `AgentEvent`'s serde
     /// shape is a frozen contract (PLAN.md) — a new variant is the only
@@ -403,6 +429,30 @@ mod tests {
         match event {
             AgentEvent::PermissionDecided { key, .. } => assert_eq!(key, None),
             other => panic!("expected PermissionDecided, got {other:?}"),
+        }
+    }
+
+    /// SC-retention (docs/hypothesis-2026-08-13-sc-retention.md): the
+    /// declared constraint must round-trip VERBATIM through the rollout
+    /// log — the whole route rides on the persisted text being exact.
+    #[test]
+    fn session_constraint_declared_round_trips_through_json() {
+        let text = "Bajo ninguna circunstancia modifiques config/produccion.toml \
+                    sin pedirme confirmación explícita primero";
+        let event = AgentEvent::SessionConstraintDeclared {
+            text: text.to_string(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains("\"session_constraint_declared\""),
+            "snake_case tag expected, got: {json}"
+        );
+        let decoded: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+        match decoded {
+            AgentEvent::SessionConstraintDeclared { text: decoded_text } => {
+                assert_eq!(decoded_text, text, "must survive verbatim");
+            }
+            other => panic!("expected SessionConstraintDeclared, got {other:?}"),
         }
     }
 
