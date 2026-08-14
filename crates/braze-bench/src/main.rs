@@ -17,6 +17,7 @@ mod report;
 mod runner;
 mod sandbox;
 mod sequential;
+mod sft;
 mod synthetic;
 mod task;
 
@@ -223,6 +224,23 @@ async fn main() -> ExitCode {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
         .init();
+
+    // Subcomando `export-sft` (línea experto-por-motor, `sft.rs`),
+    // despachado a mano ANTES de `Cli::parse()`: el CLI principal usa la
+    // suite como posicional (`braze-bench <suite.toml> ...`) en todos los
+    // repro commands documentados, y un subcomando clap real cambiaría
+    // esa gramática. El token `export-sft` no colisiona con ningún path
+    // de suite razonable, y `--help` del subcomando funciona igual.
+    if std::env::args().nth(1).as_deref() == Some("export-sft") {
+        let cli = sft::ExportCli::parse_from(std::env::args().skip(1));
+        return match sft::run(cli) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("braze-bench: error: {err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
