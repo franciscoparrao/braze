@@ -65,6 +65,11 @@ pub const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(180);
 struct BenchPrompt {
     session: SessionId,
     store: Arc<dyn SessionStore>,
+    /// Prefijos de comando del "motor" declarados por la tarea
+    /// (`TaskDef::sandbox_commands`) — segundo carve-out del
+    /// deny-everything, mismo contrato que cargo: ver
+    /// [`is_declared_sandbox_command`].
+    sandbox_commands: Vec<String>,
 }
 
 /// `cargo check`/`cargo build`/`cargo test` only, and only without the
@@ -126,6 +131,51 @@ fn unwrap_single_shell_script(command: &[String]) -> Option<Vec<&str>> {
     Some(script.split_whitespace().collect())
 }
 
+/// ¿`action` matchea alguno de los prefijos de motor declarados por la
+/// tarea (`TaskDef::sandbox_commands`)? Mismo contrato de seguridad que
+/// [`is_benchable_cargo`]: el comando se acepta SOLO como argv plano —
+/// directo, o desenvuelto de `bash -lc` por
+/// [`unwrap_single_shell_script`], cuya whitelist de caracteres excluye
+/// todo metacaracter de shell — y el prefijo declarado debe coincidir
+/// token a token desde el inicio. Los argumentos posteriores al prefijo
+/// quedan cubiertos por la misma whitelist (sin `;`/`|`/`$`/comillas no
+/// hay composición posible), y las escrituras del script caen dentro del
+/// sandbox desechable que `WorkdirAllowlist` ya acota.
+pub(crate) fn is_declared_sandbox_command(
+    action: &ActionDescriptor,
+    declared: &[String],
+) -> bool {
+    if declared.is_empty() {
+        return false;
+    }
+    let ActionDescriptor::ShellCommand { command } = action else {
+        return false;
+    };
+    let tokens: Vec<&str> = match unwrap_single_shell_script(command) {
+        Some(tokens) => tokens,
+        None => {
+            // Argv directo (sin wrapper de shell): se exige la MISMA
+            // whitelist de caracteres por token que el unwrap impone al
+            // script — sin ella, un argumento podría cargar
+            // metacaracteres que el shell de la tool sí expandiría.
+            if !command.iter().all(|t| {
+                !t.is_empty()
+                    && t.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '=' | '/' | '-'))
+            }) {
+                return false;
+            }
+            command.iter().map(String::as_str).collect()
+        }
+    };
+    declared.iter().any(|prefix| {
+        let prefix_tokens: Vec<&str> = prefix.split_whitespace().collect();
+        !prefix_tokens.is_empty()
+            && prefix_tokens.len() <= tokens.len()
+            && prefix_tokens.iter().zip(&tokens).all(|(a, b)| a == b)
+    })
+}
+
 /// The cargo rule itself, over an already-plain argv — see
 /// [`is_benchable_cargo`] for what's allowed and why.
 fn is_plain_cargo_verify(tokens: &[&str]) -> bool {
@@ -141,7 +191,8 @@ fn is_plain_cargo_verify(tokens: &[&str]) -> bool {
 #[async_trait]
 impl ConfirmationPrompt for BenchPrompt {
     async fn confirm(&self, action: &ActionDescriptor) -> bool {
-        let allowed = is_benchable_cargo(action);
+        let allowed = is_benchable_cargo(action)
+            || is_declared_sandbox_command(action, &self.sandbox_commands);
         let key = braze_permissions::derive_permission_key(action);
 
         // Best-effort, same as the real prompts: a session-store hiccup
@@ -290,6 +341,7 @@ pub async fn run_task(
     let prompt = BenchPrompt {
         session,
         store: Arc::clone(&store),
+        sandbox_commands: task.sandbox_commands.clone(),
     };
     let guard = PermissionGuard::new(allowlist, Box::new(classifier), Box::new(prompt));
     // `with_workdir`, not `new`: the bench binary's own process cwd is
@@ -940,6 +992,7 @@ mod tests {
                     expect_text_contains: None,
                     expect_file_contains: Default::default(),
                     expect_cargo_check: false,
+            sandbox_commands: Vec::new(),
                     skill: None,
                     expect_max_rounds: None,
                     expect_max_tokens: None,
@@ -1021,6 +1074,7 @@ mod tests {
             expect_text_contains: None,
             expect_file_contains: Default::default(),
             expect_cargo_check: false,
+            sandbox_commands: Vec::new(),
             skill: None,
             expect_max_rounds: None,
             expect_max_tokens: None,
@@ -1131,6 +1185,7 @@ mod tests {
         let prompt = BenchPrompt {
             session,
             store: Arc::clone(&store),
+            sandbox_commands: Vec::new(),
         };
 
         let action = ActionDescriptor::DeleteFile {
@@ -1161,6 +1216,7 @@ mod tests {
         let prompt = BenchPrompt {
             session,
             store: Arc::clone(&store),
+            sandbox_commands: Vec::new(),
         };
 
         let action = ActionDescriptor::ShellCommand {
@@ -1175,6 +1231,56 @@ mod tests {
         }
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// El carve-out declarado por la suite (experto-por-motor,
+    /// 2026-08-14): el prefijo de motor matchea en las dos formas de
+    /// envío (argv directo y `bash -lc`), los argumentos posteriores
+    /// quedan cubiertos por la whitelist de caracteres, y NINGÚN
+    /// metacaracter pasa aunque el prefijo coincida — el piloto
+    /// pizzeria midió 12-25 denegaciones por brazo sin esto (fricción
+    /// del harness, no capacidad; misma clase que el carve-out cargo).
+    #[test]
+    fn declared_sandbox_command_matches_plain_forms_and_rejects_metacharacters() {
+        let declared = vec!["python3 pizzeria.py".to_string()];
+        let shell = |parts: &[&str]| ActionDescriptor::ShellCommand {
+            command: parts.iter().map(|s| s.to_string()).collect(),
+        };
+
+        // Argv directo y bash -lc, con y sin argumentos extra.
+        assert!(is_declared_sandbox_command(
+            &shell(&["python3", "pizzeria.py", "menu"]),
+            &declared
+        ));
+        assert!(is_declared_sandbox_command(
+            &shell(&["bash", "-lc", "python3 pizzeria.py agregar napolitana familiar"]),
+            &declared
+        ));
+
+        // Prefijo distinto, denegado.
+        assert!(!is_declared_sandbox_command(
+            &shell(&["python3", "otro.py", "menu"]),
+            &declared
+        ));
+        // Metacaracteres: denegados aunque el prefijo coincida.
+        assert!(!is_declared_sandbox_command(
+            &shell(&["bash", "-lc", "python3 pizzeria.py menu; rm -rf /"]),
+            &declared
+        ));
+        assert!(!is_declared_sandbox_command(
+            &shell(&["python3", "pizzeria.py", "$(id)"]),
+            &declared
+        ));
+        // Sin declaración, nada matchea.
+        assert!(!is_declared_sandbox_command(
+            &shell(&["python3", "pizzeria.py", "menu"]),
+            &[]
+        ));
+        // Un prefijo declarado vacío no es un comodín.
+        assert!(!is_declared_sandbox_command(
+            &shell(&["python3", "pizzeria.py", "menu"]),
+            &["   ".to_string()]
+        ));
     }
 
     #[test]

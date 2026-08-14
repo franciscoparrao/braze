@@ -91,6 +91,20 @@ pub struct TaskDef {
     /// question), this measures the *outcome*.
     #[serde(default)]
     pub expect_cargo_check: bool,
+    /// Comandos del "motor" de esta tarea que el bench aprueba (línea
+    /// experto-por-motor, 2026-08-14): prefijos de argv planos — e.g.
+    /// `["python3 pizzeria.py"]` — que `BenchPrompt` permite además del
+    /// carve-out de cargo, con la misma disciplina anti-metacaracteres
+    /// (un comando con `;`/`|`/`$`/comillas NUNCA matchea, aunque su
+    /// prefijo coincida). Sin esto, una suite cuyo dominio es operar un
+    /// CLI externo es estructuralmente inganable: el piloto pizzeria
+    /// (2026-08-13) midió 12-25 denegaciones por brazo — fricción del
+    /// harness, no capacidad del modelo — la misma clase que motivó el
+    /// carve-out de cargo (sweep memory-distillation 2026-07-16). La
+    /// suite es del experimentador y el sandbox es desechable: declarar
+    /// el motor aquí es autoría del banco, no una decisión del modelo.
+    #[serde(default)]
+    pub sandbox_commands: Vec<String>,
     /// Optional free-form label (e.g. `"single_tool"`, `"multi_step"`,
     /// `"error_recovery"`) grouping tasks by the kind of capability they
     /// probe, so a report can break results down by skill instead of only

@@ -899,6 +899,7 @@ mod tests {
             expect_text_contains: expect_text_contains.map(str::to_string),
             expect_file_contains: HashMap::new(),
             expect_cargo_check: false,
+            sandbox_commands: Vec::new(),
             skill: None,
             expect_max_rounds: None,
             expect_max_tokens: None,
