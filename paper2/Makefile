@@ -10,10 +10,9 @@ figs:
 
 pdf:
 	pdflatex -interaction=nonstopmode main.tex
+	bibtex main
 	pdflatex -interaction=nonstopmode main.tex
-
-# bibtex entra cuando exista refs.bib (S3):
-#	pdflatex main && bibtex main && pdflatex ×2
+	pdflatex -interaction=nonstopmode main.tex
 
 clean:
 	rm -f main.aux main.bbl main.blg main.log main.out main.pdf

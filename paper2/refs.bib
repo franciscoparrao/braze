@@ -1,0 +1,198 @@
+% refs.bib — Paper 2 (frontera de amortización).
+%
+% Procedencia de las entradas:
+% - REUSADAS VERBATIM del refs.bib del Paper 1 (verificadas ahí con
+%   /verify-refs 2026-07-13/18/19 y 2026-08-10 para walkinglabs/dex;
+%   zhu2026babeltele quedó pendiente allá y sigue pendiente acá):
+%   corradini2025, lu2024smalllm, yang2024sweagent, zhu2026babeltele,
+%   walkinglabs2026, dex2026wsff, nosek2018preregistration,
+%   mendez2019openscience, ralph2021standards, arcuri2011practical.
+% - NUEVAS de este paper — PENDIENTES de /verify-refs (S4):
+%   parra2026scaffolding (self-cite, under review), wang2026compint
+%   (título/autores tomados de arxiv.org/abs/2608.11242 el 2026-08-15),
+%   luo2026autodesign y li2026loopsbench (título/autores tomados de la
+%   página 1 de los PDFs en docs/), wang2023voyager, shinn2023reflexion,
+%   packer2023memgpt (clásicos de memoria agéntica, de conocimiento
+%   general — verificar título/autores exactos en S4).
+
+% ---------------------------------------------------------------- self
+@misc{parra2026scaffolding,
+  title  = {Not All Scaffolding Helps: A Lever-by-Lever Study of
+            Agentic Harnesses at Small-Model Scales, with
+            Pre-Registered Adoption Criteria for Key Levers},
+  author = {Parra, Francisco},
+  year   = {2026},
+  note   = {Under review, Empirical Software Engineering}
+}
+
+% ----------------------------------------------- memoria agéntica (RW a)
+@misc{wang2023voyager,
+  title  = {Voyager: An Open-Ended Embodied Agent with Large Language
+            Models},
+  author = {Wang, Guanzhi and Xie, Yuqi and Jiang, Yunfan and
+            Mandlekar, Ajay and Xiao, Chaowei and Zhu, Yuke and Fan,
+            Linxi and Anandkumar, Anima},
+  year   = {2023},
+  doi    = {10.48550/arxiv.2305.16291},
+  note   = {arXiv:2305.16291}
+}
+
+@inproceedings{shinn2023reflexion,
+  title     = {Reflexion: Language Agents with Verbal Reinforcement
+               Learning},
+  author    = {Shinn, Noah and Cassano, Federico and Gopinath, Ashwin
+               and Narasimhan, Karthik and Yao, Shunyu},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2023},
+  doi       = {10.48550/arxiv.2303.11366},
+  note      = {arXiv:2303.11366}
+}
+
+@misc{packer2023memgpt,
+  title  = {{MemGPT}: Towards {LLMs} as Operating Systems},
+  author = {Packer, Charles and Wooders, Sarah and Lin, Kevin and
+            Fang, Vivian and Patil, Shishir G. and Stoica, Ion and
+            Gonzalez, Joseph E.},
+  year   = {2023},
+  doi    = {10.48550/arxiv.2310.08560},
+  note   = {arXiv:2310.08560}
+}
+
+% ------------------------------------------------- SLM / local (RW b)
+@article{corradini2025,
+  title   = {State of the Art and Future Directions of Small Language
+             Models: A Systematic Review},
+  author  = {Corradini, Flavio and Leonesi, Michela and Piangerelli,
+             Marco},
+  journal = {Big Data and Cognitive Computing},
+  volume  = {9},
+  number  = {7},
+  pages   = {189},
+  year    = {2025},
+  doi     = {10.3390/bdcc9070189}
+}
+
+@article{lu2024smalllm,
+  title   = {Small Language Models: Survey, Measurements, and Insights},
+  author  = {Lu, Zhenyan and Li, Xiang and Cai, Dongqi and Yi, Rongjie
+             and Liu, Fangming and Zhang, Xiwen and Lane, Nicholas D.
+             and Xu, Mengwei},
+  year    = {2024},
+  journal = {arXiv preprint arXiv:2409.15790},
+  doi     = {10.48550/arxiv.2409.15790}
+}
+
+@article{zhu2026babeltele,
+  title   = {Large Language Models Do Not Always Need Readable Language},
+  author  = {Zhu, Jiayi and Peng, Haoxuan and Wang, Junxi and Ke, Liang
+             and Zhang, Chen and Zhang, Linfeng},
+  year    = {2026},
+  journal = {arXiv preprint arXiv:2606.19857},
+  doi     = {10.48550/arxiv.2606.19857}
+}
+
+% -------------------------------------- harness engineering (RW c)
+@inproceedings{yang2024sweagent,
+  title     = {{SWE-agent}: Agent-Computer Interfaces Enable Automated
+               Software Engineering},
+  author    = {Yang, John and Jimenez, Carlos E. and Wettig, Alexander
+               and Lieret, Kilian and Yao, Shunyu and Narasimhan, Karthik
+               and Press, Ofir},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2024},
+  doi       = {10.48550/arxiv.2405.15793},
+  note      = {arXiv:2405.15793}
+}
+
+@misc{walkinglabs2026,
+  title        = {Learn Harness Engineering},
+  author       = {{Walking Labs}},
+  year         = {2026},
+  howpublished = {\url{https://walkinglabs.github.io/learn-harness-engineering/}},
+  note         = {Open-source course, MIT licence; 14 lectures, 8 projects.
+                  Accessed 2026-08-10}
+}
+
+@misc{dex2026wsff,
+  title        = {Why Software Factories Fail: or, harness engineering
+                  is not enough},
+  author       = {{Dex} and {HumanLayer}},
+  year         = {2026},
+  howpublished = {\url{https://github.com/humanlayer/advanced-context-engineering-for-coding-agents}},
+  note         = {\texttt{wsff.md}}
+}
+
+@misc{li2026loopsbench,
+  title  = {{LoopsBench}: From Harness Engineering to Loop Engineering
+            in Coding Agent Evaluation},
+  author = {Li, Han and Fang, Zhemin and Feng, Rili and Zhao, Yingqi
+            and Liu, Jiaheng and Gao, Pengfei and Ye, He and Lin, Dayi
+            and Lin, Qingwei and Rajmohan, Saravan and Zhang, Dongmei},
+  year   = {2026},
+  doi    = {10.48550/arxiv.2608.00267},
+  note   = {arXiv:2608.00267}
+}
+
+@misc{wang2026compint,
+  title  = {Lost in Compaction: Evaluating Side-Constraint Loss under
+            Context Compaction},
+  author = {Wang, Zhiqi and Zhang, Yichi and Lee, Dongwon and Yang,
+            Yuchen},
+  year   = {2026},
+  doi    = {10.48550/arxiv.2608.11242},
+  note   = {arXiv:2608.11242}
+}
+
+@misc{luo2026autodesign,
+  title  = {{AutoDesign}: Meta-Harness Optimization for Long-Horizon
+            Agentic Design},
+  author = {Luo, Yaxin and Jiang, Haobin and Zou, Jialv and Huang, Xu
+            and Yan, Wenhao and Li, Haodong and Yue, Zhengrong and Li,
+            Jing and Chen, Xiaofu and Zhao, Xiaohan and Liu, Jiacheng
+            and Cui, Jiacheng and Shen, Zhiqiang and Li, Xiaotong},
+  year   = {2026},
+  doi    = {10.48550/arxiv.2608.13560},
+  note   = {arXiv:2608.13560}
+}
+
+% --------------------------- nulos / pre-registro / estadística (RW d)
+@article{nosek2018preregistration,
+  title   = {The preregistration revolution},
+  author  = {Nosek, Brian A. and Ebersole, Charles R. and DeHaven,
+             Alexander C. and Mellor, David T.},
+  journal = {Proceedings of the National Academy of Sciences},
+  volume  = {115},
+  number  = {11},
+  year    = {2018},
+  doi     = {10.1073/pnas.1708274114}
+}
+
+@article{mendez2019openscience,
+  title   = {The open science initiative of the Empirical Software
+             Engineering journal},
+  author  = {M{\'e}ndez Fern{\'a}ndez, Daniel and Monperrus, Martin and
+             Feldt, Robert and Zimmermann, Thomas},
+  journal = {Empirical Software Engineering},
+  volume  = {24},
+  year    = {2019},
+  doi     = {10.1007/s10664-019-09712-x}
+}
+
+@misc{ralph2021standards,
+  title  = {Empirical Standards for Software Engineering Research},
+  author = {Ralph, Paul and others},
+  year   = {2020},
+  doi    = {10.48550/arxiv.2010.03525},
+  note   = {arXiv:2010.03525}
+}
+
+@inproceedings{arcuri2011practical,
+  title     = {A practical guide for using statistical tests to assess
+               randomized algorithms in software engineering},
+  author    = {Arcuri, Andrea and Briand, Lionel},
+  booktitle = {Proceedings of the 33rd International Conference on
+               Software Engineering (ICSE)},
+  pages     = {1--10},
+  year      = {2011},
+  doi       = {10.1145/1985793.1985795}
+}
