@@ -432,3 +432,65 @@ ese número decide si vale la rearquitectura.
 prefill pasa a dominar tareas de una ronda: `no_tool_qa` tarda 14-20s con
 salida mínima), pero por costo/beneficio queda detrás de #5 y #6. No accionar
 sin la medición de (e).
+
+---
+
+## 11. Addendum 2026-08-15: ferrumox/fox (y nota sobre rabbit)
+
+Dos proyectos del mismo autor revisados a propósito de braze (código
+clonado y leído, no solo READMEs):
+
+**rabbit** (`github.com/ferrumox/rabbit`) — motor de inferencia Rust puro
+para MoE gigantes (2.4T params) por streaming de expertos desde NVMe;
+0.21 tok/s medidos y publicados con honestidad. Sin valor como runtime
+para braze (una ronda de 300 tokens ≈ 24 min), pero **dos técnicas ya
+transferidas** (commit `1d4e010`): los fixture tests de chat template
+contra el render Jinja de referencia (que destaparon las desviaciones
+D1/D2 y el hallazgo D3 del dialecto gemma-4), y el patrón `TurnProfile`
+de timing por fases como inspiración para P0.2. Su `kv_session.rs`
+(persistencia append-only crash-tolerante de KV por turnos) es media
+receta para la idea #3 si alguna vez se acciona; braze ya tiene el mismo
+diseño (más robusto: C5+N-27) en su rollout log.
+
+**fox** (`github.com/ferrumox/fox`, v0.21.0, 186★) — reemplazo drop-in
+de Ollama en Rust (llama.cpp vendorizado, Axum): APIs Ollama+OpenAI,
+**prefix caching de KV**, batching continuo, multi-modelo con evicción
+LRU, KV-quant, speculative decoding. Benchmark propio (Radeon 890M,
+8 clientes, prompt compartido): TTFT p50 1129 ms vs 4550 ms de Ollama;
+declaran −4% en single-turn corto.
+
+Lectura para braze:
+
+- **Es la contraparte servida de la idea #3** (§ 10): evidencia externa
+  de que el ahorro de prefix-reuse en loops multi-turno es real y
+  grande. NO revierte el veredicto de § 10 — el techo para braze lo
+  acotó la propia medición (prompts contenidos en ~5.5-6.8k chars por
+  la compactación diferencial + colapso ACI), y el número que decide
+  (prefijo común POR TOKENS entre rondas consecutivas) sigue sin
+  medirse. Si ese número se mide y es alto, la captura correcta del
+  beneficio para braze-como-laboratorio es **in-process en el
+  LocalBackend** (patrón actor de § 10c), no adoptar un server.
+- **Dolores de Ollama que fox ataca de frente**: evicción LRU
+  (la clase del OOM-kill del 2026-08-10), multi-modelo lazy, y el
+  batching continuo beneficiaría a `+ablate:ttc=N` (N rollouts
+  concurrentes).
+- **Barreras verificadas en README antes de cualquier piloto**:
+  (1) **seed/determinismo sin documentar** — los sweeps viven de
+  `options.seed`; si fox lo ignora es no-starter de medición;
+  (2) tampoco documenta el `keep_alive` POR-REQUEST del que depende
+  `a30d6d6` (solo flag de servidor); (3) "drop-in" para la API, no
+  para el store: baja modelos de HuggingFace y NO lee blobs de Ollama
+  (los GGUF canónicos de `nitro:~/models` sí le sirven directo);
+  (4) parsea tool calls server-side (Hermes/Mistral/Llama 3) — la
+  superficie de la clase de bug #1/#17; mitigable con la escalera de
+  rescate y `+ablate:prompt-tools`.
+- **Meta**: cambiar el runtime de servicio es drift de entorno por
+  construcción (el DBV lo marcaría) — cualquier adopción sería un
+  cambio de sustrato deliberado y medido, nunca un upgrade casual.
+
+**Acciones que deja registradas** (en orden): (a) piloto acotado
+fox-vs-Ollama vía `--ollama-url` cuando Nitro esté ocioso — mismo
+modelo, mismo seed (verificar seed PRIMERO), medir wall por ronda como
+instrumento de round-economics; (b) si se retoma la idea #3, medir
+antes el prefijo común por tokens (el paso barato que § 10e dejó
+escrito); fox funciona como benchmark de referencia del techo servible.
