@@ -188,8 +188,10 @@ gaps are the subject of this paper.
 
 \paragraph{Small and local models as executors.} Surveys of small
 language models document the capability and deployment trade-offs of
-the 1--20B regime \citep{lu2024smalllm,corradini2025}. Two properties
-of that regime sharpen the memory question. First, under local
+the sub-10B regime \citep{lu2024smalllm,corradini2025}; our executor
+--- a 20B mixture-of-experts with $\sim$3.6B active parameters ---
+runs on commodity hardware at the practical edge of that regime. Two
+properties of this regime sharpen the memory question. First, under local
 inference the input-token bill is paid in wall-clock time on the
 user's hardware on every round, so per-round context overhead is a
 first-order design cost, not a billing detail. Second, small executors
@@ -212,7 +214,8 @@ from the harness to the whole evaluation loop \citep{li2026loopsbench}.
 Two recent results make the memory component specifically urgent.
 CompInt quantifies silent \emph{loss}: user-issued side constraints
 survive context compaction only a minority of the time, and the
-authors argue for architecturally separate durable state
+authors close the gap with an extraction module separate from the
+compactor rather than with better compaction prompts
 \citep{wang2026compint}. AutoDesign formalizes the harness as a
 recursive optimization target --- a meta-harness optimizer proposing
 one bounded update per iteration to one of five components, of which
@@ -227,8 +230,9 @@ gate would have promoted the false positive our control arm caught.
 \paragraph{Negative results and pre-registration in empirical software
 engineering.} Pre-registration separates hypothesis generation from
 confirmation \citep{nosek2018preregistration}, and this journal's open
-science initiative explicitly solicits registered designs and negative
-results \citep{mendez2019openscience}; community standards make
+science initiative institutionalizes the transparency and
+reproducibility expectations that make a well-documented null
+publishable \citep{mendez2019openscience}; community standards make
 analogous demands on benchmark-based studies \citep{ralph2021standards},
 and the statistical treatment of randomized SE experiments is
 well-codified \citep{arcuri2011practical}. This paper follows that
@@ -616,9 +620,10 @@ obviously good --- plausible mechanism, appealing economics, easy to
 adopt without measurement. Our original protocol for this line
 proposed it as a positive contribution; the data refused. The project
 this work belongs to has accumulated a discipline of pre-registered
-null results at the harness level (constrained decoding, test-time
-compute, prompt-format levers measured against public evidence from
-other harnesses \citep{parra2026scaffolding}); the present null is the highest
+null results at the harness level --- a prose planner that actively
+harmed small executors, tool deferral that proved cheaper but not
+free, constrained decoding that failed to beat the harness's own
+repair ladder \citep{parra2026scaffolding}; the present null is the highest
 conceptual stake among them because the technique is the most
 attractive, and because \emph{both} an efficiency framing (Study~1)
 and an effectiveness framing (Study~2) fail independently, by
