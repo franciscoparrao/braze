@@ -7,13 +7,27 @@
 %   corradini2025, lu2024smalllm, yang2024sweagent, zhu2026babeltele,
 %   walkinglabs2026, dex2026wsff, nosek2018preregistration,
 %   mendez2019openscience, ralph2021standards, arcuri2011practical.
-% - NUEVAS de este paper — PENDIENTES de /verify-refs (S4):
-%   parra2026scaffolding (self-cite, under review), wang2026compint
-%   (título/autores tomados de arxiv.org/abs/2608.11242 el 2026-08-15),
-%   luo2026autodesign y li2026loopsbench (título/autores tomados de la
-%   página 1 de los PDFs en docs/), wang2023voyager, shinn2023reflexion,
-%   packer2023memgpt (clásicos de memoria agéntica, de conocimiento
-%   general — verificar título/autores exactos en S4).
+% - NUEVAS de este paper — VERIFICADAS con /verify-refs el 2026-08-15
+%   (ver el pase completo en el historial de la sesión S4):
+%   * Nivel 1: 12 VERIFIED directos; lu2024smalllm reclasificado
+%     VERIFIED vía DataCite + OpenAlex por DOI (el NOT_FOUND inicial
+%     era un 400 de OpenAlex en la búsqueda por título);
+%     walkinglabs2026/dex2026wsff son recursos web (URLs 200,
+%     no indexables — esperado); parra2026scaffolding es el self-cite
+%     under review (no indexable — esperado; título cotejado contra
+%     paper/main.tex).
+%   * Nivel 2: 0 retracciones en los 14 DOIs (OpenAlex is_retracted).
+%   * Nivel 3 (soporte de claims, top-8 por carga): AutoDesign
+%     verificado contra el PDF completo (5 componentes, gate
+%     train/dev sin estadística); CompInt contra abstract (17%
+%     retención, módulo extractor); Voyager/Reflexion/MemGPT/zhu
+%     contra abstracts — SOPORTADOS. Tres claims corregidos en el tex
+%     (commit a9215a6): nulos del self-cite (TTC/edit-fence eran
+%     post-freeze del Paper 1), rango SLM 1-20B → sub-10B (lu cubre
+%     100M-5B, corradini hasta 7B), y mendez2019 reformulado.
+%   * Sugerencia [JUICIO, no confirmado]: wang2023voyager podría
+%     tener versión publicada (TMLR 2024) — decidir en el polish de
+%     S4 si se cita la versión de journal.
 
 % ---------------------------------------------------------------- self
 @misc{parra2026scaffolding,
