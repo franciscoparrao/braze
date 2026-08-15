@@ -17,6 +17,10 @@ mod escalation;
 // son puros (sin llama.cpp) y así sus tests corren en el `cargo test`
 // normal del workspace, donde `local` no se compila.
 #[cfg(any(feature = "local", test))]
+mod chatml;
+#[cfg(test)]
+mod chat_template_fixtures;
+#[cfg(any(feature = "local", test))]
 mod gemma;
 #[cfg(any(feature = "local", test))]
 mod harmony;

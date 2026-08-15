@@ -23,7 +23,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use braze_types::{ContentBlock, Role};
 use futures::Stream;
 use llama_cpp_2::context::params::{KvCacheType, LlamaContextParams};
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -37,7 +36,8 @@ use llama_cpp_2::token::logit_bias::LlamaLogitBias;
 use crate::args_repair::{ArgumentsOutcome, parse_arguments_with_repair};
 use crate::backend::{CompletionEvent, CompletionRequest, ModelBackend};
 use crate::error::ModelError;
-use crate::gemma::{build_gemma_prompt, render_tools_preamble};
+use crate::chatml::build_chatml_prompt;
+use crate::gemma::build_gemma_prompt;
 use crate::harmony::{
     HarmonyEvent, HarmonyMarker, HarmonyParser, build_harmony_prompt, utc_date_string,
 };

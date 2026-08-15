@@ -1,0 +1,80 @@
+{
+ "family": "chatml",
+ "date": "2026-08-15",
+ "cases": [
+  {
+   "name": "minimal",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are braze, a coding agent. Be concise."
+    },
+    {
+     "role": "user",
+     "content": "hola, ¿qué es un GGUF?"
+    }
+   ],
+   "expected": "<|im_start|>system\nYou are braze, a coding agent. Be concise.<|im_end|>\n<|im_start|>user\nhola, ¿qué es un GGUF?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "multiturn",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are braze, a coding agent. Be concise."
+    },
+    {
+     "role": "user",
+     "content": "lista los archivos"
+    },
+    {
+     "role": "assistant",
+     "content": "Hay tres archivos: a.rs, b.rs y c.rs."
+    },
+    {
+     "role": "user",
+     "content": "¿cuál es más grande?"
+    }
+   ],
+   "expected": "<|im_start|>system\nYou are braze, a coding agent. Be concise.<|im_end|>\n<|im_start|>user\nlista los archivos<|im_end|>\n<|im_start|>assistant\nHay tres archivos: a.rs, b.rs y c.rs.<|im_end|>\n<|im_start|>user\n¿cuál es más grande?<|im_end|>\n<|im_start|>assistant\n"
+  },
+  {
+   "name": "tool_round",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are braze, a coding agent. Be concise."
+    },
+    {
+     "role": "user",
+     "content": "¿qué hora es en el server?"
+    },
+    {
+     "role": "assistant",
+     "content": "",
+     "tool_calls": [
+      {
+       "function": {
+        "name": "shell_exec",
+        "arguments": {}
+       }
+      }
+     ]
+    },
+    {
+     "role": "tool",
+     "content": "14:05"
+    },
+    {
+     "role": "assistant",
+     "content": "Son las 14:05 en el server."
+    },
+    {
+     "role": "user",
+     "content": "gracias, ¿y la fecha?"
+    }
+   ],
+   "expected": "<|im_start|>system\nYou are braze, a coding agent. Be concise.<|im_end|>\n<|im_start|>user\n¿qué hora es en el server?<|im_end|>\n<|im_start|>assistant\n<tool_call>\n{\"name\": \"shell_exec\", \"arguments\": {}}\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\n14:05\n</tool_response><|im_end|>\n<|im_start|>assistant\nSon las 14:05 en el server.<|im_end|>\n<|im_start|>user\ngracias, ¿y la fecha?<|im_end|>\n<|im_start|>assistant\n"
+  }
+ ]
+}

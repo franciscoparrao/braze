@@ -1,0 +1,42 @@
+{
+ "family": "gemma",
+ "date": "2026-08-15",
+ "cases": [
+  {
+   "name": "minimal",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are braze, a coding agent. Be concise."
+    },
+    {
+     "role": "user",
+     "content": "hola, ¿qué es un GGUF?"
+    }
+   ],
+   "expected": "<|turn>system\nYou are braze, a coding agent. Be concise.<turn|>\n<|turn>user\nhola, ¿qué es un GGUF?<turn|>\n<|turn>model\n"
+  },
+  {
+   "name": "multiturn",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are braze, a coding agent. Be concise."
+    },
+    {
+     "role": "user",
+     "content": "lista los archivos"
+    },
+    {
+     "role": "assistant",
+     "content": "Hay tres archivos: a.rs, b.rs y c.rs."
+    },
+    {
+     "role": "user",
+     "content": "¿cuál es más grande?"
+    }
+   ],
+   "expected": "<|turn>system\nYou are braze, a coding agent. Be concise.<turn|>\n<|turn>user\nlista los archivos<turn|>\n<|turn>model\nHay tres archivos: a.rs, b.rs y c.rs.<turn|>\n<|turn>user\n¿cuál es más grande?<turn|>\n<|turn>model\n"
+  }
+ ]
+}

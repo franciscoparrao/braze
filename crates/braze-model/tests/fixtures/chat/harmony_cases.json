@@ -1,0 +1,42 @@
+{
+ "family": "harmony",
+ "date": "2026-08-15",
+ "cases": [
+  {
+   "name": "minimal",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are braze, a coding agent. Be concise."
+    },
+    {
+     "role": "user",
+     "content": "hola, ¿qué es un GGUF?"
+    }
+   ],
+   "expected": "<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\nCurrent date: 2026-08-15\n\nReasoning: medium\n\n# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|><|start|>developer<|message|># Instructions\n\nYou are braze, a coding agent. Be concise.\n\n<|end|><|start|>user<|message|>hola, ¿qué es un GGUF?<|end|><|start|>assistant"
+  },
+  {
+   "name": "multiturn",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are braze, a coding agent. Be concise."
+    },
+    {
+     "role": "user",
+     "content": "lista los archivos"
+    },
+    {
+     "role": "assistant",
+     "content": "Hay tres archivos: a.rs, b.rs y c.rs."
+    },
+    {
+     "role": "user",
+     "content": "¿cuál es más grande?"
+    }
+   ],
+   "expected": "<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\nCurrent date: 2026-08-15\n\nReasoning: medium\n\n# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|><|start|>developer<|message|># Instructions\n\nYou are braze, a coding agent. Be concise.\n\n<|end|><|start|>user<|message|>lista los archivos<|end|><|start|>assistant<|channel|>final<|message|>Hay tres archivos: a.rs, b.rs y c.rs.<|end|><|start|>user<|message|>¿cuál es más grande?<|end|><|start|>assistant"
+  }
+ ]
+}
