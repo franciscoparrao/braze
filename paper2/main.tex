@@ -55,30 +55,30 @@ of Prompt-Injected Memory for Local-First Coding Agents%
 % Fuente: docs/paper2-honest-outline-2026-08-11.md (§ claim + § por qué
 % un nulo es publicable).
 Coding agents built on small, locally hosted language models are
-attractive for cost, privacy, and autonomy, and an equally attractive
-idea promises to improve them over time: when the local model fails
-and a cloud model rescues it, distill the intervention into a reusable
+attractive for cost, privacy, and autonomy. An equally attractive idea
+promises to improve them over time: when the local model fails and a
+cloud model rescues it, distill the intervention into a reusable
 procedural playbook, so that the escalation is paid once and amortized
 across future tasks. We show that this idea, in its natural
 prompt-injected form, faces a narrow and quantifiable
-\emph{amortization frontier} --- and that realistic procedural memory
-falls on the wrong side of it precisely where it would be needed.
-Because an agentic loop re-sends its context on every round, an
-injected memory section costs its size times the number of rounds, and
-pays for itself only if it saves enough rounds; in the configurations
-measured here, break-even is roughly one full round of interaction. In
+\emph{amortization frontier}, and that realistic procedural memory
+falls on the wrong side of it precisely where it would be needed. An
+agentic loop re-sends its context on every round, so an injected
+memory section costs its size times the number of rounds and pays for
+itself only if it saves enough rounds. In the configurations we
+measure, break-even is roughly one full round of interaction. We ran
 two independent pre-registered evaluations on a local-first coding
-harness with a 20B-parameter executor (140 and 306 runs), a
-human-written playbook --- the ceiling for any automatically distilled
-variant --- amortizes only on the task the model already knows, where
-it is redundant, and misses break-even by a factor of $3$--$6$ on
-fresh tasks, where it would matter; success rates improve reliably
+harness with a 20B-parameter executor (140 and 306 runs). A
+human-written playbook, the ceiling for any automatically distilled
+variant, amortizes only on the task the model already knows, where it
+is redundant. On fresh tasks, where it would matter, it misses
+break-even by a factor of $3$--$6$; success rates improve reliably
 nowhere. In the second study, a same-prompt control arm dissolved an
 apparently significant $+13$-task gain (McNemar $p=0.011$,
 Holm-corrected) into an unattributable $+4$ ($p=0.541$): without that
-arm, the study would have reported a false positive that met its
-pre-registered promotion criterion. The measured noise floor ---
-$\sim$20\% of paired cells flip under byte-identical prompts --- is
+arm, we would have reported a false positive that met its
+pre-registered promotion criterion. The measured noise floor
+($\sim$20\% of paired cells flip under byte-identical prompts) is
 configuration-specific and an order of magnitude above the floor
 imported from an easier suite. The design lesson is measured rather
 than speculative: prompt-injected procedural memory pays only if the
@@ -100,8 +100,8 @@ enough on commodity hardware to be useful
 their frontier counterparts, which makes one idea for improving them
 especially attractive. When the local model fails and a stronger cloud
 model rescues it, distill the tutor's intervention into a reusable
-procedural playbook --- \emph{procedural memory} --- and inject it
-into future related tasks: the escalation is paid once and amortized
+procedural playbook (\emph{procedural memory}) and inject it into
+future related tasks: the escalation is paid once and amortized
 forever after. Variants of this idea circulate widely in the agent
 literature as skill libraries, stored reflections, and memory
 subsystems (Section~\ref{sec:related}). It sounds obviously good, and
@@ -122,9 +122,9 @@ to break even.
 We report two independent, pre-registered evaluations of
 prompt-injected procedural memory on \braze{}, a local-first agentic
 coding harness, with a 20B-parameter local executor. Study~1
-instantiates a multi-session benchmark --- session A produces a
+instantiates a multi-session benchmark (session A produces a
 playbook, same-family tasks B measure transfer, a holdout H prices
-misapplication --- with a \emph{human-written} playbook, the ceiling
+misapplication) with a \emph{human-written} playbook, the ceiling
 for any automatically distilled variant, across three compile-repair
 tasks (140 runs). Study~2 evaluates the production form of the same
 idea, a project-memory hook that injects the files touched by previous
@@ -133,12 +133,12 @@ control}: its prompt is byte-identical to the baseline by construction
 (306 runs).
 
 Both studies land on the same side of the frontier. The playbook
-amortizes only on the task the model already knows --- where it is
-redundant --- and misses break-even by a factor of $3$--$6$ on fresh
-tasks --- where it would matter; success rates improve reliably
-nowhere. In Study~2 the treatment arm beat baseline by $+13$ tasks
+amortizes only on the task the model already knows, where it is
+redundant, and misses break-even by a factor of $3$--$6$ on fresh
+tasks, where it would matter. Success rates improve reliably nowhere.
+In Study~2 the treatment arm beat baseline by $+13$ tasks
 (McNemar $p=0.011$, Holm-corrected), formally meeting the
-pre-registered promotion criterion --- and the same-prompt control
+pre-registered promotion criterion. However, the same-prompt control
 dissolved the result: the control arm rose $+9$ on an identical
 prompt, and the only contrast that isolates the memory's content was
 null ($+4$, $p=0.541$). A collateral finding has independent value:
@@ -155,7 +155,7 @@ This paper contributes:
   and~\ref{sec:results});
 \item two independent pre-registered null results that confirm it,
   together with the \emph{same-prompt control} as a transferable
-  methodological instrument --- without it, this paper would instead
+  methodological instrument; without it, this paper would instead
   report a significant false positive
   (Section~\ref{sec:results-pm});
 \item the multi-session benchmark design A$\to$B$\to$H for measuring
@@ -181,16 +181,16 @@ as virtual memory, paging information between the prompt and external
 storage \citep{packer2023memgpt}. These systems established that
 memory \emph{can} improve agents, in evaluations centered on
 frontier-scale models and success metrics. What carrying the memory
-costs --- on every round, in a loop that re-sends its context --- is
+costs (on every round, in a loop that re-sends its context) is
 generally not priced, and the effect of the memory's \emph{content} is
 rarely separated from the effect of perturbing the prompt at all. Both
 gaps are the subject of this paper.
 
 \paragraph{Small and local models as executors.} Surveys of small
 language models document the capability and deployment trade-offs of
-the sub-10B regime \citep{lu2024smalllm,corradini2025}; our executor
---- a 20B mixture-of-experts with $\sim$3.6B active parameters ---
-runs on commodity hardware at the practical edge of that regime. Two
+the sub-10B regime \citep{lu2024smalllm,corradini2025}; our executor,
+a 20B mixture-of-experts with $\sim$3.6B active parameters, runs on
+commodity hardware at the practical edge of that regime. Two
 properties of this regime sharpen the memory question. First, under local
 inference the input-token bill is paid in wall-clock time on the
 user's hardware on every round, so per-round context overhead is a
@@ -198,12 +198,12 @@ first-order design cost, not a billing detail. Second, small executors
 are sensitive to context additions in ways that are hard to predict:
 the companion study to this paper measured harness levers one at a
 time at small-model scales and found ``obviously good'' context
-additions frequently null or harmful \citep{parra2026scaffolding} ---
-the prior behind the honest expectations pre-registered here.
-Compressing injected context is a complementary lever --- models can
-consume text that is no longer human-readable \citep{zhu2026babeltele}
---- which lowers the per-round tax but leaves the amortization
-question intact.
+additions frequently null or harmful \citep{parra2026scaffolding}; that result
+is the prior behind the honest expectations pre-registered here.
+Compressing injected context is a complementary lever: models can
+consume text that is no longer human-readable \citep{zhu2026babeltele}.
+That lowers the per-round tax but leaves the amortization question
+intact.
 
 \paragraph{The harness as an engineering object.} SWE-agent showed
 that the agent-computer interface changes outcomes at fixed model
@@ -217,9 +217,9 @@ survive context compaction only a minority of the time, and the
 authors close the gap with an extraction module separate from the
 compactor rather than with better compaction prompts
 \citep{wang2026compint}. AutoDesign formalizes the harness as a
-recursive optimization target --- a meta-harness optimizer proposing
-one bounded update per iteration to one of five components, of which
-Context \& Memory is one --- accepting updates when a train score
+recursive optimization target (a meta-harness optimizer proposes one
+bounded update per iteration to one of five components, of which
+Context \& Memory is one), accepting updates when a train score
 improves and a dev score does not regress \citep{luo2026autodesign}.
 Neither line prices the \emph{injection} side of memory.
 Section~\ref{sec:discussion} argues that the amortization condition of
@@ -247,9 +247,9 @@ reported as such.
 % Fuente: outline § "El claim que los datos SÍ sostienen". Sección
 % CENTRAL y corta — la fórmula que Results instancia.
 
-Prompt-injected procedural memory --- a playbook, a list of files
-touched in previous sessions, a distilled tutor intervention ---
-enters the agent's context on \emph{every} round of a turn: agentic
+Prompt-injected procedural memory (a playbook, a list of files
+touched in previous sessions, a distilled tutor intervention) enters
+the agent's context on \emph{every} round of a turn: agentic
 loops re-send the (growing) conversation to the model each round, so a
 memory section of $c$ tokens does not cost $c$ tokens per task but
 $c \times R$ tokens, where $R$ is the number of rounds the turn takes.
@@ -261,7 +261,7 @@ mean input tokens per round of the memory-free agent on a task, and
 let $\Delta R = R_{\mathrm{base}} - R_{\mathrm{mem}}$ be the round
 reduction the memory produces. Injection adds a per-round overhead
 $\Delta T = T_{\mathrm{mem}} - T_{\mathrm{base}}$. The memory
-\emph{amortizes} --- saves net input tokens --- if and only if
+\emph{amortizes} (saves net input tokens) if and only if
 
 \begin{equation}\label{eq:amortization}
 \underbrace{\Delta R \cdot T_{\mathrm{base}}}_{\text{rounds no longer
@@ -276,7 +276,7 @@ measured in this paper ($T_{\mathrm{base}} \approx 1{,}400$ tokens per
 round, $R_{\mathrm{mem}} \approx 6$ rounds, $\Delta T \approx
 200$--$270$ tokens), the break-even round reduction is $\Delta R^{*} =
 \Delta T \cdot R_{\mathrm{mem}} / T_{\mathrm{base}} \approx 0.9$--$1.2$
-rounds --- the memory must eliminate about one full round of
+rounds: the memory must eliminate about one full round of
 interaction to pay for itself. The central empirical question is
 whether realistic procedural memory clears that bar on the tasks where
 it is actually needed. Our measurements
@@ -304,7 +304,7 @@ which the model emits tool calls, the harness executes them in a
 sandbox, and the tool results are appended to the conversation. The
 property that drives Equation~\eqref{eq:amortization} is structural,
 not incidental: on every round the harness re-sends the entire growing
-conversation --- including any injected memory section --- so a
+conversation, including any injected memory section, so a
 $c$-token memory costs $c \times R$ input tokens per task, not $c$.
 
 The executor model in both studies is \texttt{gpt-oss:20b}, a
@@ -316,8 +316,8 @@ through an Ollama server; Study~2 uses \braze{}'s in-process
 chat template and reference GGUF weights), with context window
 32{,}768 tokens, output cap 12{,}288 tokens, temperature 0.2, and a
 900\,s per-task timeout; the full environment tier is recorded in each
-run's metadata. Each benchmark run receives a hermetic sandbox --- a
-fresh directory containing only the task's setup files --- and is
+run's metadata. Each benchmark run receives a hermetic sandbox (a
+fresh directory containing only the task's setup files) and is
 graded by objective oracles; for compile-repair tasks the oracle runs
 real \texttt{cargo check} on the resulting tree. The runner records
 pass/fail, rounds, input and output tokens, wall time, and schema
@@ -328,22 +328,22 @@ test}\label{sec:method-mechanisms}
 
 \paragraph{LearnedPlaybook (Study 1).}\sloppy A typed unit of
 procedural memory defined by a JSON Schema: identity and lifecycle
-fields, a procedural payload --- \texttt{task\_family}, \texttt{applies\_when},
+fields, a procedural payload (\texttt{task\_family}, \texttt{applies\_when},
 \texttt{preconditions}, \texttt{method\_steps}, \texttt{verification},
-\texttt{avoid}, \texttt{escalate\_if} --- and provenance
+\texttt{avoid}, \texttt{escalate\_if}), and provenance
 (\texttt{source}, \texttt{evidence}). The lifecycle is
 \texttt{candidate} $\to$ \texttt{approved} $\to$ \texttt{validated}
 $\to$ \texttt{trusted} (or \texttt{retired}); in the distillation
 design, approval of a candidate requires only safety checks (schema
 validity, no sensitive data, no concrete file names from the source
-session, objective verification steps, an escalation clause) --- no
-semantic hand-editing, so that tutor distillation is not conflated
+session, objective verification steps, an escalation clause); no
+semantic hand-editing is allowed, so that tutor distillation is not conflated
 with human authorship. The benchmark injects a playbook by rendering
 it as a structured text section (title, family, applies-when, method,
 verification, avoid, escalate-if) into the system prompt, truncated by
 whole lines under a fixed 500-token budget. In Study~1 the playbook is
-\emph{human-written} --- the strongest condition a priori: an expert
-author, no distillation noise --- so the measured ceiling bounds every
+\emph{human-written} (the strongest condition a priori: an expert
+author, no distillation noise), so the measured ceiling bounds every
 automated variant from above.
 
 \paragraph{ProjectMemory hook (Study 2).} The production form:
@@ -352,8 +352,8 @@ deterministically and with zero model calls, the paths of files
 successfully written or edited into a small per-project JSON state; at
 the start of a new session the harness renders a capped ``project
 memory'' section (files touched in previous sessions) into the system
-prompt. The capture is deliberately deterministic --- no model-written
-summaries --- because the same project had previously measured that
+prompt. The capture is deliberately deterministic, with no model-written
+summaries, because the same project had previously measured that
 free-prose context degrades small executors. The lever is off by
 default and enabled per-arm by the benchmark's ablation flags.
 
@@ -372,7 +372,7 @@ described above, for the family \texttt{rust\_compile\_repair}
 (borrow-checker repair in Rust).
 
 The three B tasks were chosen to span the family: \textsc{original}
-(the canonical E0502 borrow bug --- a task the model largely passes
+(the canonical E0502 borrow bug, which the model largely passes
 unaided, i.e.\ saturated), \textsc{loop} (E0502 arising through
 iteration), and \textsc{move} (E0382, use of moved value). The holdout
 is a Rust task not involving borrow errors, run \emph{with} the
@@ -380,9 +380,9 @@ playbook attached. Arms are \texttt{none} vs.\
 \texttt{human-playbook}, $n=20$ per cell with identical seeds
 (42--61) and backend across arms: $7$ task-arms $\times\, 20 = 140$
 runs. Following the pilot's own first finding, we report the three
-quantities of Equation~\eqref{eq:amortization} together --- round
+quantities of Equation~\eqref{eq:amortization} together (round
 reduction $\Delta R$, per-round overhead $\Delta T$, and net token
-delta --- so a reader can distinguish ``the playbook saved rounds''
+delta) so a reader can distinguish ``the playbook saved rounds''
 from ``the playbook cost nothing'' from ``the playbook cost but the
 turn was short anyway.'' Pass rates are compared with Fisher's exact
 test; rounds and wall time with two-sided $t$-tests.
@@ -395,10 +395,10 @@ suite: 34 editing tasks with a \texttt{cargo check} oracle, calibrated
 near the executor's capability frontier ($\approx$2.9\,pp per item).
 Three arms: \texttt{baseline} (hook off), \texttt{empty} (hook on;
 since the benchmark opens a fresh session per repetition, the memory
-is always empty and renders nothing --- the same-prompt control), and
+is always empty and renders nothing: the same-prompt control), and
 \texttt{seeded} (hook on; the benchmark synthesizes the memory a
 previous session would have left, using the task's own setup files as
-the touched-file list --- zero experimenter-authored content). Three
+the touched-file list, with zero experimenter-authored content). Three
 repetitions per arm at fixed seed and temperature 0.2 give $3 \times 3
 \times 34 = 306$ runs. The primary contrast is pass rate under
 McNemar's exact test on (task, repetition) pairs, Holm-corrected
@@ -406,25 +406,25 @@ across the two contrasts against baseline; secondary metrics are input
 tokens, rounds, and wall time.
 
 The decision criteria were pre-registered before launch:
-(1)~a \emph{plumbing gate}, evaluated first --- if the empty arm
+(1)~a \emph{plumbing gate}, evaluated first: if the empty arm
 differs from baseline by more than 2 paired discordant cells, the
 infrastructure is investigated before any other contrast is read;
-(2)~a promotion signal --- \texttt{seeded} $-$ \texttt{baseline} $\geq
+(2)~a promotion signal (\texttt{seeded} $-$ \texttt{baseline} $\geq
 +3$ tasks with $p<0.05$ \emph{and} \texttt{seeded} $\geq$
-\texttt{empty} --- which at most \emph{opens} a promotion discussion,
+\texttt{empty}), which at most \emph{opens} a promotion discussion,
 since the study measures only the single-session prompt-side effect,
 not cross-session value; (3)~a symmetric harm criterion; (4)~the null
 as the declared expectation (the registered prior: null or slightly
-negative --- the touched-file list adds little the task prompt does
+negative, since the touched-file list adds little the task prompt does
 not already say, and costs tokens per round); and (5)~no iteration
-allowed --- the sweep is a measurement, not a tuning loop.
+allowed: the sweep is a measurement, not a tuning loop.
 
 \subsection{Pre-registration and
 reproducibility}\label{sec:method-prereg}
 
 Both studies follow the project's git-only registration convention:
-the hypothesis document --- research question, arms, metrics, decision
-criteria, and an honest prior --- is committed to the repository
+the hypothesis document (research question, arms, metrics, decision
+criteria, and an honest prior) is committed to the repository
 before the sweep is launched, so the registration is verifiable
 against the git history rather than an external registry
 \todo{S4: decidir si el pre-registro se espeja en OSF como el Paper 1,
@@ -444,8 +444,8 @@ committed alongside the analysis documents.
 redundant}\label{sec:results-m1}
 
 Table~\ref{tab:m1} shows the three task pairs of the M1 pilot: the
-same human-written playbook --- the strongest memory variant a priori,
-authored by a human rather than distilled by a model --- attached to
+same human-written playbook (the strongest memory variant a priori,
+authored by a human rather than distilled by a model) attached to
 three compile-repair tasks of the same family
 (\texttt{rust\_compile\_repair}), $n=20$ per cell, identical seeds and
 backend across arms.
@@ -478,13 +478,13 @@ $+0.35$ ($p=0.035$) & 1394$\to$1662 & $+1132$ & 48.5$\to$47.0
 \end{table}
 
 The pattern instantiates Equation~\eqref{eq:amortization} exactly. On
-the \textsc{original} task --- the canonical bug the model already has
-memorized, where it passes without help --- the playbook saves nearly
+the \textsc{original} task (the canonical bug the model already has
+memorized, where it passes without help) the playbook saves nearly
 a full round ($\Delta R = 0.95$, right at the $\Delta R^{*} \approx
 0.9$--$1.2$ break-even), and the net token balance is negative
 ($-304$): the memory amortizes. On the two fresh tasks, the round
-reduction collapses to $+0.15$ and $+0.35$ --- a factor of $3$--$6$
-below break-even --- while the per-round overhead stays fixed at
+reduction collapses to $+0.15$ and $+0.35$ (a factor of $3$--$6$
+below break-even) while the per-round overhead stays fixed at
 $+243$ and $+268$ tokens, so the playbook \emph{costs} $+1076$ and
 $+1132$ net tokens per task. Figure~\ref{fig:frontier} places the
 three tasks against the amortization frontier.
@@ -493,13 +493,13 @@ Pass rate shows no consistent signal in any pair (Fisher $p=0.72$,
 $1.00$, $0.41$), and the point direction is \emph{negative} in two of
 three ($15\!\to\!14$, $18\!\to\!15$), positive only on the saturated
 task. There is no evidence, in any of the three pilots, that this
-playbook reliably improves success --- the efficiency gain on the
+playbook reliably improves success: the efficiency gain on the
 saturated task is the only positive result of the entire pilot, and it
 does not generalize even within the same bug family.
 
 The holdout completes the picture from the other side: on the
 out-of-family task with the playbook attached, the model passed 18/20
-at 3.85 mean rounds --- an inapplicable playbook does not derail the
+at 3.85 mean rounds: an inapplicable playbook does not derail the
 model. Its cost there is the same fixed per-round tax, with nothing to
 amortize it against; the failure mode of prompt-injected memory in
 this regime is economic, not behavioral.
@@ -518,7 +518,7 @@ The second study evaluates the harness-integrated form of the same
 idea: a project-memory hook that injects, into the system prompt, the
 files touched in previous sessions. Because the benchmark opens a
 fresh session per repetition, the plain hook arm runs with empty
-memory and renders \emph{nothing} --- its prompt is identical to the
+memory and renders \emph{nothing}: its prompt is identical to the
 baseline by construction. That accident of plumbing is
 methodologically precious: the empty arm is a \textbf{same-prompt
 control}, and any paired discordance between it and the baseline is an
@@ -552,10 +552,10 @@ $p=0.011$ (Holm $0.021$)} \\
 Read without the control arm, Table~\ref{tab:pm} is a publishable
 positive: seeded beats baseline by $+13$ tasks with a Holm-corrected
 $p=0.021$, meeting the pre-registered promotion criterion \emph{in its
-letter}. The control arm invalidates the premise: with a
+letter}. The control arm, however, invalidates the premise: with a
 byte-identical prompt, the empty arm rose $+9$ on its own, and the
-only contrast that isolates the \emph{content} of the memory ---
-seeded vs.\ empty --- is null ($+4$, $p=0.541$). Attributing the
+only contrast that isolates the \emph{content} of the memory
+(seeded vs.\ empty) is null ($+4$, $p=0.541$). Attributing the
 headline to the memory would have been exactly the error the control
 arm existed to prevent. The lever was not promoted.
 
@@ -567,7 +567,7 @@ token-identical across arms in all 12 pairs --- proven, not assumed;
 (ii) no trajectory ever observed the hook's on-disk state; and (iii)
 a re-run inverted the direction of the discordances. Verdict: the 21
 discordances were noise. The collateral finding is itself a result:
-\textbf{the noise floor is configuration-specific} --- the $\leq 2$
+\textbf{the noise floor is configuration-specific}: the $\leq 2$
 threshold, borrowed from the floor measured on an easier suite,
 underestimated the discriminating-suite floor by an order of magnitude
 ($\sim$20\% of cells flip under identical prompts at temperature 0.2).
@@ -598,8 +598,8 @@ teeth}\label{sec:disc-anticorr}
 The single pattern that organizes both studies is that memory pays
 where it is redundant and does not pay where it would be needed. The
 mechanism is visible in the preserved sessions of Study~1: on the
-fresh tasks the model \emph{follows} the playbook --- it applies the
-correct fix, it is not confused by the advice --- it simply does not
+fresh tasks the model \emph{follows} the playbook: it applies the
+correct fix and is not confused by the advice; it simply does not
 arrive faster for having read it. Round savings come from skipping
 deliberation the model can already do on its own; they do not come
 from making hard reasoning easier. Prompt-injected procedural memory
@@ -608,7 +608,7 @@ worth the most on exactly the tasks where it is worth nothing. This is
 not a quirk of one playbook: the same asymmetry reappears in Study~2,
 where the only contrast that isolates the memory's content is null,
 and in the holdout, where the inapplicable playbook costs its fixed
-tax without behavioral harm. The failure mode is economic ---
+tax without behavioral harm. The failure mode is economic:
 Equation~\eqref{eq:amortization} with $\Delta R$ collapsing precisely
 when the task is fresh.
 
@@ -616,14 +616,14 @@ when the task is fresh.
 
 ``Distill the cloud tutor's intervention into a reusable playbook and
 amortize the escalation'' is exactly the kind of technique that sounds
-obviously good --- plausible mechanism, appealing economics, easy to
+obviously good: plausible mechanism, appealing economics, easy to
 adopt without measurement. Our original protocol for this line
 proposed it as a positive contribution; the data refused. The project
 this work belongs to has accumulated a discipline of pre-registered
-null results at the harness level --- a prose planner that actively
+null results at the harness level: a prose planner that actively
 harmed small executors, tool deferral that proved cheaper but not
 free, constrained decoding that failed to beat the harness's own
-repair ladder \citep{parra2026scaffolding}; the present null is the highest
+repair ladder \citep{parra2026scaffolding}. The present null is the highest
 conceptual stake among them because the technique is the most
 attractive, and because \emph{both} an efficiency framing (Study~1)
 and an effectiveness framing (Study~2) fail independently, by
@@ -647,7 +647,7 @@ temperature 0.2. The general lesson for agentic-system evaluation in
 the small-model regime: when the suite is deliberately calibrated near
 the model's capability frontier, per-configuration noise dominates,
 and the only floor that can be trusted is one measured \emph{inside
-the same sweep} --- an arm whose prompt is identical to baseline by
+the same sweep}: an arm whose prompt is identical to baseline by
 construction. The instrument is cheap (one extra arm), demands no new
 tooling, and converts ``significant against baseline'' into the only
 question that matters: significant against \emph{what}.
@@ -660,19 +660,19 @@ locate both. \emph{Lower $\Delta T$}: move the memory out of the
 per-round prompt and retrieve it on demand (a tool call or a
 just-in-time context file), so its cost is paid once per consultation
 rather than $R$ times per task. The condition then compares one
-retrieval against rounds saved --- a far weaker bar than the
+retrieval against rounds saved, a far weaker bar than the
 $\sim$1{,}200 tokens per task the M1 playbook pays before helping.
 \emph{Raise $\Delta R$}: target interventions at task classes the
 model fails outright, where success converts a full budget of burned
 rounds into a short trajectory and $\Delta R$ is large by
-construction. The M1 playbook did the opposite --- it encoded a
-methodology for a family the model already navigates --- which is why
+construction. The M1 playbook did the opposite: it encoded a
+methodology for a family the model already navigates, which is why
 its best case was worth only one round. Both directions are stated
 here as measured cost profiles, not speculation: the frontier they
 must cross is the one this paper quantifies. A third boundary is
 scoped out deliberately: session-scoped constraints (user rules that
 must survive context compaction) are the limit case of durable memory
-whose value is \emph{compliance} rather than round savings ---
+whose value is \emph{compliance} rather than round savings.
 Equation~\eqref{eq:amortization} does not price them, and a separate
 pre-registered experiment in the same project addresses them
 \todo{S3/S4: si el sweep SC-retention corre antes del freeze,
@@ -689,23 +689,23 @@ authors argue for architectural separation of durable state. Our
 result is the complementary half of the same budget: even when memory
 is durably preserved and injected, the injection itself carries a
 per-round price that fresh tasks do not repay. A principled memory
-subsystem has to price both sides --- what to preserve across
-compaction and what to re-inject per round --- and
+subsystem has to price both sides (what to preserve across
+compaction and what to re-inject per round), and
 Equation~\eqref{eq:amortization} is the acceptance criterion for the
 injection side.
 
 Meta-harness optimization \citep{luo2026autodesign} formalizes the
 harness as an optimization target with memory as one of its
 components, accepting a proposed harness update when a train score
-improves and a dev score does not regress --- point estimates, no
+improves and a dev score does not regress: point estimates, no
 statistics. Study~2 is a concrete demonstration of what that
 acceptance gate would do in this regime: it would have accepted a
 $+13$-task improvement that a same-prompt control shows to be
 unattributable to the treatment. In the small-model regime, where
 suites sit near the capability frontier and the in-sweep noise floor
 reaches $\sim$20\% of cells, an automated harness optimizer needs the
-machinery used here --- pre-registered criteria, paired exact tests
-with correction, and a same-prompt control arm --- as its acceptance
+machinery used here (pre-registered criteria, paired exact tests
+with correction, and a same-prompt control arm) as its acceptance
 gate, or its optimization record fills with noise promoted to design.
 
 % =====================================================================
@@ -718,7 +718,7 @@ gate, or its optimization record fills with noise promoted to design.
 itself is configuration-dependent: a weaker model has more rounds of
 headroom to recover ($\Delta R$ could be larger), and a different task
 family might admit interventions that unlock whole classes of failure
-rather than shave steps off a known procedure --- both would move the
+rather than shave steps off a known procedure; both would move the
 break-even point. We therefore claim the \emph{condition} and the
 measurement procedure as general, and the measured \emph{position} of
 the frontier as specific to this regime; the direction for weaker
@@ -733,8 +733,8 @@ finding. The original protocol's remaining conditions
 \texttt{lead-fallback}) were not piloted: every one of them adds at
 least the injection cost of the human-written playbook that already
 failed to amortize, so their expected outcome is recorded as a
-declared prediction rather than confirmed by further measurement ---
-a scope decision we make explicit rather than hide.
+declared prediction rather than confirmed by further measurement, a
+scope decision we make explicit rather than hide.
 
 \paragraph{Internal validity and reliability.} The serving stack is
 not bit-exact under fixed seeds: in Study 1, a wall-time effect that
@@ -742,9 +742,9 @@ was significant in one sweep ($p=0.008$) did not replicate in an
 independent re-run, while the primary token effect replicated in
 direction and magnitude; no conclusion in this paper rests on a
 secondary wall-time contrast. In Study 2, our own pre-registered
-plumbing gate was miscalibrated by an order of magnitude --- its
+plumbing gate was miscalibrated by an order of magnitude (its
 $\leq 2$-cell threshold was imported from the noise floor of an easier
-suite --- and we report that miscalibration as a finding
+suite), and we report that miscalibration as a finding
 (Section~\ref{sec:results-pm}) rather than repair it post hoc. All
 headline contrasts are paired, exact, and multiplicity-corrected; the
 decisive contrast is read against an in-sweep same-prompt control
@@ -766,7 +766,7 @@ Section~\ref{sec:model} states exactly what would have to change for
 the technique to pay: cut the per-round injection cost by retrieving
 memory on demand instead of carrying it, or raise the rounds saved by
 aiming interventions at task classes the model fails outright. Those
-two exits --- both located by measurement, not speculation --- are
+two exits, both located by measurement rather than speculation, are
 where this line of work continues.
 
 The methodological export stands on its own. In the small-model
@@ -775,8 +775,8 @@ and noise floors are configuration-specific, an A/B comparison without
 an in-sweep same-prompt control is not interpretable: ours would have
 promoted a false positive that met every conventional bar, including
 its own pre-registered criterion. Any system that optimizes harness
-memory automatically --- and the meta-harness line makes that agenda
-explicit --- will need this machinery as its acceptance gate.
+memory automatically (and the meta-harness line makes that agenda
+explicit) will need this machinery as its acceptance gate.
 
 % =====================================================================
 % Declaraciones EMSE (rellenar en S4 con /paper-submit)
