@@ -6,11 +6,13 @@
 % y el .bst vienen copiados de paper/ (zip oficial Springer).
 % Compilar: make  (o pdflatex main && bibtex main && pdflatex ×2)
 %
-% Estado S1 (2026-08-15): Results ESCRITO desde los datos cerrados
-% (síntesis M1 + A/B project-memory), modelo de amortización escrito
-% (corto y central), Methods/Intro/RW como esqueleto estructurado con
-% fuentes. Los TODO marcan prosa por escribir. NO se corre ningún sweep
-% nuevo para este paper (regla del outline § "Qué existe y qué NO").
+% Estado S2 (2026-08-15): Methods ESCRITO (harness/mecanismos/M1/A-B con
+% gate/pre-registro) y Discussion ESCRITA (anti-correlación, nulo,
+% control mismo-prompt, dos salidas medidas + forward ref SC-retention,
+% CompInt/AutoDesign). Results ganó el párrafo del holdout (18/20,
+% 3.85 rondas). Quedan S3 (Intro/RW/Threats/Conclusion/abstract +
+% refs.bib — los \todo{cite ...} marcan las citas a resolver) y S4.
+% NO se corre ningún sweep nuevo para este paper (regla del outline).
 
 \documentclass[smallcondensed,natbib]{svjour3}
 \journalname{Empirical Software Engineering}
@@ -150,26 +152,147 @@ memory helps and when it is needed.
 % Fuente: docs/project-memory-design.md, braze-memory (crate),
 % docs/paper2-memory-distillation-protocol-2026-07-16.md (bench A→B→H),
 % docs/hypothesis-2026-08-04-project-memory-ab.md (diseño A/B + gate).
-\todo{Methods (S2). Subsecciones previstas:
-\textbf{Harness e infraestructura}: \braze{} (self-cite Paper 1),
-LearnedPlaybook tipado + lifecycle (candidate$\to$validated) +
-schema, hook de ProjectMemory; ejecución local (gpt-oss:20b, Nitro,
-LocalBackend/Harmony u Ollama según sweep — declarar por experimento).
-\textbf{Estudio 1 (M1)}: benchmark multi-sesión A$\to$B$\to$H
-(sesión A genera el playbook con tutor; tareas B miden transferencia
-dentro de la familia \texttt{rust\_compile\_repair}; H holdout);
-brazos none vs human-playbook (el más fuerte a priori: escrito por
-humano, no destilado), n=20 por celda, 3 pares B + holdout = 140
-corridas, seeds 42--61, mismo backend.
-\textbf{Estudio 2 (project-memory A/B)}: los tres brazos
-(baseline / hook-con-memoria-vacía / hook-seeded), suite
-discriminante de 34 tareas con oráculo \texttt{cargo check}, 3
-repeticiones, 306 corridas; el brazo vacío como \emph{same-prompt
-control} (prompt idéntico al baseline por construcción); gate de
-plomería pre-registrado; McNemar exacto pareado + Holm.
-\textbf{Pre-registro}: ambos estudios con hipótesis, criterios de
-decisión y prior honesto commiteados antes de correr (git-only
-registration); citar los dos docs con hash.}
+
+\subsection{Harness, model, and benchmark
+infrastructure}\label{sec:method-harness}
+
+Both studies run on \braze{}, a local-first agentic coding harness
+written in Rust whose design and evaluation methodology are described
+in a companion study \todo{cite Paper 1}. The harness executes the
+standard agentic loop: a system prompt carrying the tool inventory
+(and, when enabled, a memory section), followed by \emph{rounds} in
+which the model emits tool calls, the harness executes them in a
+sandbox, and the tool results are appended to the conversation. The
+property that drives Equation~\eqref{eq:amortization} is structural,
+not incidental: on every round the harness re-sends the entire growing
+conversation --- including any injected memory section --- so a
+$c$-token memory costs $c \times R$ input tokens per task, not $c$.
+
+The executor model in both studies is \texttt{gpt-oss:20b}, a
+mixture-of-experts model (20B total, $\sim$3.6B active parameters)
+running on a dedicated LAN inference node (16\,GB RAM); no other
+workload shares the node during a sweep. Study~1 serves the model
+through an Ollama server; Study~2 uses \braze{}'s in-process
+\texttt{LocalBackend} (llama.cpp with the model's canonical Harmony
+chat template and reference GGUF weights), with context window
+32{,}768 tokens, output cap 12{,}288 tokens, temperature 0.2, and a
+900\,s per-task timeout; the full environment tier is recorded in each
+run's metadata. Each benchmark run receives a hermetic sandbox --- a
+fresh directory containing only the task's setup files --- and is
+graded by objective oracles; for compile-repair tasks the oracle runs
+real \texttt{cargo check} on the resulting tree. The runner records
+pass/fail, rounds, input and output tokens, wall time, and schema
+validation failures per run.
+
+\subsection{The two memory mechanisms under
+test}\label{sec:method-mechanisms}
+
+\paragraph{LearnedPlaybook (Study 1).}\sloppy A typed unit of
+procedural memory defined by a JSON Schema: identity and lifecycle
+fields, a procedural payload --- \texttt{task\_family}, \texttt{applies\_when},
+\texttt{preconditions}, \texttt{method\_steps}, \texttt{verification},
+\texttt{avoid}, \texttt{escalate\_if} --- and provenance
+(\texttt{source}, \texttt{evidence}). The lifecycle is
+\texttt{candidate} $\to$ \texttt{approved} $\to$ \texttt{validated}
+$\to$ \texttt{trusted} (or \texttt{retired}); in the distillation
+design, approval of a candidate requires only safety checks (schema
+validity, no sensitive data, no concrete file names from the source
+session, objective verification steps, an escalation clause) --- no
+semantic hand-editing, so that tutor distillation is not conflated
+with human authorship. The benchmark injects a playbook by rendering
+it as a structured text section (title, family, applies-when, method,
+verification, avoid, escalate-if) into the system prompt, truncated by
+whole lines under a fixed 500-token budget. In Study~1 the playbook is
+\emph{human-written} --- the strongest condition a priori: an expert
+author, no distillation noise --- so the measured ceiling bounds every
+automated variant from above.
+
+\paragraph{ProjectMemory hook (Study 2).} The production form:
+a harness hook that listens on the engine's event bus and records,
+deterministically and with zero model calls, the paths of files
+successfully written or edited into a small per-project JSON state; at
+the start of a new session the harness renders a capped ``project
+memory'' section (files touched in previous sessions) into the system
+prompt. The capture is deliberately deterministic --- no model-written
+summaries --- because the same project had previously measured that
+free-prose context degrades small executors. The lever is off by
+default and enabled per-arm by the benchmark's ablation flags.
+
+\subsection{Study 1: the multi-session benchmark
+A$\to$B$\to$H and pilot M1}\label{sec:method-m1}
+
+The benchmark models procedural transfer across sessions. In session
+\textbf{A} the local model fails a task under an objective check and a
+tutor intervention produces a playbook; \textbf{B} tasks are
+same-family tasks with different modules, names, and constants, and
+measure whether the playbook transfers; the holdout \textbf{H} is a
+task outside the family and measures what an inapplicable playbook
+costs. The pilot reported here (milestone M1) runs the benchmark
+without a live tutor: the playbook is the human-written ceiling
+described above, for the family \texttt{rust\_compile\_repair}
+(borrow-checker repair in Rust).
+
+The three B tasks were chosen to span the family: \textsc{original}
+(the canonical E0502 borrow bug --- a task the model largely passes
+unaided, i.e.\ saturated), \textsc{loop} (E0502 arising through
+iteration), and \textsc{move} (E0382, use of moved value). The holdout
+is a Rust task not involving borrow errors, run \emph{with} the
+playbook attached. Arms are \texttt{none} vs.\
+\texttt{human-playbook}, $n=20$ per cell with identical seeds
+(42--61) and backend across arms: $7$ task-arms $\times\, 20 = 140$
+runs. Following the pilot's own first finding, we report the three
+quantities of Equation~\eqref{eq:amortization} together --- round
+reduction $\Delta R$, per-round overhead $\Delta T$, and net token
+delta --- so a reader can distinguish ``the playbook saved rounds''
+from ``the playbook cost nothing'' from ``the playbook cost but the
+turn was short anyway.'' Pass rates are compared with Fisher's exact
+test; rounds and wall time with two-sided $t$-tests.
+
+\subsection{Study 2: project-memory A/B with a same-prompt
+control}\label{sec:method-pm}
+
+Study 2 evaluates the ProjectMemory hook on \braze{}'s discriminating
+suite: 34 editing tasks with a \texttt{cargo check} oracle, calibrated
+near the executor's capability frontier ($\approx$2.9\,pp per item).
+Three arms: \texttt{baseline} (hook off), \texttt{empty} (hook on;
+since the benchmark opens a fresh session per repetition, the memory
+is always empty and renders nothing --- the same-prompt control), and
+\texttt{seeded} (hook on; the benchmark synthesizes the memory a
+previous session would have left, using the task's own setup files as
+the touched-file list --- zero experimenter-authored content). Three
+repetitions per arm at fixed seed and temperature 0.2 give $3 \times 3
+\times 34 = 306$ runs. The primary contrast is pass rate under
+McNemar's exact test on (task, repetition) pairs, Holm-corrected
+across the two contrasts against baseline; secondary metrics are input
+tokens, rounds, and wall time.
+
+The decision criteria were pre-registered before launch:
+(1)~a \emph{plumbing gate}, evaluated first --- if the empty arm
+differs from baseline by more than 2 paired discordant cells, the
+infrastructure is investigated before any other contrast is read;
+(2)~a promotion signal --- \texttt{seeded} $-$ \texttt{baseline} $\geq
++3$ tasks with $p<0.05$ \emph{and} \texttt{seeded} $\geq$
+\texttt{empty} --- which at most \emph{opens} a promotion discussion,
+since the study measures only the single-session prompt-side effect,
+not cross-session value; (3)~a symmetric harm criterion; (4)~the null
+as the declared expectation (the registered prior: null or slightly
+negative --- the touched-file list adds little the task prompt does
+not already say, and costs tokens per round); and (5)~no iteration
+allowed --- the sweep is a measurement, not a tuning loop.
+
+\subsection{Pre-registration and
+reproducibility}\label{sec:method-prereg}
+
+Both studies follow the project's git-only registration convention:
+the hypothesis document --- research question, arms, metrics, decision
+criteria, and an honest prior --- is committed to the repository
+before the sweep is launched, so the registration is verifiable
+against the git history rather than an external registry
+\todo{S4: decidir si el pre-registro se espeja en OSF como el Paper 1,
+y citar hashes/paths de los dos docs + JSONs en Data Availability}.
+All raw per-run JSON records (140 runs for Study~1, 306 for Study~2,
+plus the diagnostic sessions of Section~\ref{sec:results-pm}) are
+committed alongside the analysis documents.
 
 % =====================================================================
 \section{Results}\label{sec:results}
@@ -196,6 +319,7 @@ mean input tokens (playbook) $-$ mean input tokens (none), negative =
 the playbook saves net tokens. Only the task the model already knows
 amortizes.}
 \label{tab:m1}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{lcccccc}
 \toprule
 Task & Pass (none$\to$pb) & Rounds (none$\to$pb) & $\Delta R$ &
@@ -210,7 +334,8 @@ $+0.15$ & 1383$\to$1625 & $+1076$ & 49.5$\to$51.2 ($p=0.55$) \\
 $+0.35$ ($p=0.035$) & 1394$\to$1662 & $+1132$ & 48.5$\to$47.0
 ($p=0.62$) \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 The pattern instantiates Equation~\eqref{eq:amortization} exactly. On
@@ -232,6 +357,13 @@ task. There is no evidence, in any of the three pilots, that this
 playbook reliably improves success --- the efficiency gain on the
 saturated task is the only positive result of the entire pilot, and it
 does not generalize even within the same bug family.
+
+The holdout completes the picture from the other side: on the
+out-of-family task with the playbook attached, the model passed 18/20
+at 3.85 mean rounds --- an inapplicable playbook does not derail the
+model. Its cost there is the same fixed per-round tax, with nothing to
+amortize it against; the failure mode of prompt-injected memory in
+this regime is economic, not behavioral.
 
 \begin{figure}
 \centering
@@ -318,27 +450,123 @@ narrow from both sides.
 
 % =====================================================================
 \section{Discussion}\label{sec:discussion}
-% Fuente: outline § contribución 4 + § threats.
-\todo{Discussion (S2/S3):
-(1) la anti-correlación como el hallazgo con dientes: la memoria ayuda
-donde es redundante y no ayuda donde haría falta;
-(2) por qué el nulo importa: la técnica ``suena obviamente buena'' y la
-comunidad la adoptaría sin medir; disciplina de nulos del proyecto
-(citar Paper 1: edit-fence vs evidencia aider, TTC, etc.);
-(3) el control del mismo-prompt como instrumento transferible: sin él,
-este paper reportaría un $+13$ significativo falso;
-(4) direcciones con perfil de costo distinto (future work medido, no
-especulación): (a) memoria FUERA del prompt recuperada bajo demanda
-(perfil AGENTS.md-JIT: costo solo cuando se usa); (b) intervenciones
-que desbloquean una CLASE de tarea (round savings grandes);
-(c) frontera sesión-vs-proyecto: session constraints como caso límite
-de memoria durable (SC-retention, si el sweep corre antes del freeze:
-sección corta; si no, forward reference honesta);
-(5) relación con CompInt (la compactación PIERDE memoria — nosotros
-medimos que inyectarla tampoco es gratis: las dos mitades del mismo
-presupuesto de contexto) y con AutoDesign (Context\&Memory como
-componente optimizable: nuestra ec.~\ref{eq:amortization} es el
-criterio de aceptación que ese componente necesita).}
+% Fuente: outline § contribución 4 + § threats + nota-lectura-autodesign
+% + hypothesis-2026-08-13-sc-retention (forward reference).
+
+\subsection{The anti-correlation is the finding with
+teeth}\label{sec:disc-anticorr}
+
+The single pattern that organizes both studies is that memory pays
+where it is redundant and does not pay where it would be needed. The
+mechanism is visible in the preserved sessions of Study~1: on the
+fresh tasks the model \emph{follows} the playbook --- it applies the
+correct fix, it is not confused by the advice --- it simply does not
+arrive faster for having read it. Round savings come from skipping
+deliberation the model can already do on its own; they do not come
+from making hard reasoning easier. Prompt-injected procedural memory
+therefore behaves as a reminder, not a teacher, and a reminder is
+worth the most on exactly the tasks where it is worth nothing. This is
+not a quirk of one playbook: the same asymmetry reappears in Study~2,
+where the only contrast that isolates the memory's content is null,
+and in the holdout, where the inapplicable playbook costs its fixed
+tax without behavioral harm. The failure mode is economic ---
+Equation~\eqref{eq:amortization} with $\Delta R$ collapsing precisely
+when the task is fresh.
+
+\subsection{Why the null is worth publishing}\label{sec:disc-null}
+
+``Distill the cloud tutor's intervention into a reusable playbook and
+amortize the escalation'' is exactly the kind of technique that sounds
+obviously good --- plausible mechanism, appealing economics, easy to
+adopt without measurement. Our original protocol for this line
+proposed it as a positive contribution; the data refused. The project
+this work belongs to has accumulated a discipline of pre-registered
+null results at the harness level (constrained decoding, test-time
+compute, prompt-format levers measured against public evidence from
+other harnesses \todo{cite Paper 1}); the present null is the highest
+conceptual stake among them because the technique is the most
+attractive, and because \emph{both} an efficiency framing (Study~1)
+and an effectiveness framing (Study~2) fail independently, by
+different mechanisms, under different measurement designs. What
+survives is quantitative and reusable: the bar a memory must clear
+($\Delta R^{*} \approx 0.9$--$1.2$ rounds in this configuration) and
+the measured shortfall ($3$--$6\times$) on fresh tasks.
+
+\subsection{The same-prompt control as a transferable
+instrument}\label{sec:disc-control}
+
+Without the empty arm, Study~2 is a publishable false positive: $+13$
+tasks, McNemar $p=0.011$, Holm-corrected, meeting a pre-registered
+promotion criterion. Every element of conventional rigor was present
+--- and insufficient, because the criterion's premise (that a paired
+significant difference against baseline reflects the treatment)
+assumed a noise floor imported from an easier suite. The measured
+floor on the discriminating suite was an order of magnitude higher:
+$\sim$20\% of paired cells flip under byte-identical prompts at
+temperature 0.2. The general lesson for agentic-system evaluation in
+the small-model regime: when the suite is deliberately calibrated near
+the model's capability frontier, per-configuration noise dominates,
+and the only floor that can be trusted is one measured \emph{inside
+the same sweep} --- an arm whose prompt is identical to baseline by
+construction. The instrument is cheap (one extra arm), demands no new
+tooling, and converts ``significant against baseline'' into the only
+question that matters: significant against \emph{what}.
+
+\subsection{Two measured exits from the wrong side of the
+frontier}\label{sec:disc-directions}
+
+Equation~\eqref{eq:amortization} has exactly two exits, and the data
+locate both. \emph{Lower $\Delta T$}: move the memory out of the
+per-round prompt and retrieve it on demand (a tool call or a
+just-in-time context file), so its cost is paid once per consultation
+rather than $R$ times per task. The condition then compares one
+retrieval against rounds saved --- a far weaker bar than the
+$\sim$1{,}200 tokens per task the M1 playbook pays before helping.
+\emph{Raise $\Delta R$}: target interventions at task classes the
+model fails outright, where success converts a full budget of burned
+rounds into a short trajectory and $\Delta R$ is large by
+construction. The M1 playbook did the opposite --- it encoded a
+methodology for a family the model already navigates --- which is why
+its best case was worth only one round. Both directions are stated
+here as measured cost profiles, not speculation: the frontier they
+must cross is the one this paper quantifies. A third boundary is
+scoped out deliberately: session-scoped constraints (user rules that
+must survive context compaction) are the limit case of durable memory
+whose value is \emph{compliance} rather than round savings ---
+Equation~\eqref{eq:amortization} does not price them, and a separate
+pre-registered experiment in the same project addresses them
+\todo{S3/S4: si el sweep SC-retention corre antes del freeze,
+convertir esta forward reference en un párrafo con resultado}.
+
+\subsection{Relation to compaction loss and meta-harness
+optimization}\label{sec:disc-related}
+
+Two recent lines make the context-budget economics of agent memory
+urgent. Work on compaction loss \todo{cite CompInt} shows that the
+harness silently \emph{loses} memory: session-scoped constraints
+survive context compaction only a minority of the time, and the
+authors argue for architectural separation of durable state. Our
+result is the complementary half of the same budget: even when memory
+is durably preserved and injected, the injection itself carries a
+per-round price that fresh tasks do not repay. A principled memory
+subsystem has to price both sides --- what to preserve across
+compaction and what to re-inject per round --- and
+Equation~\eqref{eq:amortization} is the acceptance criterion for the
+injection side.
+
+Meta-harness optimization \todo{cite AutoDesign} formalizes the
+harness as an optimization target with memory as one of its
+components, accepting a proposed harness update when a train score
+improves and a dev score does not regress --- point estimates, no
+statistics. Study~2 is a concrete demonstration of what that
+acceptance gate would do in this regime: it would have accepted a
+$+13$-task improvement that a same-prompt control shows to be
+unattributable to the treatment. In the small-model regime, where
+suites sit near the capability frontier and the in-sweep noise floor
+reaches $\sim$20\% of cells, an automated harness optimizer needs the
+machinery used here --- pre-registered criteria, paired exact tests
+with correction, and a same-prompt control arm --- as its acceptance
+gate, or its optimization record fills with noise promoted to design.
 
 % =====================================================================
 \section{Threats to Validity}\label{sec:threats}
