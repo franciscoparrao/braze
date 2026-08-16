@@ -32,7 +32,7 @@
 \newcommand{\braze}{\textsc{braze}}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 
-\title{When Procedural Memory Does Not Pay: the Amortization Frontier
+\title{When Procedural Memory Does Not Pay: The Amortization Frontier
 of Prompt-Injected Memory for Local-First Coding Agents%
 \thanks{\todo{grants / acknowledgements}}}
 \titlerunning{When Procedural Memory Does Not Pay}
@@ -68,22 +68,25 @@ memory section costs its size times the number of rounds and pays for
 itself only if it saves enough rounds. In the configurations we
 measure, break-even is roughly one full round of interaction. We ran
 two independent pre-registered evaluations on a local-first coding
-harness with a 20B-parameter executor (140 and 306 runs). A
+harness with a 20B-parameter mixture-of-experts executor
+($\sim$3.6B active parameters; 140 and 306 runs). A
 human-written playbook, the ceiling for any automatically distilled
 variant, amortizes only on the task the model already knows, where it
 is redundant. On fresh tasks, where it would matter, it misses
-break-even by a factor of $3$--$6$; success rates improve reliably
-nowhere. In the second study, a same-prompt control arm dissolved an
+break-even by a factor of $3$--$6$; success rates show no reliable
+change anywhere (all intervals include zero). In the second study, a same-prompt control arm dissolved an
 apparently significant $+13$-task gain (McNemar $p=0.011$,
 Holm-corrected) into an unattributable $+4$ ($p=0.541$): without that
 arm, we would have reported a false positive that met its
 pre-registered promotion criterion. The measured noise floor
 ($\sim$20\% of paired cells flip under byte-identical prompts) is
 configuration-specific and an order of magnitude above the floor
-imported from an easier suite. The design lesson is measured rather
-than speculative: prompt-injected procedural memory pays only if the
-injection cost drops (retrieval on demand) or the round savings rise
-(interventions that unlock task classes the model fails outright).
+imported from an easier suite. The design lesson carries a measured bar rather
+than a speculative one: prompt-injected procedural memory pays only
+if the injection cost drops (retrieval on demand) or the round
+savings rise (interventions that unlock task classes the model fails outright);
+both are directions whose break-even this paper quantifies but whose
+designs remain future work.
 \keywords{agentic coding \and procedural memory \and small language
 models \and negative results \and pre-registration \and same-prompt
 control}
@@ -132,11 +135,13 @@ sessions, in a three-arm A/B whose middle arm is a \emph{same-prompt
 control}: its prompt is byte-identical to the baseline by construction
 (306 runs).
 
-Both studies land on the same side of the frontier. The playbook
+Both studies land on the same side of the frontier, though they probe
+different points of it: Study~1 prices content-rich memory, Study~2 a
+content-thin one. The playbook
 amortizes only on the task the model already knows, where it is
 redundant, and misses break-even by a factor of $3$--$6$ on fresh
-tasks, where it would matter. Success rates improve reliably nowhere.
-In Study~2 the treatment arm beat baseline by $+13$ tasks
+tasks, where it would matter. Success rates show no reliable change
+anywhere. In Study~2 the treatment arm beat baseline by $+13$ tasks
 (McNemar $p=0.011$, Holm-corrected), formally meeting the
 pre-registered promotion criterion. However, the same-prompt control
 dissolved the result: the control arm rose $+9$ on an identical
@@ -159,8 +164,10 @@ This paper contributes:
   report a significant false positive
   (Section~\ref{sec:results-pm});
 \item the multi-session benchmark design A$\to$B$\to$H for measuring
-  procedural transfer under objective oracles
-  (Section~\ref{sec:method});
+  procedural transfer under objective oracles, together with its first
+  (partial) instantiation: the pilot exercises sessions B and H
+  against a human-written playbook, and the live tutor of session A
+  is future work (Section~\ref{sec:method});
 \item a design lesson with measured directions rather than
   speculation: injected memory pays only if the injection cost drops
   (retrieval on demand) or the round savings rise (class-unlocking
@@ -238,9 +245,10 @@ and the statistical treatment of randomized SE experiments is
 well-codified \citep{arcuri2011practical}. This paper follows that
 discipline in a lightweight form: both studies were registered by
 committing hypotheses, decision criteria, and an honest prior to the
-project repository before launch, all contrasts are paired exact tests
-with multiplicity correction, and the headline result is a null
-reported as such.
+project repository before launch; Study~2's confirmatory contrasts
+are paired exact tests with multiplicity correction, and Study~1's
+estimates carry confidence intervals with Holm-corrected tests per
+endpoint family; the headline result is a null reported as such.
 
 % =====================================================================
 \section{The Amortization Condition}\label{sec:model}
@@ -385,7 +393,11 @@ reduction $\Delta R$, per-round overhead $\Delta T$, and net token
 delta) so a reader can distinguish ``the playbook saved rounds''
 from ``the playbook cost nothing'' from ``the playbook cost but the
 turn was short anyway.'' Pass rates are compared with Fisher's exact
-test; rounds and wall time with two-sided $t$-tests.
+test and pass-rate differences carry Newcombe 95\% intervals; rounds
+and wall time use two-sided Welch $t$-tests with Welch intervals,
+Holm-corrected across the three task pairs within each endpoint
+family. Table~\ref{tab:m1} reports point estimates; inference is in
+the text.
 
 \subsection{Study 2: project-memory A/B with a same-prompt
 control}\label{sec:method-pm}
@@ -402,8 +414,12 @@ the touched-file list, with zero experimenter-authored content). Three
 repetitions per arm at fixed seed and temperature 0.2 give $3 \times 3
 \times 34 = 306$ runs. The primary contrast is pass rate under
 McNemar's exact test on (task, repetition) pairs, Holm-corrected
-across the two contrasts against baseline; secondary metrics are input
-tokens, rounds, and wall time.
+across the two contrasts against baseline. Because repetitions of the
+same task share prompt and oracle, pair-level McNemar overstates the
+effective sample; we therefore also report task-level (cluster-aware)
+tests: exact sign and Wilcoxon signed-rank over the 34 per-task
+pass counts. Secondary metrics are input tokens, rounds, and wall
+time.
 
 The decision criteria were pre-registered before launch:
 (1)~a \emph{plumbing gate}, evaluated first: if the empty arm
@@ -455,8 +471,10 @@ backend across arms.
 the same family ($n=20$ per cell, gpt-oss:20b, seeds 42--61).
 $\Delta R$ = mean rounds saved by the playbook; net $\Delta$tokens =
 mean input tokens (playbook) $-$ mean input tokens (none), negative =
-the playbook saves net tokens. Only the task the model already knows
-amortizes.}
+the playbook saves net tokens. Point estimates only; confidence
+intervals and Holm-corrected tests are in the text, and wall-time
+contrasts are secondary (Section~\ref{sec:threats}). Only the task
+the model already knows amortizes in point estimate.}
 \label{tab:m1}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lcccccc}
@@ -466,12 +484,11 @@ Tok/round (none$\to$pb) & Net $\Delta$tokens & Wall s (none$\to$pb) \\
 \midrule
 \textsc{original} (saturated) & 14/20$\to$16/20 & 6.70$\to$5.75 &
 $\mathbf{+0.95}$ & 1406$\to$1590 & $\mathbf{-304}$ &
-57.4$\to$40.6 ($p=0.003$) \\
+57.4$\to$40.6 \\
 \textsc{loop} (E0502, fresh) & 15/20$\to$14/20 & 5.60$\to$5.45 &
-$+0.15$ & 1383$\to$1625 & $+1076$ & 49.5$\to$51.2 ($p=0.55$) \\
+$+0.15$ & 1383$\to$1625 & $+1076$ & 49.5$\to$51.2 \\
 \textsc{move} (E0382, fresh) & 18/20$\to$15/20 & 6.40$\to$6.05 &
-$+0.35$ ($p=0.035$) & 1394$\to$1662 & $+1132$ & 48.5$\to$47.0
-($p=0.62$) \\
+$+0.35$ & 1394$\to$1662 & $+1132$ & 48.5$\to$47.0 \\
 \bottomrule
 \end{tabular}%
 }
@@ -480,28 +497,37 @@ $+0.35$ ($p=0.035$) & 1394$\to$1662 & $+1132$ & 48.5$\to$47.0
 The pattern instantiates Equation~\eqref{eq:amortization} exactly. On
 the \textsc{original} task (the canonical bug the model already has
 memorized, where it passes without help) the playbook saves nearly
-a full round ($\Delta R = 0.95$, right at the $\Delta R^{*} \approx
-0.9$--$1.2$ break-even), and the net token balance is negative
-($-304$): the memory amortizes. On the two fresh tasks, the round
-reduction collapses to $+0.15$ and $+0.35$ (a factor of $3$--$6$
-below break-even) while the per-round overhead stays fixed at
-$+243$ and $+268$ tokens, so the playbook \emph{costs} $+1076$ and
-$+1132$ net tokens per task. Figure~\ref{fig:frontier} places the
+a full round ($\Delta R = 0.95$, 95\% CI $[0.25, 1.65]$, Holm
+$p=0.027$ across the three pairs), right at the $\Delta R^{*} \approx
+0.9$--$1.2$ break-even; the net token balance is negative in point
+estimate ($-304$, CI $[-1521, +912]$): even the best case is at
+most marginal amortization, not a clear saving. On the two fresh
+tasks, the round reduction collapses to $+0.15$ (CI $[-0.40, +0.70]$)
+and $+0.35$ (CI $[+0.02, +0.68]$, Holm $p=0.072$), a factor of
+$3$--$6$ below break-even, while the per-round overhead stays fixed
+at $+243$ and $+268$ tokens, so the playbook \emph{costs} $+1076$
+(CI $[+11, +2141]$) and $+1132$ (CI $[+560, +1704]$) net tokens per
+task, both intervals excluding zero. Figure~\ref{fig:frontier} places the
 three tasks against the amortization frontier.
 
 Pass rate shows no consistent signal in any pair (Fisher $p=0.72$,
-$1.00$, $0.41$), and the point direction is \emph{negative} in two of
-three ($15\!\to\!14$, $18\!\to\!15$), positive only on the saturated
-task. There is no evidence, in any of the three pilots, that this
-playbook reliably improves success: the efficiency gain on the
-saturated task is the only positive result of the entire pilot, and it
-does not generalize even within the same bug family.
+$1.00$, $0.41$; Newcombe 95\% intervals on the differences $+0.10$
+$[-0.15, +0.37]$, $-0.05$ $[-0.32, +0.21]$, $-0.15$ $[-0.39, +0.08]$),
+and the point direction is \emph{negative} in two of three
+($15\!\to\!14$, $18\!\to\!15$), positive only on the saturated task.
+All three intervals include zero and are wide: at $n=20$ per cell the
+pilot can neither confirm nor rule out moderate success-rate effects;
+the reliable findings of Study~1 are the efficiency quantities,
+not the pass rates. What the data do establish is that the efficiency
+gain on the saturated task is the only positive result of the entire
+pilot, and it does not generalize even within the same bug family.
 
-The holdout completes the picture from the other side: on the
-out-of-family task with the playbook attached, the model passed 18/20
-at 3.85 mean rounds: an inapplicable playbook does not derail the
-model. Its cost there is the same fixed per-round tax, with nothing to
-amortize it against; the failure mode of prompt-injected memory in
+The holdout completes the picture from the other side. It ran without
+a paired memory-free arm, so its numbers are descriptive, not a
+contrast: with the playbook attached to an out-of-family task the
+model passed 18/20 at 3.85 mean rounds: an inapplicable playbook
+does not derail the model, and its per-round tax simply has nothing to
+amortize against there. The failure mode of prompt-injected memory in
 this regime is economic, not behavioral.
 
 \begin{figure}
@@ -524,7 +550,12 @@ methodologically precious: the empty arm is a \textbf{same-prompt
 control}, and any paired discordance between it and the baseline is an
 in-sweep measurement of the noise floor. A third arm
 (\emph{seeded}) synthesizes the memory a previous session would have
-left, with zero experimenter-authored content.
+left, with zero experimenter-authored content. That content is
+deliberately thin (a list of files the task prompts largely repeat,
+as the pre-registered prior already noted), so this study bounds the
+attributable effect of a realistic cheap injection; probing rich
+procedural content is Study~1's role. The two studies carry different
+evidential weight and we read them accordingly.
 
 \begin{table}
 \caption{Study 2: \texttt{enable\_project\_memory} A/B on the
@@ -557,7 +588,13 @@ byte-identical prompt, the empty arm rose $+9$ on its own, and the
 only contrast that isolates the \emph{content} of the memory
 (seeded vs.\ empty) is null ($+4$, $p=0.541$). Attributing the
 headline to the memory would have been exactly the error the control
-arm existed to prevent. The lever was not promoted.
+arm existed to prevent. The clustering structure independently makes
+the same point: repetitions of a task are not independent pairs, and
+at task level (34 per-task pass counts) the headline contrast weakens
+to sign-test $p=0.065$ and Wilcoxon $p=0.054$: the $+13$ does not
+survive cluster-aware analysis even before the control arm is
+consulted, while seeded vs.\ empty stays null under every treatment
+(task-level $p=0.58$--$0.59$). The lever was not promoted.
 
 The pre-registered plumbing gate fired first: baseline vs.\ empty
 showed 21 paired discordant cells against a pre-registered threshold
@@ -582,10 +619,17 @@ Equation~\eqref{eq:amortization} prices. The M1 playbook adds
 $\sim$200--270 tokens \emph{per round} (a methodology section the
 designer consults every round); the project-memory section is small
 ($\sim$40 tokens in round 1) but correspondingly carries no measurable
-content signal. Between them: an injection cheap enough to be
-harmless was too thin to matter, and an injection rich enough to
-matter was too expensive to amortize on fresh tasks. The frontier is
-narrow from both sides.
+content signal. Between them: the injection cheap enough to be
+harmless was too thin to matter, and the injection rich enough to
+matter was too expensive to amortize on fresh tasks. Two caveats
+bound this reading. The two points differ in content type as well as
+size, and they come from different studies; and the middle of the
+size axis is unmeasured: a short, task-tuned procedural hint of,
+say, 50 tokens would face a break-even of only $\sim$0.2 rounds under
+Equation~\eqref{eq:amortization}, and the variant that carries the
+memory only for the first rounds of a turn and then drops it halves
+the tax at fixed content. The frontier is narrow at its measured
+points; the middle of the axis is open.
 
 % =====================================================================
 \section{Discussion}\label{sec:discussion}
@@ -650,7 +694,14 @@ and the only floor that can be trusted is one measured \emph{inside
 the same sweep}: an arm whose prompt is identical to baseline by
 construction. The instrument is cheap (one extra arm), demands no new
 tooling, and converts ``significant against baseline'' into the only
-question that matters: significant against \emph{what}.
+question that matters: significant against \emph{what}. The measured
+floor also yields the suite's minimum detectable effect: with
+$\sim$21 noise discordant pairs, an exact McNemar at $\alpha=0.05$
+requires a net asymmetry of at least 11 pairs ($\approx$11\,pp on
+this suite); at three repetitions, any true effect smaller than
+that is invisible regardless of its reality. Smaller expected effects
+need proportionally more repetitions, or a sequential (anytime-valid)
+design in place of fixed-$n$ testing.
 
 \subsection{Two measured exits from the wrong side of the
 frontier}\label{sec:disc-directions}
@@ -667,9 +718,11 @@ model fails outright, where success converts a full budget of burned
 rounds into a short trajectory and $\Delta R$ is large by
 construction. The M1 playbook did the opposite: it encoded a
 methodology for a family the model already navigates, which is why
-its best case was worth only one round. Both directions are stated
-here as measured cost profiles, not speculation: the frontier they
-must cross is the one this paper quantifies. A third boundary is
+its best case was worth only one round. To be precise about what is
+measured: this paper quantifies the bar these designs must clear (the cost
+structure of Equation~\eqref{eq:amortization} with the numbers
+above), not the designs themselves, which remain future work with a
+priced target. A third boundary is
 scoped out deliberately: session-scoped constraints (user rules that
 must survive context compaction) are the limit case of durable memory
 whose value is \emph{compliance} rather than round savings.
@@ -758,16 +811,16 @@ Distilling a cloud tutor's rescue into reusable procedural memory is
 the kind of technique that sounds too obviously good to bother
 measuring. Measured under pre-registration, objective oracles, and a
 same-prompt control, it does not pay where it is needed: injected
-memory amortizes only on tasks the model already knows, misses
-break-even by $3$--$6\times$ on fresh ones, and its apparently
+memory amortizes --- at best marginally --- only on tasks the model
+already knows, misses break-even by $3$--$6\times$ on fresh ones, and its apparently
 significant effectiveness gain dissolves against a control arm with a
 byte-identical prompt. The amortization condition of
 Section~\ref{sec:model} states exactly what would have to change for
 the technique to pay: cut the per-round injection cost by retrieving
 memory on demand instead of carrying it, or raise the rounds saved by
 aiming interventions at task classes the model fails outright. Those
-two exits, both located by measurement rather than speculation, are
-where this line of work continues.
+two exits, each with a bar this paper has measured, are where this
+line of work continues.
 
 The methodological export stands on its own. In the small-model
 regime, where discriminating suites sit near the capability frontier
