@@ -82,3 +82,32 @@ agregó al Study 1 original). Fisher + Newcombe para pass.
   dirección son el resultado, no los valores puntuales.
 - 5.6 GB en Nitro: cabe entero; `--no-ollama-stop` no apila residentes
   (modelo único).
+
+## Resultados (2026-08-16)
+
+Sweep completo: 140 corridas, gate de infraestructura PASA (6.4% < 10%).
+Análisis completo en `docs/sweep-m1-ornith9b-2026-08-15.md`.
+
+**Veredicto: criterio 1 — REPLICA, y profundiza.** La clasificación
+saturada/fresca de ornith (paso 1, solo brazos none: original 16/20 >
+loop 12/20 > move 10/20) coincide con la de gpt-oss. El orden de la
+anti-correlación se sostiene: daño mínimo en la sabida, máximo en la
+más fresca. Pero el régimen es más severo: ΔR es NEGATIVO en los 3
+pares (el playbook alarga trayectorias: −0.50 / −1.55 [Holm <0.001] /
+−1.75 [Holm 0.049]) y el pass rate se degrada con significancia en las
+frescas (12→5, Fisher 0.05; 10→2, Fisher 0.01). Net tokens +2709 /
++5794 / +6635, los 3 CIs excluyen cero. Holdout 18/20 sin descarrilar.
+La censura por timeout (6/8 en brazos playbook) subestima el daño —
+sesgo conservador.
+
+```text
+Decision: el patrón replica bajo el criterio pre-registrado 1; el
+  paper gana la subsección de replicación y el threat de modelo único
+  se rebaja a "dos executors de arquitectura distinta, una familia".
+  Hallazgo adicional no anticipado por H1 pero coherente con el prior
+  del proyecto (plan-en-prosa): en el executor más débil el fallo es
+  además CONDUCTUAL (éxito degradado), no solo económico — la
+  expectativa direccional "más débil = más margen de ΔR" queda medida
+  y REFUTADA en su versión optimista.
+Sin iteración, conforme al criterio 3.
+```
