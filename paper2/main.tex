@@ -66,15 +66,21 @@ falls on the wrong side of it precisely where it would be needed. An
 agentic loop re-sends its context on every round, so an injected
 memory section costs its size times the number of rounds and pays for
 itself only if it saves enough rounds. In the configurations we
-measure, break-even is roughly one full round of interaction. We ran
+measure, break-even is one to nearly two full rounds of interaction.
+We ran
 two independent pre-registered evaluations on a local-first coding
 harness with a 20B-parameter mixture-of-experts executor
-($\sim$3.6B active parameters; 140 and 306 runs). A
-human-written playbook, the ceiling for any automatically distilled
+($\sim$3.6B active parameters; 140 and 306 runs), plus a
+pre-registered 140-run replication of the first study on a dense 9B
+executor. A human-written playbook, the ceiling for any automatically distilled
 variant, amortizes only on the task the model already knows, where it
 is redundant. On fresh tasks, where it would matter, it misses
 break-even by a factor of $3$--$6$; success rates show no reliable
-change anywhere (all intervals include zero). In the second study, a same-prompt control arm dissolved an
+change anywhere (all intervals include zero). On the smaller executor
+the same playbook is outright harmful: it lengthens trajectories on
+every task and significantly reduces success on the fresh ones. As
+the executor weakens, the failure mode shifts from economic to
+behavioral. In the second study, a same-prompt control arm dissolved an
 apparently significant $+13$-task gain (McNemar $p=0.011$,
 Holm-corrected) into an unattributable $+4$ ($p=0.541$): without that
 arm, we would have reported a false positive that met its
@@ -133,7 +139,9 @@ tasks (140 runs). Study~2 evaluates the production form of the same
 idea, a project-memory hook that injects the files touched by previous
 sessions, in a three-arm A/B whose middle arm is a \emph{same-prompt
 control}: its prompt is byte-identical to the baseline by construction
-(306 runs).
+(306 runs). A pre-registered replication of Study~1 on a second, dense
+9B executor (140 further runs) tests whether the pattern is specific
+to one architecture.
 
 Both studies land on the same side of the frontier, though they probe
 different points of it: Study~1 prices content-rich memory, Study~2 a
@@ -146,7 +154,10 @@ anywhere. In Study~2 the treatment arm beat baseline by $+13$ tasks
 pre-registered promotion criterion. However, the same-prompt control
 dissolved the result: the control arm rose $+9$ on an identical
 prompt, and the only contrast that isolates the memory's content was
-null ($+4$, $p=0.541$). A collateral finding has independent value:
+null ($+4$, $p=0.541$). The replication preserves the
+anti-correlation's ordering and worsens its regime: on the smaller
+executor the playbook lengthens trajectories everywhere and
+significantly reduces success on fresh tasks. A collateral finding has independent value:
 the noise floor of the configuration is $\sim$20\% of paired cells
 under byte-identical prompts, an order of magnitude above the floor
 the pre-registration had imported from an easier suite.
@@ -159,8 +170,10 @@ This paper contributes:
   and when it is needed (Sections~\ref{sec:model}
   and~\ref{sec:results});
 \item two independent pre-registered null results that confirm it,
-  together with the \emph{same-prompt control} as a transferable
-  methodological instrument; without it, this paper would instead
+  plus a pre-registered replication in which the failure deepens from
+  economic to behavioral on a smaller executor, together with the
+  \emph{same-prompt control} as a transferable methodological
+  instrument; without it, this paper would instead
   report a significant false positive
   (Section~\ref{sec:results-pm});
 \item the multi-session benchmark design A$\to$B$\to$H for measuring
@@ -399,6 +412,17 @@ Holm-corrected across the three task pairs within each endpoint
 family. Table~\ref{tab:m1} reports point estimates; inference is in
 the text.
 
+Study~1 was subsequently replicated on a second executor:
+\texttt{ornith:9b}, a dense 9B-parameter model (Q4\_K\_M) that
+saturates the project's easier benchmark suite, served through the
+same node with a 300\,s per-task timeout. The replication was
+pre-registered before launch with the same design, seeds, arms, and
+analysis plan, plus one rule specific to replication: the
+saturated/fresh classification is re-derived from the memory-free
+arms alone, before any playbook arm is read, so the prediction is
+relative to the new executor's own knowledge rather than the
+original's.
+
 \subsection{Study 2: project-memory A/B with a same-prompt
 control}\label{sec:method-pm}
 
@@ -445,9 +469,10 @@ before the sweep is launched, so the registration is verifiable
 against the git history rather than an external registry
 \todo{S4: decidir si el pre-registro se espeja en OSF como el Paper 1,
 y citar hashes/paths de los dos docs + JSONs en Data Availability}.
-All raw per-run JSON records (140 runs for Study~1, 306 for Study~2,
-plus the diagnostic sessions of Section~\ref{sec:results-pm}) are
-committed alongside the analysis documents.
+All raw per-run JSON records ($140+140$ runs for Study~1 and its
+replication, 306 for Study~2, plus the diagnostic sessions of
+Section~\ref{sec:results-pm}) are committed alongside the analysis
+documents.
 
 % =====================================================================
 \section{Results}\label{sec:results}
@@ -527,8 +552,9 @@ a paired memory-free arm, so its numbers are descriptive, not a
 contrast: with the playbook attached to an out-of-family task the
 model passed 18/20 at 3.85 mean rounds: an inapplicable playbook
 does not derail the model, and its per-round tax simply has nothing to
-amortize against there. The failure mode of prompt-injected memory in
-this regime is economic, not behavioral.
+amortize against there. For this executor the failure mode of
+prompt-injected memory is economic, not behavioral --- a distinction
+the replication of Section~\ref{sec:results-ornith} sharpens.
 
 \begin{figure}
 \centering
@@ -536,6 +562,69 @@ this regime is economic, not behavioral.
 \input{figs/fig1_frontera_caption.tex}
 \label{fig:frontier}
 \end{figure}
+
+\subsection{Replication on a second executor: the failure mode
+worsens}\label{sec:results-ornith}
+
+To test whether the Study~1 pattern is a quirk of one architecture,
+we replicated it (same suite, seeds, arms, and analysis plan) on
+\texttt{ornith:9b}, pre-registered before launch. The re-derived
+classification from the memory-free arms alone reproduces the original
+ordering (\textsc{original} 16/20 unaided, \textsc{loop} 12/20,
+\textsc{move} 10/20), and Table~\ref{tab:ornith} shows the outcome
+against it.
+
+\begin{table}
+\caption{Replication of Study 1 on \texttt{ornith:9b} (dense 9B,
+$n=20$ per cell, seeds 42--61, same suite and arms). Point estimates;
+confidence intervals and Holm-corrected tests in the text. $\Delta R <
+0$ means the playbook \emph{adds} rounds. On this executor the
+playbook costs net tokens everywhere and reduces success on the fresh
+tasks.}
+\label{tab:ornith}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+Task & Pass (none$\to$pb) & Rounds (none$\to$pb) & $\Delta R$ &
+Tok/round (none$\to$pb) & Net $\Delta$tokens \\
+\midrule
+\textsc{original} (known) & 16/20$\to$11/20 & 3.95$\to$4.45 &
+$-0.50$ & 1756$\to$2154 & $+2709$ \\
+\textsc{loop} (fresh) & 12/20$\to$5/20 & 3.50$\to$5.05 &
+$\mathbf{-1.55}$ & 1750$\to$2332 & $\mathbf{+5794}$ \\
+\textsc{move} (fresh) & 10/20$\to$2/20 & 4.40$\to$6.15 &
+$\mathbf{-1.75}$ & 1826$\to$2353 & $\mathbf{+6635}$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+The anti-correlation replicates in order (least harm on the task
+the model knows best, most on the freshest), and the regime is
+harsher everywhere. The playbook now \emph{lengthens} trajectories on
+every task ($\Delta R = -0.50$, CI $[-1.17, +0.17]$; $-1.55$, CI
+$[-2.16, -0.94]$, Holm $p<0.001$; $-1.75$, CI $[-3.26, -0.24]$, Holm
+$p=0.049$), costs $+2{,}709$ to $+6{,}635$ net tokens per task (all
+three intervals excluding zero), and, unlike on the 20B executor,
+\emph{reduces success} on the fresh tasks: $12/20 \to 5/20$
+(Fisher $p=0.05$) and $10/20 \to 2/20$ ($p=0.01$). The same playbook
+also costs about twice as much per round here ($+398$ to $+582$
+tokens), pushing the per-task break-even to $1.0$--$1.8$ rounds. The
+holdout is unchanged (18/20 at 3.35 mean rounds): the inapplicable
+playbook still does not derail the model. Six of the eight timeouts
+fall in playbook arms, so censoring at the 300\,s cap biases the
+measured harm \emph{downward}.
+
+The replication therefore does more than confirm the frontier: it
+locates the direction in which it moves with scale. On the 20B
+executor the failure mode is economic: the playbook is followed but
+not worth its tax. On the 9B executor it is also behavioral: the
+playbook actively degrades success on exactly the tasks where memory
+would be needed. The a priori plausible expectation that a weaker
+model has more rounds of headroom for memory to save is measured here
+and refuted: the weaker executor is hurt, not helped, consistent with
+the companion study's finding that prose planning harms small
+executors \citep{parra2026scaffolding}.
 
 \subsection{Study 2: the same-prompt control removes the headline
 effect}\label{sec:results-pm}
@@ -654,7 +743,12 @@ where the only contrast that isolates the memory's content is null,
 and in the holdout, where the inapplicable playbook costs its fixed
 tax without behavioral harm. The failure mode is economic:
 Equation~\eqref{eq:amortization} with $\Delta R$ collapsing precisely
-when the task is fresh.
+when the task is fresh --- until the executor weakens. On the 9B
+replication the same playbook turns from unprofitable to harmful:
+$\Delta R$ goes negative and success drops significantly on fresh
+tasks. A reminder the 20B model can afford to carry becomes a
+distraction the 9B model cannot. The anti-correlation survives the
+change of scale; what changes is the price of ignoring it.
 
 \subsection{Why the null is worth publishing}\label{sec:disc-null}
 
@@ -716,7 +810,10 @@ $\sim$1{,}200 tokens per task the M1 playbook pays before helping.
 \emph{Raise $\Delta R$}: target interventions at task classes the
 model fails outright, where success converts a full budget of burned
 rounds into a short trajectory and $\Delta R$ is large by
-construction. The M1 playbook did the opposite: it encoded a
+construction. The replication tempers this exit: on the 9B executor
+injected guidance reduced success outright, so a class-unlocking
+intervention must clear a behavioral bar, not only an economic one.
+The M1 playbook did the opposite: it encoded a
 methodology for a family the model already navigates, which is why
 its best case was worth only one round. To be precise about what is
 measured: this paper quantifies the bar these designs must clear (the cost
@@ -766,16 +863,19 @@ gate, or its optimization record fills with noise promoted to design.
 % Fuente: outline § threats.
 
 \paragraph{External validity.} Study 1 uses one task family
-(\texttt{rust\_compile\_repair}) and both studies use one executor
-(\texttt{gpt-oss:20b}) on one hardware and serving tier. The frontier
-itself is configuration-dependent: a weaker model has more rounds of
-headroom to recover ($\Delta R$ could be larger), and a different task
-family might admit interventions that unlock whole classes of failure
-rather than shave steps off a known procedure; both would move the
-break-even point. We therefore claim the \emph{condition} and the
-measurement procedure as general, and the measured \emph{position} of
-the frontier as specific to this regime; the direction for weaker
-models is a stated expectation, not a measurement.
+(\texttt{rust\_compile\_repair}); its result is measured on two
+executors of different architecture (a 20B mixture-of-experts and a
+dense 9B) on one hardware and serving tier, while Study 2 uses the
+20B alone. The frontier remains configuration-dependent: a different
+task family might admit interventions that unlock whole classes of
+failure rather than shave steps off a known procedure, which would
+move the break-even point. The once-plausible expectation that a
+weaker model has more rounds of headroom for memory to save is no
+longer a speculation we owe the reader: the replication measured it
+and found the opposite (Section~\ref{sec:results-ornith}). We claim
+the \emph{condition} and the measurement procedure as general, and
+the measured \emph{positions} of the frontier as specific to this
+task family and these two executors.
 
 \paragraph{Construct validity.} The null concerns memory \emph{in the
 prompt}. Retrieval-on-demand memory has a different cost profile by
