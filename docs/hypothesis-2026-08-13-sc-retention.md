@@ -345,3 +345,29 @@ autor aplicó `nitro-ollama-hardening.sh` + reboot del nodo
 (2026-08-17: swap 0B, KEEP_ALIVE=2m y MAX_LOADED_MODELS=2 en el
 servicio, gpt-oss carga en 18 s). La cláusula única de iteración de
 instrumento (forzado de compactación) sigue SIN usarse.
+
+## Diagnóstico r2/r3 (2026-08-17): la clase roam #1 volvió — y no es el nodo
+
+r3 corrió con nodo saneado (hardening + reboot, swap 0B) y
+`--no-ollama-stop` (modelo residente, sin recargas) — y abortó igual
+(tratado 26/40, control 3/40). Los errores crudos lo explican:
+**`ollama HTTP 500 "error parsing tool call: raw='We need context...'"`**
+— el parser server-side de Ollama ahogándose con el canal harmony de
+gpt-oss cuando el razonamiento se filtra a la tool call. Es el
+incidente #1 del testbed roam, que 0.32.1 había resuelto para el guion
+de entonces: la suite sc-compaction (constraint + compactación a mitad
+de turno) produce las condiciones que lo re-gatillan. Los 500 cuentan
+como fallos de transporte → 5 consecutivos → breaker → fail-fast. Los
+tres abortos (r1/r2/r3) son la misma causa raíz con tres máscaras.
+
+Implicación: **gpt-oss + esta suite no es medible vía Ollama** con la
+versión actual del servicio. El remedio estructural es el del
+proyecto: el camino LocalBackend/Harmony, donde esta clase es
+imposible por construcción (el parser es nuestro, desde los tokens).
+Ejecutarlo requiere compilar braze-bench con feature `local` EN Nitro
+(mismo prerequisito que el A/B KV-quant en cola) y cambia el stack de
+serving del brazo gpt-oss (Ollama→LocalBackend) — decisión del autor
+antes de proceder: el contraste primario es INTRA-modelo (sc-route vs
+control, mismo stack en ambos brazos), así que el pareo no se
+contamina, pero el trail del experimento debe registrar el cambio.
+Datos r2/r3 conservados por transparencia.
