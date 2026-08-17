@@ -296,3 +296,32 @@ precio puede existir.
 - **Prioridad**: no compite con EMSE (que está en revisión) ni
   bloquea nada; es un experimento de bench autocontenido, del tamaño
   de los que el proyecto ya sabe correr en un día de Nitro.
+
+## Estado interino (2026-08-16, tras la primera pasada de sweeps)
+
+**Sweep ornith:9b: VÁLIDO y completo** (40 pares;
+`docs/sweep-sc-retention-ornith-2026-08-16.json`). Instrumento OK
+(compactación en el 100% de las corridas, 2.65-2.75/run). Resultado
+preliminar (no se emite veredicto hasta tener gpt-oss válido, porque
+el criterio de adopción lo exige): sc-route 5/40 vs control 0/40 —
+los 5 pares discordantes TODOS a favor de la palanca, McNemar
+p=0.0625; y el brazo tratado consumió ~5% MENOS input tokens que el
+control (22,2k vs 23,5k) — el costo de contexto temido por la
+predicción diferencial no aparece en tareas SC (respetar el
+constraint acorta trayectorias).
+
+**Sweep gpt-oss:20b: INVÁLIDO como pareado**
+(`docs/sweep-sc-retention-gptoss-2026-08-16.json`, se conserva por
+transparencia). Dos problemas: (1) el brazo control quedó en 4/40 —
+el circuit breaker abrió por 5 fallos de transporte en la transición
+de brazos (recarga del modelo de 13.8 GB; smoke posterior: Nitro sano,
+carga en 24 s — transitorio) y el fail-fast de brazo (v9, 98b4a49)
+abortó el resto conservando las filas corridas, como fue diseñado;
+(2) el brazo tratado completo dio 0/40 (35 assertion_files,
+compactación disparando) — un PISO que, de reproducirse en la
+repetición, significa "no medible en gpt-oss con esta suite" (la
+palanca no puede verse si ninguna corrida completa el trabajo). La
+repetición del sweep completo se lanzó el mismo día (r2) —
+completar una medición abortada por infraestructura no es iteración
+de tratamiento; la cláusula única de iteración de instrumento
+(forzado de compactación) sigue SIN usarse.
