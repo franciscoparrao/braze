@@ -371,3 +371,27 @@ antes de proceder: el contraste primario es INTRA-modelo (sc-route vs
 control, mismo stack en ambos brazos), así que el pareo no se
 contamina, pero el trail del experimento debe registrar el cambio.
 Datos r2/r3 conservados por transparencia.
+
+## Desviación de instrumento para r4 (2026-08-17, autorizada por el autor, ANTES de lanzar)
+
+El brazo gpt-oss cambia de stack de serving: **Ollama →
+LocalBackend/Harmony** (`local:~/models/gpt-oss-20b-MXFP4.gguf`,
+GGUF canónico, CPU en Nitro, `BRAZE_LOCAL_FAMILY=harmony` explícito;
+braze-bench compilado en Nitro con `--features local`). Justificación:
+tres pasadas abortadas por la clase roam #1 (HTTP 500 del parser
+harmony server-side de Ollama, re-gatillada por las condiciones de la
+suite) — la clase es imposible por construcción en el LocalBackend.
+El contraste primario es INTRA-modelo con ambos brazos en el MISMO
+stack, así que el pareo sc-route vs control no se contamina; lo que
+deja de ser comparable entre modelos es el par serving-stack
+(ornith vía Ollama, gpt-oss vía LocalBackend) — se declara como
+caveat en el veredicto, no afecta los criterios pre-registrados (que
+comparan brazos dentro de cada modelo). Resto de parámetros idéntico
+(suite, seed 42, temp 0.2, 5 reps, timeout 600 s). El `--seed` del
+bench aplica a Ollama/OpenRouter; para el LocalBackend la semilla va
+por `BRAZE_LOCAL_SEED` — env-only y por-proceso, así que r4 corre con
+la semilla base y la variación entre repeticiones queda a cargo del
+sampling a temp 0.2; si las repeticiones salieran copias
+(determinismo — la trampa v9 L-9), se aplica la cláusula de
+instrumento del A/B KV-quant: `BRAZE_LOCAL_TEMP>0`/semillas por tanda,
+declarado antes de leer resultados.
