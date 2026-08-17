@@ -325,3 +325,23 @@ repetición del sweep completo se lanzó el mismo día (r2) —
 completar una medición abortada por infraestructura no es iteración
 de tratamiento; la cláusula única de iteración de instrumento
 (forzado de compactación) sigue SIN usarse.
+
+## Desviación de instrumento para r3 (2026-08-17, ANTES de lanzar)
+
+El apéndice fijó "sin `--no-ollama-stop`". Tras dos abortos del sweep
+gpt-oss por la misma clase (breaker abierto en la transición de
+brazos: la descarga+recarga de los 13.8 GB sobre swap saturado excedía
+los timeouts de transporte — r1 con brazo control 4/40, r2 degradado a
+mitad de brazo; diagnóstico por SSH: swap 3.2/4.0 Gi, uptime 27 d), r3
+corre **con `--no-ollama-stop`**: ambos brazos son el MISMO modelo,
+así que el flag es legítimo por la regla del 2026-08-10 (sweep de
+modelo único) y elimina exactamente el ciclo de recarga donde el
+breaker abrió las dos veces. Es una desviación de INFRAESTRUCTURA
+(qué hace Ollama entre brazos), no de tratamiento, sampling ni
+grading; se decide por los abortos, no por resultados (los pass rates
+de r1/r2 no informaron esta decisión — 0/40 y 0/24 se conocían pero el
+flag no puede afectar el grading de corridas individuales). Además el
+autor aplicó `nitro-ollama-hardening.sh` + reboot del nodo
+(2026-08-17: swap 0B, KEEP_ALIVE=2m y MAX_LOADED_MODELS=2 en el
+servicio, gpt-oss carga en 18 s). La cláusula única de iteración de
+instrumento (forzado de compactación) sigue SIN usarse.
