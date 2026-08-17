@@ -395,3 +395,53 @@ sampling a temp 0.2; si las repeticiones salieran copias
 (determinismo — la trampa v9 L-9), se aplica la cláusula de
 instrumento del A/B KV-quant: `BRAZE_LOCAL_TEMP>0`/semillas por tanda,
 declarado antes de leer resultados.
+
+## Resultados finales y veredicto (2026-08-17, r4 vía LocalBackend)
+
+**r4 gpt-oss (LocalBackend/Harmony, CPU): pareo COMPLETO, cero
+infraestructura** — la clase 500 desapareció por construcción, como el
+smoke predijo. Gate L-9: 12/16 grupos tarea+brazo varían entre
+repeticiones (4 idénticos a temp 0.2 — se declara; el contraste pareado
+tiene variación suficiente). Resultado: **0/40 en AMBOS brazos**
+(sc-route: 35 assertion_files + 5 timeouts; control: 29 + 11), McNemar
++0/−0. El piso de r1 (0/40 tratado vía Ollama) se confirma con otro
+stack: **gpt-oss:20b no completa el trabajo de sc-compaction** bajo
+estas condiciones (constraint + compactación + 600 s). La palanca no es
+observable en este executor: **"no medible por floor"** — hallazgo de
+instrumento (suite-executor mismatch), no de la ruta durable.
+
+**ornith:9b (válido, de la pasada 1)**: sc-route 5/40 vs control 0/40;
+los 5 discordantes TODOS pro-palanca (sc_version_bump ×2,
+sc_copyright_year, sc_host_swap, sc_port_migration), McNemar p=0.0625;
+brazo tratado ~5% más barato en tokens. Caveat declarado: las
+truncaciones ModelBackendError (4-7/brazo) tienen candidato a causa en
+el presupuesto de reasoning de Ornith-1 (nota 1aa854e) — afectan ambos
+brazos, el pareo las absorbe.
+
+```text
+Decision: NO ADOPTAR (aun). Ningun criterio pre-registrado se cumple
+  limpiamente: "adoptar" exigia mejora en ambos modelos o gpt-oss +
+  ornith direccional — gpt-oss resulto NO MEDIBLE (floor 0/40 en ambos
+  brazos, confirmado en dos stacks) y ornith es direccional-positivo
+  puro (5/0, p=0.0625) pero no significativo por si solo. Conforme al
+  riesgo pre-registrado "n chico" se reporta como piloto con senal
+  prometedora SIN inflar la suite a posteriori para perseguir
+  significancia. La palanca sc-route queda experimental/OFF.
+Hallazgos con valor propio:
+  1. La senal de ornith es la MEJOR posible a este n: todos los
+     discordantes a favor, y cumplimiento SIN costo de contexto (el
+     brazo tratado es mas barato). El matiz anti-CompInt (retencion
+     sin cumplimiento en SLMs) NO se materializo: cuando la retencion
+     esta, ornith la honra.
+  2. El floor de gpt-oss es un hallazgo de banco: la suite
+     sc-compaction esta fuera de la capability frontier de gpt-oss
+     bajo presion de compactacion — para medirle la palanca hace
+     falta una suite SC mas facil (nueva, pre-registrada aparte).
+  3. La clase roam #1 sigue viva en Ollama actual y la suite la
+     re-gatilla; el LocalBackend la elimina por construccion —
+     tercera demostracion en vivo del argumento estrategico.
+Proximos pasos (cada uno con pre-registro nuevo, NO iteracion de
+  este): (a) replica de ornith con 10 reps para potenciar el test
+  (5/0 -> ~10/0 seria p~0.002); (b) suite SC calibrada a gpt-oss.
+Sin iteracion del tratamiento, conforme al pre-registro.
+```
