@@ -136,10 +136,12 @@ vive en `engine/` (mod.rs = struct + builders + los tests de clusters
 sin módulo propio, más `context`, `turn`, `round`, `dispatch`,
 `planner`, `fallback`, `hooks_dispatch`, `test_support`), la escalera
 en `src/rescue.rs`, y el cluster `run_turn_*`/summary-round vive en
-`turn.rs` (v9 L-5 core hecho; el resto deliberado está anotado en el
-comentario del `mod tests` de mod.rs: clusters skills/exploración/task
-list/search_tools/hooks/notas/envelope/best-of-n esperan módulo
-propio). **v9 L-4 COMPLETO** (`344e4e3`, 2026-08-09): `local.rs`
+`turn.rs` y **v9 L-5 COMPLETO** (2026-08-18): el `mod tests` de
+engine/mod.rs se repartió entero — escalera de parsers a
+`rescue.rs`, hooks a `hooks_dispatch.rs`, explorador/task-list/
+search_tools a `dispatch.rs`, skills a `turn.rs`, edit-fence/envelope/
+best-of-n a `round.rs`, fallback y huérfanos a sus módulos; mod.rs
+quedó como composition root puro (871 líneas, sin tests propios). **v9 L-4 COMPLETO** (`344e4e3`, 2026-08-09): `local.rs`
 repartido en `local/` (mod 347 + decode 556 + fit 577 + sampling 379 +
 cache 150 + family 118). **v9 Paquete 4 parcial HECHO** (`98b4a49`,
 2026-08-10): interlock duro de `write_file` tras fallos de
@@ -351,12 +353,6 @@ hecho; lo abierto está listado acá.)
   (comandos del apéndice del pre-registro); al cerrar: análisis según
   criterios (adoptar / adoptar-condicional / rechazar-y-publicar-matiz
   vs CompInt) y decisión de la palanca.
-- **v9 L-5 resto (hygiene, cuando Nitro esté libre)**: mover los
-  clusters de tests restantes del `mod tests` de engine/mod.rs a
-  módulos propios (skills, exploración, task list, search_tools,
-  hooks, notas, envelope, best-of-n) — anotado en el propio comentario
-  del bloque. Requiere cargo test tras cada paso (no correr con sweep
-  activo).
 - **v9 Paquete 4 resto**: Landlock write-only; la mitad Viewer del par
   de subagentes (el editor SWE-Edit ya está, `393748e`).
 - **round-economics**: re-correr el piloto de contexto con

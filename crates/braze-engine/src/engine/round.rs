@@ -612,11 +612,11 @@ mod tests {
     // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
     use crate::engine::Engine;
     use crate::engine::test_support::*;
-    use braze_events::NoopObserver;
+    use braze_events::{NoopObserver, TextDeltaObserver};
     use braze_model::CompletionEvent;
     use braze_session::{FileSessionStore, SimpleContextCompactor};
     use braze_types::SessionId;
-    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     /// Regression test for N-13 (docs/AUDITORIA-2026-07-v2.md): a
     /// transient error on one best-of-n candidate must not discard the
@@ -864,6 +864,895 @@ mod tests {
             "la ronda 0 completada tiene que estar persistida — esa es la contabilidad \
              que este corte preserva y el backstop censura"
         );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // P1.1 resto (v9 L-5, 2026-08-18): clusters edit-fence, envelope
+    // parsing y best-of-n (G10) movidos VERBATIM del `mod tests` de
+    // engine/mod.rs; `envelope_kind` viaja con el de envelope.
+
+    // --- Edit-fence (A/B del impuesto JSON,
+    //     docs/hypothesis-2026-08-10-json-tax-edit-fence.md) ---
+
+    /// El camino completo del brazo fence: el modelo emite prosa + un
+    /// bloque SEARCH/REPLACE, el parser lo sintetiza como `edit_file`,
+    /// dispatch lo ejecuta contra el provider real (schema-válido), y
+    /// queda el rastro contable (`EditFenceApplied`, NUNCA
+    /// `TextualRescueApplied` — la separación es el mecanismo del A/B).
+    #[tokio::test]
+    async fn an_edit_fence_block_is_parsed_dispatched_and_counted() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("Fixing the constant.\n\nsrc/lib.rs\n".to_string()),
+                CompletionEvent::TextDelta(
+                    "<<<<<<< SEARCH\nlet x = 1;\n=======\nlet x = 2;\n>>>>>>> REPLACE\n".to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EditRecordingToolProvider::new(Arc::clone(
+                &calls,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_edit_fence_enabled(true);
+
+        engine
+            .run_turn(&session, "fix the constant", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 1, "the fence edit must reach the tool");
+        assert_eq!(
+            recorded[0],
+            serde_json::json!({
+                "path": "src/lib.rs",
+                "old_string": "let x = 1;",
+                "new_string": "let x = 2;",
+            }),
+            "the block's sections must arrive verbatim as edit_file args"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::EditFenceApplied { blocks: 1 })),
+            "the fence channel must persist its own bench-countable event"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextualRescueApplied { .. })),
+            "the instructed fence channel must NOT count as a rescue"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("Fixing the constant.")
+            )),
+            "the surrounding prose must survive as the round's text"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("SEARCH")
+            )),
+            "the consumed block must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// La otra mitad del brazo: con el lever ON, `edit_file` no aparece
+    /// en el inventario del request y el system prompt lleva la
+    /// gramática del fence; con el lever OFF (default), ni lo uno ni lo
+    /// otro — no-op estricto.
+    #[tokio::test]
+    async fn edit_fence_lever_hides_the_stub_and_injects_the_addendum() {
+        for lever_on in [true, false] {
+            let (store, dir) = temp_store();
+            let session = SessionId::new();
+
+            let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let model = RequestCapturingModel {
+                inner: ScriptedModel::new(vec![vec![
+                    CompletionEvent::TextDelta("ok".to_string()),
+                    CompletionEvent::Done,
+                ]]),
+                requests: Arc::clone(&requests),
+            };
+
+            let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let engine = Engine::new(
+                Box::new(model),
+                ToolRegistry::new(vec![Box::new(EditRecordingToolProvider::new(calls))]),
+                Arc::new(store),
+                Box::new(SimpleContextCompactor::default()),
+                Box::new(TestNotifier::new()),
+                "system prompt".to_string(),
+                1024,
+            )
+            .with_edit_fence_enabled(lever_on);
+
+            engine
+                .run_turn(&session, "hola", &mut NoopObserver)
+                .await
+                .expect("turn should succeed");
+
+            let captured = requests.lock().unwrap().clone();
+            assert!(!captured.is_empty());
+            let req = &captured[0];
+            let has_edit_stub = req.tool_stubs.iter().any(|s| s.name == "edit_file");
+            let has_addendum = req.system_prompt.contains("<<<<<<< SEARCH");
+            if lever_on {
+                assert!(!has_edit_stub, "lever ON must hide the edit_file stub");
+                assert!(has_addendum, "lever ON must inject the fence grammar");
+            } else {
+                assert!(has_edit_stub, "lever OFF must keep the edit_file stub");
+                assert!(!has_addendum, "lever OFF must not touch the system prompt");
+            }
+
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+        }
+    }
+
+    // --- Envelope parsing (A/B constrained decoding,
+    //     docs/constrained-decoding-ab-design.md) ---
+
+    #[test]
+    fn parse_envelope_response_extracts_a_tool_call_with_its_reasoning() {
+        let text = r#"{"action": "tool_call", "reasoning": "need the file",
+                       "name": "read_file", "arguments": {"path": "x.txt"}}"#;
+        match parse_envelope_response(text) {
+            Some(EnvelopeResponse::ToolCall { call, reasoning }) => {
+                assert_eq!(call.name, "read_file");
+                assert_eq!(call.arguments, serde_json::json!({"path": "x.txt"}));
+                assert!(call.id.starts_with("envelope-"));
+                assert_eq!(reasoning.as_deref(), Some("need the file"));
+            }
+            other => panic!("expected a tool call, got {}", envelope_kind(&other)),
+        }
+    }
+
+    #[test]
+    fn parse_envelope_response_defaults_missing_arguments_to_an_empty_object() {
+        let text = r#"{"action": "tool_call", "name": "list_dir"}"#;
+        match parse_envelope_response(text) {
+            Some(EnvelopeResponse::ToolCall { call, reasoning }) => {
+                assert_eq!(call.arguments, serde_json::json!({}));
+                assert_eq!(reasoning, None);
+            }
+            other => panic!("expected a tool call, got {}", envelope_kind(&other)),
+        }
+    }
+
+    #[test]
+    fn parse_envelope_response_rejects_non_object_arguments() {
+        let text = r#"{"action": "tool_call", "name": "read_file", "arguments": "x.txt"}"#;
+        assert!(parse_envelope_response(text).is_none());
+    }
+
+    #[test]
+    fn parse_envelope_response_extracts_a_final_answer_and_drops_reasoning() {
+        let text = r#"{"action": "final_answer", "reasoning": "done thinking", "text": "42"}"#;
+        match parse_envelope_response(text) {
+            Some(EnvelopeResponse::FinalAnswer { text }) => assert_eq!(text, "42"),
+            other => panic!("expected a final answer, got {}", envelope_kind(&other)),
+        }
+    }
+
+    #[test]
+    fn parse_envelope_response_accepts_a_json_fenced_envelope() {
+        let text = "```json\n{\"action\": \"final_answer\", \"text\": \"42\"}\n```";
+        assert!(matches!(
+            parse_envelope_response(text),
+            Some(EnvelopeResponse::FinalAnswer { .. })
+        ));
+    }
+
+    /// Non-envelope shapes must fall through untouched so the rescue
+    /// ladder stays the owner of every other textual format: bare
+    /// rescue-shape JSON (no `action`), an unknown action, and prose.
+    #[test]
+    fn parse_envelope_response_ignores_non_envelope_shapes() {
+        assert!(
+            parse_envelope_response(r#"{"name": "read_file", "arguments": {"path": "x"}}"#)
+                .is_none()
+        );
+        assert!(
+            parse_envelope_response(r#"{"action": "run", "name": "x", "arguments": {}}"#).is_none()
+        );
+        assert!(parse_envelope_response("I read the file and it says 42.").is_none());
+        assert!(parse_envelope_response(r#"{"action": "final_answer"}"#).is_none());
+    }
+
+    fn envelope_kind(envelope: &Option<EnvelopeResponse>) -> &'static str {
+        match envelope {
+            Some(EnvelopeResponse::ToolCall { .. }) => "a tool call",
+            Some(EnvelopeResponse::FinalAnswer { .. }) => "a final answer",
+            None => "none",
+        }
+    }
+
+    /// The envelope is the *primary* parse channel of prompt-tools mode,
+    /// not a rescue: the call must dispatch, the `reasoning` must survive
+    /// as the round's text, and — the A/B's mechanism check depends on
+    /// this — NO `TextualRescueApplied` may be persisted for it.
+    #[tokio::test]
+    async fn an_envelope_tool_call_dispatches_without_counting_as_a_rescue() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta(
+                    r#"{"action": "tool_call", "reasoning": "I will echo hi",
+                       "name": "echo", "arguments": {"text": "hi"}}"#
+                        .to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta(
+                    r#"{"action": "final_answer", "text": "done"}"#.to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_envelope_parsing_enabled(true);
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallCompleted { result, .. } if result.content == "echoed: hi")),
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text == "I will echo hi"
+            )),
+            "the envelope's reasoning must survive as the round's text"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text == "done"
+            )),
+            "the final_answer's inner text must be the turn's final text"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("\"action\"")
+            )),
+            "the raw envelope JSON must never be persisted as conversational text"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextualRescueApplied { .. })),
+            "an envelope parse must NOT count as a textual rescue — the \
+             A/B's mechanism check is `rescues ≈ 0` on the constrained arm"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A `final_answer` envelope whose inner text happens to look like a
+    /// bare-JSON tool call must stay text: the model explicitly declared
+    /// it final, so the rescue ladder is suppressed for that round.
+    #[tokio::test]
+    async fn an_envelope_final_answer_is_never_reinterpreted_by_the_rescue_ladder() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let inner = r#"{\"name\": \"echo\", \"arguments\": {\"text\": \"hi\"}}"#;
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta(format!(
+                r#"{{"action": "final_answer", "text": "{inner}"}}"#
+            )),
+            CompletionEvent::Done,
+        ]]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_envelope_parsing_enabled(true);
+
+        engine
+            .run_turn(
+                &session,
+                "show me the JSON for an echo call",
+                &mut NoopObserver,
+            )
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            0,
+            "a declared-final answer must not be dispatched as a tool call"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("\"name\"")
+            )),
+            "the inner text must be persisted verbatim as the answer"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Default-off is a strict no-op: without
+    /// `with_envelope_parsing_enabled(true)` an envelope-shaped response
+    /// takes the pre-existing path — the bare-JSON rescue fires on its
+    /// `name`/`arguments` fields and counts as a rescue, exactly as it
+    /// did before this lever existed.
+    #[tokio::test]
+    async fn envelope_parsing_disabled_leaves_the_pre_existing_rescue_path_intact() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta(
+                    r#"{"action": "tool_call", "name": "echo", "arguments": {"text": "hi"}}"#
+                        .to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TextualRescueApplied { .. })),
+            "with the lever off, the bare-JSON rescue owns this shape and must count as a rescue"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// F2 (docs/AUDITORIA-2026-07-v3.md): qwen3-coder's bare `<function=>`
+    /// XML grammar has no native number type, so a `limit: integer`
+    /// parameter comes back from the rescue as the string `"5"` — without
+    /// schema-guided coercion this fails validation deterministically
+    /// (every call to a tool with a numeric param, rescued via this
+    /// format, would burn a repair round it can't even fix, since the
+    /// XML grammar has no way to emit a JSON number). With the fix, the
+    /// call dispatches on the first attempt and the tool receives a real
+    /// JSON number.
+    #[tokio::test]
+    async fn qwen3_coder_xml_with_a_stringified_integer_param_gets_coerced_before_dispatch() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta(
+                    "<function=echo_limit>\n<parameter=text>\nhi\n</parameter>\n\
+                     <parameter=limit>\n5\n</parameter>\n</function>"
+                        .to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let received_limit = Arc::new(std::sync::Mutex::new(None));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoWithLimitToolProvider::new(
+                Arc::clone(&invocations),
+                Arc::clone(&received_limit),
+            ))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi with limit 5", &mut NoopObserver)
+            .await
+            .expect("turn should succeed — coercion must let validation pass on the first try");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "must dispatch exactly once — no schema-repair retry round needed"
+        );
+        assert_eq!(
+            received_limit.lock().unwrap().clone(),
+            Some(serde_json::json!(5)),
+            "the tool must receive a real JSON number, not the string \"5\""
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for N-15 (docs/AUDITORIA-2026-07-v2.md):
+    /// `with_textual_rescue_enabled(false)` must stop the rescue from
+    /// dispatching a real tool a user only asked to see the JSON for —
+    /// the raw text is persisted as ordinary conversational text instead.
+    #[tokio::test]
+    async fn textual_rescue_can_be_disabled() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta(
+                r#"{"name": "echo", "arguments": {"text": "hi"}}"#.to_string(),
+            ),
+            CompletionEvent::Done,
+        ]]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_textual_rescue_enabled(false);
+
+        engine
+            .run_turn(
+                &session,
+                "muéstrame el JSON para invocar echo",
+                &mut NoopObserver,
+            )
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            0,
+            "the tool must never actually be invoked when the rescue is disabled"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("\"name\"")
+            )),
+            "the raw JSON must be persisted as ordinary text instead of dispatched"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- técnica G10: best-of-n / test-time scaling (docs/AUDITORIA-2026-07.md) ---
+
+    /// Regression test for G10's core value proposition: a 2-vote
+    /// majority ("hi") beats a 1-vote dissenter ("wrong") among 3
+    /// candidates, and only the winning call is ever dispatched.
+    #[tokio::test]
+    async fn best_of_n_dispatches_the_majority_tool_call_signature() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-a".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-b".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "wrong" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-c".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(3);
+
+        engine
+            .run_turn(
+                &session,
+                "please echo hi (with a dissenting distractor)",
+                &mut NoopObserver,
+            )
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "only the winning candidate's call should ever reach the real tool"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { .. }))
+        {
+            Some(AgentEvent::ToolCallCompleted { result, .. }) => {
+                assert_eq!(
+                    result.content, "echoed: hi",
+                    "the 2-vote majority ('hi') must win over the 1-vote dissenter ('wrong')"
+                );
+            }
+            other => panic!("expected a ToolCallCompleted, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A 1-vs-1 tie must resolve deterministically to the
+    /// earliest-generated candidate — never `Iterator::max_by_key`'s
+    /// "last wins" default, which would make the outcome depend on
+    /// implementation details of the vote-counting loop.
+    #[tokio::test]
+    async fn best_of_n_breaks_ties_by_keeping_the_earliest_candidate() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-a".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "first" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-b".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "second" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(2);
+
+        engine
+            .run_turn(&session, "please echo something", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::ToolCallCompleted { .. }))
+        {
+            Some(AgentEvent::ToolCallCompleted { result, .. }) => {
+                assert_eq!(
+                    result.content, "echoed: first",
+                    "a 1-vs-1 tie must keep the earliest-generated candidate"
+                );
+            }
+            other => panic!("expected a ToolCallCompleted, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `self.best_of_n` real model calls happen per round — the
+    /// persisted `Usage` must reflect the *summed* cost across every
+    /// candidate, not just the winner's, or token/cost accounting
+    /// silently under-reports by every discarded candidate's share.
+    /// `stop_reason` is taken from the winning candidate specifically.
+    #[tokio::test]
+    async fn best_of_n_sums_usage_across_candidates_and_keeps_the_winners_stop_reason() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Both candidates answer with the same plain text (no tool call
+        // — same "no tool call" signature, so it's a 1-vs-1 tie and
+        // candidate 0 wins per the tie-break rule tested above).
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("hola".to_string()),
+                CompletionEvent::Usage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    stop_reason: Some("end_turn".to_string()),
+                    // Deliberately mismatched Some/None across candidates
+                    // — exercises `sum_optional_u32`'s "at least one
+                    // candidate reported it" rule, not just the trivial
+                    // both-Some or both-None cases.
+                    cache_read_tokens: Some(6),
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("hola".to_string()),
+                CompletionEvent::Usage {
+                    input_tokens: 20,
+                    output_tokens: 8,
+                    stop_reason: Some("stop_sequence".to_string()),
+                    cache_read_tokens: Some(4),
+                    cache_write_tokens: Some(2),
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(2);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        match events
+            .iter()
+            .find(|e| matches!(e, AgentEvent::Usage { .. }))
+        {
+            Some(AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+                stop_reason,
+                cache_read_tokens,
+                cache_write_tokens,
+            }) => {
+                assert_eq!(
+                    *input_tokens, 30,
+                    "usage must sum every candidate's cost, not just the winner's"
+                );
+                assert_eq!(*output_tokens, 13);
+                assert_eq!(
+                    stop_reason.as_deref(),
+                    Some("end_turn"),
+                    "stop_reason must reflect the winning candidate specifically"
+                );
+                assert_eq!(
+                    *cache_read_tokens,
+                    Some(10),
+                    "cache_read_tokens must sum across candidates like input/output do"
+                );
+                assert_eq!(
+                    *cache_write_tokens,
+                    Some(2),
+                    "one candidate's None must not zero out the other's reported value"
+                );
+            }
+            other => panic!("expected a Usage event, got {other:?}"),
+        }
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `best_of_n: 0` (e.g. from a misconfigured env var) must degrade
+    /// gracefully to the same single-call path as the default (`1`),
+    /// not panic on an empty candidate vec.
+    #[tokio::test]
+    async fn best_of_n_set_to_zero_behaves_like_disabled_not_a_panic() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("hola".to_string()),
+            CompletionEvent::Done,
+        ]]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(0);
+
+        let mut streamed = String::new();
+        engine
+            .run_turn(
+                &session,
+                "hola",
+                &mut TextDeltaObserver(|chunk: &str| streamed.push_str(chunk)),
+            )
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(streamed, "hola");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Deltas from individual best-of-n candidates never reach the
+    /// observer live (there's no single "the" answer to show until the
+    /// vote resolves one) — only the winner's full text arrives, as one
+    /// delta, right after voting.
+    #[tokio::test]
+    async fn best_of_n_suppresses_live_deltas_but_delivers_the_winners_full_text_once() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("respuesta ".to_string()),
+                CompletionEvent::TextDelta("candidata".to_string()),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("otra ".to_string()),
+                CompletionEvent::TextDelta("respuesta".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_best_of_n(2);
+
+        let mut observer = RecordingObserver {
+            deltas: Vec::new(),
+            events: Vec::new(),
+        };
+        engine
+            .run_turn(&session, "hola", &mut observer)
+            .await
+            .expect("turn should succeed");
+
+        // Neither candidate's individual deltas streamed live — exactly
+        // one delta arrives, carrying the (tied, so earliest-kept)
+        // winner's whole text in one shot.
+        assert_eq!(observer.deltas, vec!["respuesta candidata".to_string()]);
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
