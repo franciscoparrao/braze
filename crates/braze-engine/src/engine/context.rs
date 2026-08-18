@@ -1666,4 +1666,201 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
+
+    // P1.1 resto (v9 L-5, 2026-08-18): tests de synthesize_orphan_
+    // repairs movidos VERBATIM del `mod tests` de engine/mod.rs.
+
+    // --- synthesize_orphan_repairs (N-26, docs/AUDITORIA-2026-07-v2.md) ---
+
+    #[test]
+    fn synthesize_orphan_repairs_finds_a_tool_use_with_no_matching_result() {
+        let events = vec![
+            AgentEvent::UserMessage {
+                text: "please echo hi".to_string(),
+            },
+            AgentEvent::AssistantToolCall {
+                id: "call-1".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({ "text": "hi" }),
+            },
+        ];
+
+        let repairs = synthesize_orphan_repairs(&events);
+        assert_eq!(repairs.len(), 1);
+        match &repairs[0] {
+            AgentEvent::ToolCallCompleted { id, result } => {
+                assert_eq!(id, "call-1");
+                assert!(result.is_error);
+            }
+            other => panic!("expected ToolCallCompleted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn synthesize_orphan_repairs_is_a_no_op_when_every_call_already_has_a_result() {
+        let events = vec![
+            AgentEvent::AssistantToolCall {
+                id: "call-1".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            AgentEvent::ToolCallCompleted {
+                id: "call-1".to_string(),
+                result: ToolResult {
+                    tool_call_id: "call-1".to_string(),
+                    content: "echoed: hi".to_string(),
+                    is_error: false,
+                },
+            },
+        ];
+
+        assert!(synthesize_orphan_repairs(&events).is_empty());
+    }
+
+    /// Regression test for B5: a model that emits the tool call as plain
+    /// text (no structured `tool_calls` entry — the failure mode for
+    /// small/local models or templates without native tool-call support)
+    /// must still have the tool actually run, and the raw JSON must not
+    /// be persisted as if it were a normal conversational reply.
+    #[tokio::test]
+    async fn a_tool_call_emitted_as_plain_text_is_rescued_and_dispatched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta(
+                    r#"{"name": "echo", "arguments": {"text": "hi"}}"#.to_string(),
+                ),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "the rescued call must actually reach the real tool"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallCompleted { result, .. } if result.content == "echoed: hi")),
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("\"name\"")
+            )),
+            "the raw JSON must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Ítem 2 del backlog (2026-07-06): a model emitting its native
+    /// Qwen/Hermes `<tool_call>{json}</tool_call>` tagged format — with
+    /// prose around it — must have the call dispatched, the prose kept
+    /// as the round's text, and the tags/JSON stripped from what's
+    /// persisted as conversation.
+    #[tokio::test]
+    async fn a_qwen_tagged_tool_call_with_surrounding_prose_is_rescued_and_dispatched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("Voy a usar echo.\n<tool_call>\n".to_string()),
+                CompletionEvent::TextDelta(
+                    r#"{"name": "echo", "arguments": {"text": "hi"}}"#.to_string(),
+                ),
+                CompletionEvent::TextDelta("\n</tool_call>".to_string()),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "the tagged call must actually reach the real tool"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallCompleted { result, .. } if result.content == "echoed: hi")),
+        );
+        // The prose survives as round text; the tags and JSON don't.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("Voy a usar echo.")
+            )),
+            "the surrounding prose must be persisted as the round's text"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("<tool_call>") || text.contains("\"name\"")
+            )),
+            "the tagged block must not be persisted as conversational text"
+        );
+        // H-3 (docs/AUDITORIA-2026-07-v5.md): the rescue actually
+        // happening was already visible via `tracing::info!` before this
+        // — this pins that it's also persisted, bench-countable.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::TextualRescueApplied { parser } if parser.contains("Qwen/Hermes")
+            )),
+            "a rescued <tool_call> block must persist TextualRescueApplied naming that rung"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
 }

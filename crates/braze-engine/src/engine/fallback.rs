@@ -253,3 +253,115 @@ pub(super) fn strip_leaked_tool_call_shapes(text: &str) -> String {
     }
     text.to_string()
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // P1.1 resto (v9 L-5, 2026-08-18): tests de strip_leaked_tool_call_
+    // shapes movidos VERBATIM del `mod tests` de engine/mod.rs —
+    // fixtures compartidas en engine/test_support.rs.
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use braze_events::NoopObserver;
+    use braze_session::{FileSessionStore, SimpleContextCompactor};
+    use braze_tools_core::ToolRegistry;
+    use braze_types::SessionId;
+
+    use crate::engine::Engine;
+    use crate::engine::test_support::*;
+
+    // --- strip_leaked_tool_call_shapes (hallazgo U-16,
+    // docs/usability-log-2026-07-07-si2.md: attempt_tools_free_summary_round
+    // had no rescue logic at all, so a leaked tool-call block there used
+    // to get persisted verbatim as if it were the model's real answer) ---
+
+    #[test]
+    fn a_leaked_tagged_call_with_no_other_text_strips_to_empty() {
+        let text =
+            "<tool_call>read_file<arg_key>path</arg_key><arg_value>x.txt</arg_value></tool_call>";
+        assert_eq!(strip_leaked_tool_call_shapes(text), "");
+    }
+
+    #[test]
+    fn a_leaked_call_alongside_real_prose_keeps_only_the_prose() {
+        let text = "Basado en lo que leí hasta ahora, el fix consiste en...\n<tool_call>read_file<arg_key>path</arg_key><arg_value>x.txt</arg_value></tool_call>";
+        assert_eq!(
+            strip_leaked_tool_call_shapes(text),
+            "Basado en lo que leí hasta ahora, el fix consiste en..."
+        );
+    }
+
+    #[test]
+    fn plain_prose_with_no_leaked_call_is_returned_unchanged() {
+        let text = "No hay nada raro acá, solo texto normal.";
+        assert_eq!(strip_leaked_tool_call_shapes(text), text);
+    }
+
+    /// Regression test for the rescue escalera's ordering: a `<tool_call>`
+    /// tagged block must win even if the response also happens to contain
+    /// bracketed text that looks pythonic-shaped elsewhere.
+    #[tokio::test]
+    async fn a_llama_pythonic_call_is_rescued_end_to_end_when_no_structured_call_arrives() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::TextDelta("Voy a revisar.[echo(text=\"hi\")]".to_string()),
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "the pythonic call must actually reach the real tool"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::ToolCallCompleted { result, .. } if result.content == "echoed: hi")),
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("Voy a revisar.")
+            )),
+            "the surrounding prose must be persisted as the round's text"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantText { text } if text.contains("echo(")
+            )),
+            "the bracketed call must not be persisted as conversational text"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+}

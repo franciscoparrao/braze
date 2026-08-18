@@ -777,3 +777,589 @@ pub(crate) fn coerce_arguments_to_schema(
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // P1.1 resto (v9 L-5, 2026-08-18): tests unitarios de la escalera
+    // movidos VERBATIM del `mod tests` de engine/mod.rs — la migración
+    // que el module doc de arriba anticipaba ("migran cuando el split
+    // llegue al módulo de tests"). Solo parsers puros; los de
+    // integración async siguen con sus módulos del engine.
+
+    // --- coerce_arguments_to_schema (hallazgo F2) ---
+
+    fn limit_and_flag_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "limit": {"type": "integer"},
+                "ratio": {"type": "number"},
+                "recursive": {"type": "boolean"},
+            },
+        })
+    }
+
+    #[test]
+    fn coerces_a_stringified_integer_to_a_number() {
+        let mut args = serde_json::json!({"path": "x", "limit": "50"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["limit"], serde_json::json!(50));
+    }
+
+    #[test]
+    fn coerces_a_stringified_float_to_a_number() {
+        let mut args = serde_json::json!({"ratio": "0.5"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["ratio"], serde_json::json!(0.5));
+    }
+
+    #[test]
+    fn coerces_stringified_booleans() {
+        let mut args = serde_json::json!({"recursive": "true"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["recursive"], serde_json::json!(true));
+
+        let mut args = serde_json::json!({"recursive": "false"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["recursive"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn an_unparseable_string_is_left_untouched_for_validation_to_reject() {
+        let mut args = serde_json::json!({"limit": "not a number"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["limit"], serde_json::json!("not a number"));
+    }
+
+    #[test]
+    fn a_json_object_is_re_serialized_to_a_string_when_the_schema_wants_one() {
+        // The mirror-image mistake: `<parameter=path>{"a":1}</parameter>`
+        // parses as a JSON object because the XML grammar treats any
+        // value starting with `{`/`[` as structured — but the schema says
+        // `path` is a string.
+        let mut args = serde_json::json!({"path": {"a": 1}});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["path"], serde_json::json!(r#"{"a":1}"#));
+    }
+
+    #[test]
+    fn already_correctly_typed_arguments_are_left_alone() {
+        // The common case (wire-sourced calls): coercion must be a no-op.
+        let mut args = serde_json::json!({
+            "path": "x", "limit": 50, "ratio": 0.5, "recursive": true
+        });
+        let before = args.clone();
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args, before);
+    }
+
+    #[test]
+    fn a_string_value_for_a_string_field_is_left_alone() {
+        let mut args = serde_json::json!({"path": "src/main.rs"});
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args["path"], serde_json::json!("src/main.rs"));
+    }
+
+    #[test]
+    fn a_non_object_schema_or_arguments_is_a_no_op() {
+        let mut args = serde_json::json!("not an object");
+        coerce_arguments_to_schema(&mut args, &limit_and_flag_schema());
+        assert_eq!(args, serde_json::json!("not an object"));
+
+        let mut args = serde_json::json!({"limit": "50"});
+        coerce_arguments_to_schema(&mut args, &serde_json::json!({"type": "object"}));
+        assert_eq!(args["limit"], serde_json::json!("50"));
+    }
+
+    // --- try_parse_textual_tool_call (hallazgo B5) ---
+
+    #[test]
+    fn parses_a_bare_json_tool_call() {
+        let rescued =
+            try_parse_textual_tool_call(r#"{"name": "read_file", "arguments": {"path": "x.txt"}}"#)
+                .expect("should parse");
+        assert_eq!(rescued.name, "read_file");
+        assert_eq!(rescued.arguments, serde_json::json!({"path": "x.txt"}));
+    }
+
+    #[test]
+    fn parses_a_tool_call_fenced_in_json_code_block() {
+        let text = "```json\n{\"name\": \"echo\", \"arguments\": {\"text\": \"hi\"}}\n```";
+        let rescued = try_parse_textual_tool_call(text).expect("should parse");
+        assert_eq!(rescued.name, "echo");
+    }
+
+    #[test]
+    fn parses_a_tool_call_fenced_in_a_bare_code_block() {
+        let text = "```\n{\"name\": \"echo\", \"arguments\": {}}\n```";
+        let rescued = try_parse_textual_tool_call(text).expect("should parse");
+        assert_eq!(rescued.name, "echo");
+    }
+
+    #[test]
+    fn accepts_parameters_as_a_synonym_for_arguments() {
+        let rescued =
+            try_parse_textual_tool_call(r#"{"name": "echo", "parameters": {"text": "hi"}}"#)
+                .expect("should parse");
+        assert_eq!(rescued.arguments, serde_json::json!({"text": "hi"}));
+    }
+
+    #[test]
+    fn plain_prose_is_not_mistaken_for_a_tool_call() {
+        assert!(try_parse_textual_tool_call("El archivo tiene 3 lineas.").is_none());
+    }
+
+    #[test]
+    fn json_without_a_name_field_is_not_a_tool_call() {
+        assert!(try_parse_textual_tool_call(r#"{"arguments": {"path": "x.txt"}}"#).is_none());
+    }
+
+    #[test]
+    fn non_object_arguments_are_rejected() {
+        assert!(
+            try_parse_textual_tool_call(r#"{"name": "echo", "arguments": "just a string"}"#)
+                .is_none()
+        );
+    }
+
+    // --- F1 (docs/AUDITORIA-2026-07-v3.md): reject OpenAI-style tool
+    // *definitions* masquerading as a call via `parameters` ---
+
+    #[test]
+    fn an_openai_style_tool_definition_is_not_mistaken_for_a_call() {
+        let text = r#"{"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}"#;
+        assert!(
+            try_parse_textual_tool_call(text).is_none(),
+            "a JSON-Schema-shaped `parameters` must not be treated as arguments"
+        );
+    }
+
+    #[test]
+    fn a_genuine_object_typed_argument_named_type_is_still_accepted() {
+        // Must not over-trigger: a real argument object that happens to
+        // have a `type` field but no `properties` is not a schema.
+        let rescued =
+            try_parse_textual_tool_call(r#"{"name": "set_status", "arguments": {"type": "busy"}}"#)
+                .expect("should still parse — no `properties` key present");
+        assert_eq!(rescued.arguments, serde_json::json!({"type": "busy"}));
+    }
+
+    // --- F1: fenced examples are not real leaked tool calls ---
+
+    #[test]
+    fn a_tagged_call_inside_a_markdown_fence_is_not_executed() {
+        let text = "Así es como Qwen emite tool calls:\n```\n<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"/etc/shadow\"}}\n</tool_call>\n```\n";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert!(calls.is_empty(), "a fenced example must not be dispatched");
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn a_bare_function_xml_inside_a_markdown_fence_is_not_executed() {
+        let text = "Ejemplo:\n```\n<function=read_file>\n<parameter=path>\n/etc/shadow\n</parameter>\n</function>\n```\n";
+        let (calls, remaining) = extract_function_xml_tool_calls(text);
+        assert!(calls.is_empty(), "a fenced example must not be dispatched");
+        assert_eq!(remaining, text);
+    }
+
+    /// J-8 (docs/AUDITORIA-2026-07-v7.md): the pythonic rung was the only
+    /// one missing the F1 fence check — a fenced `[func(...)]` example
+    /// ("así emite Llama sus tool calls") got extracted and dispatched
+    /// for real.
+    #[test]
+    fn a_pythonic_call_inside_a_markdown_fence_is_not_executed() {
+        let text = "Así emite Llama sus tool calls:\n```\n[get_weather(city=\"SF\")]\n```\n";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty(), "a fenced example must not be dispatched");
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_unfenced_pythonic_call_after_fenced_prose_is_still_rescued() {
+        let text = "Ejemplo:\n```\nsolo texto\n```\n[echo(text=\"hi\")]";
+        let (calls, _) = extract_pythonic_tool_calls(text);
+        assert_eq!(
+            calls.len(),
+            1,
+            "the real call after the fence must still rescue"
+        );
+    }
+
+    #[test]
+    fn an_unfenced_tagged_call_after_fenced_prose_is_still_rescued() {
+        // The fence-toggle logic must correctly track state across
+        // multiple fences, not just detect "any fence exists somewhere".
+        let text = "Aquí un ejemplo:\n```\nesto es solo texto\n```\n<tool_call>\n{\"name\": \"echo\", \"arguments\": {\"text\": \"hi\"}}\n</tool_call>";
+        let (calls, _) = extract_tagged_tool_calls(text);
+        assert_eq!(
+            calls.len(),
+            1,
+            "the real call after the fence must still rescue"
+        );
+    }
+
+    #[test]
+    fn each_rescued_call_gets_a_distinct_id() {
+        let a = try_parse_textual_tool_call(r#"{"name": "echo", "arguments": {}}"#).unwrap();
+        let b = try_parse_textual_tool_call(r#"{"name": "echo", "arguments": {}}"#).unwrap();
+        assert_ne!(a.id, b.id);
+    }
+
+    // --- extract_tagged_tool_calls (formato nativo Qwen/Hermes, ítem 2
+    // del backlog 2026-07-06) ---
+
+    #[test]
+    fn extracts_a_single_qwen_tagged_tool_call() {
+        let text = "<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"x.txt\"}}\n</tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read_file");
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "x.txt"}));
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn extracts_several_tagged_calls_from_one_response() {
+        // Qwen emits one pair of tags per call for parallel calls.
+        let text = concat!(
+            "<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"a\"}}\n</tool_call>\n",
+            "<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"b\"}}\n</tool_call>",
+        );
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "a"}));
+        assert_eq!(calls[1].arguments, serde_json::json!({"path": "b"}));
+        assert!(remaining.is_empty());
+        assert_ne!(calls[0].id, calls[1].id);
+    }
+
+    #[test]
+    fn prose_around_a_tagged_call_is_preserved_as_the_round_text() {
+        let text = "Voy a leer el archivo.\n<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"x\"}}\n</tool_call>\nListo.";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(remaining, "Voy a leer el archivo.\n\nListo.");
+    }
+
+    #[test]
+    fn a_fenced_json_inside_the_tags_still_parses() {
+        let text = "<tool_call>```json\n{\"name\": \"echo\", \"arguments\": {}}\n```</tool_call>";
+        let (calls, _) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "echo");
+    }
+
+    #[test]
+    fn a_malformed_tagged_block_stays_in_the_text_instead_of_being_swallowed() {
+        let text = "<tool_call>\n{\"name\": \"echo\", \"arguments\": no-es-json}\n</tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn a_malformed_block_next_to_a_valid_one_keeps_only_the_malformed_text() {
+        let text = concat!(
+            "<tool_call>{broken</tool_call>",
+            "<tool_call>{\"name\": \"echo\", \"arguments\": {}}</tool_call>",
+        );
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(remaining, "<tool_call>{broken</tool_call>");
+    }
+
+    #[test]
+    fn an_unclosed_tag_rescues_nothing_and_keeps_the_text_intact() {
+        // E.g. a round cut off mid-block: better visible than lost.
+        let text = "algo de texto <tool_call>\n{\"name\": \"echo\"";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn a_valid_block_followed_by_an_unclosed_tag_keeps_the_dangling_tail() {
+        let text =
+            "<tool_call>{\"name\": \"echo\", \"arguments\": {}}</tool_call> y <tool_call>{\"na";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(remaining, "y <tool_call>{\"na");
+    }
+
+    #[test]
+    fn plain_prose_without_tags_is_not_rescued_by_the_tagged_extractor() {
+        let (calls, remaining) = extract_tagged_tool_calls("El archivo tiene 3 lineas.");
+        assert!(calls.is_empty());
+        assert_eq!(remaining, "El archivo tiene 3 lineas.");
+    }
+
+    #[test]
+    fn tagged_extraction_accepts_parameters_as_a_synonym_for_arguments() {
+        let text =
+            "<tool_call>{\"name\": \"echo\", \"parameters\": {\"text\": \"hi\"}}</tool_call>";
+        let (calls, _) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments, serde_json::json!({"text": "hi"}));
+    }
+
+    // --- gramática XML <function=...> de qwen3-coder (extensión del
+    // ítem 2, destrancada 2026-07-06 al haber qwen3.5-coder en Nitro) ---
+
+    /// The exact shape qwen3-coder's chat template documents: XML-ish
+    /// tags, parameter values on their own lines, wrapped in the same
+    /// `<tool_call>` tags qwen2.5 uses around JSON.
+    #[test]
+    fn function_xml_inside_tool_call_wrapper_parses() {
+        let text = "<tool_call>\n<function=read_file>\n<parameter=path>\nx.txt\n</parameter>\n</function>\n</tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read_file");
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "x.txt"}));
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn bare_function_xml_with_prose_around_parses_and_preserves_the_prose() {
+        let text = "Voy a leerlo.\n<function=read_file>\n<parameter=path>\nx.txt\n</parameter>\n</function>\ndespués te cuento";
+        let (calls, remaining) = extract_function_xml_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "x.txt"}));
+        assert_eq!(remaining, "Voy a leerlo.\n\ndespués te cuento");
+    }
+
+    #[test]
+    fn function_xml_with_several_parameters_collects_them_all() {
+        let text = "<function=edit_file>\n<parameter=path>\nsrc/main.rs\n</parameter>\n<parameter=old_string>\nlet x = 1;\n</parameter>\n<parameter=new_string>\nlet x = 2;\n</parameter>\n</function>";
+        let call = parse_function_xml_tool_call(text).expect("should parse");
+        assert_eq!(call.name, "edit_file");
+        assert_eq!(
+            call.arguments,
+            serde_json::json!({
+                "path": "src/main.rs",
+                "old_string": "let x = 1;",
+                "new_string": "let x = 2;",
+            })
+        );
+    }
+
+    /// The whole point of the XML grammar: code-carrying values need no
+    /// JSON escaping — inner quotes/braces arrive verbatim as a string.
+    #[test]
+    fn function_xml_keeps_code_carrying_values_as_verbatim_strings() {
+        let text = "<function=write_file>\n<parameter=path>\na.json\n</parameter>\n<parameter=content>\nfn main() { println!(\"{:?}\", vec![1]); }\n</parameter>\n</function>";
+        let call = parse_function_xml_tool_call(text).expect("should parse");
+        assert_eq!(
+            call.arguments["content"],
+            serde_json::json!("fn main() { println!(\"{:?}\", vec![1]); }")
+        );
+    }
+
+    /// Scalar-looking values stay strings ("42" must not become 42 —
+    /// a `path: String` schema downstream would reject the number),
+    /// while a clearly structured value (`{...}`) is parsed.
+    #[test]
+    fn function_xml_coerces_only_clearly_structured_values() {
+        let text = "<function=echo>\n<parameter=text>\n42\n</parameter>\n<parameter=options>\n{\"deep\": true}\n</parameter>\n</function>";
+        let call = parse_function_xml_tool_call(text).expect("should parse");
+        assert_eq!(call.arguments["text"], serde_json::json!("42"));
+        assert_eq!(call.arguments["options"], serde_json::json!({"deep": true}));
+    }
+
+    #[test]
+    fn malformed_function_xml_stays_in_the_text() {
+        // Missing </parameter> close.
+        let text = "<function=echo>\n<parameter=text>\nhola\n</function>";
+        let (calls, remaining) = extract_function_xml_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn function_xml_without_parameters_is_a_zero_argument_call() {
+        let call =
+            parse_function_xml_tool_call("<function=list_tools>\n</function>").expect("parses");
+        assert_eq!(call.name, "list_tools");
+        assert_eq!(call.arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn plain_prose_is_not_mistaken_for_function_xml() {
+        let (calls, remaining) =
+            extract_function_xml_tool_calls("la función f(x) = x + 1 es creciente");
+        assert!(calls.is_empty());
+        assert_eq!(remaining, "la función f(x) = x + 1 es creciente");
+    }
+
+    // --- gramática <arg_key>/<arg_value> de z-ai/glm-5.2 (hallazgo U-15,
+    // docs/usability-log-2026-07-07-si2.md — observada 2026-07-07 vía
+    // OpenRouter) ---
+
+    /// The exact shape observed leaking from `z-ai/glm-5.2`: no
+    /// `<function=...>` wrapper, just the bare name followed by
+    /// `<arg_key>`/`<arg_value>` pairs, all inside the same `<tool_call>`
+    /// tags qwen2.5/qwen3-coder use.
+    #[test]
+    fn glm_arg_tags_inside_tool_call_wrapper_parses() {
+        let text = "<tool_call>read_file<arg_key>limit</arg_key><arg_value>120</arg_value><arg_key>offset</arg_key><arg_value>63</arg_value><arg_key>path</arg_key><arg_value>crates/braze-bench/src/backend_spec.rs</arg_value></tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "read_file");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({
+                "limit": "120",
+                "offset": "63",
+                "path": "crates/braze-bench/src/backend_spec.rs",
+            })
+        );
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn glm_arg_tags_with_prose_around_are_preserved() {
+        let text = "Voy a leerlo.\n<tool_call>read_file<arg_key>path</arg_key><arg_value>x.txt</arg_value></tool_call>\ndespués te cuento";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments, serde_json::json!({"path": "x.txt"}));
+        assert_eq!(remaining, "Voy a leerlo.\n\ndespués te cuento");
+    }
+
+    /// Scalar-looking values stay strings, same rule as the qwen3-coder
+    /// XML rescue — a `path: String` schema downstream must not receive a
+    /// JSON number just because the raw text looked numeric.
+    #[test]
+    fn glm_arg_tags_coerce_only_clearly_structured_values() {
+        let text = "<tool_call>echo<arg_key>text</arg_key><arg_value>42</arg_value><arg_key>options</arg_key><arg_value>{\"deep\": true}</arg_value></tool_call>";
+        let (calls, _) = extract_tagged_tool_calls(text);
+        assert_eq!(calls[0].arguments["text"], serde_json::json!("42"));
+        assert_eq!(
+            calls[0].arguments["options"],
+            serde_json::json!({"deep": true})
+        );
+    }
+
+    #[test]
+    fn glm_arg_tags_without_any_arg_key_are_not_mistaken_for_the_grammar() {
+        // No `<arg_key>` at all: indistinguishable from prose that merely
+        // mentions a tool by name — must fall through unrescued rather
+        // than being guessed at as a zero-argument call.
+        assert!(parse_glm_arg_tag_tool_call("read_file").is_none());
+    }
+
+    #[test]
+    fn malformed_glm_arg_tags_stay_in_the_text() {
+        // Missing the closing </arg_value>.
+        let text = "<tool_call>echo<arg_key>text</arg_key><arg_value>hola</tool_call>";
+        let (calls, remaining) = extract_tagged_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    // --- extract_pythonic_tool_calls (hallazgo C2, Llama's native format) ---
+
+    #[test]
+    fn parses_a_single_pythonic_call() {
+        let (calls, remaining) =
+            extract_pythonic_tool_calls(r#"[get_weather(city="SF", metric="celsius")]"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "get_weather");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({"city": "SF", "metric": "celsius"})
+        );
+        assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn pythonic_call_preserves_surrounding_prose() {
+        let text = r#"Claro, reviso el clima.[get_weather(city="SF")]Listo."#;
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(remaining, "Claro, reviso el clima.Listo.");
+    }
+
+    #[test]
+    fn pythonic_call_parses_numbers_and_booleans() {
+        let (calls, _) =
+            extract_pythonic_tool_calls("[read_file(path=\"a.txt\", offset=5, recursive=true)]");
+        assert_eq!(calls[0].arguments["offset"], serde_json::json!(5));
+        assert_eq!(calls[0].arguments["recursive"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn pythonic_call_parses_floats() {
+        let (calls, _) = extract_pythonic_tool_calls("[set_ratio(value=0.5)]");
+        assert_eq!(calls[0].arguments["value"], serde_json::json!(0.5));
+    }
+
+    #[test]
+    fn several_pythonic_calls_in_one_bracket_are_all_parsed() {
+        let (calls, remaining) = extract_pythonic_tool_calls(r#"[echo(text="a"), echo(text="b")]"#);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].arguments["text"], serde_json::json!("a"));
+        assert_eq!(calls[1].arguments["text"], serde_json::json!("b"));
+        assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn pythonic_call_without_arguments_is_a_zero_argument_call() {
+        let (calls, _) = extract_pythonic_tool_calls("[list_tools()]");
+        assert_eq!(calls[0].name, "list_tools");
+        assert_eq!(calls[0].arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn a_comma_inside_a_quoted_argument_does_not_split_the_call() {
+        let (calls, _) = extract_pythonic_tool_calls(r#"[echo(text="a, b, c")]"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments["text"], serde_json::json!("a, b, c"));
+    }
+
+    #[test]
+    fn a_bracket_inside_a_quoted_argument_does_not_close_the_block_early() {
+        let (calls, remaining) = extract_pythonic_tool_calls(r#"[echo(text="a] b")]"#);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments["text"], serde_json::json!("a] b"));
+        assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn plain_prose_is_not_mistaken_for_a_pythonic_call() {
+        // No literal brackets around the call — must not match (this is
+        // exactly the ambiguity the bracket-wrapper requirement avoids).
+        let text = "puedes llamar a leer(archivo) para revisar el contenido";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_ordinary_list_literal_is_not_mistaken_for_a_call() {
+        // `[1, 2, 3]` has no `identifier(` right after the `[`.
+        let text = "los valores son [1, 2, 3] en ese orden";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_unrecognized_argument_shape_leaves_the_whole_block_in_the_text() {
+        // A nested list value isn't in scope (string/number/bool only) —
+        // the whole call must be left untouched, not partially rescued.
+        let text = "[echo(items=[1, 2])]";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+
+    #[test]
+    fn an_unclosed_pythonic_bracket_stays_in_the_text() {
+        let text = "[get_weather(city=\"SF\"";
+        let (calls, remaining) = extract_pythonic_tool_calls(text);
+        assert!(calls.is_empty());
+        assert_eq!(remaining, text);
+    }
+}
