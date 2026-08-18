@@ -1688,7 +1688,9 @@ mod tests {
     // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
     use crate::engine::Engine;
     use crate::engine::test_support::*;
+    use async_trait::async_trait;
     use braze_events::NoopObserver;
+    use braze_tools_core::{ToolError, ToolProvider, ToolSchema};
     use braze_model::CompletionEvent;
     use braze_session::{FileSessionStore, SimpleContextCompactor};
     use braze_types::SessionId;
@@ -2667,6 +2669,812 @@ mod tests {
         );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
+
+    // P1.1 resto (v9 L-5, 2026-08-18): clusters I.7 (explorador),
+    // C′.2 (task list tipada) y C′.1 (search_tools) movidos VERBATIM
+    // del `mod tests` de engine/mod.rs.
+
+    // --- I.7: explorador de contexto aislado
+    // (docs/explorador-aislado-ab-design.md) ---
+
+    /// The delegation round-trip: the parent calls `explore`, the child
+    /// loop (same scripted backend) answers in one tools-free round, the
+    /// conclusion comes back as the explore call's tool result, and the
+    /// rollout log records the audit event + aggregate child usage —
+    /// but NONE of the child's own transcript (isolation is the lever).
+    #[tokio::test]
+    async fn an_exploration_delegation_round_trips_and_stays_isolated() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        // Script order: parent round 1 (calls explore) → child round
+        // (answers, no tools) → parent round 2 (final answer).
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-explore".to_string(),
+                    name: "explore".to_string(),
+                    arguments: serde_json::json!({
+                        "question": "which file defines parse_header?"
+                    }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("parse_header is defined in src/header.rs.".to_string()),
+                CompletionEvent::Usage {
+                    input_tokens: 120,
+                    output_tokens: 30,
+                    stop_reason: Some("stop".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("Está en src/header.rs.".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_exploration_enabled(true);
+
+        engine
+            .run_turn(
+                &session,
+                "¿dónde se define parse_header?",
+                &mut NoopObserver,
+            )
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+
+        // The audit event carries the question and the child's cost.
+        let delegated = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ExplorationDelegated {
+                    question,
+                    child_rounds,
+                    child_tokens,
+                } => Some((question.clone(), *child_rounds, *child_tokens)),
+                _ => None,
+            })
+            .expect("ExplorationDelegated must be persisted");
+        assert_eq!(delegated.0, "which file defines parse_header?");
+        assert_eq!(delegated.1, 1, "the child answered in one round");
+        assert_eq!(delegated.2, 150, "child input+output tokens summed");
+
+        // The conclusion is the explore call's tool result…
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::ToolCallCompleted { result, .. }
+                    if !result.is_error
+                        && result.content.contains("src/header.rs")
+            )),
+            "the child's conclusion must come back as the tool result"
+        );
+        // …and the child's transcript is NOT in the parent's log: the
+        // only AssistantText is the parent's final answer.
+        let assistant_texts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::AssistantText { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            assistant_texts,
+            vec!["Está en src/header.rs."],
+            "isolation: the child's own text must never enter the parent log"
+        );
+        // The aggregate child usage rides as a Usage event so every
+        // existing token accounting counts it.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::Usage { stop_reason: Some(reason), input_tokens: 120, output_tokens: 30, .. }
+                    if reason == "exploration_child"
+            )),
+            "aggregate child usage must be persisted: {events:#?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The lever must never kill the turn: a child that produces nothing
+    /// usable degrades to a recoverable tool error the parent can act on.
+    #[tokio::test]
+    async fn a_failed_exploration_degrades_to_a_recoverable_tool_error() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-explore".to_string(),
+                    name: "explore".to_string(),
+                    arguments: serde_json::json!({ "question": "¿algo?" }),
+                },
+                CompletionEvent::Done,
+            ],
+            // Child round: empty text, no tool calls → exploration fails.
+            vec![CompletionEvent::Done],
+            vec![
+                CompletionEvent::TextDelta("Exploro yo mismo.".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_exploration_enabled(true);
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("the failed exploration must not kill the turn");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::ToolCallCompleted { result, .. }
+                    if result.is_error && result.content.contains("exploration failed")
+            )),
+            "expected the recoverable error result: {events:#?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- C′.2: task list tipada
+    // (docs/harness-engineering-hooks-skills-2026-07-10.md § I.4) ---
+
+    /// With the lever ON: the two task tools join the inventory, an add
+    /// + update round-trips through the harness-owned handler, and the
+    /// compact summary rides the NEXT round's request as an ephemeral
+    /// user message (never persisted).
+    #[tokio::test]
+    async fn task_tools_round_trip_and_the_summary_rides_the_next_request() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "task_add".to_string(),
+                        arguments: serde_json::json!({ "description": "leer notas.txt" }),
+                    },
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-2".to_string(),
+                        name: "task_add".to_string(),
+                        arguments: serde_json::json!({ "description": "responder" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-3".to_string(),
+                        name: "task_update".to_string(),
+                        arguments: serde_json::json!({ "id": 1, "status": "done" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::clone(&requests),
+        };
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "haz dos cosas", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let requests = requests.lock().unwrap().clone();
+        // Round 1: tools listed, no summary yet (empty list).
+        let round1_names: Vec<&str> = requests[0]
+            .tool_stubs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(round1_names.contains(&"task_add"));
+        assert!(round1_names.contains(&"task_update"));
+        let round1_text: String = requests[0]
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !round1_text.contains("Task list:"),
+            "no summary before any task exists"
+        );
+
+        // Round 2: the summary reflects the adds.
+        let round2_text: String = requests[1]
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            round2_text.contains("1 [pending] leer notas.txt"),
+            "got: {round2_text}"
+        );
+        assert!(round2_text.contains("2 [pending] responder"));
+
+        // Round 3: the update shows.
+        let round3_text: String = requests[2]
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            round3_text.contains("1 [done] leer notas.txt"),
+            "got: {round3_text}"
+        );
+
+        // The ephemeral summary must NOT be persisted as events.
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::UserMessage { text } if text.contains("Task list:")
+            )),
+            "the summary is request-scoped, never persisted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// With the lever OFF (the default): no task tools in the inventory
+    /// — existing measurements see zero change.
+    #[tokio::test]
+    async fn the_task_list_is_absent_by_default() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![vec![
+                CompletionEvent::TextDelta("hola".to_string()),
+                CompletionEvent::Done,
+            ]]),
+            requests: Arc::clone(&requests),
+        };
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let requests = requests.lock().unwrap().clone();
+        assert!(
+            !requests[0]
+                .tool_stubs
+                .iter()
+                .any(|s| s.name == "task_add" || s.name == "task_update"),
+            "off by default"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The planner bridge (the pre-registered A/B's planner→tasks arm):
+    /// with the task list on, an accepted plan seeds tasks instead of
+    /// persisting `PlanCreated` prose, and the summary rides the
+    /// executor's first request.
+    #[tokio::test]
+    async fn an_accepted_plan_seeds_the_task_list_instead_of_prose() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let planner = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("1. leer notas.txt\n2. responder".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let executor = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ]]),
+            requests: Arc::clone(&requests),
+        };
+
+        let engine = Engine::new(
+            Box::new(executor),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_planner(Box::new(planner))
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "haz dos cosas", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::PlanCreated { .. })),
+            "planner→tasks: no prose plan in the history"
+        );
+
+        let requests = requests.lock().unwrap().clone();
+        let round1_text: String = requests[0]
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            round1_text.contains("1 [pending] leer notas.txt"),
+            "the seeded list rides the first executor request: {round1_text}"
+        );
+        assert!(round1_text.contains("2 [pending] responder"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Marking a task `done` via `task_update` must persist
+    /// `AgentEvent::TaskCompleted` with that task's description — the
+    /// durable signal `braze-memory`'s `ProjectMemoryHook` depends on,
+    /// since the task list itself is in-memory only (J-4).
+    #[tokio::test]
+    async fn marking_a_task_done_persists_task_completed() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "task_add".to_string(),
+                    arguments: serde_json::json!({"description": "leer notas.txt"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "task_update".to_string(),
+                    arguments: serde_json::json!({"id": 1, "status": "done"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "leé el archivo", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::TaskCompleted { description } if description == "leer notas.txt"
+            )),
+            "task_update to done must persist TaskCompleted with the task's description"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The mirror case: `task_add` alone, or a transition to
+    /// `in_progress`, must NOT persist `TaskCompleted` — only an actual
+    /// completion should.
+    #[tokio::test]
+    async fn adding_or_progressing_a_task_does_not_persist_task_completed() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "task_add".to_string(),
+                    arguments: serde_json::json!({"description": "leer notas.txt"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "task_update".to_string(),
+                    arguments: serde_json::json!({"id": 1, "status": "in_progress"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("trabajando".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true);
+
+        engine
+            .run_turn(&session, "leé el archivo", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TaskCompleted { .. })),
+            "task_add and in_progress transitions must never persist TaskCompleted"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // --- C′.1: search_tools — herramientas diferidas en dos niveles
+    // (docs/harness-engineering-hooks-skills-2026-07-10.md § I.3) ---
+
+    /// A provider with many stubs — the "gateway grande" fixture. Every
+    /// tool resolves a permissive schema and invokes successfully.
+    struct NoisyToolsProvider {
+        count: usize,
+        invocations: Arc<AtomicU32>,
+    }
+
+    #[async_trait]
+    impl ToolProvider for NoisyToolsProvider {
+        fn provider_id(&self) -> &str {
+            "test:noisy"
+        }
+
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            let mut stubs: Vec<ToolStub> = (0..self.count)
+                .map(|i| ToolStub {
+                    name: format!("noise_tool_{i}"),
+                    summary: "an unrelated operation".to_string(),
+                    source: "test:noisy".to_string(),
+                    input_schema: None,
+                })
+                .collect();
+            stubs.push(ToolStub {
+                name: "frobnicate_target".to_string(),
+                summary: "frobnicates the target dataset".to_string(),
+                source: "test:noisy".to_string(),
+                input_schema: None,
+            });
+            Ok(stubs)
+        }
+
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            if name.starts_with("noise_tool_") || name == "frobnicate_target" {
+                Ok(Some(ToolSchema {
+                    name: name.to_string(),
+                    description: "test tool".to_string(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            self.invocations.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: "frobnicated".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    /// The full two-level loop: a big provider hides behind
+    /// `search_tools`; the model searches, the hit activates, the next
+    /// round's inventory lists it, and the call dispatches to the real
+    /// provider. The small provider stays visible throughout.
+    #[tokio::test]
+    async fn search_tools_hides_a_big_provider_and_activation_makes_the_hit_invocable() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let invocations = Arc::new(AtomicU32::new(0));
+        let echo_invocations = Arc::new(AtomicU32::new(0));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                // Round 1: the model searches the hidden catalog.
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "search_tools".to_string(),
+                        arguments: serde_json::json!({ "query": "frobnicate dataset" }),
+                    },
+                    CompletionEvent::Done,
+                ],
+                // Round 2: calls the tool the search surfaced.
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-2".to_string(),
+                        name: "frobnicate_target".to_string(),
+                        arguments: serde_json::json!({}),
+                    },
+                    CompletionEvent::Done,
+                ],
+                // Round 3: converges.
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::clone(&requests),
+        };
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![
+                Box::new(EchoToolProvider::new(Arc::clone(&echo_invocations))),
+                Box::new(NoisyToolsProvider {
+                    count: 50,
+                    invocations: Arc::clone(&invocations),
+                }),
+            ]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tool_search_threshold(40);
+
+        engine
+            .run_turn(&session, "frobnica el dataset", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        // Cloned out so no MutexGuard lives across the await below.
+        let requests = requests.lock().unwrap().clone();
+        // Round 1's inventory: echo (small provider, visible), NO noise
+        // tools, and the search meta-tool.
+        let round1_names: Vec<&str> = requests[0]
+            .tool_stubs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(round1_names.contains(&"echo"));
+        assert!(round1_names.contains(&"search_tools"));
+        assert!(
+            !round1_names.iter().any(|n| n.starts_with("noise_tool_")),
+            "the big provider's tools must be hidden: {round1_names:?}"
+        );
+        assert!(
+            !round1_names.contains(&"frobnicate_target"),
+            "the target starts hidden too"
+        );
+
+        // Round 2's inventory: the search hit is now listed.
+        let round2_names: Vec<&str> = requests[1]
+            .tool_stubs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert!(
+            round2_names.contains(&"frobnicate_target"),
+            "the activated hit must resurface: {round2_names:?}"
+        );
+
+        // And the real provider was actually invoked.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        // The search result itself reached the model as a tool result.
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::ToolCallCompleted { result, .. }
+                    if result.content.contains("frobnicate_target") && !result.is_error
+            )),
+            "the search must answer with the matching tools"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// J-9 (docs/AUDITORIA-2026-07-v7.md): naming a hidden tool directly
+    /// — without activating it via `search_tools` — must NOT dispatch it.
+    /// The model gets a recoverable, actionable error instead; after a
+    /// real search activates the tool, the same direct call works. This
+    /// is what makes "the model can only use what's listed or searched
+    /// for" literally true for the search_tools A/B.
+    #[tokio::test]
+    async fn a_deferred_tool_called_without_activation_is_rejected_not_dispatched() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let invocations = Arc::new(AtomicU32::new(0));
+        let echo_invocations = Arc::new(AtomicU32::new(0));
+
+        let model = ScriptedModel::new(vec![
+            // Round 1: guesses the hidden tool's name directly.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "frobnicate_target".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            // Round 2: does what the error told it to do.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "search_tools".to_string(),
+                    arguments: serde_json::json!({ "query": "frobnicate" }),
+                },
+                CompletionEvent::Done,
+            ],
+            // Round 3: the activated tool now dispatches for real.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-3".to_string(),
+                    name: "frobnicate_target".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Done,
+            ],
+            // Round 4: converges.
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![
+                Box::new(EchoToolProvider::new(Arc::clone(&echo_invocations))),
+                Box::new(NoisyToolsProvider {
+                    count: 50,
+                    invocations: Arc::clone(&invocations),
+                }),
+            ]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_tool_search_threshold(40);
+
+        engine
+            .run_turn(&session, "frobnica el dataset", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        // The provider ran exactly once — for round 3, never for the
+        // unactivated round-1 call.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let round1_result = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { id, result } if id == "call-1" => Some(result),
+                _ => None,
+            })
+            .expect("the blocked call must still complete its event pair");
+        assert!(round1_result.is_error);
+        assert!(
+            round1_result.content.contains("search_tools"),
+            "the error must tell the model the way in: {}",
+            round1_result.content
+        );
+        let round3_result = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { id, result } if id == "call-3" => Some(result),
+                _ => None,
+            })
+            .expect("the post-activation call must complete");
+        assert!(!round3_result.is_error);
+        assert_eq!(round3_result.content, "frobnicated");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
 }
 
 // SWE-Edit #17: tests del subagente editor. Provider de juguete

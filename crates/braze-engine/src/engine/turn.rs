@@ -3637,4 +3637,255 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
+
+    // P1.1 resto (v9 L-5, 2026-08-18): cluster D′ (skills locales
+    // explicit-only) movido VERBATIM del `mod tests` de engine/mod.rs;
+    // `temp_skills_dir` viaja con él.
+
+    // --- D′: skills locales explicit-only
+    // (docs/harness-engineering-hooks-skills-2026-07-10.md § Parte III) ---
+
+    fn temp_skills_dir(label: &str, skills: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "braze-engine-skills-{}-{label}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (name, body) in skills {
+            let skill_dir = dir.join(name);
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            std::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: guidance for {name}\n---\n\n{body}"),
+            )
+            .unwrap();
+        }
+        dir
+    }
+
+    /// The explicit-mention path end to end: `$testing` in the user's
+    /// input loads that skill's body into the request's system prompt,
+    /// persists `SkillLoaded`, and leaves unmentioned skills out.
+    #[tokio::test]
+    async fn a_skill_mention_loads_its_body_into_the_system_prompt() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let skills_dir = temp_skills_dir(
+            "mention",
+            &[
+                ("testing", "Always run cargo test before claiming success."),
+                ("review", "Check invariants first."),
+            ],
+        );
+        let registry = std::sync::Arc::new(braze_skills::SkillRegistry::discover(
+            std::slice::from_ref(&skills_dir),
+        ));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ]]),
+            requests: Arc::clone(&requests),
+        };
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(registry, 1200, 2);
+
+        engine
+            .run_turn(&session, "usa $testing para esto", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let requests = requests.lock().unwrap().clone();
+        assert!(
+            requests[0].system_prompt.contains("Loaded skill: testing"),
+            "got: {}",
+            requests[0].system_prompt
+        );
+        assert!(
+            requests[0]
+                .system_prompt
+                .contains("Always run cargo test before claiming success."),
+            "the body itself must be injected"
+        );
+        assert!(
+            !requests[0].system_prompt.contains("Loaded skill: review"),
+            "unmentioned skills stay out"
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::SkillLoaded { name, trigger, .. }
+                    if name == "testing" && trigger == "explicit_mention"
+            )),
+            "the load must persist as the rollout log's trace"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::UserMessage { text } if text.contains("Always run cargo test")
+            )),
+            "the body is request-scoped, never persisted as conversation"
+        );
+
+        let _ = std::fs::remove_dir_all(&skills_dir);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// The per-turn cap: mentioning three skills with a cap of 2 loads
+    /// two and persists a `SkillLoadSkipped` for the third — bounded
+    /// context growth, visible in the log.
+    #[tokio::test]
+    async fn the_per_turn_cap_skips_the_excess_mention_with_an_event() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let skills_dir = temp_skills_dir(
+            "cap",
+            &[
+                ("uno", "body uno"),
+                ("dos", "body dos"),
+                ("tres", "body tres"),
+            ],
+        );
+        let registry = std::sync::Arc::new(braze_skills::SkillRegistry::discover(
+            std::slice::from_ref(&skills_dir),
+        ));
+
+        let model = ScriptedModel::new(vec![vec![
+            CompletionEvent::TextDelta("listo".to_string()),
+            CompletionEvent::Done,
+        ]]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(registry, 1200, 2);
+
+        engine
+            .run_turn(&session, "usa $uno $dos $tres", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let loaded: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::SkillLoaded { .. }))
+            .collect();
+        assert_eq!(loaded.len(), 2, "cap of 2: {events:#?}");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::SkillLoadSkipped { name, reason }
+                    if name == "tres" && reason.contains("per-turn cap")
+            )),
+            "the third mention must be visibly skipped"
+        );
+
+        let _ = std::fs::remove_dir_all(&skills_dir);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Regression test for J-12 (docs/AUDITORIA-2026-07-v7.md): a FRESH
+    /// engine over the same session store — the `--resume` restart, or a
+    /// `/model` rebuild — must re-load the bodies the log's `SkillLoaded`
+    /// events record, without appending new `SkillLoaded` events (which
+    /// would double the bench's counts on every resumed turn).
+    #[tokio::test]
+    async fn a_fresh_engine_rehydrates_previously_loaded_skills_from_the_log() {
+        let (store, dir) = temp_store();
+        let store = Arc::new(store);
+        let session = SessionId::new();
+        let skills_dir = temp_skills_dir(
+            "rehydrate",
+            &[("testing", "Always run cargo test before claiming success.")],
+        );
+        let registry = std::sync::Arc::new(braze_skills::SkillRegistry::discover(
+            std::slice::from_ref(&skills_dir),
+        ));
+
+        // Session 1: the mention loads the skill and persists SkillLoaded.
+        let first_engine = Engine::new(
+            Box::new(ScriptedModel::new(vec![vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ]])),
+            ToolRegistry::new(vec![]),
+            Arc::clone(&store) as Arc<dyn SessionStore>,
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(std::sync::Arc::clone(&registry), 1200, 2);
+        first_engine
+            .run_turn(&session, "usa $testing para esto", &mut NoopObserver)
+            .await
+            .expect("first turn must converge");
+        drop(first_engine); // the restart: in-memory loaded_skills is gone
+
+        // Session 2 (same store, fresh engine): no mention this turn —
+        // the body must come back from the log alone.
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let second_engine = Engine::new(
+            Box::new(RequestCapturingModel {
+                inner: ScriptedModel::new(vec![vec![
+                    CompletionEvent::TextDelta("sigo".to_string()),
+                    CompletionEvent::Done,
+                ]]),
+                requests: Arc::clone(&requests),
+            }),
+            ToolRegistry::new(vec![]),
+            Arc::clone(&store) as Arc<dyn SessionStore>,
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(registry, 1200, 2);
+        second_engine
+            .run_turn(&session, "continúa con lo anterior", &mut NoopObserver)
+            .await
+            .expect("resumed turn must converge");
+
+        let requests = requests.lock().unwrap().clone();
+        assert!(
+            requests[0]
+                .system_prompt
+                .contains("Always run cargo test before claiming success."),
+            "the rehydrated body must reach the resumed turn's system prompt, got: {}",
+            requests[0].system_prompt
+        );
+
+        let verify_store = FileSessionStore::new(dir.clone());
+        let events = verify_store.load(&session).await.expect("load events");
+        let loaded_count = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::SkillLoaded { .. }))
+            .count();
+        assert_eq!(
+            loaded_count, 1,
+            "rehydration must NOT append a second SkillLoaded event: {events:#?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&skills_dir);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
 }
