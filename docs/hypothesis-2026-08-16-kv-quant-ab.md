@@ -160,3 +160,35 @@ las repeticiones varían (gate 0).
 - **LocalBackend como laboratorio**: tercera demostración del
   argumento estratégico (sampler/KV access que ningún harness
   API-bound tiene) tras stencil y ablaciones por token.
+
+## Resoluciones de instrumento (2026-08-18, del smoke, ANTES de leer ningún brazo)
+
+El smoke pre-registrado cazó tres cosas; se resuelven aquí, antes de
+la medición:
+
+1. **Contradicción interna del pre-registro**: el tier decía "el mismo
+   del pm-ab" y los riesgos decían "CPU puro con GPU_LAYERS=0". Se
+   resuelve a favor del tier pm-ab (autofit; aunque con el binario
+   `local` sin CUDA el resultado es CPU igual — la GPU queda para un
+   futuro build `local-cuda`).
+2. **Gate 0 (L-9) DISPARÓ**: repeticiones idénticas con semilla fija
+   (sampler determinista del LocalBackend). Cláusula aplicada como
+   estaba pre-registrada: **semillas por repetición** —
+   `BRAZE_LOCAL_SEED` es por-proceso, así que cada (brazo, rep) corre
+   como invocación separada: 12 invocaciones, seeds 42/43/44,
+   pareo por (tarea, índice-de-rep) en el análisis. Verificado en
+   smoke: seeds distintas → trayectorias distintas.
+3. **`BRAZE_LOCAL_REASONING=low` para los 4 brazos**: a reasoning
+   medio (default) el canal analysis de Harmony quema el presupuesto
+   de reloj en CPU y la tarea de smoke muere a 900 s en TODAS las
+   condiciones (timeout-floor: el instrumento no mide); a low, la
+   misma tarea PASA en 567 s. La desviación aplica idéntica a los 4
+   brazos (no toca el tratamiento KV) y se decide por conducta del
+   instrumento, no por resultados. Consecuencia declarada: el
+   baseline f16-a de este A/B no es comparable con el 57.8% del
+   pm-ab (que corrió a medium) — el A/B es autocontenido y su
+   referencia es f16-a.
+
+Estimación de duración corregida: ~400-600 s/corrida × 408 ≈ 45-65 h
+(la del pre-registro, 7-17 h, era optimista — el ritmo real del
+pm-ab en este hardware siempre fue ~10 min/corrida).
