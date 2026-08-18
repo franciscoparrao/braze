@@ -17,7 +17,7 @@ use braze_events::{AgentEvent, BackgroundTask, TaskHandle, TaskNotifier, TurnObs
 use braze_model::{CompletionEvent, CompletionRequest, ModelBackend, ModelError};
 use braze_session::FileSessionStore;
 use braze_tools_core::{ToolError, ToolProvider, ToolSchema};
-use braze_types::{SessionId, ToolCall, ToolResult, ToolStub};
+use braze_types::{ContentBlock, SessionId, ToolCall, ToolResult, ToolStub};
 use futures::{Stream, StreamExt};
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
@@ -849,4 +849,15 @@ impl TurnObserver for RecordingObserver {
     fn on_event(&mut self, event: &AgentEvent) {
         self.events.push(event.clone());
     }
+}
+
+/// `true` when any message in `req` carries a Text block containing
+/// `needle` — for the J-3/J-4 request-scoping assertions below.
+pub(crate) fn any_message_text_contains(req: &CompletionRequest, needle: &str) -> bool {
+    req.messages.iter().any(|message| {
+        message
+            .content
+            .iter()
+            .any(|block| matches!(block, ContentBlock::Text { text } if text.contains(needle)))
+    })
 }
