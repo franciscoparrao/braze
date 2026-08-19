@@ -63,3 +63,23 @@ SC-retention de esta semana.
    real: Ornith-1-9B (DeepReinforce, base Qwen 3.5, RL
    scaffold-conjunto, reasoning) — actualizar cuando toque editar esas
    páginas, no urgente.
+
+## Addendum 2026-08-19: salió Ornith-1.5-9B (HF: ornith-ai/Ornith-1.5-9B)
+
+Cambios relevantes vs 1.0: el self-improvement ahora **genera sus
+propias tareas de entrenamiento** (task generation + scaffold +
+solución optimizados conjuntamente por RL — el loop completo que
+Meta-Harness/AutoDesign hacen solo del lado harness); multimodal
+(texto+imagen); mismo template Qwen3.5/XML/thinking (compatible con
+braze sin cambios); sampling recomendado igual (0.6 coding — nuestro
+0.2 sigue siendo la nota de sensibilidad pendiente); 256K contexto;
+GGUF disponible; MIT. Claims fuertes (SWE-bench Verified 70.6 para un
+9B) — a verificar con NUESTROS oráculos, no adoptar de la card.
+
+Implicancias: (a) candidato a suceder a ornith:9b en el lineup —
+requiere el rito de adopción completo (tool-support check + sweep
+discriminante pareado vs 1.0, pre-registrado); (b) la réplica SC ×10
+pendiente debe correr sobre 1.0 (el sujeto pre-registrado) — 1.5
+sería experimento aparte; (c) un modelo que genera sus propias tareas
+cambia la forma del riesgo de contaminación de benchmarks — refuerza
+el valor de suites propias con oráculo cargo check y del DBV.
