@@ -83,3 +83,37 @@ pendiente debe correr sobre 1.0 (el sujeto pre-registrado) — 1.5
 sería experimento aparte; (c) un modelo que genera sus propias tareas
 cambia la forma del riesgo de contaminación de benchmarks — refuerza
 el valor de suites propias con oráculo cargo check y del DBV.
+
+### Detalles de la página de release (ornith.ai/ornith_1_5.html, leída 2026-08-19)
+
+**El reward de generación de tareas es nuestra suite discriminante
+convertida en señal de entrenamiento**: R_task = V × D × N donde V =
+validez (el scaffold ejecuta y las soluciones son verificables), D =
+"frontier difficulty" con **success rate objetivo ~20%** medido por
+rollouts, N = novedad semántica. El término D es exactamente el
+principio de diseño de discriminating.toml ("tareas cerca de la
+frontera del modelo") — ellos lo escribieron en la función de reward.
+Y el reward del harness (C × F × H: task alignment, reward fidelity,
+**hack resistance**) convierte en señal de RL los dos temas nuestros:
+la validez del oráculo (la lección de la suite v1: aserciones vacuas)
+y la integridad silenciosa (dsh). Convergencia a nivel de
+entrenamiento, no solo de evaluación.
+
+**Rigor de evaluación**: promedian 5 corridas independientes (mejor
+que los point estimates de Meta-Harness/AutoDesign; aún sin CIs ni
+tests), anti-hacking explícito (git history removido, red apagada),
+jueces independientes. **Sus propios benchmarks corren a temperatura
+1.0** (Terminal-Bench/SWE-bench; ClawEval a 0.6): el mapa de sampling
+queda vendor-evals 1.0 / recomendación coding 0.6 / braze 0.2 — la
+nota de sensibilidad se agudiza.
+
+**Claims a verificar con máxima sospecha**: 9B con Terminal-Bench 2.1
+= 47.0 usando el harness de Claude Code (compárese: Meta-Harness
+reportó Haiku 4.5 a 27.5 con Claude Code en TB-2), GPQA Diamond 86.4
+para un 9B, y "matches Gemma 4-31B / Qwen 3.6-35B". O el currículo
+auto-generado es un breakthrough real, o hay benchmark-fitting fino —
+el rito de adopción con nuestros oráculos es el árbitro correcto, y
+ahora el A/B 1.5-vs-1.0 tiene interés científico propio (¿el task
+generation loop produce capacidad agéntica transferible?). Familia
+completa: 397B MoE (claim: a la par de Opus 4.8 en TB), 35B MoE, 9B
+dense, 9B-Mobile cuantizado.
