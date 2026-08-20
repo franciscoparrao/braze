@@ -117,3 +117,26 @@ contrastes. Secundarias: schema_fail, rescues, rondas, tokens, pass^3.
 - Los claims públicos de 1.5 quedan FUERA del alcance: no los
   reproducimos ni los auditamos — auditamos su implicación de
   generalización.
+
+## Desviación de instrumento (2026-08-20, ANTES de correr): orden INTERCALADO
+
+El § Diseño fijó 5 invocaciones (una por brazo, 3 reps cada una). Se
+cambia a **15 invocaciones de 1 repetición en orden round-robin**
+(A-s42, B-s42, C-s42, D-s42, E-s42, A-s43, …): mismo diseño, mismos
+510 datos, distinto ORDEN de ejecución. Motivo: el incidente del A/B
+KV-quant del 2026-08-20 mostró que correr brazo-por-brazo **confunde
+deriva temporal del nodo con tratamiento** (timeouts crecientes
+f16a 6/5/2 → q4 4/17/17, con el A/A muriendo por OOM al final). El
+round-robin reparte cualquier deriva por igual entre los cinco
+brazos. Es desviación de INFRAESTRUCTURA/orden, decidida por
+metodología antes de existir ningún dato del 2×2 — no toca
+tratamiento, suite, seeds, temperaturas ni análisis.
+
+Consecuencias operativas declaradas: (i) sin `--no-ollama-stop` (hay
+dos modelos y no caben residentes en 14 GB: 5,6 GB × 2 + KV) → cada
+invocación recarga su modelo (~20-30 s, 15 recargas ≈ 8 min de
+overhead, aceptable); (ii) el quant de 1.5 es **Q4_K_M, idéntico al
+de 1.0** (verificado con `ollama show`), así el contraste es
+modelo-vs-modelo y no quant-vs-quant; (iii) el alias local del modelo
+nuevo es `ornith:9b-1.5` (copia de `hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q4_K_M`),
+digest a registrar en la síntesis.
