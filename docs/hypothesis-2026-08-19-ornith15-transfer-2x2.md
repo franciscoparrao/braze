@@ -140,3 +140,32 @@ de 1.0** (verificado con `ollama show`), así el contraste es
 modelo-vs-modelo y no quant-vs-quant; (iii) el alias local del modelo
 nuevo es `ornith:9b-1.5` (copia de `hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q4_K_M`),
 digest a registrar en la síntesis.
+
+## Smoke de instrumento (2026-08-20): PASA, con un hallazgo de costo
+
+Modelo obtenido: `hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q4_K_M` → alias
+`ornith:9b-1.5`, digest **803aeaf6af02**, 6,6 GB (vs 5,6 GB del 1.0
+con el MISMO quant Q4_K_M — diferencia de arquitectura/vocabulario,
+anotada). Gates: (1) tool-calling vía Ollama **funciona** (7 y 10 tool
+calls, sin HTTP 400); (2) métrica dual activa
+(`grading: functional-primary+strict-secondary/2026-08-12`, campo
+`passed_strict` presente); (3) repeticiones **varían**.
+
+**Hallazgo de costo, declarado antes de medir**: 1.5 tardó **557 s y
+703 s** en la tarea de smoke (8 y 10 rondas), contra los ~30-60 s por
+tarea que 1.0 promedia en esta clase de suite: **~10-20× más lento**,
+consistente con un reasoning model que piensa mucho más largo. Dos
+consecuencias que se declaran ahora, no después:
+
+1. **La estimación del § Diseño (5-8 h) queda obsoleta**: el sweep
+   real cuesta ~35-40 h (los 6 brazos de 1.5 dominan). Se corre igual,
+   resumible por invocación.
+2. **El timeout de 900 s censurará más al brazo 1.5 que al 1.0.** Se
+   mantiene idéntico para ambos (es entorno, no tratamiento): si 1.5
+   pierde tareas por agotar el presupuesto de reloj, eso **es un
+   resultado** sobre su viabilidad local-first bajo presupuesto fijo,
+   no un artefacto — y se reportará como tal, con la tasa de timeouts
+   por brazo en la síntesis. La lectura del transfer (H1) se hará
+   sobre `passed` con los timeouts declarados, y además restringida a
+   las tareas que ambos brazos completaron, como análisis de
+   sensibilidad.
