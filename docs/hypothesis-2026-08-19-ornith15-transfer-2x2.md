@@ -169,3 +169,39 @@ consecuencias que se declaran ahora, no después:
    sobre `passed` con los timeouts declarados, y además restringida a
    las tareas que ambos brazos completaron, como análisis de
    sensibilidad.
+
+## INCIDENTE (2026-08-20): OOM sostenido — sweep INVÁLIDO y una atribución mía corregida
+
+El sweep se detuvo tras ~8 invocaciones al detectar que **el OOM
+killer mató `llama-server` de Ollama** (`ollama.service: Failed with
+result 'oom-kill'`, proceso de 12,9 GB de VM) — y no una vez: **8
+eventos "Out of memory" en 6 horas**. El síntoma que lo destapó fue
+del mundo físico: el escritorio de Nitro dejó de responder (swap
+thrashing), reportado por el autor. Los 8 JSONs escritos
+(A-s42/s43, B-s42/s43, C-s42/s43, D-s42, E-s42) quedan **inválidos
+como medición** y se conservan solo como evidencia del incidente.
+
+**Corrección de una atribución mía, hecha antes de que nadie la
+cuestione**: el "hallazgo de costo" del § Smoke — *"1.5 es 10-20×
+más lento (557-703 s/tarea), consistente con un reasoning model que
+piensa más largo"* — **está confundido con swap thrashing**. El smoke
+corrió con la memoria ya comprometida, así que esos tiempos NO
+separan "el modelo piensa más" de "el nodo estaba paginando". La
+afirmación se retira hasta poder medirla en un nodo sano; lo único
+firme es que 1.5 (6,6 GB + KV de 32k) **no cabe en este nodo con la
+sesión gráfica abierta**.
+
+**Causa raíz estructural**: 14 GB totales − ~2,5-3 GB de escritorio
+(gnome-shell + Chrome abiertos desde ago-17) deja ~11 GB para un
+modelo de 6,6 GB cuyo KV a 32k lo lleva a ~12,9 GB de VM. No cabe. Es
+la MISMA causa raíz del incidente KV-quant del mismo día (f16b muerto
+por OOM): **este nodo está saturado para los experimentos actuales**,
+y ambos incidentes son síntomas de eso, no casualidades independientes.
+
+**Condiciones para re-correr** (cualquiera de las dos, declaradas
+antes de reintentar): (i) RAM ampliada (2×32 GB en evaluación por el
+autor) — la solución de fondo; o (ii) nodo **headless** durante los
+sweeps (sesión gráfica cerrada, ~2,5-3 GB liberados) más swap limpio,
+que sería suficiente para 1.5 en este contexto. Bajar
+`BRAZE_OLLAMA_NUM_CTX` NO es opción: cambiaría el entorno respecto de
+los baselines de 1.0 con los que se compara.
