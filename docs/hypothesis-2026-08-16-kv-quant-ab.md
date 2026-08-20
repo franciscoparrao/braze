@@ -192,3 +192,53 @@ la medición:
 Estimación de duración corregida: ~400-600 s/corrida × 408 ≈ 45-65 h
 (la del pre-registro, 7-17 h, era optimista — el ritmo real del
 pm-ab en este hardware siempre fue ~10 min/corrida).
+
+## INCIDENTE y hallazgo metodológico (2026-08-20): el orden por-brazo confunde deriva con tratamiento
+
+**Qué pasó**: `f16b-s42` (el control A/A) murió con **exit 137 (OOM
+killer)** tras 5 h; `f16b-s43` siguió corriendo a ~36 min/tarea (4× el
+ritmo normal) sobre un nodo con swap 100% lleno y 666 MiB disponibles.
+Se detuvo manualmente al detectarlo. Los 9 JSONs de f16a/q8/q4 están
+completos y se conservan.
+
+**El hallazgo, que es peor que el brazo muerto**: el gate de
+infraestructura, evaluado ANTES de cualquier contraste (criterio 5),
+muestra timeouts por invocación en el orden temporal de ejecución:
+
+| brazo (orden real) | timeouts /34 |
+|---|---|
+| f16a s42/s43/s44 (18-ago, swap limpio) | 6, 5, 2 |
+| q8 s42/s43/s44 | 5, 6, 6 |
+| q4 s42/s43/s44 (19-ago, swap llenándose) | 4, **17**, **17** |
+| f16b s42 (20-ago) | OOM |
+
+La degradación del nodo (swap saturándose durante 2 días de sweeps)
+es **monótona en el tiempo**, y el orden pre-registrado
+(f16a→q8→q4→f16b) hace que **tiempo y tratamiento estén
+confundidos**. Los 17 timeouts de q4 admiten dos explicaciones
+indistinguibles con estos datos: (a) daño real de q4_0 (H1: atención
+degradada → trayectorias más largas → timeout), o (b) deriva del nodo.
+El diseño no puede separarlas.
+
+**La lección, generalizable a todo el proyecto**: poner el A/A al
+final DETECTA deriva pero no la DESCONFUNDE. Los sweeps largos
+multi-brazo deben **intercalar** brazos (round-robin por seed:
+f16a-s42, q8-s42, q4-s42, f16b-s42, f16a-s43, …), no correr
+brazo-por-brazo. Aplica retrospectivamente al A/B de project-memory
+(brazos secuenciales; parte de sus 21 celdas "de ruido" pudo ser
+deriva — consistente con que el re-run invirtiera la dirección) y a
+todo sweep futuro. Material para el follow-up: el piso de ruido
+in-sweep incluye deriva temporal, no solo sampling.
+
+**Dato colateral que sí queda firme**: el KV f16 con 32k de contexto
+está **al borde de la memoria de este nodo** (el proceso llegó a 10,9
+GB RSS de 14 GB y murió), mientras q8/q4 completaron sus 6
+invocaciones sin OOM. El ahorro de memoria del KV cuantizado no está
+en disputa y aquí se confirmó de la forma más cruda posible.
+
+**Estado**: sweep DETENIDO, resultados NO interpretados (ningún
+contraste leído, conforme al criterio 1: sin piso no hay lectura). El
+experimento se re-corre COMPLETO con (i) nodo saneado, (ii) orden
+intercalado, (iii) preferentemente tras el upgrade de RAM que elimina
+la presión de raíz. Los 9 JSONs actuales quedan como evidencia del
+incidente, no como medición del tratamiento.
