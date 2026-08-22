@@ -4,8 +4,11 @@ Objetivo: ver si FreeToken permite servir el tier MoE grande
 (Ornith-1.5-35B-A3B, gemma-4-26B-A4B) que hoy no cabe en Nitro, y si
 podría adelantar experimentos sin esperar la ampliación de RAM.
 
-**Resultado: BLOQUEADO por un mismatch de CUDA. No se llegó a servir
-ningún modelo.** Pero el ejercicio dejó un dato de hardware valioso.
+**Resultado: DESBLOQUEADO** (CUDA 13 instalado vía pip dentro del venv,
+sin sudo y sin tocar el sistema). El bench completo corrió en modo
+`hybrid`, y su veredicto sobre este hardware es más informativo que
+cualquier estimación: **el cuello de botella de Nitro es el PCIe, no
+la RAM** — ver § Medición con PCIe gather.
 
 ## Lo que sí funcionó
 
@@ -95,3 +98,86 @@ que es infraestructura de experimentos ya validada.
   safetensors (`ft checkpoint` convierte desde HF), no los GGUF que
   ya tenemos, así que probar el serving exigía bajar 13-20 GB. No se
   hizo por el bloqueante anterior.
+
+---
+
+# ACTUALIZACIÓN (2026-08-22, tarde): desbloqueado y medido
+
+## Cómo se resolvió el CUDA mismatch — sin sudo, sin fork
+
+No hizo falta instalar CUDA 13 en el sistema ni preservar/forkear la
+configuración del LocalBackend (preocupación válida del autor).
+NVIDIA publica el compilador como paquete pip: `nvidia-cuda-nvcc`
+(13.3.73) instala `nvcc` **dentro del venv**. Verificado:
+
+```
+nvcc del venv:     cuda_13.3.r13.3
+nvcc del sistema:  cuda_12.4.r12.4   ← INTACTO
+```
+
+La toolchain del LocalBackend sigue exactamente como estaba. Un
+`rm -rf ~/freetoken-venv` revierte todo.
+
+Nota de proceso (error propio, documentado): el primer venv quedó
+inservible por un flip-flop de versiones de torch (2.11 → 2.6 → 2.13)
+que dejó las extensiones compiladas contra un ABI muerto
+(`INTERNAL ASSERT FAILED ... no interpreter set`). Se recreó limpio
+con la secuencia correcta: venv → `freetoken[accel]` (trae su torch) →
+`nvidia-cuda-nvcc`. **Lección**: no manipular la versión de torch de un
+stack que trae extensiones compiladas; recrear el entorno es más
+barato que repararlo.
+
+## Medición con PCIe gather activo (`ft bench bw`, modo hybrid)
+
+| formato | CPU-MoE | PCIe-gather | ratio CPU/PCIe | hybrid usa PCIe para |
+|---|---|---|---|---|
+| bf16 | 54,2 GB/s | **5,6 GB/s** | 9,67× | 9,1% de los misses |
+| nvfp4 | 36,6 GB/s | 5,7 GB/s | 6,40× | 14,9% |
+| ds_fp4 | 19,6 GB/s | 5,6 GB/s | 3,49× | 21,4% |
+| mxfp4 | 14,3 GB/s | 5,5 GB/s | 2,61× | 27,9% |
+
+**El hallazgo: el PCIe de Nitro mide 5,6 GB/s** — un orden de magnitud
+por debajo del cómputo CPU-MoE (54 GB/s en bf16). Para un laptop eso
+sugiere un enlace estrecho (PCIe x4, o x8 en generación baja); un
+PCIe 4.0 ×16 daría 25-30 GB/s.
+
+Consecuencia directa sobre la hipótesis que motivó esta evaluación:
+**la ventaja principal de FreeToken —mantener expertos en VRAM y
+traer los que falten por PCIe— tiene poco margen en este hardware.**
+El propio planificador lo reconoce: decide enrutar por PCIe apenas el
+**9,1%** de los misses en bf16, porque para el 91% restante es más
+rápido computar en CPU. No es un defecto del sistema; es su
+adaptatividad funcionando y diciéndonos que aquí no hay mucho que
+ganar.
+
+Estimación revisada del speedup esperable en Nitro: **modesto** (del
+orden del 9-28% de los accesos que fallan al caché, no un factor
+2-3×). La proyección optimista que motivó esta evaluación —"expertos
+calientes en VRAM a 350 GB/s"— **no se sostiene**, porque el costo no
+es leer de VRAM sino *llegar* a la VRAM por un bus de 5,6 GB/s.
+
+Segundo dato, ya anotado arriba y ahora confirmado en modo hybrid:
+**mxfp4 es el peor formato para el camino CPU** (14,3 GB/s, 3,8×
+debajo de bf16) — y es el de `gpt-oss-20b-MXFP4`, el modelo estrella
+del proyecto. Es el único caso donde el hybrid aporta más (27,9% de
+los misses), justamente porque el camino CPU es tan lento que el PCIe
+compite. Sigue siendo hipótesis para nuestro banco, no medición
+nuestra.
+
+## Qué falta para un veredicto definitivo
+
+El bench mide techos de componentes, no throughput end-to-end. Un
+juicio final exigiría servir un modelo MoE en safetensors/FTW y
+compararlo contra nuestro baseline de llama.cpp con el mismo modelo
+(gpt-oss:20b: 57/57 y ~41 s/tarea vía LocalBackend). Costo: descarga
+de 13-20 GB + conversión con `ft checkpoint`. Viable (97 GB libres),
+pero **el bench ya bajó mucho la expectativa de ganancia**, así que la
+relación costo/beneficio de esa medición es peor de lo que era esta
+mañana.
+
+**Recomendación actualizada**: no seguir hasta la medición end-to-end
+por ahora. El cuello de botella de Nitro es el PCIe, y eso no lo
+arregla ni FreeToken ni más RAM — solo otro equipo. Si el autor
+evalúa hardware nuevo, **el ancho de banda PCIe entre CPU y GPU pasa
+a ser un criterio de compra tan importante como la VRAM**, y este
+número (5,6 GB/s) es el punto de comparación.
