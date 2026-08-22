@@ -276,6 +276,27 @@ $c \times R$ tokens, where $R$ is the number of rounds the turn takes.
 Its benefit, in turn, is realized as \emph{rounds saved}: if the
 memory actually guides the model, the turn converges earlier.
 
+Two clarifications about what that cost is, and is not. Modern
+serving stacks cache the key--value state of a stable prefix, so an
+injected section is \emph{computed} once rather than $R$ times; the
+$c \times R$ term is therefore an accounting and occupancy cost, not
+a recomputation cost. It is nonetheless real on three counts: hosted
+APIs meter input tokens per round (discounted under explicit prompt
+caching, not free); the cached section occupies key--value memory for
+the whole turn, competing with the rest of the context, which is
+material on constrained hardware; and carrying the section changes
+what the model sees on every round, so its effect on the trajectory
+is behavioral, not merely fiscal. Our own measurements separate these
+components: on the two fresh tasks of Section~\ref{sec:results-m1}
+the playbook adds ${\sim}1{,}100$ net input tokens with \emph{no}
+reliable change in wall time (Table~\ref{tab:m1}), which is the
+signature of a cached prefix --- while on the weaker executor of
+Section~\ref{sec:results-ornith} the same section lengthens
+trajectories and reduces success, which is the behavioral component
+and the one that hurts. Equation~\eqref{eq:amortization} prices the
+accounting term; the behavioral term is what the anti-correlation of
+Section~\ref{sec:disc-anticorr} describes.
+
 Let $R_{\mathrm{base}}$ and $T_{\mathrm{base}}$ be the mean rounds and
 mean input tokens per round of the memory-free agent on a task, and
 let $\Delta R = R_{\mathrm{base}} - R_{\mathrm{mem}}$ be the round
