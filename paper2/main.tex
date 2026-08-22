@@ -461,17 +461,36 @@ allowed: the sweep is a measurement, not a tuning loop.
 \subsection{Pre-registration and
 reproducibility}\label{sec:method-prereg}
 
-Both studies follow the project's git-only registration convention:
-the hypothesis document (research question, arms, metrics, decision
-criteria, and an honest prior) is committed to the repository
-before the sweep is launched, so the registration is verifiable
-against the git history rather than an external registry
-\todo{S4: decidir si el pre-registro se espeja en OSF como el Paper 1,
-y citar hashes/paths de los dos docs + JSONs en Data Availability}.
-All raw per-run JSON records ($140+140$ runs for Study~1 and its
-replication, 306 for Study~2, plus the diagnostic sessions of
-Section~\ref{sec:results-pm}) are committed alongside the analysis
-documents.
+The project follows a git-only registration convention: each
+hypothesis document --- research question, arms, metrics, decision
+criteria, and an honest prior --- is committed to the project's public
+repository before its sweep is launched, so that registration is
+verifiable against the repository's public history rather than
+self-asserted.
+
+We audited our own compliance, and it is asymmetric. The order is
+externally verifiable for \textbf{Study~2} (hypothesis committed
+2026-08-04, first data 2026-08-06) and for the \textbf{replication of
+Study~1} (hypothesis 2026-08-15, data 2026-08-16): any reader can
+check both with a single command against the public history. It is
+\emph{not} verifiable for the Study~1 pilot itself, whose protocol,
+hypothesis, decision record and data all entered the public
+repository in one commit after the pilot had run. Those documents
+carry earlier internal dates and were written before the sweep, but
+external precedence cannot be established from the record, and we do
+not ask the reader to take it on trust. We therefore report the
+pilot as \emph{exploratory} and rest this paper's confirmatory
+claims --- the same-prompt control, the promotion criterion met in
+letter and invalidated in premise, and the replication --- on the two
+studies whose registration is verifiable.
+
+The hypothesis documents are additionally archived at
+\todo{S4: DOI del depósito OSF}; that archive supplies permanence,
+not temporal precedence, which the public commit history is what
+establishes. All raw per-run JSON records ($140+140$ runs for
+Study~1 and its replication, 306 for Study~2, plus the diagnostic
+sessions of Section~\ref{sec:results-pm}) are committed alongside the
+analysis documents.
 
 % =====================================================================
 \section{Results}\label{sec:results}
