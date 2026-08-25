@@ -1,0 +1,1529 @@
+{
+ "seed": 20260825,
+ "files_scanned": 105,
+ "files_with_runs": 85,
+ "groups_with_replicates": 140,
+ "null_trials": 1602,
+ "false_acceptance_rate": {
+  "meta_harness": 0.24406991260923847,
+  "autodesign": 0.14357053682896379,
+  "hcl_delta1": 0.14357053682896379,
+  "hcl_delta3": 0.00749063670411985,
+  "braze_mcnemar": 0.0
+ },
+ "raw_accepts": {
+  "meta_harness": 391,
+  "autodesign": 230,
+  "hcl_delta1": 230,
+  "hcl_delta3": 12,
+  "braze_mcnemar": 0
+ },
+ "per_group": [
+  {
+   "file": "INVALID-sweep-gptoss-discriminating-2026-08-11-infra-timeout.json",
+   "backend": "ollama:gpt-oss:20b",
+   "tasks": 23,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
+   "backend": "ollama:gemma4:e4b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
+   "backend": "ollama:llama3.2:1b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
+   "backend": "ollama:llama3.2:1b+lead:ollama:gemma4:e4b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
+   "backend": "ollama:gemma4:e4b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
+   "backend": "ollama:llama3.2:1b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
+   "backend": "ollama:llama3.2:1b+lead:ollama:gemma4:e4b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.json",
+   "backend": "ollama:gemma4:e4b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.json",
+   "backend": "ollama:llama3.2:1b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.json",
+   "backend": "ollama:llama3.2:1b+lead:ollama:gemma4:e4b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-bfcl-anchor-2026-07-18.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 60,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3,
+    "hcl_delta3": 2
+   }
+  },
+  {
+   "file": "sweep-braze-composite-power-2026-07-13.json",
+   "backend": "ollama:llama3.2:1b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 10,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 3,
+    "hcl_delta1": 3,
+    "hcl_delta3": 1
+   }
+  },
+  {
+   "file": "sweep-capacity-hardware-2026-07-13.json",
+   "backend": "ollama:gemma4:12b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-capacity-hardware-2026-07-13.json",
+   "backend": "ollama:gpt-oss:20b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 1
+   }
+  },
+  {
+   "file": "sweep-capacity-hardware-2026-07-13.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 5,
+    "hcl_delta1": 5
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:gemma3:1b+ablate:constrained-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:gemma3:1b+ablate:prompt-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:gemma4:e2b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:gemma4:e2b+ablate:constrained-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:gemma4:e2b+ablate:prompt-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:llama3.2:1b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:llama3.2:1b+ablate:constrained-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:llama3.2:1b+ablate:prompt-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:qwen2.5:3b+ablate:constrained-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-2026-07-12.json",
+   "backend": "ollama:qwen2.5:3b+ablate:prompt-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-iteration-2026-07-12.json",
+   "backend": "ollama:gemma3:1b+ablate:constrained-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-constrained-decoding-iteration-2026-07-12.json",
+   "backend": "ollama:gemma4:e2b+ablate:constrained-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-iteration-2026-07-12.json",
+   "backend": "ollama:llama3.2:1b+ablate:constrained-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2
+   }
+  },
+  {
+   "file": "sweep-constrained-decoding-iteration-2026-07-12.json",
+   "backend": "ollama:qwen2.5:3b+ablate:constrained-tools",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:llama3.2:1b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:llama3.2:1b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:llama3.2:1b+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:llama3.2:1b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen2.5:7b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen2.5:7b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen2.5:7b+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen2.5:7b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen3.5-coder+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.partial-1b.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 5,
+    "hcl_delta1": 5,
+    "hcl_delta3": 2
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen2.5:7b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen2.5:7b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen2.5:7b+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen2.5:7b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen3.5-coder+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3,
+    "hcl_delta3": 1
+   }
+  },
+  {
+   "file": "sweep-curva-multiescala-2026-07-10.qwen.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-external-bare-lead-2026-07-13.json",
+   "backend": "external:bare-lead(ollama:llama3.2:1b+lead:ollama:gemma4:e4b)",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 1,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-external-bare-lead-power-2026-07-13.json",
+   "backend": "external:bare-lead(ollama:llama3.2:1b+lead:ollama:gemma4:e4b)",
+   "tasks": 19,
+   "reps": 10,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-gemma4-e4b-solo-2026-07-13.json",
+   "backend": "ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-gemma4-e4b-solo-power-2026-07-13.json",
+   "backend": "ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 10,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4
+   }
+  },
+  {
+   "file": "sweep-gemma4e4b-vs-gptoss20b-2026-07-13.json",
+   "backend": "ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2
+   }
+  },
+  {
+   "file": "sweep-gemma4e4b-vs-gptoss20b-2026-07-13.json",
+   "backend": "ollama:gpt-oss:20b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-gptoss-discriminating-2026-08-11-v2.json",
+   "backend": "ollama:gpt-oss:20b",
+   "tasks": 25,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2,
+    "hcl_delta3": 1
+   }
+  },
+  {
+   "file": "sweep-json-tax-edit-fence-2026-08-10.json",
+   "backend": "ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-json-tax-edit-fence-2026-08-10.json",
+   "backend": "ollama:gemma4:e4b+ablate:edit-fence",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 1
+   }
+  },
+  {
+   "file": "sweep-json-tax-edit-fence-2026-08-10.json",
+   "backend": "ollama:gpt-oss:20b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2
+   }
+  },
+  {
+   "file": "sweep-json-tax-edit-fence-2026-08-10.json",
+   "backend": "ollama:gpt-oss:20b+ablate:edit-fence",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-json-tax-edit-fence-2026-08-10.json",
+   "backend": "ollama:llama3.2:1b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-json-tax-edit-fence-2026-08-10.json",
+   "backend": "ollama:llama3.2:1b+ablate:edit-fence",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-json-tax-edit-fence-2026-08-10.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3
+   }
+  },
+  {
+   "file": "sweep-json-tax-edit-fence-2026-08-10.json",
+   "backend": "ollama:qwen2.5:3b+ablate:edit-fence",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-lead-3brazos-2026-07-10.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 5,
+    "hcl_delta1": 5
+   }
+  },
+  {
+   "file": "sweep-lead-3brazos-2026-07-10.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-lead-3brazos-2026-07-10.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b+ablate:lead-turns=0",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-lead-summary-ttc-2026-08-10.json",
+   "backend": "ollama:llama3.2:1b",
+   "tasks": 9,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-lead-summary-ttc-2026-08-10.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-lead-summary-ttc-2026-08-10.json",
+   "backend": "ollama:qwen2.5:3b+ablate:ttc=3",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-lead-summary-ttc-2026-08-10b.json",
+   "backend": "ollama:llama3.2:1b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 5,
+    "hcl_delta1": 5
+   }
+  },
+  {
+   "file": "sweep-lead-summary-ttc-2026-08-10b.json",
+   "backend": "ollama:llama3.2:1b+ablate:ttc=3",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-lead-summary-ttc-2026-08-10b.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:qwen2.5:7b+ablate:tactical-threshold=4",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-lead-summary-ttc-2026-08-10b.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:qwen2.5:7b+ablate:tactical-threshold=4;l",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2
+   }
+  },
+  {
+   "file": "sweep-matriz-4brazos-2026-07-10.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-matriz-4brazos-2026-07-10.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-matriz-4brazos-2026-07-10.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-matriz-4brazos-2026-07-10.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-nuevos-locales-2026-08-12.json",
+   "backend": "ollama:gpt-oss:20b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-nuevos-locales-2026-08-12.json",
+   "backend": "ollama:lfm2.5",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-nuevos-locales-2026-08-12.json",
+   "backend": "ollama:ornith:9b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-planlead-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-planlead-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-planlead-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b+ablate",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-planlead-2026-07-11.json",
+   "backend": "ollama:qwen3.5-coder+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-planlead-2026-07-11.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3
+   }
+  },
+  {
+   "file": "sweep-planlead-2026-07-11.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b+abl",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-planlead-taskslead-postfix-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-planlead-taskslead-postfix-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b+ablate",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-planner-ab-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-planner-ab-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 5,
+    "hcl_delta1": 5,
+    "hcl_delta3": 1
+   }
+  },
+  {
+   "file": "sweep-planner-ab-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+ablate:task-list",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4
+   }
+  },
+  {
+   "file": "sweep-planner-ab-2026-07-11.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-planner-ab-2026-07-11.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-planner-ab-2026-07-11.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+ablate:task-list",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-planner-ab-3b-tasklist-rerun-2026-07-11.json",
+   "backend": "ollama:qwen2.5:3b+plan:ollama:gemma4:e4b+ablate:task-list",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-pm-ab-baseline-2026-08-04.json",
+   "backend": "local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf",
+   "tasks": 34,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2,
+    "hcl_delta3": 2
+   }
+  },
+  {
+   "file": "sweep-pm-ab-empty-2026-08-04.json",
+   "backend": "local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf+ablate:proje",
+   "tasks": 34,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2
+   }
+  },
+  {
+   "file": "sweep-pm-ab-seeded-2026-08-04.json",
+   "backend": "local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf+ablate:proje",
+   "tasks": 34,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-rank-12b-v3.json",
+   "backend": "local:/home/franciscoparrao/models/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-rank-oss.json",
+   "backend": "local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-rerun-block1-1b-planlead-2026-07-19.json",
+   "backend": "ollama:llama3.2:1b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-rerun-block1-1b-planlead-2026-07-19.json",
+   "backend": "ollama:llama3.2:1b+plan:ollama:gemma4:e4b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-rerun-block2-coder-planner-2026-07-19.contaminated-breaker-probe.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-rerun-block2-coder-planner-2026-07-19.contaminated-breaker-probe.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-rerun-block2-coder-planner-2026-07-19.contaminated-breaker-probe.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+ablate:task-list",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-rerun-block2-coder-planner-2026-07-19.json",
+   "backend": "ollama:qwen3.5-coder",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-rerun-block2-coder-planner-2026-07-19.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-rerun-block2-coder-planner-2026-07-19.json",
+   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+ablate:task-list",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-sc-retention-gptoss-2026-08-16.json",
+   "backend": "ollama:gpt-oss:20b+ablate:tactical-window=8;tactical-threshold=10",
+   "tasks": 8,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-sc-retention-gptoss-r4-local-2026-08-17.json",
+   "backend": "local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf+ablate:no-sc",
+   "tasks": 8,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-sc-retention-gptoss-r4-local-2026-08-17.json",
+   "backend": "local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf+ablate:tacti",
+   "tasks": 8,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-sc-retention-ornith-2026-08-16.json",
+   "backend": "ollama:ornith:9b+ablate:no-sc-route;tactical-window=8;tactical-thresho",
+   "tasks": 8,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-sc-retention-ornith-2026-08-16.json",
+   "backend": "ollama:ornith:9b+ablate:tactical-window=8;tactical-threshold=10",
+   "tasks": 8,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 4,
+    "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-si2-lead-ab-2026-07-09.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-si2-lead-ab-2026-07-09.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-si2-lead-ab-2026-07-09.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:qwen3.5-coder",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-si2-lead-ab-h3-2026-07-09.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-si2-lead-ab-h3-2026-07-09.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-si2-lead-ab-h3-2026-07-09.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:qwen3.5-coder",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-stencil-off-v2.json",
+   "backend": "local:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-stencil-off-v3.json",
+   "backend": "local:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-stencil-on-v2.json",
+   "backend": "local:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-stencil-on-v3.json",
+   "backend": "local:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-verify-ab-n20.json",
+   "backend": "local:/home/franciscoparrao/models/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+   "tasks": 20,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2,
+    "hcl_delta3": 2
+   }
+  },
+  {
+   "file": "sweep-verify-ab-n20.json",
+   "backend": "local:qwen2.5:3b",
+   "tasks": 20,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  }
+ ]
+}
