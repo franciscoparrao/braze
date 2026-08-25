@@ -94,3 +94,62 @@ nuestro.
 5. Confirmar contra el texto completo que efectivamente no hacen
    inferencia (el abstract no la menciona, pero el claim del Paper 3
    no puede descansar en un abstract).
+
+---
+
+## Confirmación contra TEXTO COMPLETO (2026-08-25, tarde)
+
+PDFs descargados (`docs/2605.27922v1.pdf`, `docs/2607.04528v1.pdf`) y
+analizados. La conclusión del abstract se sostiene pero **con un matiz
+que corrige la versión anterior de esta nota**.
+
+### Harness-Bench (Peking University + Qiyuan Tech) — confirmado, y mejor de lo esperado para el Paper 3
+
+En 6.804 palabras: **cero** p-values, tests, intervalos, repeticiones,
+seeds o error bars. Pero usan "variance" 13 veces, y al definirla
+escriben:
+
+> *"we compute its average score under each configurable harness across
+> all tasks and report the variance of these harness-level averages.
+> This variance reflects cross-harness variation over the fixed task
+> suite, **not repeated-run stochastic variance**."*
+
+**Reconocen explícitamente la varianza estocástica entre corridas y
+declaran que su métrica no la captura.** Para el Paper 3 esto es más
+fuerte que un vacío: no hay que argumentar que el problema existe —
+el propio trabajo de mayor escala del campo (5.194 trayectorias) lo
+nombra y sigue sin medirlo. Es una cita, no una inferencia nuestra.
+
+### Belief Divergence — CORRECCIÓN: más cuidadosos de lo que dije
+
+Su protocolo es riguroso en el **diseño**: grilla de seis harnesses ×
+ocho tareas × cuatro horizontes K∈{1,3,5,8} × **tres semillas
+aleatorias**; LLM base, plantilla de elicitación, decodificación y
+esquema de creencias fijos; **semillas apareadas** entre
+configuraciones; 21 celdas pareadas por harness base; implementación
+con 77/77 tests unitarios.
+
+Lo que NO hacen es **inferencia**: ni un p-value, ni un intervalo, ni
+desviación estándar reportada. Comparan magnitudes.
+
+**El hueco preciso, entonces, no es "ignoran el ruido"** — a este
+equipo claramente le importa — **sino que controlan la varianza en el
+DISEÑO y no la propagan a la DECISIÓN**. Esa formulación es más justa
+y más difícil de refutar, y es la que debe ir al Paper 3. La versión
+anterior de esta nota los metía en el mismo saco; era injusto.
+
+### Consecuencia para el claim del Paper 3
+
+Queda una escala de tres niveles, que es mejor material que un
+veredicto binario:
+
+1. **Sin control ni inferencia**: Meta-Harness, AutoDesign (selección
+   por estimación puntual).
+2. **Control de diseño sin inferencia**: Belief Divergence (semillas
+   apareadas, condiciones fijas) y Harness-Bench (que además declara
+   la limitación).
+3. **Control + inferencia + criterio pre-registrado**: lo que este
+   proyecto aporta.
+
+Y HarnessOpt-Bench (held-out inaccesible) ocupa un cuarto lugar:
+protege contra sobreajuste de búsqueda, no contra ruido de medición.
