@@ -253,6 +253,22 @@ impl BackendSpec {
         models
     }
 
+    /// Si alguna mitad de este spec —executor, planner o lead— corre por
+    /// el `LocalBackend` (llama.cpp in-process).
+    ///
+    /// Decide si `RunMetadata::engine_version` aplica al sweep. La
+    /// alternativa —registrar el motor siempre que el binario traiga el
+    /// feature `local`— describe el BINARIO, no la corrida, y mete drift
+    /// falso: dos sweeps servidos idénticos, uno lanzado con un binario
+    /// compilado con `local` y otro sin, diferirían en un campo que no
+    /// tocó ni un token de la generación.
+    pub fn uses_local_backend(&self) -> bool {
+        let is_local = |spec: &BackendSpec| spec.provider == Provider::Local;
+        is_local(self)
+            || self.planner.as_deref().is_some_and(is_local)
+            || self.lead.as_deref().is_some_and(is_local)
+    }
+
     /// Whether the *executor* half of this spec is a local Ollama model —
     /// what `runner` keys the Ollama context budget on (N-36), mirroring
     /// how production keys it on `default_backend`.
@@ -762,6 +778,20 @@ pub struct AblationOverrides {
     /// SLM distractors) — the suffix still means what every suffix
     /// means: "this row diverges from the config default".
     pub enable_task_list: bool,
+    /// `+ablate:task-evidence` — ENABLES el gate de evidencia para cerrar
+    /// tareas de la lista C′.2 (checkers de Recuris, arXiv:2608.24876
+    /// § 2.2.3): `task_update(id, "done")` se rechaza sin una tool call
+    /// exitosa desde el último `done` aceptado. Misma excepción de
+    /// clave-que-habilita que `task-list`, y **depende de ella**: sin la
+    /// lista encendida no hay nada que cerrar, así que la fila útil del
+    /// A/B es `+ablate:task-list,task-evidence` contra `+ablate:task-list`.
+    pub enable_task_evidence: bool,
+    /// `+ablate:call-time-skills` — ENABLES la invocación call-time de
+    /// skills (Recuris § 2.2.2). Misma excepción de clave-que-habilita
+    /// que `task-list`. Requiere un registro de skills con `tools:` en
+    /// su frontmatter: sin eso la fila corre idéntica al control, que es
+    /// el modo de fallo silencioso a vigilar al armar el A/B.
+    pub enable_call_time_skills: bool,
     /// `+ablate:explore` — ENABLES the I.7 isolated exploration child
     /// loop (`docs/explorador-aislado-ab-design.md`). Same documented
     /// enabling-key exception as `enable_task_list`: the lever defaults
@@ -946,6 +976,8 @@ impl AblationOverrides {
                     out.verify_gate = Some(n);
                 }
                 "task-list" => out.enable_task_list = true,
+                "task-evidence" => out.enable_task_evidence = true,
+                "call-time-skills" => out.enable_call_time_skills = true,
                 "explore" => out.enable_exploration = true,
                 "editor" => out.enable_editor = true,
                 "edit-fence" => out.enable_edit_fence = true,
@@ -1058,6 +1090,12 @@ impl AblationOverrides {
         }
         if self.enable_task_list {
             parts.push("task-list".to_string());
+        }
+        if self.enable_task_evidence {
+            parts.push("task-evidence".to_string());
+        }
+        if self.enable_call_time_skills {
+            parts.push("call-time-skills".to_string());
         }
         if self.enable_exploration {
             parts.push("explore".to_string());
@@ -1267,6 +1305,45 @@ mod tests {
         assert_eq!(
             spec.display_name(&config()),
             "ollama:qwen2.5:3b+plan:openrouter:deepseek/deepseek-v4-flash"
+        );
+    }
+
+    /// El caso que motivó el predicado: un sweep 100% servido corrido con
+    /// un binario compilado con el feature `local` NO debe registrar
+    /// motor. Si lo hiciera, ese sweep driftearía contra uno idéntico
+    /// lanzado desde un binario sin el feature — una diferencia en la
+    /// build del harness, no en el experimento.
+    #[test]
+    fn a_served_spec_does_not_use_the_local_backend() {
+        assert!(!BackendSpec::parse("ollama:qwen2.5:3b")
+            .unwrap()
+            .uses_local_backend());
+        assert!(!BackendSpec::parse("openrouter:deepseek/deepseek-v4-flash")
+            .unwrap()
+            .uses_local_backend());
+    }
+
+    #[test]
+    fn a_local_executor_uses_the_local_backend() {
+        assert!(BackendSpec::parse("local:/home/x/models/gpt-oss-20b-MXFP4.gguf")
+            .unwrap()
+            .uses_local_backend());
+    }
+
+    /// El motor cuenta aunque solo lo use una mitad accesoria: un planner
+    /// o un lead local generan tokens que entran en la trayectoria, así
+    /// que un bump de bindings sí puede mover el resultado.
+    #[test]
+    fn a_local_planner_or_lead_counts_as_using_the_local_backend() {
+        assert!(
+            BackendSpec::parse("ollama:qwen2.5:3b+plan:local:/home/x/m.gguf")
+                .unwrap()
+                .uses_local_backend()
+        );
+        assert!(
+            BackendSpec::parse("ollama:qwen2.5:3b+lead:local:/home/x/m.gguf")
+                .unwrap()
+                .uses_local_backend()
         );
     }
 
@@ -1660,6 +1737,45 @@ mod tests {
         assert!(
             spec.display_name(&braze_config::Config::default())
                 .ends_with("+ablate:edit-fence")
+        );
+    }
+
+    /// El gate de evidencia depende de la lista: la fila útil del A/B es
+    /// `task-list,task-evidence` contra `task-list` sola, y ambas claves
+    /// tienen que sobrevivir juntas al display name para que el
+    /// `backend_specs` del sweep distinga los dos brazos.
+    #[test]
+    fn parses_task_evidence_alongside_the_task_list_key() {
+        let treated =
+            BackendSpec::parse("ollama:qwen2.5:3b+ablate:task-list;task-evidence").unwrap();
+        let ablation = treated.ablation();
+        assert!(ablation.enable_task_list);
+        assert!(ablation.enable_task_evidence);
+        let rendered = treated.display_name(&braze_config::Config::default());
+        assert!(
+            rendered.ends_with("+ablate:task-list;task-evidence"),
+            "got: {rendered}"
+        );
+
+        // El brazo de control: lista sin gate, y el display los separa.
+        let control = BackendSpec::parse("ollama:qwen2.5:3b+ablate:task-list").unwrap();
+        assert!(control.ablation().enable_task_list);
+        assert!(!control.ablation().enable_task_evidence);
+        assert_ne!(
+            rendered,
+            control.display_name(&braze_config::Config::default()),
+            "los dos brazos NO pueden colapsar al mismo nombre"
+        );
+    }
+
+    #[test]
+    fn parses_call_time_skills_enabling_key() {
+        let spec =
+            BackendSpec::parse("ollama:qwen2.5:3b+ablate:call-time-skills").unwrap();
+        assert!(spec.ablation().enable_call_time_skills);
+        assert!(
+            spec.display_name(&braze_config::Config::default())
+                .ends_with("+ablate:call-time-skills")
         );
     }
 

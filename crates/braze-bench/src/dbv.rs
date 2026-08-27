@@ -93,6 +93,16 @@ pub fn drift_report(reference: &RunMetadata, current: &RunMetadata) -> Vec<Drift
         format!("{:?}", reference.ollama_server_version),
         format!("{:?}", current.ollama_server_version),
     );
+    // El motor in-process es a un sweep `local:` lo que
+    // `ollama_server_version` es a uno servido: la capa que ejecuta el
+    // modelo. Un bump de `llama-cpp-2` (o pasar de build CPU a `+cuda`)
+    // cambia kernels y decodificación sin tocar modelo, seed ni sampling,
+    // así que es drift aunque todo lo demás coincida.
+    check(
+        "engine_version",
+        format!("{:?}", reference.engine_version),
+        format!("{:?}", current.engine_version),
+    );
     // Digests de modelo: comparar el conjunto {model → digest}. Un
     // re-pull cambia el digest de un modelo con el mismo nombre.
     let fmt_digests = |m: &RunMetadata| {
@@ -253,6 +263,7 @@ mod tests {
             suite_path: "suites/default.toml".to_string(),
             suite_fingerprint: "abc123".to_string(),
             braze_git_commit: Some("deadbeef".to_string()),
+            engine_version: Some("llama-cpp-2 0.1.152".to_string()),
             ollama_model_digests: vec![OllamaModelDigest {
                 model: "qwen2.5:3b".to_string(),
                 digest: Some("d1".to_string()),
@@ -311,6 +322,61 @@ mod tests {
         current.ollama_server_version = Some("0.30.7".to_string());
         let drift = drift_report(&reference, &current);
         assert!(drift.iter().any(|d| d.field == "ollama_server_version"));
+    }
+
+    /// El análogo in-process de `a_server_upgrade_is_drift`: llama.cpp
+    /// 0.3.0 (25-ago-2026) cambió kernels, split de tensores y cache KV.
+    /// Un sweep `local:` construido antes y otro después no son la misma
+    /// condición, y nada más en la metadata lo delata — el modelo, el
+    /// seed y el sampling son idénticos.
+    #[test]
+    fn an_engine_upgrade_is_drift() {
+        let reference = meta();
+        let mut current = meta();
+        current.engine_version = Some("llama-cpp-2 0.1.154".to_string());
+        let drift = drift_report(&reference, &current);
+        assert!(drift.iter().any(|d| d.field == "engine_version"));
+    }
+
+    /// Misma versión de bindings, kernels distintos: el build con offload
+    /// GPU no es el build CPU. Ya mordió en este proyecto (los dos
+    /// tropiezos por binarios desincronizados en Nitro, 21-jul).
+    #[test]
+    fn a_cpu_vs_cuda_build_is_drift() {
+        let reference = meta();
+        let mut current = meta();
+        current.engine_version = Some("llama-cpp-2 0.1.152+cuda".to_string());
+        let drift = drift_report(&reference, &current);
+        assert!(drift.iter().any(|d| d.field == "engine_version"));
+    }
+
+    /// Un sweep pre-`engine_version` (campo ausente => `None`) contra uno
+    /// nuevo del LocalBackend: el ref no dice con qué motor corrió, así
+    /// que la comparación no está justificada y debe marcarse, no
+    /// asumirse equivalente.
+    #[test]
+    fn a_reference_without_engine_version_is_drift_against_a_local_run() {
+        let reference = RunMetadata {
+            engine_version: None,
+            ..meta()
+        };
+        let drift = drift_report(&reference, &meta());
+        assert!(drift.iter().any(|d| d.field == "engine_version"));
+    }
+
+    /// Dos sweeps servidos (sin LocalBackend) comparten `None` y no deben
+    /// inventar drift por un campo que no aplica a ninguno de los dos.
+    #[test]
+    fn two_non_local_runs_do_not_drift_on_engine_version() {
+        let a = RunMetadata {
+            engine_version: None,
+            ..meta()
+        };
+        let b = RunMetadata {
+            engine_version: None,
+            ..meta()
+        };
+        assert!(drift_report(&a, &b).is_empty());
     }
 
     #[test]

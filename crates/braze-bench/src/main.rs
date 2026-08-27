@@ -275,13 +275,15 @@ async fn run() -> Result<(), BenchError> {
     // (commits de integración aterrizando en paralelo en el mismo
     // árbol) — la metadata debe describir lo que corrió, no el estado
     // del repo al momento de terminar. Aquel sweep quedó registrado
-    // con un commit varios pasos posterior al del binario. Caveat que
-    // esta captura no cierra: el binario pudo compilarse en un commit
-    // anterior al HEAD del arranque — cerrar eso del todo requeriría
-    // embeber el commit en tiempo de build (build.rs), anotado como
-    // mejora futura, no hecho aquí.
+    // con un commit varios pasos posterior al del binario. Aquel caveat
+    // —"el binario pudo compilarse en un commit anterior al HEAD del
+    // arranque"— ya está cerrado: el commit se embebe en tiempo de build
+    // (`build.rs`) y `resolve_git_commit` lo prefiere sobre el HEAD del
+    // cwd, así que la metadata describe el ejecutable y no el directorio
+    // desde el que se lo lanzó. Eso arregla además el caso Nitro, donde
+    // `~/braze` es una copia sin `.git` y el campo salía `null`.
     let suite_fingerprint = metadata::fingerprint_bytes(&std::fs::read(&cli.suite)?);
-    let braze_git_commit = metadata::current_git_commit().await;
+    let braze_git_commit = metadata::resolve_git_commit().await;
 
     // Opt-in transcript preservation (Issue 4,
     // docs/emse-review-2026-07-13-checklist.md) — was an uncommitted local
@@ -868,6 +870,20 @@ async fn run() -> Result<(), BenchError> {
             suite_path: cli.suite.display().to_string(),
             suite_fingerprint,
             braze_git_commit,
+            // Contraparte de `ollama_server_version` para el camino
+            // in-process: con llama.cpp linkeado en el binario no hay
+            // servidor al que preguntarle la versión, así que viene
+            // embebida del build. Misma postura condicional que el
+            // `ollama_server_version` de abajo — solo cuando ALGÚN
+            // backend del sweep corre de verdad por el LocalBackend, no
+            // por el mero hecho de que el binario traiga el feature: lo
+            // segundo describe el binario y no la corrida, y haría
+            // driftear dos sweeps servidos idénticos.
+            engine_version: specs
+                .iter()
+                .any(|(_, spec)| spec.uses_local_backend())
+                .then(braze_model::local_engine_version)
+                .flatten(),
             ollama_model_digests: metadata::collect_ollama_model_digests(
                 &config.ollama_base_url,
                 &ollama_models,

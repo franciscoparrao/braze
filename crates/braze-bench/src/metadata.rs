@@ -36,10 +36,42 @@ pub struct RunMetadata {
     /// changed between two runs claiming to use it", not a security
     /// primitive; collision resistance isn't the point here.
     pub suite_fingerprint: String,
-    /// `git rev-parse HEAD` of the working directory the sweep ran from,
-    /// if available — `None` outside a git checkout (e.g. a source
-    /// tarball) or if `git` itself isn't on `PATH`.
+    /// El commit de `braze` que construyó el binario del bench, con
+    /// sufijo `-dirty` si el árbol tenía cambios sin commitear al
+    /// compilar.
+    ///
+    /// Se embebe en tiempo de build (`build.rs`) y solo cae a
+    /// `git rev-parse HEAD` del cwd si el build-time no está disponible —
+    /// ver [`resolve_git_commit`]. Antes se capturaba SOLO en runtime, lo
+    /// que dejaba sin procedencia todo sweep corrido desde un directorio
+    /// que no fuera un checkout git: en Nitro, `~/braze` es una copia sin
+    /// `.git`, así que el campo salía `null` en los sweeps del nodo donde
+    /// corre el grueso de los experimentos (verificado en el A/B de
+    /// weight-quant, 2026-08). `None` solo si ambos caminos fallan.
     pub braze_git_commit: Option<String>,
+    /// Identidad del motor de inferencia in-process (`llama-cpp-2 <ver>`,
+    /// más `+cuda` en el build con offload GPU) cuando el sweep corrió
+    /// algún backend `local:`; `None` si no.
+    ///
+    /// La condición es que ALGUNA mitad de algún spec use el
+    /// `LocalBackend` —no que el binario traiga el feature `local`
+    /// compilado— porque el campo describe la corrida, no el ejecutable:
+    /// un sweep enteramente servido no debe registrar (ni driftear por)
+    /// un motor que nunca generó un token. Ver
+    /// `BackendSpec::uses_local_backend`.
+    ///
+    /// Contraparte de `ollama_server_version` para el `LocalBackend`: ese
+    /// campo identifica la capa de servicio cuando el modelo vive detrás
+    /// de un servidor, pero con llama.cpp linkeado in-process no hay
+    /// servidor al que preguntarle — la versión solo existe en el binario.
+    /// Sin este campo, un sweep `local:` sub-especificaba su propio motor,
+    /// que es la variable que más se mueve del stack: llama.cpp cambia
+    /// kernels, cuantización y decodificación entre releases, así que dos
+    /// corridas con bindings distintos no son la misma condición aunque
+    /// coincidan modelo, seed y sampling. Omitido del JSON cuando es
+    /// `None`, igual que el resto de campos best-effort.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_version: Option<String>,
     /// One entry per distinct Ollama model referenced by any backend spec
     /// in this sweep (executor, planner, and/or lead), resolved via
     /// `braze_model::ollama_model_digest`. Empty when the sweep touches
@@ -132,10 +164,43 @@ pub fn fingerprint_bytes(bytes: &[u8]) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-/// Best-effort `git rev-parse HEAD` — `None` on any failure (not a git
-/// checkout, `git` missing, detached weirdness), never propagated as an
-/// error: metadata is a diagnostic nicety, not something worth failing a
-/// sweep over.
+/// El commit embebido al compilar el binario (`build.rs`), o `None` si el
+/// build no pudo determinarlo (compilado desde un tarball, `git` ausente).
+///
+/// Es la fuente PREFERIDA de procedencia del harness porque describe el
+/// ejecutable, no el directorio desde el que se lo lanzó — ver
+/// [`resolve_git_commit`].
+pub fn build_git_commit() -> Option<String> {
+    let commit = env!("BRAZE_BUILD_GIT_COMMIT");
+    (!commit.is_empty()).then(|| commit.to_string())
+}
+
+/// Procedencia del harness: el commit de build-time y, solo si ese no
+/// existe, el `git rev-parse HEAD` del cwd.
+///
+/// La precedencia importa y no es arbitraria. El commit de build-time
+/// describe *qué código corrió*; el de runtime describe *desde dónde se
+/// lanzó*, y los dos se separan en los dos casos que se dan en la
+/// práctica: un binario que no se recompiló tras avanzar HEAD (el runtime
+/// atribuye el sweep a código que no corrió), y un binario copiado a la
+/// máquina de benchmark sin el árbol de fuentes (el runtime no devuelve
+/// nada). El fallback a runtime conserva el comportamiento anterior para
+/// el caso en que el binario venga de un tarball pero se corra dentro de
+/// un checkout.
+pub async fn resolve_git_commit() -> Option<String> {
+    match build_git_commit() {
+        Some(commit) => Some(commit),
+        None => current_git_commit().await,
+    }
+}
+
+/// Best-effort `git rev-parse HEAD` of the working directory — `None` on
+/// any failure (not a git checkout, `git` missing, detached weirdness),
+/// never propagated as an error: metadata is a diagnostic nicety, not
+/// something worth failing a sweep over.
+///
+/// Fallback de [`resolve_git_commit`]; preferir esa función, que sabe
+/// distinguir el commit del binario del commit del cwd.
 pub async fn current_git_commit() -> Option<String> {
     let output = tokio::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -216,6 +281,37 @@ mod tests {
         let a = fingerprint_bytes(b"hola mundo");
         let b = fingerprint_bytes(b"chau mundo");
         assert_ne!(a, b);
+    }
+
+    /// El commit embebido debe estar bien formado: SHA-1 hex completo,
+    /// opcionalmente con el sufijo `-dirty`. Un valor mal formado acá es
+    /// peor que `None` — parece procedencia sin serlo.
+    #[test]
+    fn build_git_commit_is_well_formed_when_present() {
+        let Some(commit) = build_git_commit() else {
+            return; // build fuera de un checkout git — caso legítimo
+        };
+        let sha = commit.strip_suffix("-dirty").unwrap_or(&commit);
+        assert_eq!(sha.len(), 40, "expected a full SHA-1 hex string: {commit}");
+        assert!(
+            sha.chars().all(|c| c.is_ascii_hexdigit()),
+            "got: {commit}"
+        );
+    }
+
+    /// La razón de ser del cambio: compilado dentro de este workspace, la
+    /// procedencia del harness NO puede depender de que el cwd del sweep
+    /// sea un checkout git — ese era exactamente el modo de falla en Nitro
+    /// (`~/braze` es una copia sin `.git` y el campo salía `null`).
+    #[tokio::test]
+    async fn resolve_git_commit_prefers_the_embedded_build_commit() {
+        if let Some(embedded) = build_git_commit() {
+            assert_eq!(
+                resolve_git_commit().await,
+                Some(embedded),
+                "el build-time debe ganarle al runtime, no al revés"
+            );
+        }
     }
 
     #[tokio::test]

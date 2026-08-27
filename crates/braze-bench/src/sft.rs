@@ -243,6 +243,36 @@ pub fn events_to_messages(events: &[AgentEvent]) -> Conversion {
     out
 }
 
+/// Procedencia del SWEEP — idéntica en todas las líneas del JSONL, a
+/// diferencia del resto de [`LineMetadata`], que varía por fila.
+///
+/// Viaja agrupada y no como parámetros sueltos por una razón concreta:
+/// son tres `Option<&str>` que el compilador no puede distinguir entre
+/// sí. Pasados posicionalmente, intercambiar el commit con la versión del
+/// motor compila sin una queja y produce un dataset de entrenamiento mal
+/// etiquetado — el modo de falla exacto contra el que existe este campo.
+///
+/// Se aplana en el JSON (`serde(flatten)`), así que las líneas conservan
+/// la misma forma que antes de que este struct existiera.
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct Provenance<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suite_fingerprint: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub braze_git_commit: Option<&'a str>,
+    /// El motor de inferencia que GENERÓ estas trayectorias
+    /// (`llama-cpp-2 <ver>[+cuda]`), cuando el sweep vino de un binario
+    /// con el feature `local`.
+    ///
+    /// Para un dataset de fine-tuning no es un adorno: las trayectorias
+    /// son el producto del motor tanto como del modelo, y llama.cpp
+    /// cambia cuantización y decodificación entre versiones. Un conjunto
+    /// de entrenamiento que mezcla motores sin registrarlo no se puede
+    /// particionar después, porque la variable ya no está en los datos.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine_version: Option<&'a str>,
+}
+
 /// Metadata de procedencia por línea del JSONL — suficiente para volver
 /// de un ejemplo de entrenamiento a la fila exacta del sweep que lo
 /// produjo (y para filtrar río abajo sin re-abrir el results.json).
@@ -264,10 +294,8 @@ struct LineMetadata<'a> {
     lossy: bool,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     lossy_events: BTreeMap<&'static str, u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    suite_fingerprint: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    braze_git_commit: Option<&'a str>,
+    #[serde(flatten)]
+    provenance: Provenance<'a>,
 }
 
 #[derive(Debug, Serialize)]
@@ -296,8 +324,7 @@ pub fn export_rows(
     sessions_root: &std::path::Path,
     include_failed: bool,
     backend_filter: &[String],
-    suite_fingerprint: Option<&str>,
-    braze_git_commit: Option<&str>,
+    provenance: Provenance<'_>,
     writer: &mut dyn std::io::Write,
 ) -> Result<ExportSummary, BenchError> {
     let mut summary = ExportSummary::default();
@@ -350,8 +377,7 @@ pub fn export_rows(
                 compaction_count: row.compaction_count,
                 lossy: !conversion.lossy_events.is_empty(),
                 lossy_events: conversion.lossy_events,
-                suite_fingerprint,
-                braze_git_commit,
+                provenance,
             },
         };
         let json = serde_json::to_string(&line)
@@ -567,8 +593,15 @@ pub fn run(cli: ExportCli) -> Result<(), BenchError> {
         &cli.sessions,
         cli.include_failed,
         &cli.backends,
-        Some(file.metadata.suite_fingerprint.as_str()),
-        file.metadata.braze_git_commit.as_deref(),
+        // La procedencia se lee del results.json, no se re-deriva: el
+        // JSONL debe describir el sweep que generó las trayectorias, no
+        // el binario que corre el export (que puede ser otro, más nuevo,
+        // en otra máquina).
+        Provenance {
+            suite_fingerprint: Some(file.metadata.suite_fingerprint.as_str()),
+            braze_git_commit: file.metadata.braze_git_commit.as_deref(),
+            engine_version: file.metadata.engine_version.as_deref(),
+        },
         &mut writer,
     )?;
     writer
@@ -856,8 +889,11 @@ mod tests {
             &root,
             false,
             &[expert.to_string()],
-            Some("fp123"),
-            Some("commitabc"),
+            Provenance {
+                suite_fingerprint: Some("fp123"),
+                braze_git_commit: Some("commitabc"),
+                engine_version: Some("llama-cpp-2 0.1.152"),
+            },
             &mut out,
         )
         .expect("export");
@@ -891,6 +927,10 @@ mod tests {
         assert_eq!(parsed["metadata"]["lossy"], false);
         assert_eq!(parsed["metadata"]["suite_fingerprint"], "fp123");
         assert_eq!(parsed["metadata"]["braze_git_commit"], "commitabc");
+        // `flatten` mantiene la procedencia al mismo nivel que el resto de
+        // la metadata: el struct agrupa los campos en Rust sin anidarlos
+        // en el JSON, así que los consumidores del JSONL no cambian.
+        assert_eq!(parsed["metadata"]["engine_version"], "llama-cpp-2 0.1.152");
         assert_eq!(parsed["messages"][0]["role"], "user");
         assert_eq!(parsed["messages"][1]["role"], "assistant");
         assert_eq!(
@@ -899,6 +939,46 @@ mod tests {
         );
         assert_eq!(parsed["messages"][2]["role"], "tool");
         assert_eq!(parsed["messages"][3]["content"], "11900");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Un sweep servido (Ollama, OpenRouter, Anthropic) no tiene motor
+    /// in-process, y ahí el campo debe AUSENTARSE del JSONL en vez de
+    /// aparecer nulo o vacío: al concatenar exports de varias fuentes en
+    /// un set de entrenamiento, un `engine_version: null` es
+    /// indistinguible de "corrió local y no se registró", que es
+    /// justamente la ambigüedad que este campo vino a cerrar.
+    #[test]
+    fn a_served_sweep_omits_engine_version_instead_of_emitting_null() {
+        let root = temp_root("no-engine-version");
+        let backend = "ollama:qwen2.5:3b";
+        preserved_session(&root, backend, "t", 0, &[user("hola"), assistant_text("chao")]);
+
+        let rows = vec![row(backend, "t", 0, true)];
+        let mut out = Vec::new();
+        export_rows(
+            &rows,
+            &root,
+            false,
+            &[],
+            Provenance {
+                suite_fingerprint: Some("fp123"),
+                braze_git_commit: Some("commitabc"),
+                engine_version: None,
+            },
+            &mut out,
+        )
+        .expect("export");
+
+        let text = String::from_utf8(out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(parsed["metadata"]["braze_git_commit"], "commitabc");
+        assert!(
+            parsed["metadata"].get("engine_version").is_none(),
+            "el campo debe estar ausente, no nulo: {}",
+            parsed["metadata"]
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -914,7 +994,7 @@ mod tests {
         let rows = vec![row(backend, "t", 0, false)];
         let mut out = Vec::new();
         let summary =
-            export_rows(&rows, &root, true, &[], None, None, &mut out).expect("export");
+            export_rows(&rows, &root, true, &[], Provenance::default(), &mut out).expect("export");
 
         assert_eq!(summary.exported, 1);
         assert_eq!(summary.skipped_not_passed, 0);
@@ -973,7 +1053,7 @@ mod tests {
 
         let rows = vec![row_with_key(backend, "t", 0, true, &["shell_exec"], 1)];
         let mut out = Vec::new();
-        let summary = export_rows(&rows, &root, false, &[], None, None, &mut out).expect("export");
+        let summary = export_rows(&rows, &root, false, &[], Provenance::default(), &mut out).expect("export");
 
         assert_eq!(summary.exported, 1);
         assert_eq!(summary.missing_sessions, 0);
@@ -1007,7 +1087,7 @@ mod tests {
 
         let rows = vec![row_with_key(backend, "t", 0, true, &["shell_exec"], 1)];
         let mut out = Vec::new();
-        let summary = export_rows(&rows, &root, false, &[], None, None, &mut out).expect("export");
+        let summary = export_rows(&rows, &root, false, &[], Provenance::default(), &mut out).expect("export");
 
         assert_eq!(summary.exported, 0);
         assert_eq!(summary.missing_sessions, 1);
@@ -1048,7 +1128,7 @@ mod tests {
 
         let rows = vec![row_with_key(backend, "t", 0, true, &["shell_exec"], 1)];
         let mut out = Vec::new();
-        let result = export_rows(&rows, &root, false, &[], None, None, &mut out);
+        let result = export_rows(&rows, &root, false, &[], Provenance::default(), &mut out);
         assert!(result.is_err(), "contenido distinto con la misma clave debe ser error");
 
         let _ = std::fs::remove_dir_all(&root);
@@ -1076,7 +1156,7 @@ mod tests {
 
         let rows = vec![row_with_key(backend, "t", 0, true, &["shell_exec"], 1)];
         let mut out = Vec::new();
-        let summary = export_rows(&rows, &root, false, &[], None, None, &mut out).expect("export");
+        let summary = export_rows(&rows, &root, false, &[], Provenance::default(), &mut out).expect("export");
 
         assert_eq!(summary.exported, 1);
         let _ = std::fs::remove_dir_all(&root);
@@ -1101,7 +1181,7 @@ mod tests {
 
         let rows = vec![row_with_key(backend, "t", 0, true, &["shell_exec"], 1)];
         let mut out = Vec::new();
-        let summary = export_rows(&rows, &root, false, &[], None, None, &mut out).expect("export");
+        let summary = export_rows(&rows, &root, false, &[], Provenance::default(), &mut out).expect("export");
 
         assert_eq!(summary.exported, 1);
         assert_eq!(String::from_utf8(out).unwrap().lines().count(), 1);
