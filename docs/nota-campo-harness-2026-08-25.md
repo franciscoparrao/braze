@@ -39,7 +39,26 @@ Ninguno estaba en el bib del proyecto.
 
 1. Al bib del follow-up: `ursekar2026harnessopt`, y tras leerlos, los
    otros cinco. `/verify-refs` en su momento.
-2. **Leer Harness-Bench y belief-divergence en profundidad** — son los
-   dos que pueden solapar con el Paper 1.
-3. Preparar el párrafo de Related Work actualizado para la eventual
-   revisión del Paper 1 (no se toca el manuscrito congelado).
+2. ~~**Leer Harness-Bench y belief-divergence en profundidad**~~ —
+   HECHO 2026-08-25, con corrección a favor de Belief Divergence
+   (controlan en el diseño; no propagan a la decisión). Ver
+   `nota-lectura-harnessbench-belief-2026-08-25.md`.
+3. ~~Preparar el párrafo de Related Work~~ — **HECHO 2026-08-27**,
+   redactado en LaTeX al final de esa misma nota. Pendiente: crear
+   las claves de bib y pasarlas por `/verify-refs` antes de usarlo.
+
+## Adenda 2026-08-27: el mapeo se amplía más allá de los papers
+
+Dos trabajos que **no son papers de evaluación** y que igual caen del
+lado del hueco: **Apache Maka** (workspace de agentes en incubación
+ASF, con un harness de eval declarativo casi isomorfo a `braze-bench`
+y sin control de varianza documentado) y **Cordis** (formalismo de
+composabilidad dinámica de DeepSeek-AI + Peking University, 92 pp.,
+que motiva con *self-evolving agent harnesses* y no mide ninguno).
+
+Consecuencia para el Paper 3: el hueco no es de la literatura de
+benchmarks sino del campo entero, y se formula mejor por **tres
+poblaciones** (papers de evaluación / infraestructura en producción /
+formalismos de arquitectura) que por una sola escala. Detalle,
+matices y qué NO hacer con esto en
+`docs/nota-lectura-maka-cordis-2026-08-27.md`.

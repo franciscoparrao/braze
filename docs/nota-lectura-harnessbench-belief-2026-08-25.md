@@ -153,3 +153,61 @@ veredicto binario:
 
 Y HarnessOpt-Bench (held-out inaccesible) ocupa un cuarto lugar:
 protege contra sobreajuste de búsqueda, no contra ruido de medición.
+
+---
+
+## El párrafo de Related Work, redactado (2026-08-27)
+
+Cierra la acción 2 de esta nota y la 3 de
+`nota-campo-harness-2026-08-25.md`. **No se toca el manuscrito
+congelado**: esto se guarda para la eventual revisión del Paper 1, o
+para la respuesta a un revisor que pregunte por estos trabajos.
+
+Escrito en el registro del § Related Work existente (`paper/main.tex`,
+l. 288): `\paragraph{}` temático, cita con números concretos, y cierre
+que dice qué hace braze distinto. Va después de
+`\paragraph{Agent-computer interfaces.}`, que es donde encaja
+temáticamente.
+
+```latex
+\paragraph{Concurrent work on harness effects.} Two contemporaneous
+studies measure harness effects directly and reach the framing of
+this paper independently. Harness-Bench \citep{yao2026harnessbench}
+runs 5{,}194 execution trajectories over 106 sandboxed tasks across
+model$\times$harness pairings and argues that agent capability
+``should be reported at the model-harness configuration level rather
+than attributed to the base model.'' Belief-divergence work
+\citep{yi2026belief} states the same premise as ours in as many
+words---``harness design is an experimental variable in agent
+evaluation, not an implementation detail''---and operationalizes it
+as a nine-dimension belief rollout over a grid of six harnesses,
+eight tasks, four horizons and three paired seeds; its central
+finding, that terminal success can be preserved while the beliefs
+guiding subsequent decisions shift substantially, is the phenomenon
+our dual functional/strict metric detects with two booleans and a
+compiler oracle instead of belief elicitation. Both are descriptive
+where this paper is causal: they characterize how much outcomes vary
+across configurations, whereas we vary one lever at a time against a
+pre-registered adoption criterion, report paired exact tests with
+multiplicity correction against a measured in-sweep noise floor, and
+work in the local small-model regime where several of these levers
+change sign rather than magnitude. Notably, Harness-Bench defines its
+variance as cross-harness variation over a fixed task suite and
+states that this is ``not repeated-run stochastic variance''---the
+distinction our noise floor is built to measure.
+```
+
+**Notas de uso.**
+
+1. Las dos claves de bib (`yao2026harnessbench`, `yi2026belief`) hay
+   que crearlas y pasarlas por `/verify-refs` antes de usar el
+   párrafo. No están en `refs.bib` del Paper 1.
+2. La última oración es la que más trabaja: convierte la cita de un
+   competidor en apoyo del Paper 3 sin sacar los pies del Paper 1.
+3. **Postura si un revisor pregunta por qué no estaban citados**: son
+   de mayo y julio de 2026, el manuscrito se congeló el 29-jul, y la
+   respuesta honesta es que se incorporan ahora. No inventar que se
+   conocían.
+4. Si el manuscrito exige versión anónima, el self-cite del Paper 1
+   pasa a tercera persona pero este párrafo no se toca (no se
+   auto-cita).
