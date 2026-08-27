@@ -11,10 +11,15 @@
 % harness engineering con CompInt/AutoDesign/LoopsBench, nulos y
 % pre-registro), Threats (por tipo de validez), Conclusion, y refs.bib
 % activo (18 entradas; las nuevas PENDIENTES de /verify-refs — ver el
-% header de refs.bib). TODOs restantes, todos S4: grants/thanks,
-% declaraciones EMSE, decisión OSF (§ pre-registro), y la forward
-% reference SC-retention de la Discussion (convertir en párrafo si el
-% sweep corre antes del freeze). S4 = /verify-refs, /paper-style,
+% header de refs.bib). TODOs restantes (2026-08-26): SOLO dos, ambos
+% esperando un input del autor — el DOI del depósito OSF (§ pre-registro,
+% l. ~509) y el tag de submission (Data availability, l. ~1002).
+% Ya resueltos: grants/thanks (DICYT 062619MC_POSTDOC), declaraciones
+% EMSE (§ Declarations completa), y la forward reference SC-retention de
+% la Discussion — el sweep SÍ cerró (2026-08-17, veredicto NO ADOPTAR en
+% docs/hypothesis-2026-08-13-sc-retention.md) y § 6.4 ahora reporta el
+% piloto en vez de decir que no había resultados.
+% S4 = /verify-refs, /paper-style,
 % /paper-review-emse, /paper-match (decisión formal de venue),
 % /paper-submit. NO se corre ningún sweep nuevo para este paper.
 
@@ -863,8 +868,16 @@ scoped out deliberately: session-scoped constraints (user rules that
 must survive context compaction) are the limit case of durable memory
 whose value is \emph{compliance} rather than round savings.
 Equation~\eqref{eq:amortization} does not price them, and a separate
-pre-registered experiment in the same project addresses them; its
-results were not yet available at the time of writing.
+pre-registered experiment in the same project addresses them. It has
+since closed without adopting the lever: on the 9B executor a
+durable-constraint route solved $5/40$ constraint tasks against
+$0/40$ for the control---every discordant pair favoring the route, at
+$\sim$5\% \emph{lower} token cost---but $p = 0.0625$ at that sample
+size, and on the 20B executor both arms floored at $0/40$, leaving
+the lever unmeasurable there rather than absent. Neither outcome is
+something our condition can price: compliance value arrived at
+negative context cost, and a two-armed floor reports on the benchmark
+rather than on the treatment.
 
 \subsection{Relation to compaction loss and meta-harness
 optimization}\label{sec:disc-related}
