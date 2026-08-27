@@ -343,6 +343,8 @@ pub struct Engine {
     /// III): registry de skills descubiertas al arranque. `None` (el
     /// default y el bench siempre) = feature apagada.
     skill_registry: Option<std::sync::Arc<braze_skills::SkillRegistry>>,
+    /// Recuris § 2.2.2 — ver [`Engine::with_call_time_skills`].
+    call_time_skills_enabled: bool,
     /// Skills ya cargadas esta sesión — sus addenda se re-anexan al
     /// system prompt de cada request (reconstruidos del registry, nunca
     /// persistidos como conversación).
@@ -491,6 +493,7 @@ impl Engine {
             turn_did_edit: std::sync::atomic::AtomicBool::new(false),
             turn_attempted_edit: std::sync::atomic::AtomicBool::new(false),
             skill_registry: None,
+            call_time_skills_enabled: false,
             loaded_skills: std::sync::Mutex::new(Vec::new()),
             agents_md_root: None,
             loaded_agents_md: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -777,6 +780,55 @@ impl Engine {
     /// `+ablate:task-list`. Chainable.
     pub fn with_task_list_enabled(mut self, enabled: bool) -> Self {
         self.task_list_enabled = enabled;
+        self
+    }
+
+    /// Exige evidencia de ejecución para cerrar una tarea de la lista
+    /// C′.2: `task_update(id, "done")` se rechaza salvo que alguna tool
+    /// call del registry haya terminado sin error desde el último `done`
+    /// aceptado.
+    ///
+    /// Es la traducción barata de los *checkers* de Recuris
+    /// (arXiv:2608.24876, § 2.2.3), donde un goal solo avanza cuando la
+    /// observación del entorno sostiene el cambio de estado en vez del
+    /// claim del modelo. El síntoma que ataca ya está documentado acá:
+    /// v8 K-6 registró que un 3B re-marca `done` con frecuencia, y la
+    /// métrica dual (`[RouteMiss]`, 2026-08-12) mide la versión de esto
+    /// que sí llega al resultado.
+    ///
+    /// Off by default; `Config::enable_task_evidence` /
+    /// `+ablate:task-evidence`. Sin `with_task_list_enabled` no hace
+    /// nada — no hay lista que cerrar. Chainable.
+    pub fn with_task_evidence_required(self, required: bool) -> Self {
+        if let Ok(mut list) = self.task_list.lock() {
+            list.set_require_evidence(required);
+        }
+        self
+    }
+
+    /// Invocación *call-time* de skills (Recuris, arXiv:2608.24876
+    /// § 2.2.2): cuando el modelo redacta una tool call para la que
+    /// alguna skill se declara guía (frontmatter `tools:`), la call **no
+    /// se ejecuta**. Vuelve un resultado sintético de no-ejecución, la
+    /// skill entra al system prompt, y el modelo re-emite la acción ya
+    /// con la guía delante.
+    ///
+    /// El cambio respecto de D′ no es *qué* se inyecta sino *cuándo*: la
+    /// guía llega antes de que la acción ocurra en vez de después de que
+    /// falle, y solo para las herramientas que el turno realmente usa —
+    /// una skill que nadie invoca nunca se paga. Es el lado barato de la
+    /// condición de amortización del Paper 2: la Tabla 12 de Recuris
+    /// mide que tener la biblioteca entera en contexto cuesta 3.111
+    /// tokens más en el primer call, rinde 18 puntos peor y sale 46% más
+    /// caro por éxito que este esquema.
+    ///
+    /// Cada skill intercepta **una sola vez por sesión**: una vez
+    /// cargada, las llamadas siguientes a esa herramienta se ejecutan
+    /// normalmente. Off by default; `Config::enable_call_time_skills` /
+    /// `+ablate:call-time-skills`. Sin registro de skills no hace nada.
+    /// Chainable.
+    pub fn with_call_time_skills(mut self, enabled: bool) -> Self {
+        self.call_time_skills_enabled = enabled;
         self
     }
 

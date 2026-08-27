@@ -528,6 +528,10 @@ pub async fn run_task(
     // C′.2: la fila puede prender la task list aunque config la tenga
     // off (default) — el brazo planner→tasks del A/B pre-registrado.
     .with_task_list_enabled(config.enable_task_list || ablation.enable_task_list)
+    // Gate de evidencia para cerrar tareas (checkers de Recuris). Sin la
+    // lista encendida no tiene efecto — ver la doc de la clave.
+    .with_task_evidence_required(config.enable_task_evidence || ablation.enable_task_evidence)
+    .with_call_time_skills(config.enable_call_time_skills || ablation.enable_call_time_skills)
     .with_exploration_enabled(config.enable_exploration || ablation.enable_exploration)
     .with_editor_enabled(config.enable_editor || ablation.enable_editor)
     // A/B del impuesto JSON (docs/hypothesis-2026-08-10-json-tax-edit-fence.md):

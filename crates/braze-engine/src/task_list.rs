@@ -64,6 +64,20 @@ pub(crate) struct TaskEntry {
 #[derive(Debug, Default)]
 pub(crate) struct TaskList {
     entries: Vec<TaskEntry>,
+    /// Cuántas tool calls REALES han terminado sin error en este turno.
+    /// Solo cuenta el camino del registry: las dos tools de esta lista
+    /// se manejan inline y nunca llegan al punto que alimenta este
+    /// contador, así que un `task_add` no puede ser su propia evidencia.
+    successful_tool_calls: usize,
+    /// Cuánta de esa evidencia ya fue consumida por transiciones a
+    /// `Done` aceptadas. Un `done` exige evidencia PROPIA: sin esto, una
+    /// sola tool call exitosa avalaría cerrar la lista entera de un
+    /// tirón, que es la forma que toma el modo de falla en un 3B.
+    evidence_spent: usize,
+    /// Gate de evidencia (`Config::enable_task_evidence`). Off = el
+    /// comportamiento anterior a esta palanca: el estado es lo que el
+    /// modelo dice que es.
+    require_evidence: bool,
 }
 
 impl TaskList {
@@ -76,6 +90,22 @@ impl TaskList {
     /// el resumen re-inyectado es el único lugar donde el modelo los ve.
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
+        // Los contadores de evidencia son del TURNO, igual que las
+        // entradas (J-4): sin este reset, el trabajo de un turno avalaría
+        // los `done` del siguiente.
+        self.successful_tool_calls = 0;
+        self.evidence_spent = 0;
+    }
+
+    /// Enciende el gate de evidencia — ver [`TaskList::require_evidence`].
+    pub(crate) fn set_require_evidence(&mut self, require: bool) {
+        self.require_evidence = require;
+    }
+
+    /// Una tool call del registry terminó sin error. Es la ÚNICA fuente
+    /// de evidencia que este gate reconoce.
+    pub(crate) fn note_successful_tool_call(&mut self) {
+        self.successful_tool_calls = self.successful_tool_calls.saturating_add(1);
     }
 
     pub(crate) fn add(&mut self, description: &str) -> usize {
@@ -102,11 +132,37 @@ impl TaskList {
         id: usize,
         status: TaskStatus,
     ) -> Result<Option<String>, String> {
+        // Gate de evidencia (checkers de Recuris, arXiv:2608.24876 § 2.2.3
+        // traducido a lo que este harness puede verificar barato): un goal
+        // no pasa a `done` porque el modelo lo afirme, sino porque algo
+        // pasó en el entorno desde el último `done` aceptado. Se evalúa
+        // ANTES de mutar, para que un rechazo deje la entrada intacta.
+        let needs_evidence = self.require_evidence
+            && status == TaskStatus::Done
+            && self
+                .entries
+                .iter()
+                .any(|entry| entry.id == id && entry.status != TaskStatus::Done);
+        if needs_evidence && self.successful_tool_calls <= self.evidence_spent {
+            return Err(format!(
+                "task {id} stays open: no tool call has succeeded since the last completed \
+                 task, so there is no evidence the work was done. Do the work with a tool \
+                 first, then mark it done."
+            ));
+        }
+
         match self.entries.iter_mut().find(|entry| entry.id == id) {
             Some(entry) => {
                 let was_done = entry.status == TaskStatus::Done;
                 entry.status = status;
-                Ok((status == TaskStatus::Done && !was_done).then(|| entry.description.clone()))
+                let completed = status == TaskStatus::Done && !was_done;
+                if completed && self.require_evidence {
+                    // Consumir la unidad recién avalada. Un Done→Done
+                    // repetido no gasta nada (no entra acá), coherente con
+                    // K-6.
+                    self.evidence_spent = self.evidence_spent.saturating_add(1);
+                }
+                Ok(completed.then(|| entry.description.clone()))
             }
             None => Err(format!(
                 "no task with id {id} — current ids: {}",
@@ -223,6 +279,137 @@ pub(crate) const TASK_UPDATE_TOOL: &str = "task_update";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gated() -> TaskList {
+        let mut list = TaskList::default();
+        list.set_require_evidence(true);
+        list
+    }
+
+    /// El modo de falla que motiva el gate (v8 K-6): el modelo abre una
+    /// tarea y la cierra sin haber ejecutado nada. Sin evidencia el
+    /// `done` se rechaza y la entrada queda intacta, no a medias.
+    #[test]
+    fn closing_a_task_without_any_tool_call_is_rejected() {
+        let mut list = gated();
+        list.add("editar la función");
+
+        let err = list
+            .update(1, TaskStatus::Done)
+            .expect_err("sin evidencia no se cierra");
+        assert!(err.contains("no evidence"), "got: {err}");
+        assert!(
+            list.has_open_tasks(),
+            "un done rechazado deja la tarea abierta"
+        );
+        assert!(list.summary_line().contains("1 [pending]"), "estado intacto");
+    }
+
+    #[test]
+    fn a_successful_tool_call_is_the_evidence_that_closes_a_task() {
+        let mut list = gated();
+        list.add("editar la función");
+        list.note_successful_tool_call();
+
+        let completed = list.update(1, TaskStatus::Done).expect("hay evidencia");
+        assert_eq!(completed.as_deref(), Some("editar la función"));
+        assert!(!list.has_open_tasks());
+    }
+
+    /// El corazón del diseño: la evidencia se CONSUME. Una sola tool call
+    /// exitosa no puede avalar el cierre de la lista entera — que es la
+    /// forma concreta que toma el modo de falla en un 3B.
+    #[test]
+    fn evidence_is_spent_so_one_tool_call_closes_only_one_task() {
+        let mut list = gated();
+        list.add("tarea uno");
+        list.add("tarea dos");
+        list.note_successful_tool_call();
+
+        list.update(1, TaskStatus::Done).expect("la primera se avala");
+        let err = list
+            .update(2, TaskStatus::Done)
+            .expect_err("la segunda ya no tiene evidencia propia");
+        assert!(err.contains("no evidence"), "got: {err}");
+
+        // Y con trabajo nuevo, se cierra.
+        list.note_successful_tool_call();
+        list.update(2, TaskStatus::Done).expect("evidencia fresca");
+        assert!(!list.has_open_tasks());
+    }
+
+    /// K-6 se preserva bajo el gate: re-marcar `done` algo ya cerrado no
+    /// consume evidencia ni vuelve a emitir señal de completitud.
+    #[test]
+    fn re_marking_done_neither_spends_evidence_nor_re_signals() {
+        let mut list = gated();
+        list.add("tarea uno");
+        list.add("tarea dos");
+        list.note_successful_tool_call();
+        list.update(1, TaskStatus::Done).expect("primera");
+
+        assert_eq!(
+            list.update(1, TaskStatus::Done).expect("done→done es no-op"),
+            None,
+            "no re-emite señal de completitud"
+        );
+
+        // Si el done repetido hubiera gastado evidencia, esta call no
+        // alcanzaría para la segunda tarea.
+        list.note_successful_tool_call();
+        list.update(2, TaskStatus::Done).expect("segunda");
+    }
+
+    /// Los contadores son del TURNO (J-4): el trabajo de un turno no
+    /// avala los `done` del siguiente.
+    #[test]
+    fn clear_resets_the_evidence_counters() {
+        let mut list = gated();
+        list.add("tarea vieja");
+        list.note_successful_tool_call();
+        list.note_successful_tool_call();
+
+        list.clear();
+        list.add("tarea nueva");
+        let err = list
+            .update(1, TaskStatus::Done)
+            .expect_err("la evidencia del turno anterior no viaja");
+        assert!(err.contains("no evidence"), "got: {err}");
+    }
+
+    /// Off por default: sin el gate, el comportamiento es exactamente el
+    /// anterior a esta palanca.
+    #[test]
+    fn without_the_gate_a_claim_is_enough() {
+        let mut list = TaskList::default();
+        list.add("tarea uno");
+        list.add("tarea dos");
+        assert!(list.update(1, TaskStatus::Done).is_ok());
+        assert!(list.update(2, TaskStatus::Done).is_ok());
+        assert!(!list.has_open_tasks());
+    }
+
+    /// Un id inexistente sigue dando su error de siempre bajo el gate —
+    /// el chequeo de evidencia no debe secuestrar ese diagnóstico, que es
+    /// el que le dice al modelo qué ids hay.
+    #[test]
+    fn a_bad_id_still_reports_the_available_ids_under_the_gate() {
+        let mut list = gated();
+        list.add("tarea uno");
+        let err = list.update(9, TaskStatus::Done).expect_err("no id 9");
+        assert!(err.contains("current ids: 1"), "got: {err}");
+    }
+
+    /// Transiciones que no son a `done` no piden evidencia: marcar algo
+    /// `in_progress` es justamente lo que se hace ANTES de trabajar.
+    #[test]
+    fn in_progress_needs_no_evidence() {
+        let mut list = gated();
+        list.add("tarea uno");
+        list.update(1, TaskStatus::InProgress)
+            .expect("in_progress no exige nada");
+        assert!(list.summary_line().contains("1 [in_progress]"));
+    }
 
     /// add → update → summary: the full life cycle, plus the actionable
     /// error for a bad id.

@@ -858,6 +858,10 @@ async fn build_engine(
     .with_tool_search_threshold(config.tool_search_threshold)
     // C′.2: task list tipada — off salvo config explícita.
     .with_task_list_enabled(config.enable_task_list)
+    // Gate de evidencia para cerrar tareas — off salvo config explícita.
+    .with_task_evidence_required(config.enable_task_evidence)
+    // Recuris § 2.2.2: skills inyectadas al redactar la tool call.
+    .with_call_time_skills(config.enable_call_time_skills)
     .with_exploration_enabled(config.enable_exploration)
     .with_editor_enabled(config.enable_editor)
     .with_edit_fence_enabled(config.enable_edit_fence)

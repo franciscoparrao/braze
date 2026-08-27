@@ -95,6 +95,10 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "tool_search_threshold",
     // C′.2 — lista de tareas tipada (task_add/task_update).
     "enable_task_list",
+    // Gate de evidencia para cerrar tareas (checkers de Recuris).
+    "enable_task_evidence",
+    // Recuris § 2.2.2 — skills inyectadas al redactar la tool call.
+    "enable_call_time_skills",
     "enable_exploration",
     // E′ I.6 — snapshot de entorno en el system prompt.
     "environment_block",

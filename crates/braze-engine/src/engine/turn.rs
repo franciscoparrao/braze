@@ -1130,6 +1130,99 @@ impl Engine {
     /// crossings and unreadable files persist as `SkillLoadSkipped`).
     /// Already-loaded skills are skipped silently — re-mentioning is a
     /// no-op, not an error.
+    /// Invocación *call-time* (Recuris § 2.2.2 — ver
+    /// [`Engine::with_call_time_skills`]): carga la skill declarada como
+    /// guía de `tool`, si hay una y no está ya cargada.
+    ///
+    /// `Ok(Some(nombre))` = se cargó, y el caller **debe abortar la
+    /// ejecución** de la call para que el modelo la re-emita con la guía
+    /// delante. `Ok(None)` = seguir normalmente, y cubre los cuatro casos
+    /// en que interceptar sería peor que no hacerlo: la palanca apagada,
+    /// no hay skill para esa tool, la skill ya está cargada (así la
+    /// segunda llamada a la misma herramienta sí ejecuta y no hay bucle),
+    /// y el body dejó de ser legible.
+    ///
+    /// El cap por turno también degrada a `None` en vez de trabar la
+    /// herramienta: pasado el cap, la acción se ejecuta sin guía, que es
+    /// exactamente lo que pasaba antes de esta palanca.
+    pub(super) async fn load_call_time_skill(
+        &self,
+        session: &SessionId,
+        tool: &str,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<Option<String>, EngineError> {
+        if !self.call_time_skills_enabled {
+            return Ok(None);
+        }
+        let Some(registry) = &self.skill_registry else {
+            return Ok(None);
+        };
+        let Some(stub) = registry.for_tool(tool) else {
+            return Ok(None);
+        };
+        let name = stub.name.clone();
+        if self
+            .loaded_skills
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|s| s.name == name)
+        {
+            return Ok(None);
+        }
+        if self.loaded_skills.lock().unwrap().len() >= self.skills_max_loaded_per_turn {
+            self.append_and_notify(
+                session,
+                &AgentEvent::SkillLoadSkipped {
+                    name,
+                    reason: format!("per-turn cap ({}) reached", self.skills_max_loaded_per_turn),
+                },
+                observer,
+            )
+            .await?;
+            return Ok(None);
+        }
+        match registry.load_body(&name, self.skills_max_body_tokens) {
+            Some(loaded) => {
+                tracing::info!(
+                    skill = %loaded.name,
+                    tool,
+                    estimated_tokens = loaded.estimated_tokens,
+                    truncated = loaded.truncated,
+                    "skill loaded at call time; the drafted call was not executed"
+                );
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::SkillLoaded {
+                        name: loaded.name.clone(),
+                        // El `trigger` distingue este camino del explícito
+                        // en el rollout log, así que el A/B puede contar
+                        // cuántas cargas fueron call-time sin instrumentar
+                        // nada más.
+                        trigger: "call_time".to_string(),
+                        estimated_tokens: loaded.estimated_tokens,
+                        truncated: loaded.truncated,
+                    },
+                    observer,
+                )
+                .await?;
+                self.loaded_skills.lock().unwrap().push(loaded);
+                Ok(Some(name))
+            }
+            None => {
+                // Un body ilegible NO puede trabar la herramienta: sin
+                // este `None` la call se interceptaría en cada ronda sin
+                // que la skill llegue nunca, y el turno no avanzaría.
+                tracing::warn!(
+                    skill = %name,
+                    tool,
+                    "call-time skill is no longer loadable — executing the call without it"
+                );
+                Ok(None)
+            }
+        }
+    }
+
     async fn load_mentioned_skills(
         &self,
         session: &SessionId,
@@ -3661,6 +3754,263 @@ mod tests {
             .unwrap();
         }
         dir
+    }
+
+    /// Como `temp_skills_dir` pero con `tools:` en el frontmatter — la
+    /// declaración que habilita la invocación call-time.
+    fn temp_skills_dir_for_tools(label: &str, skills: &[(&str, &str, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "braze-engine-skills-{}-{label}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (name, tools, body) in skills {
+            let skill_dir = dir.join(name);
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            std::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!(
+                    "---\nname: {name}\ndescription: guidance for {name}\ntools: {tools}\n---\n\n{body}"
+                ),
+            )
+            .unwrap();
+        }
+        dir
+    }
+
+    /// Recuris § 2.2.2 end to end. La primera llamada a `echo` se
+    /// intercepta: NO se ejecuta (el contador del provider lo prueba), el
+    /// modelo recibe un resultado de no-ejecución, y la skill entra al
+    /// system prompt. La segunda llamada, ya con la guía delante, sí
+    /// ejecuta — que es la mitad del contrato sin la cual esto sería un
+    /// deadlock elegante.
+    #[tokio::test]
+    async fn a_call_time_skill_intercepts_the_first_call_and_lets_the_second_through() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let invocations = Arc::new(AtomicU32::new(0));
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let skills_dir = temp_skills_dir_for_tools(
+            "call-time",
+            &[("echoing", "echo", "Echo twice, never once.")],
+        );
+        let registry = std::sync::Arc::new(braze_skills::SkillRegistry::discover(
+            std::slice::from_ref(&skills_dir),
+        ));
+
+        let model = RequestCapturingModel {
+            inner: ScriptedModel::new(vec![
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-1".to_string(),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({"text": "hola"}),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::ToolCallRequested {
+                        id: "call-2".to_string(),
+                        name: "echo".to_string(),
+                        arguments: serde_json::json!({"text": "hola hola"}),
+                    },
+                    CompletionEvent::Done,
+                ],
+                vec![
+                    CompletionEvent::TextDelta("listo".to_string()),
+                    CompletionEvent::Done,
+                ],
+            ]),
+            requests: Arc::clone(&requests),
+        };
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(registry, 1200, 2)
+        .with_call_time_skills(true);
+
+        engine
+            .run_turn(&session, "haz eco", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        // La herramienta corrió UNA vez: la segunda call, no la primera.
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "la primera call se intercepta y la segunda ejecuta"
+        );
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load");
+        let first = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { id, result } if id == "call-1" => Some(result),
+                _ => None,
+            })
+            .expect("la call interceptada igual reporta resultado");
+        assert!(
+            first.content.contains("NOT EXECUTED"),
+            "el modelo tiene que saber que no pasó nada: {}",
+            first.content
+        );
+        assert!(
+            !first.is_error,
+            "no es un fallo: no se ejecutó, que es distinto"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::SkillLoaded { name, trigger, .. }
+                    if name == "echoing" && trigger == "call_time"
+            )),
+            "el trigger distingue este camino del explícito en el log"
+        );
+
+        // Y la guía llegó al modelo: la request posterior la lleva.
+        {
+            let seen = requests.lock().unwrap();
+            assert!(
+                seen.last()
+                    .expect("hubo requests")
+                    .system_prompt
+                    .contains("Echo twice, never once."),
+                "el body de la skill viaja en el system prompt de las rondas siguientes"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&skills_dir);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Una tool sin skill declarada se ejecuta de una, con la palanca
+    /// encendida: la intercepción es por herramienta, no un peaje global.
+    #[tokio::test]
+    async fn a_tool_without_a_declared_skill_is_not_intercepted() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let invocations = Arc::new(AtomicU32::new(0));
+        let skills_dir = temp_skills_dir_for_tools(
+            "call-time-miss",
+            &[("editing", "edit_file", "Read before editing.")],
+        );
+        let registry = std::sync::Arc::new(braze_skills::SkillRegistry::discover(
+            std::slice::from_ref(&skills_dir),
+        ));
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({"text": "hola"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(registry, 1200, 2)
+        .with_call_time_skills(true);
+
+        engine
+            .run_turn(&session, "haz eco", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        assert_eq!(
+            invocations.load(Ordering::SeqCst),
+            1,
+            "sin skill para `echo`, la call corre de una"
+        );
+
+        let _ = std::fs::remove_dir_all(&skills_dir);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Off por default: con la palanca apagada, una skill declarada para
+    /// esa tool no cambia nada. Es el brazo de control del A/B.
+    #[tokio::test]
+    async fn with_the_lever_off_a_declared_skill_does_not_intercept() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let invocations = Arc::new(AtomicU32::new(0));
+        let skills_dir =
+            temp_skills_dir_for_tools("call-time-off", &[("echoing", "echo", "Echo twice.")]);
+        let registry = std::sync::Arc::new(braze_skills::SkillRegistry::discover(
+            std::slice::from_ref(&skills_dir),
+        ));
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({"text": "hola"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "base prompt".to_string(),
+            1024,
+        )
+        .with_skills(registry, 1200, 2);
+
+        engine
+            .run_turn(&session, "haz eco", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::SkillLoaded { .. })),
+            "con la palanca apagada no se carga ninguna skill sola"
+        );
+
+        let _ = std::fs::remove_dir_all(&skills_dir);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     /// The explicit-mention path end to end: `$testing` in the user's

@@ -830,6 +830,46 @@ impl Engine {
                 continue;
             }
 
+            // Invocación call-time de skills (Recuris § 2.2.2). Se
+            // evalúa ACÁ, con la call ya validada contra su schema y con
+            // los permisos resueltos: interceptar antes habría competido
+            // con la escalera de reparación de argumentos, y el punto de
+            // la palanca es que la guía llegue para una call bien
+            // formada que está a punto de ejecutarse — no para una que
+            // el harness iba a rechazar de todos modos.
+            if let Some(skill) = self
+                .load_call_time_skill(session, &call.name, observer)
+                .await?
+            {
+                self.append_and_notify(
+                    session,
+                    &AgentEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        result: ToolResult {
+                            tool_call_id: call.id.clone(),
+                            // NO es error: no falló nada, simplemente no
+                            // se ejecutó. Marcarlo como error mandaría al
+                            // modelo a recuperarse de un problema que no
+                            // existe. El texto tiene que ser inequívoco
+                            // en las dos cosas que el modelo necesita
+                            // saber: que la acción no ocurrió, y que
+                            // ahora tiene guía para re-emitirla.
+                            content: format!(
+                                "NOT EXECUTED — this call was intercepted before running. \
+                                 The '{skill}' skill is now in your instructions because it \
+                                 covers '{}'. Read it and issue the call again; nothing has \
+                                 changed yet.",
+                                call.name
+                            ),
+                            is_error: false,
+                        },
+                    },
+                    observer,
+                )
+                .await?;
+                continue;
+            }
+
             // A9 (docs/AUDITORIA-2026-07.md): per-tool-call visibility for
             // the ordinary/successful dispatch path — previously only
             // failures (schema rejection, unknown tool, timeout) logged
@@ -978,6 +1018,20 @@ impl Engine {
                     {
                         tracing::info!(id = %id, "appending unproductive-reread nudge");
                         result.content.push_str(&nudge);
+                    }
+                    // Evidencia para el gate de la task list: este es el
+                    // único punto por el que salen los resultados de tools
+                    // REALES del registry — las dos tools de la lista se
+                    // resuelven inline y hacen `continue` mucho antes, así
+                    // que un `task_add` no puede avalarse a sí mismo. Se
+                    // cuenta aunque el gate esté apagado: el contador es
+                    // barato y así encenderlo a mitad de sesión no
+                    // arranca con la evidencia en cero.
+                    if !result.is_error
+                        && self.task_list_enabled
+                        && let Ok(mut list) = self.task_list.lock()
+                    {
+                        list.note_successful_tool_call();
                     }
                     self.append_and_notify(
                         session,
@@ -3141,6 +3195,156 @@ mod tests {
                 AgentEvent::TaskCompleted { description } if description == "leer notas.txt"
             )),
             "task_update to done must persist TaskCompleted with the task's description"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Gate de evidencia end-to-end (checkers de Recuris): el modelo abre
+    /// una tarea y la cierra sin haber ejecutado NADA. El harness rechaza
+    /// el cierre, así que no hay `TaskCompleted`, y el rechazo vuelve al
+    /// modelo como tool result de error — accionable, no un silencio.
+    #[tokio::test]
+    async fn the_evidence_gate_rejects_a_done_with_no_tool_call_behind_it() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "task_add".to_string(),
+                    arguments: serde_json::json!({"description": "editar notas.txt"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "task_update".to_string(),
+                    arguments: serde_json::json!({"id": 1, "status": "done"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true)
+        .with_task_evidence_required(true);
+
+        engine
+            .run_turn(&session, "editá el archivo", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TaskCompleted { .. })),
+            "un done sin evidencia no debe completar la tarea"
+        );
+        let rejection = events.iter().find_map(|e| match e {
+            AgentEvent::ToolCallCompleted { id, result } if id == "call-2" => Some(result),
+            _ => None,
+        });
+        let rejection = rejection.expect("el task_update debe tener resultado");
+        assert!(rejection.is_error, "el rechazo viaja como error");
+        assert!(
+            rejection.content.contains("no evidence"),
+            "y dice por qué: {}",
+            rejection.content
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// El complemento: una tool call REAL exitosa habilita el cierre. Sin
+    /// este caso, el test de arriba se satisfaría con un gate que rechaza
+    /// siempre.
+    #[tokio::test]
+    async fn a_real_tool_call_supplies_the_evidence_the_gate_wants() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "task_add".to_string(),
+                    arguments: serde_json::json!({"description": "editar notas.txt"}),
+                },
+                CompletionEvent::Done,
+            ],
+            // El trabajo de verdad: una tool del registry que termina bien.
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({"text": "hecho"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-3".to_string(),
+                    name: "task_update".to_string(),
+                    arguments: serde_json::json!({"id": 1, "status": "done"}),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("listo".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::new(
+                AtomicU32::new(0),
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_task_list_enabled(true)
+        .with_task_evidence_required(true);
+
+        engine
+            .run_turn(&session, "editá el archivo", &mut NoopObserver)
+            .await
+            .expect("turn must converge");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::TaskCompleted { description } if description == "editar notas.txt"
+            )),
+            "con una tool call exitosa detrás, el cierre procede"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

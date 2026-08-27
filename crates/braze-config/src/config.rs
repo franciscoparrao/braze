@@ -584,6 +584,26 @@ pub struct Config {
     /// SLM; se promueve solo si su A/B lo valida.
     #[serde(default)]
     pub enable_task_list: bool,
+    /// Gate de evidencia para cerrar tareas de la lista C′.2 — traducción
+    /// barata de los *checkers* de Recuris (arXiv:2608.24876 § 2.2.3):
+    /// `task_update(id, "done")` se rechaza salvo que una tool call del
+    /// registry haya terminado sin error desde el último `done` aceptado,
+    /// de modo que el estado dependa de lo que pasó y no de lo que el
+    /// modelo afirma. Ataca el síntoma de v8 K-6 (un 3B re-marca `done`
+    /// con frecuencia). OFF por default y sin efecto sin
+    /// `enable_task_list`; mismo posicionamiento que las demás — entra
+    /// apagada y se promueve solo si su A/B la valida.
+    #[serde(default)]
+    pub enable_task_evidence: bool,
+    /// Invocación call-time de skills (Recuris, arXiv:2608.24876 § 2.2.2):
+    /// una tool call para la que alguna skill se declara guía
+    /// (frontmatter `tools:`) NO se ejecuta; vuelve un resultado
+    /// sintético de no-ejecución, la skill entra al system prompt, y el
+    /// modelo re-emite la acción con la guía delante. Cambia el *cuándo*
+    /// de D′, no el *qué*: la guía llega antes del fallo y solo para las
+    /// herramientas que el turno usa. OFF por default.
+    #[serde(default)]
+    pub enable_call_time_skills: bool,
     /// I.7 — explorador de contexto aislado (tool `explore`,
     /// `docs/explorador-aislado-ab-design.md`). OFF por default, mismo
     /// posicionamiento que `enable_task_list`: la palanca entra apagada
@@ -730,6 +750,8 @@ impl Default for Config {
             references: Vec::new(),
             tool_search_threshold: default_tool_search_threshold(),
             enable_task_list: false,
+            enable_task_evidence: false,
+            enable_call_time_skills: false,
             enable_exploration: false,
             enable_editor: false,
             enable_edit_fence: false,
@@ -1014,6 +1036,12 @@ impl Config {
         }
         if let Some(v) = overrides.tool_search_threshold {
             self.tool_search_threshold = v;
+        }
+        if let Some(v) = overrides.enable_task_evidence {
+            self.enable_task_evidence = v;
+        }
+        if let Some(v) = overrides.enable_call_time_skills {
+            self.enable_call_time_skills = v;
         }
         if let Some(v) = overrides.enable_task_list {
             self.enable_task_list = v;

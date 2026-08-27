@@ -139,6 +139,14 @@ pub struct ConfigOverrides {
     /// C′.2 — lista de tareas tipada (`BRAZE_ENABLE_TASK_LIST`).
     #[serde(default)]
     pub enable_task_list: Option<bool>,
+    /// Gate de evidencia para cerrar tareas, checkers de Recuris
+    /// (`BRAZE_ENABLE_TASK_EVIDENCE`).
+    #[serde(default)]
+    pub enable_task_evidence: Option<bool>,
+    /// Invocación call-time de skills, Recuris § 2.2.2
+    /// (`BRAZE_ENABLE_CALL_TIME_SKILLS`).
+    #[serde(default)]
+    pub enable_call_time_skills: Option<bool>,
     /// I.7 — explorador aislado (`BRAZE_ENABLE_EXPLORATION`).
     #[serde(default)]
     pub enable_exploration: Option<bool>,
@@ -386,6 +394,28 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.enable_task_list = Some(parsed);
+                }
+                "ENABLE_TASK_EVIDENCE" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.enable_task_evidence = Some(parsed);
+                }
+                "ENABLE_CALL_TIME_SKILLS" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.enable_call_time_skills = Some(parsed);
                 }
                 "ENABLE_EXPLORATION" => {
                     let parsed =

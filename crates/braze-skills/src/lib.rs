@@ -59,6 +59,16 @@ pub struct SkillStub {
     /// ~4 chars/token sobre el body completo — para que quien inyecta
     /// sepa cuánto va a costar ANTES de cargar.
     pub estimated_tokens: u32,
+    /// Nombres de tool para las que esta skill es la guía relevante
+    /// (frontmatter `tools: edit_file, write_file`), normalizados a
+    /// lowercase. Vacío = la skill solo entra por mención explícita, que
+    /// es el comportamiento D′ de siempre.
+    ///
+    /// Habilita la invocación *call-time* (Recuris, arXiv:2608.24876
+    /// § 2.2.2): el harness usa el nombre de la tool que el modelo acaba
+    /// de redactar como clave de recuperación, de modo que la guía llega
+    /// ANTES de que la acción se ejecute y no después de que falle.
+    pub tools: Vec<String>,
 }
 
 /// Registro inmutable post-discovery. Duplicados por nombre: gana el
@@ -122,6 +132,18 @@ impl SkillRegistry {
     pub fn find(&self, name: &str) -> Option<&SkillStub> {
         let wanted = normalize_name(name);
         self.skills.iter().find(|s| s.name == wanted)
+    }
+
+    /// La skill declarada como guía de `tool`, si hay alguna — la clave
+    /// de recuperación de la invocación *call-time*.
+    ///
+    /// Determinista ante varias candidatas: gana la primera en el orden
+    /// del registro (que ya es el orden de prioridad de paths de config),
+    /// igual que la resolución de duplicados por nombre. Una skill sin
+    /// `tools:` nunca matchea: sigue siendo explicit-only.
+    pub fn for_tool(&self, tool: &str) -> Option<&SkillStub> {
+        let wanted = tool.trim().to_lowercase();
+        self.skills.iter().find(|s| s.tools.contains(&wanted))
     }
 
     /// Relee y devuelve el body de `name`, capado a `max_body_tokens`
@@ -248,30 +270,43 @@ fn parse_skill_file(path: &Path) -> Option<SkillStub> {
         tracing::warn!(path = ?path, bytes = raw.len(), "SKILL.md over the size cap; skipped");
         return None;
     }
-    let (name, description) = parse_frontmatter(&raw)?;
+    let (name, description, tools) = parse_frontmatter(&raw)?;
     let body = skill_body(&raw);
     Some(SkillStub {
         name: normalize_name(&name),
         description,
         path: path.to_path_buf(),
         estimated_tokens: (body.len() / 4) as u32,
+        tools,
     })
 }
 
-fn parse_frontmatter(raw: &str) -> Option<(String, String)> {
+fn parse_frontmatter(raw: &str) -> Option<(String, String, Vec<String>)> {
     let rest = raw.strip_prefix("---")?;
     let end = rest.find("\n---")?;
     let block = &rest[..end];
     let mut name = None;
     let mut description = None;
+    let mut tools = Vec::new();
     for line in block.lines() {
         if let Some(value) = line.strip_prefix("name:") {
             name = Some(value.trim().to_string()).filter(|v| !v.is_empty());
         } else if let Some(value) = line.strip_prefix("description:") {
             description = Some(value.trim().to_string()).filter(|v| !v.is_empty());
+        } else if let Some(value) = line.strip_prefix("tools:") {
+            // Lista separada por comas. Opcional: su ausencia deja la
+            // skill como explicit-only, que es el default D′.
+            tools = value
+                .trim()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .split(',')
+                .map(|t| t.trim().trim_matches(['"', '\'']).to_lowercase())
+                .filter(|t| !t.is_empty())
+                .collect();
         }
     }
-    Some((name?, description?))
+    Some((name?, description?, tools))
 }
 
 /// El markdown después del frontmatter (o el archivo entero si no hay
@@ -289,6 +324,40 @@ fn skill_body(raw: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// El frontmatter `tools:` es lo que habilita la invocación
+    /// call-time: sin él la skill sigue siendo explicit-only (D′), que es
+    /// el default y el brazo de control del A/B.
+    #[test]
+    fn tools_frontmatter_maps_a_skill_to_its_tools() {
+        let dir = temp_skills_dir("tools-frontmatter");
+        let skill = dir.join("editing");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: editing\ndescription: d\ntools: edit_file, Write_File\n---\n\nbody",
+        )
+        .unwrap();
+        let plain = dir.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(
+            plain.join("SKILL.md"),
+            "---\nname: plain\ndescription: d\n---\n\nbody",
+        )
+        .unwrap();
+
+        let registry = SkillRegistry::discover(std::slice::from_ref(&dir));
+        // Case-insensitive en ambos lados de la comparación.
+        assert_eq!(registry.for_tool("edit_file").map(|s| s.name.as_str()), Some("editing"));
+        assert_eq!(registry.for_tool("write_file").map(|s| s.name.as_str()), Some("editing"));
+        assert_eq!(registry.for_tool("EDIT_FILE").map(|s| s.name.as_str()), Some("editing"));
+        // Una tool sin skill declarada no matchea nada...
+        assert!(registry.for_tool("shell_exec").is_none());
+        // ...y una skill sin `tools:` no es candidata de ninguna.
+        assert!(registry.find("plain").is_some_and(|s| s.tools.is_empty()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn temp_skills_dir(label: &str) -> PathBuf {
         let dir =
