@@ -1,0 +1,89 @@
+# Suite Q0 del pre-registro del gate de evidencia
+# (docs/hypothesis-2026-08-28-task-evidence-gate.md).
+#
+# Las 6 tareas de `default.toml` de las familias multi_step y
+# error_recovery — donde se concentran las 17 filas históricas en que
+# algún modelo llegó a usar las task tools. NO es una suite nueva: los
+# bloques se copian VERBATIM de default.toml para que Q0 no confunda
+# "cambió el uso de la lista" con "cambió la tarea".
+#
+# Q0 mide TASA DE USO de task_add/task_update, no pass rate. El pass
+# rate viaja como secundaria para detectar que subir el uso no dañe.
+
+[[tasks]]
+id = "multi_step_read_count_write"
+prompt = "Lee el archivo resumen.txt del directorio actual, cuenta cuántas líneas tiene, y escribe ese número (solo el número, sin texto adicional) en un archivo nuevo llamado conteo.txt."
+skill = "multi_step"
+
+[tasks.setup_files]
+"resumen.txt" = "linea a\nlinea b\nlinea c\n"
+
+[tasks.expect_file_contains]
+"conteo.txt" = ["3"]
+
+
+[[tasks]]
+id = "error_recovery_wrong_filename"
+prompt = "Lee el archivo de informe del directorio actual (el nombre empieza con 'informe' pero no recuerdo el resto) y dime cuántas líneas tiene."
+expect_text_contains = "2"
+skill = "error_recovery"
+
+# El prompt deliberadamente no da el nombre exacto — el modelo tiene que
+# recuperarse de un primer read_file fallido (o usar glob/grep primero)
+# en vez de repetir la misma llamada o rendirse.
+[tasks.setup_files]
+"informe_final_v2.txt" = "dato uno\ndato dos\n"
+
+
+[[tasks]]
+id = "multi_step_sum_two_files"
+prompt = "Lee los archivos a.txt y b.txt del directorio actual, suma la cantidad de líneas que tiene cada uno, y escribe el total (solo el número, sin texto adicional) en un archivo nuevo llamado total.txt."
+skill = "multi_step"
+
+[tasks.setup_files]
+"a.txt" = "linea 1\nlinea 2\n"
+"b.txt" = "linea 1\nlinea 2\nlinea 3\n"
+
+[tasks.expect_file_contains]
+"total.txt" = ["5"]
+
+
+[[tasks]]
+id = "multi_step_multiply_and_write"
+prompt = "Lee el archivo precio.txt del directorio actual (contiene un solo número), multiplica ese número por 3, y escribe el resultado (solo el número, sin texto adicional) en un archivo nuevo llamado total_final.txt."
+skill = "multi_step"
+
+[tasks.setup_files]
+"precio.txt" = "5\n"
+
+[tasks.expect_file_contains]
+"total_final.txt" = ["15"]
+
+
+[[tasks]]
+id = "error_recovery_wrong_config_extension"
+prompt = "Lee el archivo de configuración del directorio actual (el nombre empieza con 'config' pero no recuerdo la extensión) y dime qué valor tiene la clave 'modo'."
+expect_text_contains = "activo"
+skill = "error_recovery"
+
+# Igual que error_recovery_wrong_filename: el prompt no da el nombre
+# exacto, forzando glob/grep o un read_file fallido antes de encontrar el
+# archivo real.
+[tasks.setup_files]
+"config.yaml" = "modo: activo\n"
+
+
+[[tasks]]
+id = "error_recovery_edit_wrong_filename"
+prompt = "Edita el archivo de ajustes del proyecto (no recuerdo el nombre exacto, pero tiene que ver con la configuración de la app) y cambia 'timeout=30' por 'timeout=60'."
+skill = "error_recovery"
+
+# Sin expect_tool_call: recuperarse vía write_file (la propia señal de
+# error de edit_file sugiere ese camino) cuenta igual que recuperarse vía
+# edit_file — lo que importa es el resultado en el archivo, no la ruta.
+[tasks.setup_files]
+"ajustes_app.ini" = "timeout=30\n"
+
+[tasks.expect_file_contains]
+"ajustes_app.ini" = ["timeout=60"]
+

@@ -398,7 +398,9 @@ impl Engine {
                 tool_stubs.retain(|s| s.name != "edit_file");
             }
             if self.task_list_enabled {
-                tool_stubs.extend(crate::task_list::task_tool_stubs());
+                tool_stubs.extend(crate::task_list::task_tool_stubs_with(
+                    self.insistent_task_tools,
+                ));
                 let task_list = self.task_list.lock().unwrap();
                 if task_list.has_open_tasks() {
                     request_messages.push(Message {

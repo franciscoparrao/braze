@@ -227,13 +227,35 @@ impl TaskList {
 
 /// Los stubs de las dos tools, agregados al inventario solo con
 /// `enable_task_list` — ver el module doc sobre por qué off-by-default.
-pub(crate) fn task_tool_stubs() -> Vec<ToolStub> {
+/// Con la redacción del brazo U1 de Q0
+/// (`docs/hypothesis-2026-08-28-task-evidence-gate.md`) cuando
+/// `insistent`: las descripciones piden el uso explícitamente en vez de
+/// ofrecerlo.
+///
+/// El texto se fija ACÁ y se commitea antes de correr, porque la
+/// redacción **es** el tratamiento de U1: elegirla a la vista de los
+/// resultados sería iterar sobre el tratamiento.
+pub(crate) fn task_tool_stubs_with(insistent: bool) -> Vec<ToolStub> {
+    let add_summary = if insistent {
+        "REQUIRED FIRST STEP for any request needing more than one action: call \
+         task_add once per step BEFORE you touch any other tool. Do this even if \
+         the plan seems obvious."
+    } else {
+        "Add one step to your task list for this request. Use it to break a \
+         multi-step request down before acting."
+    };
+    let update_summary = if insistent {
+        "REQUIRED after finishing each step: call task_update(id, \"done\"). Also \
+         call it with \"in_progress\" when you start a step. Do not skip this — \
+         the task list is how progress is tracked."
+    } else {
+        "Update a task's status as you work: in_progress when you start it, \
+         done when it's finished."
+    };
     vec![
         ToolStub {
             name: "task_add".to_string(),
-            summary: "Add one step to your task list for this request. Use it to break a \
-                      multi-step request down before acting."
-                .to_string(),
+            summary: add_summary.to_string(),
             source: "harness".to_string(),
             input_schema: Some(serde_json::json!({
                 "type": "object",
@@ -249,9 +271,7 @@ pub(crate) fn task_tool_stubs() -> Vec<ToolStub> {
         },
         ToolStub {
             name: "task_update".to_string(),
-            summary: "Update a task's status as you work: in_progress when you start it, \
-                      done when it's finished."
-                .to_string(),
+            summary: update_summary.to_string(),
             source: "harness".to_string(),
             input_schema: Some(serde_json::json!({
                 "type": "object",

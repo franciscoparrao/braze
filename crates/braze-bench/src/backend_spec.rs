@@ -792,6 +792,11 @@ pub struct AblationOverrides {
     /// su frontmatter: sin eso la fila corre idéntica al control, que es
     /// el modo de fallo silencioso a vigilar al armar el A/B.
     pub enable_call_time_skills: bool,
+    /// `+ablate:task-tools-insistent` — brazo U1 de Q0
+    /// (`docs/hypothesis-2026-08-28-task-evidence-gate.md`): descripciones
+    /// de las task tools que piden el uso en vez de ofrecerlo. Depende de
+    /// `task-list`.
+    pub enable_insistent_task_tools: bool,
     /// `+ablate:explore` — ENABLES the I.7 isolated exploration child
     /// loop (`docs/explorador-aislado-ab-design.md`). Same documented
     /// enabling-key exception as `enable_task_list`: the lever defaults
@@ -978,6 +983,7 @@ impl AblationOverrides {
                 "task-list" => out.enable_task_list = true,
                 "task-evidence" => out.enable_task_evidence = true,
                 "call-time-skills" => out.enable_call_time_skills = true,
+                "task-tools-insistent" => out.enable_insistent_task_tools = true,
                 "explore" => out.enable_exploration = true,
                 "editor" => out.enable_editor = true,
                 "edit-fence" => out.enable_edit_fence = true,
@@ -1096,6 +1102,9 @@ impl AblationOverrides {
         }
         if self.enable_call_time_skills {
             parts.push("call-time-skills".to_string());
+        }
+        if self.enable_insistent_task_tools {
+            parts.push("task-tools-insistent".to_string());
         }
         if self.enable_exploration {
             parts.push("explore".to_string());

@@ -345,6 +345,8 @@ pub struct Engine {
     skill_registry: Option<std::sync::Arc<braze_skills::SkillRegistry>>,
     /// Recuris § 2.2.2 — ver [`Engine::with_call_time_skills`].
     call_time_skills_enabled: bool,
+    /// Brazo U1 de Q0 — ver [`Engine::with_insistent_task_tools`].
+    insistent_task_tools: bool,
     /// Skills ya cargadas esta sesión — sus addenda se re-anexan al
     /// system prompt de cada request (reconstruidos del registry, nunca
     /// persistidos como conversación).
@@ -494,6 +496,7 @@ impl Engine {
             turn_attempted_edit: std::sync::atomic::AtomicBool::new(false),
             skill_registry: None,
             call_time_skills_enabled: false,
+            insistent_task_tools: false,
             loaded_skills: std::sync::Mutex::new(Vec::new()),
             agents_md_root: None,
             loaded_agents_md: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -829,6 +832,18 @@ impl Engine {
     /// Chainable.
     pub fn with_call_time_skills(mut self, enabled: bool) -> Self {
         self.call_time_skills_enabled = enabled;
+        self
+    }
+
+    /// Brazo **U1** de Q0 (`docs/hypothesis-2026-08-28-task-evidence-gate.md`):
+    /// las descripciones de `task_add`/`task_update` piden el uso
+    /// explícitamente en vez de ofrecerlo.
+    ///
+    /// Existe para medir si la tasa de uso del 2,2 % es un problema de
+    /// redacción o de capacidad. Sin `with_task_list_enabled` no hace
+    /// nada. Off by default; `+ablate:task-tools-insistent`. Chainable.
+    pub fn with_insistent_task_tools(mut self, insistent: bool) -> Self {
+        self.insistent_task_tools = insistent;
         self
     }
 
