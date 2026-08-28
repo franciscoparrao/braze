@@ -1,0 +1,106 @@
+% Entradas de bib para el Paper 3 y para la eventual revisión del
+% Paper 1 — PENDIENTES DE /verify-refs.
+%
+% PROCEDENCIA: título y autoría extraídos de los metadatos de los PDF
+% que están en `docs/` (fuente primaria, no búsqueda web ni abstract).
+% Los seis se verificaron con `pdfinfo` el 2026-08-28. Los PDF están en
+% .gitignore, así que la comprobación se rehace con:
+%
+%     pdfinfo docs/<id>.pdf | grep -E '^(Title|Author)'
+%
+% LO QUE FALTA y por qué este archivo no está todavía en un refs.bib:
+%   1. /verify-refs contra OpenAlex/CrossRef — existencia, retracciones,
+%      y sobre todo si alguno pasó de preprint a versión publicada con
+%      venue (varios son de agosto de 2026; el estado puede cambiar).
+%   2. Decidir destino: `parupudi2026neutral` y `yu2026recuris` van al
+%      Paper 3; `yao2026harnessbench` y `yi2026belief` van al párrafo de
+%      Related Work del Paper 1 (redactado en
+%      docs/nota-lectura-harnessbench-belief-2026-08-25.md).
+%
+% NO copiar a un refs.bib sin (1). El bib del Paper 2 documenta la
+% verificación de cada entrada; romper esa convención por conveniencia
+% sería exactamente lo que este proyecto audita en otros.
+
+@misc{yao2026harnessbench,
+  title  = {Harness-Bench: Measuring Harness Effects across Models in
+            Realistic Agent Workflows},
+  author = {Yao, Yilun and Tan, Xinyu and Liu, Chao-Hsuan and Li, Yaoming
+            and Wang, Zhengyang and Yu, Wenhan and Tan, Zhewen and Tian,
+            Yuxuan and Zhao, Guangxiang and Sun, Lin and Zhang, Xiangzheng
+            and Yang, Tong},
+  year   = {2026},
+  eprint = {2605.27922},
+  archivePrefix = {arXiv},
+  note   = {Peking University + Qiyuan Tech. 106 tareas, 5.194
+            trayectorias. Define su varianza como cross-harness sobre
+            suite fija y declara que NO es repeated-run stochastic
+            variance}
+}
+
+@misc{yi2026belief,
+  title  = {Measuring Harness-Induced Belief Divergence in Multi-Step
+            LLM Agents},
+  author = {Yi, Haiwen and Song, Xinyuan},
+  year   = {2026},
+  eprint = {2607.04528},
+  archivePrefix = {arXiv},
+  note   = {Grilla de 6 harnesses x 8 tareas x 4 horizontes x 3 semillas
+            apareadas. Controla varianza en el DISEÑO; no la propaga a
+            la decisión}
+}
+
+@misc{parupudi2026neutral,
+  title  = {There Is No Neutral Harness: Modern {LLM} Leaderboards Are
+            Manufactured by Config-Fragile Items},
+  author = {Parupudi, V. S. Raghu},
+  year   = {2026},
+  eprint = {2608.21382},
+  archivePrefix = {arXiv},
+  note   = {UC San Diego. Fragility grid de 26 configuraciones sobre
+            3.679 ítems y 12 modelos. Excluye sampling variance por
+            diseño (greedy, single-seed) y declara no testear tareas
+            agénticas}
+}
+
+@misc{yu2026recuris,
+  title  = {Recursive Experiential-Working Memory Evolution for
+            Long-Horizon Agent Harnesses},
+  author = {Yu, Zhaochen and Wu, Yingcheng and Yin, Zhenfei and Chen,
+            Kaiyuan and Zhao, Zhe and Wang, Mengdi and Yan, Shuicheng
+            and Yang, Ling},
+  year   = {2026},
+  eprint = {2608.24876},
+  archivePrefix = {arXiv},
+  note   = {NUS/Stanford/Oxford/Princeton. Bootstrap task-clustered y
+            McNemar exacto; mide un piso run-to-run ([-6,98, +7,27]) y
+            lo usa como criterio de decisión. Apéndice B ablaciona su
+            propia capa de harness y reporta que no aporta nada medible}
+}
+
+@misc{zhang2026jitagent,
+  title  = {{JIT-Agent}: Scaling Harness Intelligence via Just-in-Time
+            Harness Evolution},
+  author = {Zhang, Guibin and Lu, Leo and Xie, Fangzhou and Zhu, Kang
+            and Wang, Junhao and Xie, Zhifei and Yu, Zhaochen and Liu,
+            Zihang and Sun, Zhongxiang and Li, Qiankun and Liao, Yue and
+            Chang, Heng and Hu, Xiaobin and Ren, Qibing and Zhou,
+            Wangchunshu and Yan, Shuicheng},
+  year   = {2026},
+  eprint = {2608.25593},
+  archivePrefix = {arXiv},
+  note   = {LV-NUS Lab. Factorización h=(M,P,A,F) y HarnessFactory con
+            13 scaffolds bajo protocolo común. Código MIT en
+            github.com/bingreeky/JIT}
+}
+
+@misc{ren2025learningdynamics,
+  title  = {Learning Dynamics of {LLM} Finetuning},
+  author = {Ren, Yi and Sutherland, Danica J.},
+  year   = {2025},
+  eprint = {2407.10490},
+  archivePrefix = {arXiv},
+  note   = {ICLR 2025. Base teórica del pre-registro del QLoRA
+            (docs/hypothesis-2026-08-26-experto-por-motor-qlora.md):
+            push-down global, contaminación cruzada, y el fingerprint
+            del modelo generador}
+}

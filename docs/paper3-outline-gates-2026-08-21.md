@@ -1,5 +1,13 @@
 # Outline honesto del Paper 3: gates de aceptación para optimización de harness bajo ruido
 
+> **SUPERADO EN SU PREMISA (2026-08-28).** La frase "ninguno resuelve
+> cómo decidir bajo ruido" quedó refutada por Parupudi (2608.21382) y
+> Recuris (2608.24876), ambos del 25-26 de agosto, que sí miden. La
+> evidencia propia y los threats de este documento siguen siendo
+> válidos; la premisa, el posicionamiento y las contribuciones se
+> reescribieron en `docs/paper3-outline-v2-2026-08-28.md`. Se conserva
+> por trazabilidad del razonamiento, no como plan vigente.
+
 Fecha: 2026-08-21
 Estado: **outline — scoping de la versión que los datos YA sostienen**,
 siguiendo la disciplina que funcionó con el Paper 2 (declarar qué
