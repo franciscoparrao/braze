@@ -132,3 +132,84 @@ sea verificable por terceros:
 anterior a la fecha de los JSON de resultados. Es la práctica que la
 auditoría del Paper 2 mostró que **no** se cumplió para el piloto M1,
 donde registro y datos entraron en un mismo commit posterior.
+
+---
+
+## Resultados finales y veredicto (2026-08-28)
+
+Script: `scripts/weight_quant_close.py`. Pareo por (tarea, seed) sobre
+las seeds que los tres brazos comparten (42, 43).
+
+**El sweep cumple el diseño mínimo, no está truncado.** Se corrieron
+A×3, B×2, E×2. El § Costo declarado autoriza de antemano —"declarado
+aquí, no decidido después"— bajar a 2 seeds si el tiempo apremia,
+"nunca eliminar el brazo A/A". El brazo A/A está completo, así que el
+recorte cae dentro de lo pre-registrado. La interrupción del 24-ago
+(apagado del equipo durante `B-s44`) coincidió con el recorte
+permitido; no hay decisión post-hoc que justificar.
+
+### Brazos (métrica dual, seeds compartidas, n = 68 celdas)
+
+| brazo | passed | strict | s/tarea |
+|---|---|---|---|
+| **A** MXFP4 nativo | 55/68 (80,9 %) | 55/68 | 420 |
+| **E** MXFP4 (A/A) | 50/68 (73,5 %) | 50/68 | 425 |
+| **B** Q3_K_M | 32/68 (47,1 %) | 32/68 | 606 |
+
+### El piso primero (criterio 1)
+
+A contra E —el mismo brazo contra sí mismo— da **17/68 celdas
+discordantes (25,0 %)**, McNemar exacto p = 0,33. El piso no es
+significativo, que es exactamente lo que un A/A debe mostrar, y su
+magnitud es la vara contra la que se lee todo lo demás.
+
+Dato para el Paper 3: **una de cada cuatro celdas voltea sin que nada
+cambie**.
+
+### El tratamiento
+
+B contra A: **29/68 discordantes, 26 a favor de A y 3 de B**, McNemar
+exacto **p = 1,5 × 10⁻⁵**. Delta de pass rate **−33,8 pp**. Está
+holgadamente fuera del piso, tanto en discordantes (29 vs 17) como en
+dirección (26/29 en un solo sentido).
+
+### Hipótesis
+
+- **H1 (velocidad) — REFUTADA, y en la dirección contraria.** Q3_K_M no
+  es más rápido: es **44,3 % más lento** (606 s contra 420 s por
+  tarea). La motivación entera del A/B era la sospecha de que MXFP4
+  fuera el formato lento en el camino CPU; medido en nuestro harness
+  con nuestro oráculo, el quant agresivo pierde también acá.
+- **H2 (calidad) — REFUTADA.** El pass rate cae 33,8 pp, muy fuera del
+  piso.
+- **H3 (huella)** — no medible con estos datos: los JSON no registran
+  memoria pico. Queda sin responder y se declara como tal.
+
+### Veredicto: RECHAZAR Q3_K_M (criterio 3)
+
+El pass rate cae fuera del piso, así que aplica el criterio 3 tal como
+estaba escrito: *"se documenta el precio en calidad del quant agresivo
+— resultado útil, porque la comunidad usa estos quants sin medirlos con
+oráculo objetivo"*. Ese precio resultó ser doble, calidad **y**
+velocidad.
+
+**MXFP4 nativo se queda como el formato local de gpt-oss:20b.**
+
+La lectura de mecanismo que el pre-registro anticipó se sostiene:
+Q3_K_M no es una cuantización de pesos FP16, es una **re-cuantización
+de una cuantización** (MXFP4 es el formato nativo con que se entrenaron
+los expertos, quantization-aware). El riesgo no era simétrico con el
+caso habitual, y por eso se midió en vez de suponerlo.
+
+### Caveats
+
+- Los JSON **no registran `engine_version`** (la capacidad es del
+  2026-08-27, posterior al sweep), así que no se puede descartar del
+  todo que el motor cambiara entre brazos. Los tres corrieron en la
+  misma ventana de 48 h sobre el mismo binario, lo que lo hace
+  improbable pero no verificable a partir del dato.
+- 34 tareas × 2 seeds. El efecto es tan grande que el `n` no es el
+  cuello de botella acá, a diferencia de
+  `docs/analisis-fragilidad-discriminacion-2026-08-28.md`.
+- Un solo modelo y un solo quant de la comunidad. No se afirma nada
+  sobre Q4_K_M ni sobre otras familias.
