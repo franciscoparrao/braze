@@ -1,25 +1,69 @@
 % Entradas de bib para el Paper 3 y para la eventual revisión del
-% Paper 1 — PENDIENTES DE /verify-refs.
+% Paper 1 — VERIFICADAS con /verify-refs el 2026-08-28.
 %
-% PROCEDENCIA: título y autoría extraídos de los metadatos de los PDF
-% que están en `docs/` (fuente primaria, no búsqueda web ni abstract).
-% Los seis se verificaron con `pdfinfo` el 2026-08-28. Los PDF están en
-% .gitignore, así que la comprobación se rehace con:
+% PROCEDENCIA en dos pasos:
+%   1. Título y autoría extraídos de los metadatos de los PDF en `docs/`
+%      (fuente primaria, no búsqueda web ni abstract), con `pdfinfo`.
+%   2. /verify-refs nivel 1 (existencia/metadata contra OpenAlex y
+%      CrossRef) y nivel 2 (retracciones y preprint-con-versión-
+%      publicada, vía OpenAlex `is_retracted` y `locations`).
 %
-%     pdfinfo docs/<id>.pdf | grep -E '^(Title|Author)'
+% RESULTADO DE LA VERIFICACIÓN (2026-08-28)
 %
-% LO QUE FALTA y por qué este archivo no está todavía en un refs.bib:
-%   1. /verify-refs contra OpenAlex/CrossRef — existencia, retracciones,
-%      y sobre todo si alguno pasó de preprint a versión publicada con
-%      venue (varios son de agosto de 2026; el estado puede cambiar).
-%   2. Decidir destino: `parupudi2026neutral` y `yu2026recuris` van al
-%      Paper 3; `yao2026harnessbench` y `yi2026belief` van al párrafo de
-%      Related Work del Paper 1 (redactado en
-%      docs/nota-lectura-harnessbench-belief-2026-08-25.md).
+%   Nivel 1: 7/7 encontradas. Cero NOT_FOUND, cero SUSPICIOUS. Todas
+%   salieron FIXABLE por falta de DOI, y los siete DOI se agregaron.
+%   Score de confianza del CLI: 100 %.
 %
-% NO copiar a un refs.bib sin (1). El bib del Paper 2 documenta la
-% verificación de cada entrada; romper esa convención por conveniencia
-% sería exactamente lo que este proyecto audita en otros.
+%   Nivel 2: cero retractadas. Seis son preprints de arXiv sin versión
+%   publicada indexada, consistente con que son de mayo-agosto de 2026.
+%
+%   UN HALLAZGO, el que motivaba correr el nivel 2: `ren2025dynamics`
+%   está PUBLICADO en ICLR 2025, y OpenAlex NO lo sabe — solo indexa el
+%   preprint de 2024 (búsqueda por título: un único resultado, arXiv).
+%   La evidencia de la versión publicada es primaria: el PDF lleva
+%   "Published as a conference paper at ICLR 2025" en el encabezado de
+%   cada página. Se cita como @inproceedings, que es la forma correcta
+%   cuando la versión de conferencia existe, con el eprint como nota.
+%   Es el caso exacto que este nivel busca, y que una verificación
+%   apoyada solo en la API habría pasado por alto.
+%
+% UN FIXABLE RECHAZADO A PROPÓSITO. Al re-verificar, el CLI marca
+% `ren2025dynamics` como fixable y propone agregarle
+% `doi = {10.48550/arxiv.2407.10490}`. NO se aplica: ese DOI identifica
+% el PREPRINT, y la entrada cita deliberadamente la versión de
+% conferencia. Ponerlo como `doi` de un @inproceedings afirmaría que la
+% versión ICLR tiene ese identificador, que es falso. El DOI queda en
+% `note`, donde describe lo que es. Un re-run futuro va a volver a
+% proponerlo; la respuesta sigue siendo no.
+%
+% RE-CHEQUEO: los cinco preprints de 2026 pueden adquirir versión
+% publicada en los próximos meses. Volver a correr el nivel 2 antes de
+% someter cualquier manuscrito que los cite.
+%
+% DESTINO de cada entrada:
+%   - Paper 3: parupudi2026neutral, yu2026recuris, zhang2026jitagent,
+%     ursekar2026harnessopt
+%   - Related Work del Paper 1 (párrafo redactado en
+%     docs/nota-lectura-harnessbench-belief-2026-08-25.md):
+%     yao2026harnessbench, yi2026belief
+%   - Pre-registro del QLoRA: ren2025dynamics
+
+@misc{ursekar2026harnessopt,
+  title  = {{HarnessOpt-Bench}: Evaluating {LLMs} at Harness Optimization},
+  author = {Ursekar, Varun and Shanker, Apaar and Maurya, Yash and
+            Yasser, Shehab and Kalmath, Vijay S. and Chatrath, Veronica
+            and Xue, Yuan},
+  year   = {2026},
+  eprint = {2608.06301},
+  archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2608.06301},
+  note   = {Scale AI. Partición de test inaccesible durante toda la
+            búsqueda, entorno de ejecución de confianza que hace cumplir
+            el límite de evaluación y versiona cada candidato para
+            auditoría, 111 corridas puntuadas sobre 4 tareas. Nombra
+            explícitamente "separate real improvement from noise" como
+            parte de la capacidad que mide}
+}
 
 @misc{yao2026harnessbench,
   title  = {Harness-Bench: Measuring Harness Effects across Models in
@@ -31,6 +75,7 @@
   year   = {2026},
   eprint = {2605.27922},
   archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2605.27922},
   note   = {Peking University + Qiyuan Tech. 106 tareas, 5.194
             trayectorias. Define su varianza como cross-harness sobre
             suite fija y declara que NO es repeated-run stochastic
@@ -39,11 +84,12 @@
 
 @misc{yi2026belief,
   title  = {Measuring Harness-Induced Belief Divergence in Multi-Step
-            LLM Agents},
+            {LLM} Agents},
   author = {Yi, Haiwen and Song, Xinyuan},
   year   = {2026},
   eprint = {2607.04528},
   archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2607.04528},
   note   = {Grilla de 6 harnesses x 8 tareas x 4 horizontes x 3 semillas
             apareadas. Controla varianza en el DISEÑO; no la propaga a
             la decisión}
@@ -56,6 +102,7 @@
   year   = {2026},
   eprint = {2608.21382},
   archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2608.21382},
   note   = {UC San Diego. Fragility grid de 26 configuraciones sobre
             3.679 ítems y 12 modelos. Excluye sampling variance por
             diseño (greedy, single-seed) y declara no testear tareas
@@ -71,6 +118,7 @@
   year   = {2026},
   eprint = {2608.24876},
   archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2608.24876},
   note   = {NUS/Stanford/Oxford/Princeton. Bootstrap task-clustered y
             McNemar exacto; mide un piso run-to-run ([-6,98, +7,27]) y
             lo usa como criterio de decisión. Apéndice B ablaciona su
@@ -88,19 +136,24 @@
   year   = {2026},
   eprint = {2608.25593},
   archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2608.25593},
   note   = {LV-NUS Lab. Factorización h=(M,P,A,F) y HarnessFactory con
             13 scaffolds bajo protocolo común. Código MIT en
             github.com/bingreeky/JIT}
 }
 
-@misc{ren2025learningdynamics,
-  title  = {Learning Dynamics of {LLM} Finetuning},
-  author = {Ren, Yi and Sutherland, Danica J.},
-  year   = {2025},
-  eprint = {2407.10490},
-  archivePrefix = {arXiv},
-  note   = {ICLR 2025. Base teórica del pre-registro del QLoRA
-            (docs/hypothesis-2026-08-26-experto-por-motor-qlora.md):
-            push-down global, contaminación cruzada, y el fingerprint
-            del modelo generador}
+% Versión de conferencia, no el preprint — ver el hallazgo de nivel 2
+% en la cabecera. El eprint queda como nota porque OpenAlex indexa esa
+% versión y no la de ICLR.
+@inproceedings{ren2025dynamics,
+  title     = {Learning Dynamics of {LLM} Finetuning},
+  author    = {Ren, Yi and Sutherland, Danica J.},
+  booktitle = {International Conference on Learning Representations
+               (ICLR)},
+  year      = {2025},
+  note      = {arXiv:2407.10490, doi 10.48550/arxiv.2407.10490. Base
+               teórica del pre-registro del QLoRA
+               (docs/hypothesis-2026-08-26-experto-por-motor-qlora.md):
+               push-down global, contaminación cruzada, y el fingerprint
+               del modelo generador}
 }

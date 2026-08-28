@@ -46,7 +46,21 @@ No es sobre el campo, es sobre **los gates**. Reformulada:
 Tres distinciones que hay que mantener separadas y que el v1 mezclaba:
 
 1. **Sobreajuste de búsqueda** — elegir el candidato que memorizó el
-   train. Lo ataca un held-out inaccesible (HarnessOpt-Bench).
+   train. Lo ataca un held-out inaccesible (HarnessOpt-Bench, Scale AI:
+   la partición de test es inaccesible durante toda la búsqueda y un
+   entorno de ejecución de confianza hace cumplir el límite, mide el
+   consumo del agente objetivo y versiona cada candidato para
+   auditoría). **Verificado contra el texto completo el 2026-08-28**,
+   no contra el abstract.
+
+   Matiz que la lectura completa obliga a agregar: ellos **nombran** el
+   problema del ruido —el optimizador debe *"separate real improvement
+   from noise"*— pero como parte de la **capacidad que miden en el
+   optimizador**, no como propiedad de su propia medición. La
+   distinción de este outline sigue en pie: su held-out se evalúa una
+   vez, y con evaluación estocástica ese score final tiene varianza que
+   el protocolo no acota. Decir que "ignoran el ruido" sería falso;
+   decir que no lo propagan a su métrica de reporte, no.
 2. **Ruido de medición en el test final** — una ganancia en el held-out
    puede ser ruido igual. Lo ataca un piso medido (Recuris, en un
    dominio).
@@ -175,9 +189,16 @@ de nivel superior — lección del 25-ago.
 
 ## Qué falta para escribir
 
-- [ ] Claves de bib: `yao2026harnessbench`, `yi2026belief`,
-      `ursekar2026harnessopt`, `parupudi2026neutral`, `yu2026recuris` +
-      `/verify-refs`.
+- [x] Claves de bib — HECHO 2026-08-28:
+      `docs/paper3-refs-verificadas-2026-08-28.bib`, seis entradas con
+      /verify-refs niveles 1 y 2 pasados (6/6 encontradas, cero
+      retractadas, seis DOI agregados). Un hallazgo: `ren2025dynamics`
+      está publicado en ICLR 2025 y OpenAlex no lo sabe — se cita como
+      @inproceedings. Falta `ursekar2026harnessopt` (HarnessOpt-Bench):
+      no hay PDF en disco, así que no se pudo verificar con fuente
+      primaria.
+- [x] `ursekar2026harnessopt` — HECHO 2026-08-28: PDF bajado,
+      metadatos por `pdfinfo`, verificado nivel 1 y 2. Son 7 entradas.
 - [ ] Leer `packages/eval` de Maka; verificar Cordis.
 - [ ] Decidir si se versionan los JSON que alimentan los análisis (hoy
       viven en Nitro; sin ellos nada es reproducible por terceros).
