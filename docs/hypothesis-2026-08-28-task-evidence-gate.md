@@ -183,3 +183,107 @@ Los números de la precondición se reproducen sobre el archivo de sweeps
 de `nitro:~/braze/docs/` con el snippet documentado en la sección de
 la precondición (conteo sobre `tool_call_names` de las filas cuyo
 `backend` contiene `task-list`).
+
+---
+
+## Resultados de Q0 y veredicto (2026-08-28)
+
+Corrido en Nitro bajo `tmux`, 21 minutos. Recorte declarado aplicado:
+solo `ornith:9b` — `gpt-oss:20b` (~12 GB) no cabía en los 5,7 GiB
+disponibles con la sesión gráfica abierta. El brazo U0 está completo.
+Datos: `nitro:~/q0-{U0,U1,U2}-s{42,43}.json`.
+
+### Tasa de uso
+
+| brazo | corridas | usaron `task_*` | tasa | `task_update` | passed |
+|---|---|---|---|---|---|
+| **U0** estado actual | 12 | 0 | **0 %** | 0 | 12/12 |
+| **U1** descripciones insistentes | 12 | 0 | **0 %** | 0 | 12/12 |
+| **U2** sembrada por planner | 12 | 10 | **83 %** | 26 | 12/12 |
+
+**U1 queda refutado.** Reescribir las descripciones para pedir el uso
+—"REQUIRED FIRST STEP…", "REQUIRED after finishing each step…"— no movió
+la aguja ni una corrida. La hipótesis de que el 2,2 % histórico fuera un
+problema de redacción **no se sostiene**, al menos en este executor.
+
+**U2 desbloquea el criterio**: 83 % supera holgadamente el 30 %
+pre-registrado. Cuando el planner siembra la lista, el modelo sí la
+actualiza (26 `task_update` en 10 corridas).
+
+### Pero Q1 NO se lanza, por una razón que Q0 no buscaba
+
+De las **10 corridas de U2 con `task_update`, CERO** lo emitieron sin
+una tool real previa. Todas tienen entre 1 y 4 herramientas ejecutadas
+antes del primer update:
+
+```
+multi_step_read_count_write   ['read_file', 'write_file', 'task_update', …]
+error_recovery_wrong_filename ['glob', 'shell_exec', 'shell_exec', 'shell_exec', 'task_update']
+multi_step_sum_two_files      ['read_file', 'read_file', 'write_file', 'task_update', …]
+```
+
+**El gate de evidencia no habría disparado ni una vez.** El modo de
+falla que ataca —v8 K-6, "un 3B re-marca `done` con frecuencia"— no se
+manifiesta en `ornith:9b`: el modelo trabaja primero y marca después,
+que es exactamente el orden correcto.
+
+Esto lo decide el **criterio 3 del propio diseño de Q1**, escrito antes
+de correr nada: *"no se adopta un efecto sin mecanismo observable
+aunque sea significativo — el conteo de disparos del gate tiene que ser
+> 0"*. Q0 muestra de antemano que ese conteo sería 0. Correr Q1 sería
+gastar horas para confirmar lo que ya se sabe.
+
+Hay que decir con claridad qué anticipó el pre-registro y qué no: el
+criterio de desbloqueo (30 % de uso) **se cumplió**, y la razón para no
+lanzar Q1 es otra que Q0 no fue diseñado para buscar. No estaba
+previsto; apareció.
+
+### La tensión estructural que esto destapa
+
+Los dos hechos juntos son incómodos y valen más que la palanca:
+
+1. El modelo que **comete** el error (un 3B, K-6) **no usa** la lista:
+   0 % en U0 y U1, y 2,2 % en 760 filas históricas.
+2. El modelo que **usa** la lista (ornith con planner, 83 %) **no
+   comete** el error: 0 de 10 updates sin evidencia.
+
+El gate de evidencia está bien implementado y resuelve un problema que,
+donde se puede medir, no ocurre. No es un fallo del gate: es que la
+población donde el mecanismo aplica y la población donde el instrumento
+funciona **no se solapan** con los executores disponibles.
+
+### Caveat de la suite
+
+Los tres brazos dan 12/12. La suite Q0 —familias `multi_step` y
+`error_recovery` de `default.toml`— está **saturada** para `ornith:9b`.
+Para Q0 no importa (su métrica primaria es tasa de uso, no pass rate),
+pero invalida esta suite para cualquier Q1 futuro: sin espacio hacia
+arriba no hay mejora que detectar. Elegirla fue un error de diseño mío
+al escribir el pre-registro, que nombraba a ornith como "de los que
+saturan `default.toml`" y aun así tomó tareas de ahí.
+
+### Veredicto
+
+**Q1 NO se lanza. La palanca `task-evidence` queda implementada y
+OFF**, con el mismo desenlace que `sc-route`: mecanismo razonable, sin
+condiciones para medirlo.
+
+Lo que haría falta para reabrirla, y ninguna es barata:
+
+- Un executor que use la lista **y** cometa el error. No hay candidato
+  entre los disponibles; habría que buscarlo, no suponerlo.
+- Una suite no saturada para ese executor.
+- O bien: aceptar que el valor del gate es de **seguro** (impide una
+  clase de falla) y no de mejora medible, y decidir si eso justifica
+  mantener la palanca. Es una decisión de diseño, no experimental, y
+  como tal no se resuelve con un sweep.
+
+### Lo que Q0 sí aporta, independiente del gate
+
+- **La palanca `task-list` no es inerte por redacción sino por
+  invocación**: con planner llega al 83 %. Si alguna vez se quiere
+  validar C′.2, el brazo tiene que ser `+plan:` — U0 solo mide que el
+  modelo no la descubre.
+- **Un dato negativo limpio sobre prompt engineering**: hacer las
+  descripciones de una tool más imperativas no cambió nada. Es el tipo
+  de intervención que se asume efectiva y acá midió cero.
