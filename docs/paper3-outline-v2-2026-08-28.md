@@ -33,6 +33,44 @@ agosto se rompió del todo:
 contraejemplos de la misma semana.** Escribirlo así sería el error que
 este proyecto persigue en otros.
 
+## El encuadre, en el marco de otros (2026-08-29)
+
+*Stop Comparing LLM Agents Without Disclosing the Harness*
+(arXiv:2605.23950, Zhang et al.) da la formulación más limpia que este
+paper ha tenido, porque permite enunciar el aporte **dentro de una
+descomposición que ellos ya publicaron** en vez de contra nadie.
+
+Su ecuación 1 afirma que la varianza total *"decomposes exactly as"*:
+
+```
+Var(B(M,H)) = MV + HV + Var(model × harness)
+```
+
+Eso es exacto para la varianza de la **media** `μ(M,H)`; para el score
+**observado**, con `B = μ + ε`, falta un cuarto término: `σ²_ε`, el
+ruido entre corridas de la misma celda.
+
+Lo notable es que **su propio diseño lo estima y no lo reporta**. Corren
+dos repeticiones por celda, y su ecuación 2 usa `SS_error` —que ES ese
+término— como denominador de un `η²_p`. Pero su Tabla 2 promedia las dos
+corridas sin dispersión, y el protocolo que recomiendan a la comunidad
+(HV por modelo, MV por harness, ratio, reversiones, `η²_p`) **no incluye
+el residual entre las cantidades a reportar**.
+
+**El aporte del Paper 3, reformulado**: el término residual existe,
+varios diseños lo estiman sin proponérselo, ninguno lo reporta ni lo usa
+para calibrar un umbral, y acá está medido junto con lo que cuesta
+ignorarlo. Constructivo, encaja en un marco publicado, y no requiere
+caracterizar mal a nadie — que es la restricción que esta semana impuso
+tres veces.
+
+**Caveat de régimen, que hay que respetar al citarlos**: su tesis está
+restringida a modelos frontier de capacidad comparable en tareas
+long-horizon, y excluye explícitamente los casos donde un modelo domina.
+El régimen de este proyecto —SLM locales de 3-20B con brechas grandes—
+queda fuera. Su HV/MV = 7,80× no se hereda; lo que se hereda es la
+descomposición como lenguaje.
+
 ## La premisa que SÍ se sostiene
 
 No es sobre el campo, es sobre **los gates**. Reformulada:

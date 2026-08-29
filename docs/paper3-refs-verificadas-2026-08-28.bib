@@ -10,11 +10,11 @@
 %
 % RESULTADO DE LA VERIFICACIÓN (2026-08-28)
 %
-%   Nivel 1: 8/8 encontradas. Cero NOT_FOUND, cero SUSPICIOUS. Todas
+%   Nivel 1: 9/9 encontradas. Cero NOT_FOUND, cero SUSPICIOUS. Todas
 %   salieron FIXABLE por falta de DOI, y los siete DOI se agregaron.
 %   Score de confianza del CLI: 100 %.
 %
-%   Nivel 2: cero retractadas. Siete son preprints de arXiv sin versión
+%   Nivel 2: cero retractadas. Ocho son preprints de arXiv sin versión
 %   publicada indexada, consistente con que son de mayo-agosto de 2026.
 %
 %   UN HALLAZGO, el que motivaba correr el nivel 2: `ren2025dynamics`
@@ -42,11 +42,28 @@
 %
 % DESTINO de cada entrada:
 %   - Paper 3: parupudi2026neutral, yu2026recuris, zhang2026jitagent,
-%     ursekar2026harnessopt, shi2026cordis
+%     ursekar2026harnessopt, shi2026cordis, zhang2026stopcomparing
 %   - Related Work del Paper 1 (párrafo redactado en
 %     docs/nota-lectura-harnessbench-belief-2026-08-25.md):
 %     yao2026harnessbench, yi2026belief
 %   - Pre-registro del QLoRA: ren2025dynamics
+
+@misc{zhang2026stopcomparing,
+  title  = {Stop Comparing {LLM} Agents Without Disclosing the Harness},
+  author = {Zhang, Yunbei and Wang, Janet and Ge, Yingqiang and Xu,
+            Weijie and Hamm, Jihun and Reddy, Chandan K.},
+  year   = {2026},
+  eprint = {2605.23950},
+  archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2605.23950},
+  note   = {Tulane/Rutgers/Virginia Tech. Binding Constraint Thesis:
+            HV(M) comparable o mayor que MV(H) en long-horizon a
+            capacidad comparable. Factorial 3x3 con DOS corridas por
+            celda, ratio HV/MV = 7,80x y 6 reversiones de ranking en 9
+            comparaciones. Su descomposicion Var(B) = MV + HV +
+            interaccion omite el termino residual, que su propio diseno
+            estima como SS_error para el eta^2 parcial}
+}
 
 @misc{ursekar2026harnessopt,
   title  = {{HarnessOpt-Bench}: Evaluating {LLMs} at Harness Optimization},
