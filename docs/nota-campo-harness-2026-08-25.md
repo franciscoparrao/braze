@@ -13,8 +13,8 @@ Ninguno estaba en el bib del proyecto.
 | **Stop Comparing LLM Agents Without Disclosing the Harness** — arXiv 2605.23950 | posición (Binding Constraint Thesis + protocolo de descomposición de varianza) | El título **es** nuestra crítica de atribución. LEÍDO 2026-08-29 → `nota-lectura-binding-constraint-2026-08-29.md`. **Corrección: AutoHarness NO es de ellos**, lo citan como trabajo de terceros junto con ADAS, Meta-Harness y AHE |
 | **Measuring Harness-Induced Belief Divergence in Multi-Step LLM Agents** — arXiv 2607.04528 (5-jul) | mide divergencia de creencias inducida por el harness | Su frase — *"harness design is an experimental variable in agent evaluation, not an implementation detail"* — es literalmente la tesis del Paper 1, publicada por terceros |
 | **Harness-Bench** — arXiv 2605.27922 | mide efectos de harness across models en workflows realistas | Competidor directo del encuadre del Paper 1; hay que ver si su diseño mide interacción θ×H |
-| **Position: Coding Benchmarks Are Misaligned with Agentic SE** — arXiv 2606.17799 | posición | Conecta con "benchmark-capacidad ≠ confiabilidad agéntica" |
-| **SkillsBench** — arXiv 2602.12670 | cómo funcionan las *agent skills* across tasks | Toca D′ (skills explicit-only) |
+| **Position: Coding Benchmarks Are Misaligned with Agentic SE** — arXiv 2606.17799 (Tessl) | posición | LEÍDO 2026-08-29. Su Tabla 1 (Opus 4.6: 79,8→58,0 según harness, modelo fijo) es la tesis del Paper 1 en datos ajenos. Cita AI21 (200k corridas) y Anthropic sobre ruido de infraestructura |
+| **SkillsBench** — arXiv 2602.12670 | cómo funcionan las *agent skills* across tasks | LEÍDO 2026-08-29. +16,6 pp de skills curadas (rango +4,1 a +25,7); "skill efficacy is a property of a specific agent stack, not a universal constant". Su diseño de 3 condiciones es el modelo para el pre-registro de call-time skills |
 
 ## Lectura estratégica, sin autoengaño
 
@@ -23,7 +23,8 @@ Ninguno estaba en el bib del proyecto.
    Paper 1 pierde parte de su novedad de framing, aunque conserva la
    suya: la **curva harness-vs-escala en régimen SLM local** con
    pre-registro por palanca, que ninguno de estos hace.
-2. **Prioridad de lectura**: (a) Harness-Bench y belief-divergence,
+2. ~~**Prioridad de lectura**~~ — **LAS SEIS LEÍDAS al 2026-08-29.**
+   Orden original: (a) Harness-Bench y belief-divergence,
    porque pueden solaparse con el Paper 1 y hay que citarlos o
    diferenciarse antes de la revisión; (b) Stop Comparing, por el
    ángulo de atribución; (c) HarnessOpt-Bench ya leído en abstract y

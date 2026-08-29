@@ -10,11 +10,11 @@
 %
 % RESULTADO DE LA VERIFICACIÓN (2026-08-28)
 %
-%   Nivel 1: 9/9 encontradas. Cero NOT_FOUND, cero SUSPICIOUS. Todas
+%   Nivel 1: 11/11 encontradas. Cero NOT_FOUND, cero SUSPICIOUS. Todas
 %   salieron FIXABLE por falta de DOI, y los siete DOI se agregaron.
 %   Score de confianza del CLI: 100 %.
 %
-%   Nivel 2: cero retractadas. Ocho son preprints de arXiv sin versión
+%   Nivel 2: cero retractadas. Diez son preprints de arXiv sin versión
 %   publicada indexada, consistente con que son de mayo-agosto de 2026.
 %
 %   UN HALLAZGO, el que motivaba correr el nivel 2: `ren2025dynamics`
@@ -47,6 +47,38 @@
 %     docs/nota-lectura-harnessbench-belief-2026-08-25.md):
 %     yao2026harnessbench, yi2026belief
 %   - Pre-registro del QLoRA: ren2025dynamics
+
+@misc{gorinova2026misaligned,
+  title  = {Position: Coding Benchmarks Are Misaligned with Agentic
+            Software Engineering},
+  author = {Gorinova, Maria I. and Baker, Macey and Heineike, Amy and
+            Shaposhnikov, Maksim and Willoughby, Rob and Knox, Dru},
+  year   = {2026},
+  eprint = {2606.17799},
+  archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2606.17799},
+  note   = {Tessl. Su Tabla 1: Claude Opus 4.6 en Terminal-Bench va de
+            79,8 a 58,0 segun el harness, con el modelo FIJO. Cita dos
+            fuentes industriales del ruido residual: AI21 sobre 200.000
+            corridas de SWE-bench y el post de Anthropic sobre
+            infrastructure noise}
+}
+
+@misc{li2026skillsbench,
+  title  = {{SkillsBench}: Benchmarking How Well Agent Skills Work
+            Across Diverse Tasks},
+  author = {Li, Xiangyi and Liu, Yimin and Chen, Wenbo and You, Bingran
+            and others},
+  year   = {2026},
+  eprint = {2602.12670},
+  archivePrefix = {arXiv},
+  doi    = {10.48550/arxiv.2602.12670},
+  note   = {87 tareas, 8 dominios, 18 configuraciones modelo-harness,
+            9.396 trayectorias. Skills curadas: 33,9 -> 50,5 % (+16,6
+            pp), rango +4,1 a +25,7. Diseno pareado por (configuracion,
+            tarea), 3 trials por celda, IC 95 %. Finding 1: la eficacia
+            de una skill es propiedad del stack, no una constante}
+}
 
 @misc{zhang2026stopcomparing,
   title  = {Stop Comparing {LLM} Agents Without Disclosing the Harness},
