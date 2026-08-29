@@ -99,6 +99,12 @@ pub struct ConfigOverrides {
     pub lead_failure_threshold: Option<usize>,
     #[serde(default)]
     pub lead_escalation_turns: Option<usize>,
+    /// Specs `backend[:modelo]` de la cadena de failover, en orden de
+    /// preferencia. Por env se pasa como lista separada por comas.
+    #[serde(default)]
+    pub failover_backends: Option<Vec<String>>,
+    #[serde(default)]
+    pub failover_cooldown_secs: Option<u64>,
     #[serde(default)]
     pub max_turn_iterations: Option<u32>,
     #[serde(default)]
@@ -352,6 +358,30 @@ impl ConfigOverrides {
                 "PLANNER_MODEL" => overrides.planner_model = Some(value.to_string()),
                 "LEAD_BACKEND" => overrides.lead_backend = Some(value.to_string()),
                 "LEAD_MODEL" => overrides.lead_model = Some(value.to_string()),
+                // Lista separada por comas: `BRAZE_FAILOVER_BACKENDS=
+                // "zen:hy3-free,ollama:qwen2.5:3b"`. Se descartan las
+                // entradas vacías para que una coma sobrante no componga
+                // un backend sin nombre; el valor vacío entero deja la
+                // cadena en `Some(vec![])`, que apaga el decorator igual
+                // que el default.
+                "FAILOVER_BACKENDS" => {
+                    overrides.failover_backends = Some(
+                        value
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|spec| !spec.is_empty())
+                            .map(str::to_string)
+                            .collect(),
+                    );
+                }
+                "FAILOVER_COOLDOWN_SECS" => {
+                    let parsed = value.parse::<u64>().map_err(|e| ConfigError::InvalidEnvValue {
+                        var: key.to_string(),
+                        value: value.to_string(),
+                        reason: e.to_string(),
+                    })?;
+                    overrides.failover_cooldown_secs = Some(parsed);
+                }
                 "LEAD_TURNS" => {
                     let parsed =
                         value

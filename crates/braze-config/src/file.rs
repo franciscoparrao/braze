@@ -76,6 +76,10 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "lead_turns",
     "lead_failure_threshold",
     "lead_escalation_turns",
+    // Failover por rate limit (2026-08-29): cadena de backends alternos
+    // y el cooldown tras un 429. `FailoverBackend` en braze-model.
+    "failover_backends",
+    "failover_cooldown_secs",
     // v4 P0.2 (mitad rondas) — `max_turn_iterations` and
     // `planner_max_tokens` stop being engine.rs hardcoded constants, now
     // configurable.

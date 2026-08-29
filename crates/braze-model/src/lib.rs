@@ -13,6 +13,7 @@ mod backend;
 mod circuit_breaker;
 mod error;
 mod escalation;
+mod failover;
 // Compilados también sin el feature `local` (bajo `test`): estos módulos
 // son puros (sin llama.cpp) y así sus tests corren en el `cargo test`
 // normal del workspace, donde `local` no se compila.
@@ -48,6 +49,7 @@ pub use anthropic::AnthropicBackend;
 pub use backend::{CompletionEvent, CompletionRequest, ModelBackend};
 pub use error::ModelError;
 pub use escalation::EscalatingBackend;
+pub use failover::FailoverBackend;
 #[cfg(feature = "local")]
 pub use local::{LocalBackend, LocalSampling, TuneReport, resolve_local_gguf, tune_model};
 pub use ollama::{

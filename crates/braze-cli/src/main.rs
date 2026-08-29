@@ -579,6 +579,30 @@ async fn build_engine(
 > {
     let mut model = build_model_backend(config, &config.default_backend, None)?;
 
+    // Failover por rate limit (2026-08-29): la hoja principal pasa a ser
+    // una cadena — si contesta 429 (o su breaker está abierto), la ronda
+    // la sirve el siguiente backend en vez de morir el turno.
+    //
+    // Va ANTES del EscalatingBackend a propósito: envuelve la *hoja*, no
+    // el conjunto, así que con `--lead` esto protege al worker y el lead
+    // conserva su identidad de modelo. Un 429 del worker no arrastra al
+    // rol que no estaba limitado.
+    if !config.failover_backends.is_empty() {
+        let mut rest: Vec<Box<dyn braze_model::ModelBackend>> = Vec::new();
+        for spec in &config.failover_backends {
+            let (backend, model_override) = match spec.split_once(':') {
+                Some((backend, model)) => (backend, Some(model)),
+                None => (spec.as_str(), None),
+            };
+            rest.push(build_model_backend(config, backend, model_override)?);
+        }
+        let mut chain = braze_model::FailoverBackend::new(model, rest);
+        if let Some(secs) = config.failover_cooldown_secs {
+            chain = chain.with_cooldown(std::time::Duration::from_secs(secs));
+        }
+        model = Box::new(chain);
+    }
+
     // Reactive lead/worker escalation (estilo Goose, ítem 6 del backlog
     // 2026-07-06): the primary backend becomes the *worker*; the lead
     // opens the session and returns whenever the worker strings failed

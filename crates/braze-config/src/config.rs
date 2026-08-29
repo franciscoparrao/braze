@@ -456,6 +456,32 @@ pub struct Config {
     /// `None` uses the decorator's default (3). Same I-1 rationale.
     #[serde(default)]
     pub lead_escalation_turns: Option<usize>,
+    /// Cadena de failover por rate limit (2026-08-29): backends
+    /// alternativos, en orden de preferencia, a los que se manda la ronda
+    /// cuando el principal contesta 429 o su circuit breaker está abierto
+    /// (`braze-model::FailoverBackend`). Cada entrada es un spec
+    /// `backend[:modelo]`, misma convención que `--planner`/`--lead`.
+    /// Vacío (el default) desactiva el decorator por completo.
+    ///
+    /// Envuelve la hoja principal, no el conjunto: con `--lead`, el
+    /// failover protege al *worker*, y el lead conserva su identidad de
+    /// modelo. Un 429 del worker no debe arrastrar consigo al rol que no
+    /// estaba limitado (decisión del autor, 2026-08-29).
+    #[serde(default)]
+    pub failover_backends: Vec<String>,
+    /// Segundos que un backend queda marcado como limitado tras
+    /// rechazar, antes de volver a intentarlo
+    /// (`FailoverBackend::with_cooldown`). `None` usa el default del
+    /// decorator (60s), que vive en `braze-model::failover` y no se
+    /// duplica acá. `Some(0)` desactiva la memoria: cada ronda reintenta
+    /// el principal primero — el brazo de ablación.
+    ///
+    /// No se deriva de `Retry-After` porque esa cabecera se consume
+    /// dentro de `send_with_retry` y nunca llega al decorator; para
+    /// OpenCode Zen da igual, sus 429 no traen cabeceras de rate limit
+    /// (medido 2026-08-29).
+    #[serde(default)]
+    pub failover_cooldown_secs: Option<u64>,
     /// Tope de iteraciones agentic por turno antes de forzar una respuesta
     /// text-only (`Engine::run_turn`'s `MAX_TURN_ITERATIONS`). Default 20,
     /// el histórico valor hardcoded; acá expuesto (v4 P0.2/mitad rondas)
@@ -753,6 +779,8 @@ impl Default for Config {
             lead_turns: None,
             lead_failure_threshold: None,
             lead_escalation_turns: None,
+            failover_backends: Vec::new(),
+            failover_cooldown_secs: None,
             max_turn_iterations: default_max_turn_iterations(),
             planner_max_tokens: default_planner_max_tokens(),
             max_turn_total_tokens: None,
@@ -1012,6 +1040,12 @@ impl Config {
         }
         if let Some(v) = overrides.lead_escalation_turns {
             self.lead_escalation_turns = Some(v);
+        }
+        if let Some(v) = overrides.failover_backends {
+            self.failover_backends = v;
+        }
+        if let Some(v) = overrides.failover_cooldown_secs {
+            self.failover_cooldown_secs = Some(v);
         }
         if let Some(v) = overrides.max_turn_iterations {
             self.max_turn_iterations = v;
@@ -1466,6 +1500,34 @@ mod tests {
         assert_eq!(config.lead_turns, Some(0));
         assert_eq!(config.lead_failure_threshold, Some(3));
         assert_eq!(config.lead_escalation_turns, Some(4));
+    }
+
+    /// La cadena de failover llega desde env, se parte por comas y
+    /// tolera espacios y comas sobrantes — una entrada vacía compondría
+    /// un `build_model_backend("")` que falla en arranque con un mensaje
+    /// sobre un backend sin nombre, muy lejos de la coma de más que lo
+    /// causó.
+    #[test]
+    fn failover_chain_defaults_to_empty_and_parses_from_env() {
+        let defaults = Config::load_with(None, no_env()).unwrap();
+        assert!(defaults.failover_backends.is_empty());
+        assert_eq!(defaults.failover_cooldown_secs, None);
+
+        let env = vec![
+            (
+                "BRAZE_FAILOVER_BACKENDS".to_string(),
+                "zen:hy3-free, ollama:qwen2.5:3b,".to_string(),
+            ),
+            ("BRAZE_FAILOVER_COOLDOWN_SECS".to_string(), "0".to_string()),
+        ];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(
+            config.failover_backends,
+            vec!["zen:hy3-free".to_string(), "ollama:qwen2.5:3b".to_string()]
+        );
+        // `Some(0)` (ablación: sin memoria) debe sobrevivir distinto de
+        // `None` (default del decorator), misma razón que `lead_turns`.
+        assert_eq!(config.failover_cooldown_secs, Some(0));
     }
 
     #[test]
