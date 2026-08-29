@@ -126,6 +126,90 @@ fn median(sorted: &[u128]) -> f64 {
     }
 }
 
+/// Partición de ítems por estabilidad entre repeticiones, con la banda
+/// que induce — el vocabulario de Parupudi (arXiv:2608.21382 § 3.4)
+/// trasladado de configuraciones a repeticiones de la MISMA
+/// configuración, que es la fuente de varianza que él excluye por
+/// diseño y la que este proyecto mide con sus brazos A/A.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemStability {
+    pub tasks: usize,
+    /// Pasa en TODAS las repeticiones.
+    pub robust_correct: usize,
+    /// Falla en todas — separado de `fragile` para que un ítem
+    /// uniformemente imposible no se confunda con uno que voltea.
+    pub robust_wrong: usize,
+    /// Voltea entre repeticiones.
+    pub fragile: usize,
+    /// `robust_correct / tasks` — el piso que sí se sostiene.
+    pub robust_accuracy: f64,
+    /// Promedio de las tasas por ítem: lo que el pass rate reporta.
+    pub mean_accuracy: f64,
+    /// Fracción de ítems que pasan al menos una vez — la cota optimista.
+    pub optimistic_accuracy: f64,
+    /// `(mean - robust) / mean`: cuánto de lo acreditado por la media no
+    /// sobrevive a repetir la corrida. `0.0` si la media es cero.
+    pub run_lucky_fraction: f64,
+}
+
+/// `None` cuando no hay repeticiones (ninguna tarea corrió más de una
+/// vez): sin réplicas la partición no es calculable y una tabla de
+/// ceros sugeriría estabilidad que no se midió.
+///
+/// Las filas con `harness_err` NO se excluyen acá a propósito, a
+/// diferencia del pass rate: un fallo de infraestructura que solo
+/// aparece en algunas repeticiones ES inestabilidad de la corrida, y
+/// esconderlo daría una banda más angosta que la real.
+pub fn item_stability(results: &[&TaskResult]) -> Option<ItemStability> {
+    let mut by_task: std::collections::BTreeMap<&str, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for r in results {
+        let e = by_task.entry(r.task_id.as_str()).or_insert((0, 0));
+        e.0 += 1;
+        if r.passed {
+            e.1 += 1;
+        }
+    }
+    if by_task.is_empty() || by_task.values().all(|(n, _)| *n < 2) {
+        return None;
+    }
+    let tasks = by_task.len();
+    let mut robust_correct = 0;
+    let mut robust_wrong = 0;
+    let mut fragile = 0;
+    let mut rate_sum = 0.0;
+    let mut at_least_one = 0;
+    for (n, k) in by_task.values() {
+        if *k == *n {
+            robust_correct += 1;
+        } else if *k == 0 {
+            robust_wrong += 1;
+        } else {
+            fragile += 1;
+        }
+        if *k > 0 {
+            at_least_one += 1;
+        }
+        rate_sum += *k as f64 / *n as f64;
+    }
+    let mean_accuracy = rate_sum / tasks as f64;
+    let robust_accuracy = robust_correct as f64 / tasks as f64;
+    Some(ItemStability {
+        tasks,
+        robust_correct,
+        robust_wrong,
+        fragile,
+        robust_accuracy,
+        mean_accuracy,
+        optimistic_accuracy: at_least_one as f64 / tasks as f64,
+        run_lucky_fraction: if mean_accuracy > 0.0 {
+            (mean_accuracy - robust_accuracy) / mean_accuracy
+        } else {
+            0.0
+        },
+    })
+}
+
 fn summarize(backend: &str, results: &[&TaskResult]) -> BackendSummary {
     let harness_errors = results
         .iter()
@@ -544,6 +628,52 @@ pub fn print_table(results: &[TaskResult]) {
         }
     }
 
+    // Estabilidad por ítem — misma lógica de sección propia que pass^k:
+    // la tabla de arriba está al límite de ancho y esto solo existe con
+    // repeticiones. Adoptado de
+    // `docs/analisis-fragilidad-discriminacion-2026-08-28.md`, que midió
+    // que un sweep de gpt-oss:20b reportando 0,782 tenía accuracy
+    // ROBUSTA de 0,471: el 40 % de lo acreditado no sobrevivía a repetir
+    // la corrida. El pass rate solo no distingue "acierta" de "acierta a
+    // veces", y esa diferencia es la que un A/B necesita antes de
+    // interpretar cualquier delta.
+    //
+    // Vocabulario de Parupudi (arXiv:2608.21382 § 3.4) trasladado de
+    // configuraciones a repeticiones.
+    let stability: Vec<(&str, ItemStability)> = summaries
+        .iter()
+        .filter_map(|s| {
+            let rows: Vec<&TaskResult> =
+                results.iter().filter(|r| r.backend == s.backend).collect();
+            item_stability(&rows).map(|st| (s.backend.as_str(), st))
+        })
+        .collect();
+    if !stability.is_empty() {
+        println!("\n== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==");
+        println!(
+            "{:<24} {:>9} {:>9} {:>13} {:>10} {:>10} {:>12} {:>10}",
+            "backend", "robusto", "frágil", "robusto-mal", "robusta", "media", "optimista", "suerte"
+        );
+        for (backend, st) in &stability {
+            println!(
+                "{:<24} {:>9} {:>9} {:>13} {:>10.3} {:>10.3} {:>12.3} {:>10.2}",
+                backend,
+                format!("{}/{}", st.robust_correct, st.tasks),
+                format!("{}/{}", st.fragile, st.tasks),
+                format!("{}/{}", st.robust_wrong, st.tasks),
+                st.robust_accuracy,
+                st.mean_accuracy,
+                st.optimistic_accuracy,
+                st.run_lucky_fraction,
+            );
+        }
+        println!(
+            "(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado \
+             por la media que no sobrevive a repetir. Un delta de A/B menor que la banda \
+             robusta→optimista no es interpretable.)"
+        );
+    }
+
     // v8 K-19 — el diseño pareado que los seeds compartidos habilitan:
     // McNemar exacto por brazo contra el PRIMER brazo (control), Holm
     // sobre la familia. Complementa (no reemplaza) el Wilson de arriba,
@@ -835,6 +965,96 @@ mod tests {
         let single = holm_adjust(&[0.2]);
         assert!((single[0] - 0.2).abs() < 1e-12);
         assert!(holm_adjust(&[0.9, 0.8]).iter().all(|p| *p <= 1.0));
+    }
+
+    fn stab_row(task: &str, rep: u32, passed: bool) -> TaskResult {
+        let mut r = result(passed, 10, 1, 1);
+        r.task_id = task.to_string();
+        r.repetition = rep;
+        r
+    }
+
+    /// Sin repeticiones no hay partición que calcular, y devolver ceros
+    /// sugeriría una estabilidad que no se midió.
+    #[test]
+    fn item_stability_is_none_without_repetitions() {
+        let rows = [stab_row("a", 0, true), stab_row("b", 0, false)];
+        let refs: Vec<&TaskResult> = rows.iter().collect();
+        assert_eq!(item_stability(&refs), None);
+    }
+
+    /// La partición separa las tres clases, y `robust_wrong` no se
+    /// confunde con `fragile`: un ítem uniformemente imposible es
+    /// estable, no inestable.
+    #[test]
+    fn item_stability_partitions_robust_fragile_and_robust_wrong() {
+        let rows = [
+            // robusto: pasa las dos veces
+            stab_row("robusto", 0, true),
+            stab_row("robusto", 1, true),
+            // frágil: voltea
+            stab_row("fragil", 0, true),
+            stab_row("fragil", 1, false),
+            // robusto-mal: falla las dos
+            stab_row("imposible", 0, false),
+            stab_row("imposible", 1, false),
+        ];
+        let refs: Vec<&TaskResult> = rows.iter().collect();
+        let st = item_stability(&refs).expect("hay repeticiones");
+        assert_eq!(st.tasks, 3);
+        assert_eq!(st.robust_correct, 1);
+        assert_eq!(st.fragile, 1);
+        assert_eq!(st.robust_wrong, 1);
+        // media = (1 + 0,5 + 0) / 3 = 0,5 ; robusta = 1/3
+        assert!((st.mean_accuracy - 0.5).abs() < 1e-9);
+        assert!((st.robust_accuracy - 1.0 / 3.0).abs() < 1e-9);
+        // optimista = ítems con al menos un acierto = 2/3
+        assert!((st.optimistic_accuracy - 2.0 / 3.0).abs() < 1e-9);
+        // suerte = (0,5 - 0,333) / 0,5 = 0,333
+        assert!((st.run_lucky_fraction - 1.0 / 3.0).abs() < 1e-9);
+    }
+
+    /// El caso que motivó la sección, con los números reales del sweep
+    /// A/A de gpt-oss:20b (docs/analisis-fragilidad-discriminacion-2026-08-28.md):
+    /// 34 ítems sobre 5 réplicas, 16 robustos, 18 frágiles, 0
+    /// robusto-mal. La media reportada es 0,782 y la robusta 0,471.
+    /// Reproducirlo acá fija que la métrica del bench y la del análisis
+    /// son la misma cuenta.
+    #[test]
+    fn item_stability_reproduces_the_measured_aa_sweep() {
+        let mut rows = Vec::new();
+        // 16 ítems que pasan las 5 veces.
+        for i in 0..16 {
+            for rep in 0..5 {
+                rows.push(stab_row(&format!("robusto{i}"), rep, true));
+            }
+        }
+        // 18 frágiles. Para que la media dé 0,782 con 16 robustos, los
+        // frágiles deben promediar (0,782*34 - 16) / 18 ≈ 0,588.
+        // Se construyen con 3 de 5 aciertos (0,6), que da 0,788 — la
+        // aserción compara contra ESA construcción, no contra 0,782.
+        for i in 0..18 {
+            for rep in 0..5 {
+                rows.push(stab_row(&format!("fragil{i}"), rep, rep < 3));
+            }
+        }
+        let refs: Vec<&TaskResult> = rows.iter().collect();
+        let st = item_stability(&refs).expect("hay repeticiones");
+        assert_eq!(st.tasks, 34);
+        assert_eq!(st.robust_correct, 16);
+        assert_eq!(st.fragile, 18);
+        assert_eq!(st.robust_wrong, 0);
+        // La accuracy robusta es exactamente la medida en el sweep real.
+        assert!(
+            (st.robust_accuracy - 16.0 / 34.0).abs() < 1e-9,
+            "robusta = {}",
+            st.robust_accuracy
+        );
+        // Y la optimista es 1,000: ninguna tarea es imposible, igual que
+        // en el sweep real.
+        assert!((st.optimistic_accuracy - 1.0).abs() < 1e-9);
+        // La suerte es sustancial: más de un tercio de lo acreditado.
+        assert!(st.run_lucky_fraction > 0.3, "suerte = {}", st.run_lucky_fraction);
     }
 
     /// El pareo usa (task_id, repetition), excluye pares donde falta la
