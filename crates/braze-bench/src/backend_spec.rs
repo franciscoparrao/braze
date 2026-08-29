@@ -42,6 +42,20 @@ enum Provider {
     Anthropic,
     Ollama,
     OpenRouter,
+    /// OpenCode Zen — gateway de modelos con API compatible con OpenAI.
+    /// NO es un `ModelBackend` nuevo: reusa `OpenRouterBackend` entero
+    /// con otra `base_url` y otra key, porque Zen habla el mismo wire de
+    /// chat completions y el request de braze no lleva ninguno de los
+    /// headers propios de OpenRouter.
+    ///
+    /// Existe como provider aparte —en vez de un alias de config sobre
+    /// `openrouter`— por dos razones concretas: separa el espacio de
+    /// nombres del pricing (`Config::pricing_for` se indexa por nombre de
+    /// backend, y sin la separación los modelos de pago de Zen heredarían
+    /// una tarifa de OpenRouter o al revés), y hace que el
+    /// `metadata.backend_specs` de un sweep distinga los brazos, que es
+    /// justo lo que un A/B Zen-contra-OpenRouter necesita leer.
+    Zen,
     /// LocalBackend (llama.cpp in-process). Construir requiere el feature
     /// `local`; sin él, `build` da un error claro.
     Local,
@@ -155,6 +169,7 @@ impl BackendSpec {
             "anthropic" => Provider::Anthropic,
             "ollama" => Provider::Ollama,
             "openrouter" => Provider::OpenRouter,
+            "zen" => Provider::Zen,
             "local" => Provider::Local,
             other => {
                 return Err(BenchError::Startup(format!(
@@ -208,6 +223,7 @@ impl BackendSpec {
             Provider::Anthropic => "anthropic",
             Provider::Ollama => "ollama",
             Provider::OpenRouter => "openrouter",
+            Provider::Zen => "zen",
             Provider::Local => "local",
         };
         let model = self
@@ -218,6 +234,7 @@ impl BackendSpec {
                 // El local reusa la ref de modelo de Ollama (mismo blob).
                 Provider::Ollama | Provider::Local => config.ollama_model.clone(),
                 Provider::OpenRouter => config.openrouter_model.clone().unwrap_or_default(),
+                Provider::Zen => config.zen_model.clone().unwrap_or_default(),
             });
         if model.is_empty() {
             provider.to_string()
@@ -341,6 +358,7 @@ impl BackendSpec {
                 Provider::Anthropic => config.anthropic_model.clone().unwrap_or_default(),
                 Provider::Ollama | Provider::Local => config.ollama_model.clone(),
                 Provider::OpenRouter => config.openrouter_model.clone().unwrap_or_default(),
+                Provider::Zen => config.zen_model.clone().unwrap_or_default(),
             })
     }
 
@@ -351,6 +369,7 @@ impl BackendSpec {
             Provider::Anthropic => "anthropic",
             Provider::Ollama => "ollama",
             Provider::OpenRouter => "openrouter",
+            Provider::Zen => "zen",
             Provider::Local => "local",
         }
     }
@@ -583,6 +602,46 @@ impl BackendSpec {
                 // here, and no `+ablate:no-caching` row was possible.
                 // Same precedence as every other lever: explicit ablation
                 // wins, else config.
+                .with_prompt_caching_enabled(
+                    config.enable_prompt_caching && !self.ablation().disable_prompt_caching,
+                );
+                if let Some(seed) = sampling.seed {
+                    backend = backend.with_seed(seed);
+                }
+                Ok(Box::new(backend))
+            }
+            Provider::Zen => {
+                let api_key = config.zen_api_key.clone().ok_or_else(|| {
+                    BenchError::Startup(
+                        "falta ZEN_API_KEY (config file o BRAZE_ZEN_API_KEY) para un backend \
+                         'zen'"
+                            .to_string(),
+                    )
+                })?;
+                let model = self
+                    .model_override
+                    .clone()
+                    .or_else(|| config.zen_model.clone())
+                    .ok_or_else(|| {
+                        BenchError::Startup(
+                            "falta el modelo zen: usa 'zen:<modelo>' o configura \
+                             BRAZE_ZEN_MODEL"
+                                .to_string(),
+                        )
+                    })?;
+                // Mismo backend que OpenRouter, otra base_url y otra key.
+                // El prompt caching explícito NO aplica: sus breakpoints
+                // solo se emiten para modelos `anthropic/` o `qwen/`
+                // (openrouter_wire::model_supports_explicit_caching), y
+                // los ids de Zen no matchean — se pasa el flag igual por
+                // coherencia con la fila `+ablate:no-caching`.
+                let mut backend = OpenRouterBackend::with_base_url(
+                    api_key.expose_secret().to_string(),
+                    model,
+                    config.zen_base_url.clone(),
+                )
+                .with_provider_label("zen")
+                .with_temperature(sampling.temperature)
                 .with_prompt_caching_enabled(
                     config.enable_prompt_caching && !self.ablation().disable_prompt_caching,
                 );
@@ -1786,6 +1845,41 @@ mod tests {
             spec.display_name(&braze_config::Config::default())
                 .ends_with("+ablate:call-time-skills")
         );
+    }
+
+    /// El provider `zen` se parsea y se muestra como tal. Importa para
+    /// la procedencia: si Zen corriera bajo el nombre `openrouter`, un
+    /// sweep que compara los dos gateways tendría ambos brazos
+    /// etiquetados igual en `metadata.backend_specs`.
+    #[test]
+    fn parses_zen_provider_and_keeps_it_distinct_from_openrouter() {
+        let zen = BackendSpec::parse("zen:big-pickle").unwrap();
+        let orr = BackendSpec::parse("openrouter:deepseek/deepseek-v4-flash").unwrap();
+        let cfg = braze_config::Config::default();
+        assert!(zen.display_name(&cfg).starts_with("zen:"));
+        assert!(orr.display_name(&cfg).starts_with("openrouter:"));
+        assert_ne!(zen.display_name(&cfg), orr.display_name(&cfg));
+    }
+
+    /// El pricing se indexa por nombre de backend, así que una tarifa de
+    /// `openrouter` NO puede alcanzar a un modelo de `zen` ni al revés —
+    /// que es la razón de que `zen` sea un provider y no un alias de
+    /// config sobre `openrouter`.
+    #[test]
+    fn zen_does_not_inherit_openrouter_pricing() {
+        let mut cfg = braze_config::Config::default();
+        cfg.model_pricing.push(braze_config::ModelPricing {
+            backend: "openrouter".to_string(),
+            model_prefix: String::new(), // catch-all de OpenRouter
+            input_usd_per_mtok: 99.0,
+            output_usd_per_mtok: 99.0,
+            cache_read_usd_per_mtok: None,
+            cache_write_usd_per_mtok: None,
+        });
+        // Sin entrada propia, un modelo de zen queda en "costo
+        // desconocido", no hereda el catch-all del otro backend.
+        assert!(cfg.pricing_for("zen", "big-pickle").is_none());
+        assert!(cfg.pricing_for("openrouter", "cualquiera").is_some());
     }
 
     #[test]

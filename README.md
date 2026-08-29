@@ -37,6 +37,59 @@ Backends are configured in `~/.config/braze/config.json` (or env vars
 (`ollama pull qwen2.5:3b`), then
 `braze chat --tui --backend ollama --model qwen2.5:3b`.
 
+### OpenCode Zen
+
+[Zen](https://opencode.ai/zen) is a model gateway with an
+OpenAI-compatible API. `braze` reaches it through the `zen` backend,
+which reuses `OpenRouterBackend` unchanged — verified against the live
+API on 2026-08-29: SSE chunks, partial `tool_calls` and `usage` are all
+standard, so no wire changes were needed. Zen additionally sends
+`reasoning_content` and a string `cost` field, both of which the wire
+ignores.
+
+```bash
+BRAZE_ZEN_API_KEY=<key> \
+  braze chat --tui --backend zen --model nemotron-3.5-lightning-free
+```
+
+Model ids are **flat** (`big-pickle`, `hy3-free`), not
+`opencode/<id>`. The catalogue is live, so list it rather than trusting
+any list written here:
+
+```bash
+curl -sS -H "Authorization: Bearer $BRAZE_ZEN_API_KEY" \
+  https://opencode.ai/zen/v1/models | jq -r '.data[].id'
+```
+
+Free models carry a `-free` suffix (`big-pickle` is the exception) and
+are temporary evaluation periods, so **they rotate**. Two caveats
+measured on 2026-08-29: a listed id can still answer `400 Model is
+unavailable`, and the free tiers rate-limit after a handful of calls.
+Zen returns **no rate-limit headers at all** — not `retry-after`, not
+`x-ratelimit-*` — so their limits have to be measured by counting calls
+until the 429, not read off a header.
+
+Cost estimation: with no `model_pricing` entry a model reports **cost
+unknown**, never `$0`. To have the free ones report zero, add explicit
+entries — the ids go in your config, not in braze's defaults, precisely
+because they rotate:
+
+```json
+{
+  "zen_api_key": "<key>",
+  "model_pricing": [
+    { "backend": "zen", "model_prefix": "hy3-free",
+      "input_usd_per_mtok": 0.0, "output_usd_per_mtok": 0.0 },
+    { "backend": "zen", "model_prefix": "nemotron-3.5-lightning-free",
+      "input_usd_per_mtok": 0.0, "output_usd_per_mtok": 0.0 }
+  ]
+}
+```
+
+Paid Zen models left out of that list keep reporting cost unknown,
+which is the intended behaviour: a silent `$0` for a model that does
+charge would be worse than no estimate.
+
 ## Reproducing the paper's sweeps
 
 Every sweep cited in the manuscript is reproducible from its raw JSON

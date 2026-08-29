@@ -50,6 +50,11 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "openrouter_api_key",
     "openrouter_model",
     "openrouter_base_url",
+    // OpenCode Zen — gateway compatible con OpenAI; reusa
+    // OpenRouterBackend con otra base_url y otra key.
+    "zen_api_key",
+    "zen_model",
+    "zen_base_url",
     "max_tokens",
     "system_prompt",
     "session_dir",

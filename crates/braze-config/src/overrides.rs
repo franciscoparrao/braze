@@ -48,6 +48,15 @@ pub struct ConfigOverrides {
     pub ollama_keep_alive: Option<String>,
     #[serde(default)]
     pub openrouter_api_key: Option<ApiKey>,
+    /// OpenCode Zen (`BRAZE_ZEN_API_KEY`).
+    #[serde(default)]
+    pub zen_api_key: Option<ApiKey>,
+    /// `BRAZE_ZEN_MODEL`.
+    #[serde(default)]
+    pub zen_model: Option<String>,
+    /// `BRAZE_ZEN_BASE_URL`.
+    #[serde(default)]
+    pub zen_base_url: Option<String>,
     #[serde(default)]
     pub openrouter_model: Option<String>,
     #[serde(default)]
@@ -285,6 +294,9 @@ impl ConfigOverrides {
                 "OPENROUTER_API_KEY" => overrides.openrouter_api_key = Some(ApiKey::new(value)),
                 "OPENROUTER_MODEL" => overrides.openrouter_model = Some(value.to_string()),
                 "OPENROUTER_BASE_URL" => overrides.openrouter_base_url = Some(value.to_string()),
+                "ZEN_API_KEY" => overrides.zen_api_key = Some(ApiKey::new(value)),
+                "ZEN_MODEL" => overrides.zen_model = Some(value.to_string()),
+                "ZEN_BASE_URL" => overrides.zen_base_url = Some(value.to_string()),
                 "MAX_TOKENS" => {
                     let parsed =
                         value

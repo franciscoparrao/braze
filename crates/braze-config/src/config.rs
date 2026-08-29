@@ -309,6 +309,23 @@ pub struct Config {
     /// is out of scope for now. A model with a small context window may
     /// truncate or fail server-side without a client-side warning.
     pub openrouter_base_url: String,
+    /// API key de OpenCode Zen. Nunca hardcodeada — viene del archivo de
+    /// config o de `BRAZE_ZEN_API_KEY`. `ApiKey`, misma razón que las
+    /// otras dos: se redacta en `Debug` para que no se filtre por logs.
+    #[serde(default)]
+    pub zen_api_key: Option<ApiKey>,
+    /// Identificador de modelo en Zen (p.ej. `"big-pickle"`). Sin
+    /// default: los modelos free de Zen son períodos de evaluación
+    /// temporales y su lista rota, así que fijar uno acá lo dejaría
+    /// obsoleto sin aviso. Si se selecciona el backend `zen` sin
+    /// configurarlo, es un error de arranque claro.
+    #[serde(default)]
+    pub zen_model: Option<String>,
+    /// Base URL de la API de Zen, compatible con OpenAI. El backend
+    /// reusa `OpenRouterBackend` entero: Zen habla el mismo wire de chat
+    /// completions y no requiere los headers propios de OpenRouter.
+    /// Configurable por si Zen mueve el endpoint o se apunta a un mirror.
+    pub zen_base_url: String,
     /// Default max tokens for a model completion request.
     pub max_tokens: u32,
     /// System prompt sent with every request. `None` (the default) means
@@ -710,6 +727,9 @@ impl Default for Config {
             openrouter_api_key: None,
             openrouter_model: None,
             openrouter_base_url: "https://openrouter.ai/api/v1".to_string(),
+            zen_api_key: None,
+            zen_model: None,
+            zen_base_url: "https://opencode.ai/zen/v1".to_string(),
             max_tokens: 4096,
             system_prompt: None,
             session_dir: paths::default_session_dir(),
@@ -926,6 +946,15 @@ impl Config {
         }
         if let Some(v) = overrides.openrouter_base_url {
             self.openrouter_base_url = v;
+        }
+        if let Some(v) = overrides.zen_api_key {
+            self.zen_api_key = Some(v);
+        }
+        if let Some(v) = overrides.zen_model {
+            self.zen_model = Some(v);
+        }
+        if let Some(v) = overrides.zen_base_url {
+            self.zen_base_url = v;
         }
         if let Some(v) = overrides.max_tokens {
             self.max_tokens = v;

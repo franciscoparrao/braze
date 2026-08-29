@@ -429,6 +429,40 @@ fn build_model_backend(
                 .with_prompt_caching_enabled(config.enable_prompt_caching),
             ))
         }
+        "zen" => {
+            // OpenCode Zen: gateway compatible con OpenAI. Reusa
+            // OpenRouterBackend entero — mismo wire de chat completions,
+            // y el request de braze no lleva headers propios de
+            // OpenRouter. Verificado contra la API real (2026-08-29):
+            // chunks SSE, tool_calls parciales y `usage` son estándar;
+            // Zen agrega `reasoning_content` y un `cost` string que el
+            // wire ignora sin romper.
+            let api_key = config.zen_api_key.clone().ok_or_else(|| {
+                CliError::Startup(
+                    "falta ZEN_API_KEY (config file o BRAZE_ZEN_API_KEY) para el backend zen"
+                        .to_string(),
+                )
+            })?;
+            let model_name = model_override
+                .map(str::to_string)
+                .or_else(|| config.zen_model.clone())
+                .ok_or_else(|| {
+                    CliError::Startup(
+                        "falta --model o BRAZE_ZEN_MODEL para el backend zen. Los ids se \
+                         listan en GET /zen/v1/models — los gratuitos llevan sufijo `-free`"
+                            .to_string(),
+                    )
+                })?;
+            Ok(Box::new(
+                braze_model::OpenRouterBackend::with_base_url(
+                    api_key.expose_secret().to_string(),
+                    model_name,
+                    config.zen_base_url.clone(),
+                )
+                .with_provider_label("zen")
+                .with_prompt_caching_enabled(config.enable_prompt_caching),
+            ))
+        }
         #[cfg(feature = "local")]
         "local" => {
             // Inferencia in-process sobre llama.cpp, reusando los GGUF de
@@ -485,6 +519,10 @@ fn model_override_for(
         }),
         "openrouter" => Ok(braze_config::ConfigOverrides {
             openrouter_model: Some(model.to_string()),
+            ..Default::default()
+        }),
+        "zen" => Ok(braze_config::ConfigOverrides {
+            zen_model: Some(model.to_string()),
             ..Default::default()
         }),
         // El backend local reusa el campo `ollama_model` como ref del

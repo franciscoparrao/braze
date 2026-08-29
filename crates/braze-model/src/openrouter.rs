@@ -45,6 +45,15 @@ pub struct OpenRouterBackend {
     /// failures. Defaults to [`crate::retry::DEFAULT_MAX_RETRIES`]; see
     /// [`OpenRouterBackend::with_max_retries`].
     max_retries: u32,
+    /// Etiqueta del proveedor en errores, trazas y clave del circuit
+    /// breaker. `"openrouter"` por default; los gateways que reusan este
+    /// backend con otra `base_url` (OpenCode Zen) la cambian con
+    /// [`OpenRouterBackend::with_provider_label`].
+    ///
+    /// Existe porque sin ella un fallo contra Zen se reportaba como
+    /// `openrouter HTTP 400`, que manda a diagnosticar el proveedor
+    /// equivocado — encontrado en vivo el 2026-08-29.
+    provider_label: &'static str,
 }
 
 impl OpenRouterBackend {
@@ -59,6 +68,7 @@ impl OpenRouterBackend {
             seed: None,
             prompt_caching_enabled: true,
             max_retries: crate::retry::DEFAULT_MAX_RETRIES,
+            provider_label: "openrouter",
         }
     }
 
@@ -74,6 +84,7 @@ impl OpenRouterBackend {
             seed: None,
             prompt_caching_enabled: true,
             max_retries: crate::retry::DEFAULT_MAX_RETRIES,
+            provider_label: "openrouter",
         }
     }
 
@@ -114,17 +125,25 @@ impl OpenRouterBackend {
         self.prompt_caching_enabled = enabled;
         self
     }
+
+    /// Cambia la etiqueta de proveedor que aparece en errores, trazas y
+    /// la clave del circuit breaker — ver el campo `provider_label`.
+    /// La usa el provider `zen` del bench y del CLI. Chainable.
+    pub fn with_provider_label(mut self, label: &'static str) -> Self {
+        self.provider_label = label;
+        self
+    }
 }
 
 #[async_trait]
 impl ModelBackend for OpenRouterBackend {
     fn name(&self) -> &str {
-        "openrouter"
+        self.provider_label
     }
 
     #[tracing::instrument(
         skip(self, req),
-        fields(provider = "openrouter", model = %self.model, message_count = req.messages.len())
+        fields(provider = %self.provider_label, model = %self.model, message_count = req.messages.len())
     )]
     async fn complete(
         &self,
@@ -151,9 +170,9 @@ impl ModelBackend for OpenRouterBackend {
         // circuit breaker keyed by destination+model (2026-07-17,
         // recalibrated per AUDITORIA-2026-07-v8 K-1) — see
         // `AnthropicBackend::complete`'s identical comment.
-        let breaker_key = format!("openrouter:{url}:{}", self.model);
+        let breaker_key = format!("{}:{url}:{}", self.provider_label, self.model);
         let guard = crate::circuit_breaker::acquire(&breaker_key)?;
-        let send_result = crate::retry::send_with_retry("openrouter", self.max_retries, || {
+        let send_result = crate::retry::send_with_retry(self.provider_label, self.max_retries, || {
             self.client
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", self.api_key))
@@ -168,6 +187,7 @@ impl ModelBackend for OpenRouterBackend {
                 return Err(err);
             }
         };
+        log_rate_limit_headers(self.provider_label, response.headers());
 
         let byte_stream = response
             .bytes_stream()
@@ -183,6 +203,49 @@ impl ModelBackend for OpenRouterBackend {
 
         let event_stream = stream::unfold(ctx, drive_stream);
         Ok(Box::pin(event_stream))
+    }
+}
+
+/// Cabeceras de rate limit que este wire sabe leer, en el orden en que
+/// se registran. Cubre las tres convenciones vivas: la de OpenAI/
+/// OpenRouter (`x-ratelimit-*`), la de Anthropic
+/// (`anthropic-ratelimit-*`) y el `retry-after` de HTTP.
+const RATE_LIMIT_HEADERS: &[&str] = &[
+    "retry-after",
+    "x-ratelimit-limit",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+    "x-ratelimit-limit-requests",
+    "x-ratelimit-remaining-requests",
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-tokens",
+    "x-ratelimit-reset-tokens",
+    "anthropic-ratelimit-requests-remaining",
+    "anthropic-ratelimit-tokens-remaining",
+];
+
+/// Traza a `info` las cabeceras de rate limit que el proveedor haya
+/// devuelto, para poder medir sus límites sin documentación.
+///
+/// Silencioso cuando no viene ninguna, que es el caso **medido** de
+/// OpenCode Zen al 2026-08-29: sus respuestas (200, 429 y 503) traen
+/// solo `date`, `content-type`, `content-length`, `server` y las de
+/// Cloudflare. La ausencia de log es entonces el dato: los límites de
+/// sus modelos gratuitos hay que medirlos contando llamadas hasta el
+/// 429, no leyéndolos de una cabecera.
+fn log_rate_limit_headers(provider: &str, headers: &reqwest::header::HeaderMap) {
+    let present: Vec<String> = RATE_LIMIT_HEADERS
+        .iter()
+        .filter_map(|name| {
+            headers
+                .get(*name)
+                .and_then(|v| v.to_str().ok())
+                .map(|v| format!("{name}={v}"))
+        })
+        .collect();
+    if !present.is_empty() {
+        tracing::info!(provider, headers = %present.join(" "), "rate limit headers");
     }
 }
 
@@ -303,6 +366,53 @@ async fn drive_stream(
 
 #[cfg(test)]
 mod tests {
+    /// El label por default no cambia: los tests y el uso existentes de
+    /// OpenRouter siguen viendo "openrouter".
+    #[test]
+    fn provider_label_defaults_to_openrouter() {
+        let b = super::OpenRouterBackend::new("k".into(), "m".into());
+        assert_eq!(crate::backend::ModelBackend::name(&b), "openrouter");
+        let b = super::OpenRouterBackend::with_base_url("k".into(), "m".into(), "u".into());
+        assert_eq!(crate::backend::ModelBackend::name(&b), "openrouter");
+    }
+
+    /// El gateway que reusa este backend se identifica como tal — sin
+    /// esto, un fallo contra Zen se reportaba como `openrouter HTTP 400`
+    /// y mandaba a diagnosticar el proveedor equivocado (encontrado en
+    /// vivo el 2026-08-29).
+    #[test]
+    fn provider_label_is_overridable() {
+        let b = super::OpenRouterBackend::with_base_url("k".into(), "m".into(), "u".into())
+            .with_provider_label("zen");
+        assert_eq!(crate::backend::ModelBackend::name(&b), "zen");
+    }
+
+    /// Solo se registran las cabeceras presentes, y ninguna se inventa.
+    /// El caso vacío importa: es el de Zen, cuyas respuestas no traen
+    /// ninguna cabecera de rate limit.
+    #[test]
+    fn rate_limit_headers_are_collected_only_when_present() {
+        use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+        let mut h = HeaderMap::new();
+        // Sin cabeceras: no hay nada que registrar y no debe romper.
+        super::log_rate_limit_headers("zen", &h);
+        h.insert(
+            HeaderName::from_static("x-ratelimit-remaining"),
+            HeaderValue::from_static("7"),
+        );
+        h.insert(
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("application/json"),
+        );
+        let present: Vec<&str> = super::RATE_LIMIT_HEADERS
+            .iter()
+            .filter(|n| h.contains_key(**n))
+            .copied()
+            .collect();
+        assert_eq!(present, vec!["x-ratelimit-remaining"]);
+        super::log_rate_limit_headers("zen", &h);
+    }
+
     use super::*;
     use braze_types::{Message, Role};
 
