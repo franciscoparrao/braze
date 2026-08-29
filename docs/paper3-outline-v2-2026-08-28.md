@@ -150,23 +150,39 @@ Consecuencia de tono: el paper deja de denunciar una ausencia y pasa a
 **documentar un umbral en movimiento**, con dos trabajos de agosto como
 evidencia de hacia dónde. Es más defendible y envejece mejor.
 
-## Las tres poblaciones (de `nota-lectura-maka-cordis-2026-08-27`)
+## Las poblaciones — RETIRADA la formulación de tres (2026-08-28)
 
-El hueco no es de la literatura de benchmarks sino del campo entero, y
-se formula mejor por poblaciones que por una escala única:
+La versión anterior de esta sección ponía a Apache Maka como ejemplo de
+"infraestructura de evaluación en producción donde la varianza no
+aparece en el modelo". **Es falso.** Al leer su repo (`docs/eval/`, no
+solo README/ARCHITECTURE) resulta que sus reportes usan McNemar exacto,
+declaran Bonferroni, y **miden un piso de ruido que llaman "the most
+useful number in this report"**: 19,10 % de tareas que cambian de
+resultado entre dos corridas de configuración idéntica, del que derivan
+que *"a single run cannot validate a change worth fewer than roughly ten
+tasks"*.
 
-1. **Papers que evalúan harnesses** — de "sin control ni inferencia"
-   (Meta-Harness, AutoDesign) a "control + inferencia + piso" (Recuris,
-   Parupudi).
-2. **Infraestructura de evaluación en producción** — Apache Maka, cuyo
-   procedimiento es en algunos aspectos más estricto que el de varios
-   papers (anti-cherry-picking codificado) y donde la varianza no
-   aparece en el modelo.
-3. **Formalismos de arquitectura** — Cordis, que no mide y lo admite.
+Con eso, la población 2 se queda sin ejemplo y la formulación de tres
+poblaciones no se sostiene. Se retira hasta tener evidencia primaria de
+algún caso que la ocupe.
 
-Pendiente antes de citar: leer `packages/eval` de Maka y verificar
-Cordis (preprint sin venue). El claim no puede descansar en documentos
-de nivel superior — lección del 25-ago.
+Lo que queda en pie es más simple y más defendible: **entre los trabajos
+que sí miden el ruido, ninguno usa esa medición para calibrar el umbral
+de un gate automático de aceptación.** Recuris mide el piso y decide con
+él de forma cualitativa ("differences of a few points"); Maka lo mide y
+deriva un MDE cualitativo ("fewer than roughly ten tasks"); ninguno
+convierte el piso en el δ de una regla. Eso es lo que la curva del
+experimento central aporta.
+
+### Y un dato externo que corrobora el nuestro
+
+El 19,1 % de Maka —otro harness, otro benchmark, otro modelo, otro
+dominio— está en el mismo orden de magnitud que el **25,0 %** del A/A de
+MXFP4 medido acá (`scripts/weight_quant_close.py`) y que el **53 %** de
+ítems frágiles sobre 5 réplicas. Tres mediciones independientes del
+ruido run-to-run de un banco agéntico, todas entre ~20 % y ~50 % según
+la unidad. Es evidencia externa de que la magnitud no es un artefacto
+del banco propio, que era el threat de circularidad de este paper.
 
 ## Threats, actualizados
 

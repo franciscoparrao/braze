@@ -160,3 +160,78 @@ acceso al sampler no hay stencil ni ablaciones por token).
 4. Al outline del Paper 3: la formulación de tres poblaciones de
    arriba, que amplía la escala de cuatro niveles en vez de
    reemplazarla.
+
+---
+
+## CORRECCIÓN (2026-08-28): leí `packages/eval` y me equivoqué con Maka
+
+La acción 1 de esta nota decía "leer `packages/eval` de Maka antes de
+citarlo en el Paper 3". Hecho, clonando el repo. **La caracterización de
+arriba es falsa y hay que retirarla.**
+
+Lo que decía esta nota: *"en README ni ARCHITECTURE.md aparece nada
+sobre semillas, control de varianza, no-determinismo o potencia
+estadística"*. Literalmente cierto para esos dos archivos, y
+completamente engañoso sobre el proyecto: el rigor no está en el código
+del paquete sino en **`docs/eval/`, donde Maka publica sus propios
+reportes de evaluación**.
+
+### Lo que esos reportes hacen
+
+De `terminal-bench-2.1-deepseek-v4-flash-four-arm.md`:
+
+- **McNemar exacto de dos colas** sobre pares discordantes, con las 89
+  tareas como unidades pareadas. Reportan p en todas las comparaciones,
+  incluidas las no significativas (Codex−Maka, p = 0,359).
+- **Corrección de multiplicidad**, declarada en Limitations: Bonferroni
+  sobre las seis comparaciones mueve el umbral a 0,0083 y verifican que
+  sus dos resultados lo sobreviven.
+- **Un piso de ruido medido, y lo llaman "the most useful number in
+  this report"**: dos corridas del mismo brazo con configuración
+  idéntica dieron **19,10 % de tareas que cambian de resultado** con el
+  score neto moviéndose 3. *"Roughly a fifth of this suite is decided by
+  run-to-run variation rather than by any property of the harness under
+  test."*
+- **Derivan el MDE de ese piso**: *"a single run cannot validate a
+  change worth fewer than roughly ten tasks"*.
+- **Separan confound de varianza** para los brazos cuya configuración sí
+  cambió entre corridas, en vez de leer su delta como efecto.
+- **Declaran una asimetría de harness no controlada** —Maka lleva un
+  system prompt externo y una política de prune que los otros tres
+  brazos no tienen— y admiten que la corrida *"has no prune-off or
+  prompt-off control"*.
+- **Reportan una discrepancia de telemetría sin resolver** y se abstienen
+  del claim que dependería de ella.
+- Hashes SHA-256 de la evidencia congelada.
+
+### Consecuencias
+
+1. **Maka sale de la "población 2".** No es infraestructura que omite la
+   varianza: es infraestructura que la mide, la usa para derivar un MDE
+   y publica sus limitaciones. Con eso, la población 2 se queda **sin
+   ejemplo**, y la formulación de tres poblaciones no se sostiene tal
+   como está escrita arriba.
+2. **Su 19 % corrobora nuestro 25 %.** El A/A de MXFP4 dio 25,0 % de
+   celdas discordantes; Maka mide 19,1 % de tareas que voltean, con otro
+   harness, otro benchmark, otro modelo y otro dominio. Dos mediciones
+   independientes en el mismo orden de magnitud. Eso **refuerza** el
+   Paper 3 aunque le quite un ejemplo del hueco: el argumento deja de
+   ser "nadie mide" y pasa a "cuando se mide aparece ~20-25 %, y los
+   umbrales publicados no lo respetan".
+3. El *earliest-valid-attempt* sigue valiendo como mecanismo a robar.
+
+### La lección, por tercera vez en tres días
+
+Belief Divergence (25-ago), HarnessOpt-Bench (28-ago) y ahora Maka: en
+los tres casos caracterizar por el documento de nivel superior produjo
+una afirmación injusta, y en los tres la versión corregida resultó **más
+difícil de refutar** que la original.
+
+Peor acá: esta nota **ya declaraba** el caveat ("leí los dos documentos
+de nivel superior, no `packages/eval`") y aun así la caracterización
+entró al outline v2 del Paper 3 como si estuviera establecida. Escribir
+el caveat no basta si después se cita el claim sin él.
+
+Regla operativa: **ningún trabajo entra a un argumento del Paper 3 sin
+que alguien haya leído su evidencia primaria.** Si el caveat existe, el
+claim no se usa hasta levantarlo.
