@@ -96,7 +96,40 @@ de entrenamiento es pizzeria, no discriminating, así que la
 contaminación cruzada se mide *dentro* de la familia pizzeria, entre
 sus tareas. Ambas cosas hacen falta y son distintas.
 
-### La suite held-out, pre-especificada
+### La suite held-out — CONSTRUIDA Y CONGELADA (2026-08-29)
+
+`crates/braze-bench/suites/pizzeria-holdout.toml`, **12 tareas**, el
+máximo que el pre-registro autorizaba ("si el held-out puede
+construirse con 12+ tareas sin inflar el costo, se hace — pero se decide
+y se commitea AHORA, no después de ver A"). Commiteada antes de exportar
+el JSONL y antes de entrenar.
+
+Verificado al construirla:
+
+- **Motor byte-idéntico** al del piloto (comparación exacta de los
+  `setup_files`). Sin eso el held-out mediría "cambió la tarea" en vez
+  de "generalizó".
+- **Cero solape de ids** con el set de entrenamiento.
+- **Ninguna respuesta esperada coincide con una entrenada**: el set
+  enseña 11900 (napolitana familiar) y 19800 (napolitana familiar +
+  margarita mediana), y ninguno aparece acá. Responder 11900 a una
+  pregunta de precio de esta suite es, por construcción, aplicar el
+  valor de una tarea entrenada a una held-out — el efecto de § 4.1 de
+  Ren & Sutherland hecho observable sin instrumentación extra.
+- Cobertura: 4 `single_tool`, 4 `multi_step`, 3 `error_recovery` con
+  modos de fallo **distintos** al entrenado (que era pizza inexistente:
+  acá son tamaño inválido, agregar tras confirmar, y comando
+  desconocido), y 1 `distractor_selection` nuevo sobre un ítem no
+  entrenado.
+
+Dos aserciones de la primera versión se descartaron por vacuas: un
+`expect_text_contains = "0"` y otro `= "1"` matchean casi cualquier
+salida. Es la lección de la suite discriminante v1
+(`borrar_bloque_deprecado` era vacua porque el crate ya compilaba).
+Reemplazadas por una diferencia de precios (3000) y un total confirmado
+(16800), ambos inequívocos.
+
+### El diseño original de la suite, para trazabilidad
 
 `pizzeria-holdout.toml`: tareas nuevas **sobre el mismo motor**
 `pizzeria.py`, sin ninguna en el set de entrenamiento. Se construye y

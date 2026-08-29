@@ -1,0 +1,1048 @@
+# Suite HELD-OUT del pre-registro experto-por-motor
+# (docs/hypothesis-2026-08-26-experto-por-motor-qlora.md).
+#
+# CONGELADA el 2026-08-29, ANTES de exportar el JSONL y antes de
+# entrenar. El pre-registro lo exige: "se construye y se commitea ANTES
+# de entrenar, y no se toca después". Ampliarla o ajustarla a la vista
+# de resultados invalidaría el experimento.
+#
+# QUÉ MIDE. Generalización sobre el MISMO motor `pizzeria.py` (verbatim
+# del piloto, byte por byte) con tareas que NO están en el set de
+# entrenamiento. Si el alumno destilado sube acá, aprendió a operar el
+# motor; si sube solo en `pizzeria-pilot.toml`, memorizó 16
+# trayectorias.
+#
+# CONTAMINACIÓN CRUZADA. Ninguna respuesta esperada coincide con una
+# entrenada. Los valores que el set de entrenamiento enseña son 11900
+# (napolitana familiar) y 19800 (napolitana familiar + margarita
+# mediana); acá no aparece ninguno de los dos. Responder 11900 a una
+# pregunta de precio de esta suite es, por construcción, aplicar el
+# valor de una tarea entrenada a una held-out — el efecto de Ren &
+# Sutherland (§ 4.1) hecho observable.
+#
+# COBERTURA, 12 tareas contra las 6 del entrenamiento:
+#   - 3 precios de ítems distintos del entrenado
+#   - 3 totales con composiciones distintas
+#   - 3 recuperaciones de error con modos de fallo DISTINTOS al
+#     entrenado (que era pizza inexistente): tamaño inválido, agregar
+#     tras confirmar, comando desconocido
+#   - 2 de estado (pedido vacío, confirmar y verificar)
+#   - 1 distractor nuevo, sobre un ítem no entrenado
+#
+# El pre-registro autorizaba 12+ "si se puede sin inflar el costo": son
+# 12, y a ~60 s/tarea en ornith son ~12 min por brazo.
+
+[[tasks]]
+id = "ho_precio_margarita_mediana"
+skill = "single_tool"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). ¿Cuánto cuesta la pizza margarita tamaño mediana? Responde solo el número."
+expect_tool_call = "shell_exec"
+expect_text_contains = "7900"
+expect_max_rounds = 4
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_precio_pepperoni_familiar"
+skill = "single_tool"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). ¿Cuánto cuesta la pizza pepperoni tamaño familiar? Responde solo el número."
+expect_tool_call = "shell_exec"
+expect_text_contains = "12900"
+expect_max_rounds = 4
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_precio_napolitana_mediana"
+skill = "single_tool"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). ¿Cuánto cuesta la pizza napolitana tamaño mediana? Responde solo el número."
+expect_tool_call = "shell_exec"
+expect_text_contains = "8900"
+expect_max_rounds = 4
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_total_dos_medianas"
+skill = "multi_step"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). Arma un pedido con una pepperoni mediana y una margarita mediana, y dime el total. Responde el total como número entero sin separadores (ejemplo: 12345)."
+expect_tool_call = "shell_exec"
+expect_text_contains = "17300"
+expect_max_rounds = 8
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_total_mixto"
+skill = "multi_step"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). Arma un pedido con una margarita familiar y una napolitana mediana, y dime el total. Responde el total como número entero sin separadores (ejemplo: 12345)."
+expect_tool_call = "shell_exec"
+expect_text_contains = "19300"
+expect_max_rounds = 8
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_total_tres_iguales"
+skill = "multi_step"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). Arma un pedido con tres margaritas medianas y dime el total. Responde el total como número entero sin separadores (ejemplo: 12345)."
+expect_tool_call = "shell_exec"
+expect_text_contains = "23700"
+expect_max_rounds = 8
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_error_tamano_invalido"
+skill = "error_recovery"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). Intenta agregar una pizza napolitana tamaño gigante. Si no se puede, dime qué tamaños SÍ existen."
+expect_tool_call = "shell_exec"
+expect_text_contains = "familiar"
+expect_max_rounds = 8
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_error_tras_confirmar"
+skill = "error_recovery"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). Agrega una margarita mediana, confirma el pedido, y después intenta agregar una pepperoni familiar. Dime qué pasó con ese último intento."
+expect_tool_call = "shell_exec"
+expect_text_contains = "confirmado"
+expect_max_rounds = 8
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_error_comando_desconocido"
+skill = "error_recovery"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). Ejecuta el comando 'cancelar' del script. Si no existe, dime qué comandos SÍ acepta."
+expect_tool_call = "shell_exec"
+expect_text_contains = "confirmar"
+expect_max_rounds = 8
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_diferencia_de_precio"
+skill = "single_tool"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). ¿Cuánto más cara es la napolitana familiar que la napolitana mediana? Responde solo la diferencia como número entero."
+expect_tool_call = "shell_exec"
+expect_text_contains = "3000"
+expect_max_rounds = 4
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_confirmar_y_verificar"
+skill = "multi_step"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). Agrega una margarita mediana y una napolitana mediana, confirma el pedido, y dime el total confirmado como número entero sin separadores (ejemplo: 12345)."
+expect_tool_call = "shell_exec"
+expect_text_contains = "16800"
+expect_max_rounds = 8
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+
+[[tasks]]
+id = "ho_distractor_precio_falso"
+skill = "distractor_selection"
+prompt = "En el directorio actual hay un script ./pizzeria.py (córrelo con python3). También hay un archivo precios-antiguos.txt. ¿Cuánto cuesta HOY la pizza pepperoni familiar según el SCRIPT? Responde solo el número."
+expect_tool_call = "shell_exec"
+expect_text_contains = "12900"
+expect_max_rounds = 5
+sandbox_commands = ["python3 pizzeria.py", "python pizzeria.py", "python3 ./pizzeria.py", "python ./pizzeria.py"]
+
+[tasks.setup_files]
+"pizzeria.py" = '''
+import json, os, sys
+
+MENU = {
+    "napolitana": {"mediana": 8900, "familiar": 11900},
+    "pepperoni": {"mediana": 9400, "familiar": 12900},
+    "margarita": {"mediana": 7900, "familiar": 10400},
+}
+STATE = "pedidos.json"
+
+def load():
+    if os.path.exists(STATE):
+        with open(STATE) as f:
+            return json.load(f)
+    return {"items": [], "estado": "abierto"}
+
+def save(s):
+    with open(STATE, "w") as f:
+        json.dump(s, f, ensure_ascii=False, indent=1)
+
+def usage():
+    print("pizzeria.py — gestor de pedidos")
+    print("Comandos:")
+    print("  menu                     ver pizzas y precios")
+    print("  agregar <pizza> <tamano> agregar al pedido")
+    print("  total                    total del pedido actual")
+    print("  confirmar                cerrar y confirmar el pedido")
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        usage(); return 0
+    cmd = args[0]
+    if cmd == "menu":
+        for pizza, tams in MENU.items():
+            for t, precio in tams.items():
+                print(f"{pizza} {t}: ${precio}")
+        return 0
+    if cmd == "agregar":
+        if len(args) != 3:
+            print("ERROR: uso: agregar <pizza> <tamano>"); return 1
+        pizza, tam = args[1].lower(), args[2].lower()
+        if pizza not in MENU:
+            print(f"ERROR: pizza '{pizza}' no existe. Disponibles: " + ", ".join(MENU))
+            return 1
+        if tam not in MENU[pizza]:
+            print(f"ERROR: tamano '{tam}' no existe. Disponibles: mediana, familiar")
+            return 1
+        s = load()
+        if s["estado"] != "abierto":
+            print("ERROR: el pedido ya esta confirmado"); return 1
+        s["items"].append({"pizza": pizza, "tamano": tam, "precio": MENU[pizza][tam]})
+        save(s)
+        print(f"OK: {pizza} {tam} ${MENU[pizza][tam]} agregada ({len(s['items'])} item(s))")
+        return 0
+    if cmd == "total":
+        s = load()
+        print(f"TOTAL: ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    if cmd == "confirmar":
+        s = load()
+        if not s["items"]:
+            print("ERROR: pedido vacio"); return 1
+        s["estado"] = "confirmado"
+        save(s)
+        print(f"CONFIRMADO: {len(s['items'])} item(s), total ${sum(i['precio'] for i in s['items'])}")
+        return 0
+    print(f"ERROR: comando '{cmd}' desconocido")
+    usage()
+    return 1
+
+sys.exit(main())
+'''
+"precios-antiguos.txt" = '''
+LISTA DE PRECIOS 2019 (OBSOLETA)
+pepperoni familiar: 6100
+margarita mediana: 3200
+napolitana familiar: 5400
+
+'''
