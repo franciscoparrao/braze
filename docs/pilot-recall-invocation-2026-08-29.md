@@ -1,5 +1,13 @@
 # Piloto de invocación de memoria — resultados
 
+> **⚠ Corrección posterior (2026-08-30, `docs/pilot2-recall-signposting-2026-08-30.md`)**:
+> el detector contaba como "consulta" cualquier tool call que mencionara el
+> directorio de memoria, incluido un `glob` que solo lista nombres sin
+> entregar contenido — más laxo que la definición del pre-registro ("leyó
+> algún archivo"). Con la definición estricta (`read_file`), **ornith:9b
+> baja de 11/14 (78,6%) a 10/14 (71,4%)**; gpt-oss:20b queda igual en 12/12.
+> El veredicto SEGUIR de este piloto NO cambia, pero cítese 71,4%.
+
 Fecha: 2026-08-29
 Pre-registro: `docs/hypothesis-2026-08-29-recall-invocation.md` (escrito ANTES de correr)
 Diseño: `docs/distilled-memory-design-2026-08-29.md` § paso 1

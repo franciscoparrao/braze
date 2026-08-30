@@ -1,0 +1,421 @@
+{
+ "schema": "recall-invocation-pilot/1",
+ "preregistration": "docs/hypothesis-2026-08-29-recall-invocation.md",
+ "model": "ornith:9b",
+ "reps": 5,
+ "summary": {
+  "n": 26,
+  "recall_invocation_rate": 0.731,
+  "convention_compliance": 0.462,
+  "compliance_given_recall": 0.579,
+  "compliance_without_recall": 0.143,
+  "n_without_recall": 7,
+  "timeouts": 4,
+  "by_arm": {
+   "neutral": {
+    "n": 14,
+    "recall_invocation_rate": 0.5,
+    "convention_compliance": 0.429
+   },
+   "signposted": {
+    "n": 12,
+    "recall_invocation_rate": 1.0,
+    "convention_compliance": 0.5
+   }
+  }
+ },
+ "runs": [
+  {
+   "task": "errors",
+   "arm": "neutral",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "87378be8-76ed-4566-a274-4089f651e251",
+   "rounds": 3,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "arm": "signposted",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "9fb4b155-15b6-4c8b-bdeb-9ae04e36d382",
+   "rounds": 3,
+   "recalled": true,
+   "recall_tools": [
+    "glob"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "neutral",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "ff8b2518-1b64-4ebb-b98b-66f9b856f8ae",
+   "rounds": 13,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "signposted",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "8a23c30c-78d1-4391-8fcb-e21a352a724c",
+   "rounds": 8,
+   "recalled": true,
+   "recall_tools": [
+    "glob",
+    "glob",
+    "read_file",
+    "glob"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "neutral",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "f7d556f5-74ad-4e66-ad43-dbb24c602581",
+   "rounds": 5,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "signposted",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "18aeb938-91b0-4483-858b-868232a23390",
+   "rounds": 5,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "arm": "neutral",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "7127048d-4466-48a2-8cf1-2e199e95955a",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "glob"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "arm": "signposted",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "5e6991ae-af71-4fab-86ac-ec22b6564359",
+   "rounds": 4,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "neutral",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "f74ba802-7e21-4dd6-ada8-b23b47f66d61",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "signposted",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "911b2bd9-35cb-44db-81e3-806ffe8ced11",
+   "rounds": 9,
+   "recalled": true,
+   "recall_tools": [
+    "glob",
+    "glob"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "neutral",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "0641cfea-f301-49f3-a751-e098c155af80",
+   "rounds": 5,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "signposted",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "f58b10f2-76f5-4561-8627-d576f6b17e6d",
+   "rounds": 5,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "arm": "neutral",
+   "rep": 2,
+   "model": "ornith:9b",
+   "session_id": "52ba626e-45ac-49b3-8560-59a0e1fcdfc6",
+   "rounds": 3,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "arm": "signposted",
+   "rep": 2,
+   "model": "ornith:9b",
+   "session_id": "c5121619-1d13-4f91-8e9b-aa0500c41aa5",
+   "rounds": 5,
+   "recalled": true,
+   "recall_tools": [
+    "glob"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "neutral",
+   "rep": 2,
+   "model": "ornith:9b",
+   "session_id": "541d5f4c-2806-4c4d-8c81-58c25cefa63f",
+   "rounds": 7,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "signposted",
+   "rep": 2,
+   "model": "ornith:9b",
+   "session_id": "0e65005d-1d9d-4213-8236-2c14ff52e7de",
+   "rounds": 8,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "neutral",
+   "rep": 2,
+   "model": "ornith:9b",
+   "session_id": "d525993e-85cd-4cc0-8ac3-4f11940d5f52",
+   "rounds": 9,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "signposted",
+   "rep": 2,
+   "model": "ornith:9b",
+   "session_id": "2a3b10f7-548b-48e1-9e44-43a2c42f43e6",
+   "rounds": 10,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "arm": "neutral",
+   "rep": 3,
+   "model": "ornith:9b",
+   "session_id": "4d9c6c1e-9450-4493-b8ea-30be620caa67",
+   "rounds": 8,
+   "recalled": true,
+   "recall_tools": [
+    "glob"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "arm": "signposted",
+   "rep": 3,
+   "model": "ornith:9b",
+   "session_id": "6eaf4220-e5d3-46f8-b43c-e8b41509ff5c",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "glob"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "neutral",
+   "rep": 3,
+   "model": "ornith:9b",
+   "recalled": false,
+   "complied": false,
+   "timeout": true
+  },
+  {
+   "task": "logging",
+   "arm": "signposted",
+   "rep": 3,
+   "model": "ornith:9b",
+   "recalled": false,
+   "complied": false,
+   "timeout": true
+  },
+  {
+   "task": "tests",
+   "arm": "neutral",
+   "rep": 3,
+   "model": "ornith:9b",
+   "session_id": "15617e1a-eedc-4fbb-a3d8-ff46f38479ec",
+   "rounds": 6,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "signposted",
+   "rep": 3,
+   "model": "ornith:9b",
+   "recalled": false,
+   "complied": false,
+   "timeout": true
+  },
+  {
+   "task": "errors",
+   "arm": "neutral",
+   "rep": 4,
+   "model": "ornith:9b",
+   "session_id": "b16253d4-43a1-457a-8516-e211d5440b49",
+   "rounds": 6,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "arm": "signposted",
+   "rep": 4,
+   "model": "ornith:9b",
+   "session_id": "edb03320-dfd0-446e-9623-a0e93108bf00",
+   "rounds": 6,
+   "recalled": true,
+   "recall_tools": [
+    "glob"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "neutral",
+   "rep": 4,
+   "model": "ornith:9b",
+   "session_id": "cfe7742c-8408-427a-986d-be12cc993cf9",
+   "rounds": 11,
+   "recalled": true,
+   "recall_tools": [
+    "glob",
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "arm": "signposted",
+   "rep": 4,
+   "model": "ornith:9b",
+   "session_id": "413dcfb1-4e1e-4d52-bf30-bea0d6d06020",
+   "rounds": 11,
+   "recalled": true,
+   "recall_tools": [
+    "glob",
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "neutral",
+   "rep": 4,
+   "model": "ornith:9b",
+   "session_id": "5235887c-035a-464f-b833-7c94b6aea6c1",
+   "rounds": 4,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "arm": "signposted",
+   "rep": 4,
+   "model": "ornith:9b",
+   "recalled": false,
+   "complied": false,
+   "timeout": true
+  }
+ ]
+}
