@@ -1,0 +1,209 @@
+{
+ "schema": "recall-invocation-pilot/1",
+ "preregistration": "docs/hypothesis-2026-08-29-recall-invocation.md",
+ "model": "ornith:9b",
+ "reps": 5,
+ "summary": {
+  "n": 14,
+  "recall_invocation_rate": 0.786,
+  "convention_compliance": 0.643,
+  "compliance_given_recall": 0.818,
+  "compliance_without_recall": 0.0,
+  "n_without_recall": 3,
+  "timeouts": 1
+ },
+ "runs": [
+  {
+   "task": "errors",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "4b42fbf2-8bb0-44ad-a91b-586927d55130",
+   "rounds": 3,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "3d80fd49-7b74-47e7-9db1-a6cdd1f2a042",
+   "rounds": 13,
+   "recalled": true,
+   "recall_tools": [
+    "glob",
+    "read_file",
+    "glob",
+    "glob"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "rep": 0,
+   "model": "ornith:9b",
+   "session_id": "7b3185fe-cc5d-4d5d-9308-ca525a9602e6",
+   "rounds": 9,
+   "recalled": true,
+   "recall_tools": [
+    "read_file",
+    "read_file",
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "ae00938b-c53f-4545-88fd-3f1d4cd69f88",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "glob",
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "d39d7a5b-2786-47b2-a8da-6952e4003eda",
+   "rounds": 11,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "rep": 1,
+   "model": "ornith:9b",
+   "session_id": "5092dcd4-e311-4de3-9926-6f65736fcb5f",
+   "rounds": 9,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "rep": 2,
+   "model": "ornith:9b",
+   "session_id": "09a7f97a-0aab-47ad-a3d5-31adac465a0b",
+   "rounds": 4,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 2,
+   "model": "ornith:9b",
+   "recalled": false,
+   "complied": false,
+   "timeout": true
+  },
+  {
+   "task": "tests",
+   "rep": 2,
+   "model": "ornith:9b",
+   "session_id": "0925948b-650c-4727-8e19-eda3188b633c",
+   "rounds": 4,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "rep": 3,
+   "model": "ornith:9b",
+   "session_id": "a2861743-e6f8-4b94-8c52-23c0986051bc",
+   "rounds": 4,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 3,
+   "model": "ornith:9b",
+   "session_id": "c17466d2-44f6-4586-a530-ac71fb2d4902",
+   "rounds": 13,
+   "recalled": true,
+   "recall_tools": [
+    "glob",
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "rep": 3,
+   "model": "ornith:9b",
+   "session_id": "e95b0d7e-0a92-4495-9a47-2420d678408b",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "rep": 4,
+   "model": "ornith:9b",
+   "session_id": "8a563fcf-eab0-4ae4-b3c0-ec1ce2fab8dd",
+   "rounds": 4,
+   "recalled": false,
+   "recall_tools": [],
+   "complied": false,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 4,
+   "model": "ornith:9b",
+   "session_id": "6a6d8ce8-ddd0-4d91-bd94-ad54d36b9e0d",
+   "rounds": 13,
+   "recalled": true,
+   "recall_tools": [
+    "glob"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "rep": 4,
+   "model": "ornith:9b",
+   "session_id": "0aaea7d7-204c-4d20-bd3f-922c2525aff6",
+   "rounds": 14,
+   "recalled": true,
+   "recall_tools": [
+    "read_file",
+    "glob"
+   ],
+   "complied": false,
+   "returncode": 0
+  }
+ ]
+}

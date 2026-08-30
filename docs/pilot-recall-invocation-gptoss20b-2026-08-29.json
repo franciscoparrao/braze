@@ -1,0 +1,200 @@
+{
+ "schema": "recall-invocation-pilot/1",
+ "preregistration": "docs/hypothesis-2026-08-29-recall-invocation.md",
+ "model": "gpt-oss:20b",
+ "reps": 5,
+ "summary": {
+  "n": 12,
+  "recall_invocation_rate": 1.0,
+  "convention_compliance": 1.0,
+  "compliance_given_recall": 1.0,
+  "compliance_without_recall": null,
+  "n_without_recall": 0,
+  "timeouts": 3
+ },
+ "runs": [
+  {
+   "task": "errors",
+   "rep": 0,
+   "model": "gpt-oss:20b",
+   "session_id": "4326814a-6634-4dd3-b2ca-62887668a93e",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 0,
+   "model": "gpt-oss:20b",
+   "recalled": false,
+   "complied": false,
+   "timeout": true
+  },
+  {
+   "task": "tests",
+   "rep": 0,
+   "model": "gpt-oss:20b",
+   "session_id": "ee539c34-a7f4-426c-a9db-06d0c1e80dac",
+   "rounds": 12,
+   "recalled": true,
+   "recall_tools": [
+    "read_file",
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "rep": 1,
+   "model": "gpt-oss:20b",
+   "session_id": "96466bec-b574-4122-a1b7-23e55c251a76",
+   "rounds": 8,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 1,
+   "model": "gpt-oss:20b",
+   "session_id": "165f2902-f6d2-4cca-933b-91168b2355c4",
+   "rounds": 14,
+   "recalled": true,
+   "recall_tools": [
+    "read_file",
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "rep": 1,
+   "model": "gpt-oss:20b",
+   "session_id": "59d6fbec-0151-4ffb-8788-5562baa4795f",
+   "rounds": 6,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "rep": 2,
+   "model": "gpt-oss:20b",
+   "session_id": "7e1c6ea1-4123-4670-8540-d4a8c1e35b5b",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 2,
+   "model": "gpt-oss:20b",
+   "session_id": "cf2ce486-978a-47fa-86c7-b7df29a52ea2",
+   "rounds": 13,
+   "recalled": true,
+   "recall_tools": [
+    "read_file",
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "tests",
+   "rep": 2,
+   "model": "gpt-oss:20b",
+   "session_id": "6a6801f7-9190-4f49-b651-ebbcea9bfd3a",
+   "rounds": 6,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "rep": 3,
+   "model": "gpt-oss:20b",
+   "session_id": "0954dd7c-dbf3-4564-8e99-d66cd9ea06f8",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 3,
+   "model": "gpt-oss:20b",
+   "recalled": false,
+   "complied": false,
+   "timeout": true
+  },
+  {
+   "task": "tests",
+   "rep": 3,
+   "model": "gpt-oss:20b",
+   "session_id": "fa3e0e65-796e-4de3-9ba3-dd1e8471a3fa",
+   "rounds": 8,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "errors",
+   "rep": 4,
+   "model": "gpt-oss:20b",
+   "session_id": "72878e99-e155-466e-accf-e1423339ed88",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  },
+  {
+   "task": "logging",
+   "rep": 4,
+   "model": "gpt-oss:20b",
+   "recalled": false,
+   "complied": false,
+   "timeout": true
+  },
+  {
+   "task": "tests",
+   "rep": 4,
+   "model": "gpt-oss:20b",
+   "session_id": "956086e3-dff3-4fad-8e10-eb5f0b506b30",
+   "rounds": 7,
+   "recalled": true,
+   "recall_tools": [
+    "read_file"
+   ],
+   "complied": true,
+   "returncode": 0
+  }
+ ]
+}
