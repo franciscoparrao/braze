@@ -1,0 +1,699 @@
+{
+ "schema": "rate-limit-probe/1",
+ "target": "zen:hy3-free",
+ "cross_check": "zen:laguna-s-2.1-free",
+ "base_url": "https://opencode.ai/zen/v1",
+ "started_at": "2026-08-29T21:20:38.735084+00:00",
+ "finished_at": "2026-08-29T21:22:18.144825+00:00",
+ "max_calls": 40,
+ "backoff_minutes": "1,5,15,60",
+ "summary": {
+  "calls_until_first_429": 40,
+  "hit_429": false,
+  "stopped_by_status": null,
+  "cross_check_status": null,
+  "recoveries": []
+ },
+ "calls": [
+  {
+   "at": "2026-08-29T21:20:38.735645+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:20:40 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e99d5da00daec-DFW"
+   },
+   "latency_ms": 1992,
+   "phase": "burst",
+   "index": 0
+  },
+  {
+   "at": "2026-08-29T21:20:41.228141+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:20:43 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e99e4ac62f81c-DFW"
+   },
+   "latency_ms": 1853,
+   "phase": "burst",
+   "index": 1
+  },
+  {
+   "at": "2026-08-29T21:20:43.581181+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:20:45 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e99f35ef1a65b-PHL"
+   },
+   "latency_ms": 2035,
+   "phase": "burst",
+   "index": 2
+  },
+  {
+   "at": "2026-08-29T21:20:46.116286+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:20:48 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a030eda52a0-TLH"
+   },
+   "latency_ms": 2044,
+   "phase": "burst",
+   "index": 3
+  },
+  {
+   "at": "2026-08-29T21:20:48.660891+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:20:50 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a13098457eb-DFW"
+   },
+   "latency_ms": 1897,
+   "phase": "burst",
+   "index": 4
+  },
+  {
+   "at": "2026-08-29T21:20:51.057955+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:20:53 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a2249f92660-DFW"
+   },
+   "latency_ms": 2069,
+   "phase": "burst",
+   "index": 5
+  },
+  {
+   "at": "2026-08-29T21:20:53.626953+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:20:55 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a323c3fb6f4-DFW"
+   },
+   "latency_ms": 2080,
+   "phase": "burst",
+   "index": 6
+  },
+  {
+   "at": "2026-08-29T21:20:56.210145+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:20:58 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a42281d26b1-MEM"
+   },
+   "latency_ms": 1976,
+   "phase": "burst",
+   "index": 7
+  },
+  {
+   "at": "2026-08-29T21:20:58.686815+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:00 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a519a43f444-MEM"
+   },
+   "latency_ms": 2009,
+   "phase": "burst",
+   "index": 8
+  },
+  {
+   "at": "2026-08-29T21:21:01.195569+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:03 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a61488b0d36-MEM"
+   },
+   "latency_ms": 1984,
+   "phase": "burst",
+   "index": 9
+  },
+  {
+   "at": "2026-08-29T21:21:03.679662+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:05 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a70ea8c6a0c-TLH"
+   },
+   "latency_ms": 1972,
+   "phase": "burst",
+   "index": 10
+  },
+  {
+   "at": "2026-08-29T21:21:06.155110+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:08 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a8068022aa8-PHL"
+   },
+   "latency_ms": 1979,
+   "phase": "burst",
+   "index": 11
+  },
+  {
+   "at": "2026-08-29T21:21:08.634322+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:10 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a8fbb8b0d36-MEM"
+   },
+   "latency_ms": 1835,
+   "phase": "burst",
+   "index": 12
+  },
+  {
+   "at": "2026-08-29T21:21:10.969614+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:12 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9a9e7af1fae5-DFW"
+   },
+   "latency_ms": 1854,
+   "phase": "burst",
+   "index": 13
+  },
+  {
+   "at": "2026-08-29T21:21:13.325231+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:15 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9aad0e26535d-MEM"
+   },
+   "latency_ms": 2028,
+   "phase": "burst",
+   "index": 14
+  },
+  {
+   "at": "2026-08-29T21:21:15.856408+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:17 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9abd0c5cfae5-DFW"
+   },
+   "latency_ms": 2040,
+   "phase": "burst",
+   "index": 15
+  },
+  {
+   "at": "2026-08-29T21:21:18.396455+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:20 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9accff95da1e-DFW"
+   },
+   "latency_ms": 1885,
+   "phase": "burst",
+   "index": 16
+  },
+  {
+   "at": "2026-08-29T21:21:20.781542+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:22 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9adbdc5dae04-PHL"
+   },
+   "latency_ms": 2064,
+   "phase": "burst",
+   "index": 17
+  },
+  {
+   "at": "2026-08-29T21:21:23.345776+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:25 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9aebbae752a0-TLH"
+   },
+   "latency_ms": 1939,
+   "phase": "burst",
+   "index": 18
+  },
+  {
+   "at": "2026-08-29T21:21:25.788101+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:27 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9afb1a578c79-DFW"
+   },
+   "latency_ms": 2065,
+   "phase": "burst",
+   "index": 19
+  },
+  {
+   "at": "2026-08-29T21:21:28.353410+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:30 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b0b2be65136-DFW"
+   },
+   "latency_ms": 2005,
+   "phase": "burst",
+   "index": 20
+  },
+  {
+   "at": "2026-08-29T21:21:30.859069+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:32 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b1ae896d81a-PHL"
+   },
+   "latency_ms": 2100,
+   "phase": "burst",
+   "index": 21
+  },
+  {
+   "at": "2026-08-29T21:21:33.459056+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:35 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b2b39ebc787-DFW"
+   },
+   "latency_ms": 2066,
+   "phase": "burst",
+   "index": 22
+  },
+  {
+   "at": "2026-08-29T21:21:36.026052+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:37 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b3b4d04da1e-DFW"
+   },
+   "latency_ms": 1885,
+   "phase": "burst",
+   "index": 23
+  },
+  {
+   "at": "2026-08-29T21:21:38.411670+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:40 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b4d2938fae5-DFW"
+   },
+   "latency_ms": 2409,
+   "phase": "burst",
+   "index": 24
+  },
+  {
+   "at": "2026-08-29T21:21:41.320876+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:43 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b5c28abbbea-PHL"
+   },
+   "latency_ms": 2102,
+   "phase": "burst",
+   "index": 25
+  },
+  {
+   "at": "2026-08-29T21:21:43.923338+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:45 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b6c7edcfae5-DFW"
+   },
+   "latency_ms": 1846,
+   "phase": "burst",
+   "index": 26
+  },
+  {
+   "at": "2026-08-29T21:21:46.269225+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:48 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b7b0dbdf444-MEM"
+   },
+   "latency_ms": 1958,
+   "phase": "burst",
+   "index": 27
+  },
+  {
+   "at": "2026-08-29T21:21:48.728344+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:50 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b8a79900d04-TLH"
+   },
+   "latency_ms": 1974,
+   "phase": "burst",
+   "index": 28
+  },
+  {
+   "at": "2026-08-29T21:21:51.202846+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:53 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9b99ffc52660-DFW"
+   },
+   "latency_ms": 1913,
+   "phase": "burst",
+   "index": 29
+  },
+  {
+   "at": "2026-08-29T21:21:53.615844+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:55 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9ba91be02660-DFW"
+   },
+   "latency_ms": 1810,
+   "phase": "burst",
+   "index": 30
+  },
+  {
+   "at": "2026-08-29T21:21:55.925898+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:21:57 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9bb77d82d57a-DFW"
+   },
+   "latency_ms": 2037,
+   "phase": "burst",
+   "index": 31
+  },
+  {
+   "at": "2026-08-29T21:21:58.463345+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:22:00 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9bc74a5168a7-DFW"
+   },
+   "latency_ms": 1850,
+   "phase": "burst",
+   "index": 32
+  },
+  {
+   "at": "2026-08-29T21:22:00.813310+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:22:02 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9bd61874395a-CLT"
+   },
+   "latency_ms": 1938,
+   "phase": "burst",
+   "index": 33
+  },
+  {
+   "at": "2026-08-29T21:22:03.251493+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:22:05 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9be5393ed57a-DFW"
+   },
+   "latency_ms": 1932,
+   "phase": "burst",
+   "index": 34
+  },
+  {
+   "at": "2026-08-29T21:22:05.684195+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:22:07 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9bf4682c575d-TLH"
+   },
+   "latency_ms": 1875,
+   "phase": "burst",
+   "index": 35
+  },
+  {
+   "at": "2026-08-29T21:22:08.062162+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:22:10 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9c035979d81a-PHL"
+   },
+   "latency_ms": 2058,
+   "phase": "burst",
+   "index": 36
+  },
+  {
+   "at": "2026-08-29T21:22:10.620188+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:22:12 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9c132fda0def-MEM"
+   },
+   "latency_ms": 1969,
+   "phase": "burst",
+   "index": 37
+  },
+  {
+   "at": "2026-08-29T21:22:13.089282+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:22:15 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9c22cc7e7cdd-DFW"
+   },
+   "latency_ms": 2000,
+   "phase": "burst",
+   "index": 38
+  },
+  {
+   "at": "2026-08-29T21:22:15.589571+00:00",
+   "model": "hy3-free",
+   "status": 200,
+   "headers": {
+    "Date": "Sat, 29 Aug 2026 21:22:17 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "406",
+    "Connection": "close",
+    "Cf-Placement": "remote-ORD",
+    "Server": "cloudflare",
+    "CF-RAY": "a32e9c328c0ee5d2-DFW"
+   },
+   "latency_ms": 2055,
+   "phase": "burst",
+   "index": 39
+  }
+ ]
+}
