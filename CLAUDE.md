@@ -331,14 +331,17 @@ no sobre la plantilla).
 Paquetes 3 y 4 de v9: ver § "Estado del código" — el grueso ya está
 hecho; lo abierto está listado acá.)
 
-- **SUBMISSION EMSE Paper 1 — dos bloqueantes, ambos del autor**: (1)
-  hacer público el repo (`gh repo edit franciscoparrao/braze
-  --visibility public --accept-visibility-change-consequences`; el
-  escaneo de seguridad de la historia completa ya se corrió, limpio);
-  (2) crear los 2 registros OSF (formularios listos en `/tmp/osf/` de
-  la sesión del 29-jul) y pegar los IDs en el `\todo` que los espera.
-  Tras ambos: verificar 200 anónimo, regenerar `paper/submission-emse/`,
-  subir. **El repo público es bloqueante COMPARTIDO con el Paper 2.**
+- **SUBMISSION EMSE Paper 1 — queda UN bloqueante del autor**: crear los
+  2 registros OSF (formularios listos en `/tmp/osf/` de la sesión del
+  29-jul) y pegar los IDs en el `\todo` que los espera. Tras eso:
+  verificar 200 anónimo, regenerar `paper/submission-emse/`, subir.
+  **El repo YA ES PÚBLICO** (verificado 2026-08-30 con `gh repo view
+  franciscoparrao/braze --json visibility` → `PUBLIC`; el escaneo de
+  seguridad de la historia completa se había corrido antes, limpio).
+  Eso cierra también el bloqueante que era COMPARTIDO con el Paper 2.
+  Consecuencia operativa vigente: **todo push publica**, incluidos los
+  resultados negativos — coherente con la práctica del proyecto, pero
+  ya no es una decisión reversible.
 - **Paper 2 (CONGELADO a decisión del autor, 2026-08-16)**: ciclo
   S1→S4 completo — manuscrito 15 págs en `paper2/`, verify-refs,
   paper-style, review simulado con los 3 reject-level resueltos
@@ -348,7 +351,8 @@ hecho; lo abierto está listado acá.)
   rolling), paquete de submission en
   `~/vault/journals/emse/submissions/2026-08-16_paper2-amortization/`.
   Quedan 4 inputs del autor (funding, acks, OSF, Declarations) + los
-  bloqueantes de submit (repo público, tag, ORCID, modalidad review).
+  bloqueantes de submit (tag, ORCID, modalidad review). El repo público
+  ya NO es bloqueante: se verificó `PUBLIC` el 2026-08-30.
 - **SC-retention**: sweeps gpt-oss + ornith LANZADOS 2026-08-16
   (comandos del apéndice del pre-registro); al cerrar: análisis según
   criterios (adoptar / adoptar-condicional / rechazar-y-publicar-matiz
@@ -364,9 +368,11 @@ hecho; lo abierto está listado acá.)
   antes de correr.
 - **Experto-por-motor**: QLoRA de qwen2.5:3b sobre las trayectorias
   exportadas por export-sft (16 del experto; evaluar engordar el set).
-- **Push pendiente (autor decide)**: todo el lote desde `95b8b56`
-  (ciclo Paper 2 + pre-registros + datos ornith + paquete submission)
-  y los previos ya anotados.
+- **Push: al día** (2026-08-30). `origin/main` = `86ace03`, sin
+  divergencia. El lote desde `95b8b56` que este ítem daba por pendiente
+  ya estaba subido; lo que faltaba eran los cuatro commits del 29-30 de
+  agosto (failover, memoria destilada V2, datos de la sonda, piloto 2),
+  ya pusheados.
 - **Backlog que sobrevive de v8**: A/B Gemma4 de runtime con digest
   fijo (`c6eb396dbd59`); lead-summary y TTC en la cola de Nitro; TUI
   overlay `ask_user` en vivo; P0.2 (costo USD/walltime por turno).
