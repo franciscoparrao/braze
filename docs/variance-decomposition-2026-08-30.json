@@ -1,0 +1,137 @@
+{
+ "schema": "variance-decomposition/1",
+ "sensitivity": [
+  {
+   "min_n": 1,
+   "tasks": 19,
+   "eta2_modelo": 0.04944349934618324,
+   "eta2_config": 0.050554884725758656,
+   "eta2_config_x_tarea": 0.3011646411435169,
+   "ratio_config_modelo": 1.0224778867651325
+  },
+  {
+   "min_n": 5,
+   "tasks": 18,
+   "eta2_modelo": 0.05399100522641006,
+   "eta2_config": 0.03958572057299801,
+   "eta2_config_x_tarea": 0.3093994137301925,
+   "ratio_config_modelo": 0.7331910270423042
+  }
+ ],
+ "source": "sweeps archivados en docs/, sin correr modelos",
+ "suite_fingerprint": "8deba9d2bffdf3c1",
+ "files": [
+  "sweep-capacity-hardware-2026-07-13.json",
+  "sweep-constrained-decoding-2026-07-12.json",
+  "sweep-curva-multiescala-2026-07-10.qwen.json",
+  "sweep-json-tax-edit-fence-2026-08-10.json",
+  "sweep-lead-3brazos-2026-07-10.json",
+  "sweep-lead-summary-ttc-2026-08-10.json",
+  "sweep-localbackend-parity-2026-07-21.json",
+  "sweep-matriz-4brazos-2026-07-10.json",
+  "sweep-planlead-2026-07-11.json",
+  "sweep-planlead-taskslead-postfix-2026-07-11.json",
+  "sweep-planner-ab-2026-07-11.json",
+  "sweep-rerun-block2-coder-planner-2026-07-19.json",
+  "sweep-si2-lead-ab-2026-07-09.json",
+  "sweep-si2-lead-ab-h3-2026-07-09.json"
+ ],
+ "commits": [
+  "0b4b5bed",
+  "28f7a53a",
+  "43e28279",
+  "5c313e28",
+  "6668f94f",
+  "66db9953",
+  "70c20727",
+  "8b720f13",
+  "acce1184",
+  "adbc9a4d",
+  "c4f00aa5",
+  "df516e3e",
+  "e16143e2",
+  "e4bcc8b6"
+ ],
+ "design": {
+  "models": [
+   "ollama:qwen2.5:3b",
+   "ollama:qwen2.5:7b",
+   "ollama:qwen3.5-coder"
+  ],
+  "configs": [
+   "base",
+   "+lead",
+   "+plan",
+   "+plan+lead"
+  ],
+  "tasks": [
+   "distractor_selection_among_files",
+   "distractor_selection_debug_config",
+   "distractor_selection_log_with_error",
+   "edit_file_basic",
+   "edit_file_function_body",
+   "error_recovery_edit_wrong_filename",
+   "error_recovery_wrong_config_extension",
+   "error_recovery_wrong_filename",
+   "glob_basic",
+   "grep_basic",
+   "multi_step_multiply_and_write",
+   "multi_step_read_count_write",
+   "multi_step_sum_two_files",
+   "no_tool_capital_question",
+   "no_tool_qa",
+   "no_tool_subtraction",
+   "read_file_basic",
+   "shell_exec_basic",
+   "write_file_basic"
+  ]
+ },
+ "runs_used": 3573,
+ "cell_pass_rate": {
+  "ollama:qwen2.5:3b": {
+   "base": 0.7374269005847953,
+   "+lead": 0.9385085674559359,
+   "+plan": 0.6277231540389436,
+   "+plan+lead": 0.9295739348370927
+  },
+  "ollama:qwen2.5:7b": {
+   "base": 0.8026315789473685,
+   "+lead": 0.9473684210526315,
+   "+plan": 0.8210526315789475,
+   "+plan+lead": 0.9473684210526315
+  },
+  "ollama:qwen3.5-coder": {
+   "base": 0.9942724458204334,
+   "+lead": 0.9473684210526315,
+   "+plan": 0.9503855793329478,
+   "+plan+lead": 0.9407894736842105
+  }
+ },
+ "sum_of_squares": {
+  "ss_total": 17.282116138985554,
+  "modelo": 0.854488298018595,
+  "config_harness": 0.8736953892235879,
+  "tarea": 5.179455160440543,
+  "modelo_x_config": 0.8289405415250223,
+  "modelo_x_tarea": 1.6092393093914092,
+  "config_x_tarea": 5.204762305198166,
+  "residuo": 2.7315351351882313
+ },
+ "eta_squared": {
+  "tarea": 0.29970028663078835,
+  "modelo": 0.04944349934618324,
+  "config_harness": 0.050554884725758656,
+  "modelo_x_config": 0.0479652222481639,
+  "modelo_x_tarea": 0.09311587171673007,
+  "config_x_tarea": 0.3011646411435169,
+  "residuo": 0.158055594188859
+ },
+ "eta_squared_excluding_task": {
+  "modelo": 0.07060334083003639,
+  "config_harness": 0.072190354730454,
+  "modelo_x_config": 0.06849242022019178,
+  "modelo_x_tarea": 0.13296574300843325,
+  "config_x_tarea": 0.43005107012622323,
+  "residuo": 0.22569707108466144
+ }
+}
