@@ -353,12 +353,32 @@ hecho; lo abierto está listado acá.)
   Quedan 4 inputs del autor (funding, acks, OSF, Declarations) + los
   bloqueantes de submit (tag, ORCID, modalidad review). El repo público
   ya NO es bloqueante: se verificó `PUBLIC` el 2026-08-30.
+  **DESCONGELADO PARCIALMENTE el 2026-09-02**: se agregó un
+  `\paragraph{Concurrent work}` en § Related Work posicionando el paper
+  frente a WikiSkill (arXiv 2608.27454, Google, 28-ago), que reporta
+  +12-24 puntos de accuracy con memoria procedimental inyectada. El
+  argumento: miden ejes ortogonales (ellos accuracy, nosotros el costo
+  de contexto que ellos no tarifan pese a inyectar 45-143 líneas por
+  ronda), su mecanismo evoluciona con gating y el nuestro es un playbook
+  fijo, y **su propio gradiente predice nuestro régimen como el menos
+  favorable**. Compila a 17 págs, 0 citas sin resolver. **El paquete de
+  submission en el vault quedó DESACTUALIZADO — hay que regenerarlo.**
+  Ojo al regenerar: `make` en `paper2/` regenera `figs/` desde R y
+  DEGRADA el caption de la fig. 1 (pierde la frase "each computed from
+  that task's measured ... under the none arm"). Revertir `paper2/figs/`
+  tras compilar, o arreglar el script R.
 - **SC-retention**: sweeps gpt-oss + ornith LANZADOS 2026-08-16
   (comandos del apéndice del pre-registro); al cerrar: análisis según
   criterios (adoptar / adoptar-condicional / rechazar-y-publicar-matiz
   vs CompInt) y decisión de la palanca.
-- **v9 Paquete 4 resto**: Landlock write-only; la mitad Viewer del par
-  de subagentes (el editor SWE-Edit ya está, `393748e`).
+- **v9 Paquete 4 resto**: Landlock write-only. **El par Viewer/Editor
+  está COMPLETO** — corregido 2026-09-02: el mensaje de `393748e` dice
+  "el Viewer ya existía (`explore`, read-only); esto es el Editor", así
+  que este ítem y el #17 de la tabla de v9 (§5, "abierto") estaban
+  desactualizados. Nota de alcance: ese par aísla *contexto* (mantiene
+  el churn de ediciones fuera del padre), NO *autoría* — no es un
+  aceptador independiente, que es lo que pide el pre-registro del
+  2026-09-02 (ver abajo).
 - **round-economics**: re-correr el piloto de contexto con
   `BRAZE_LOCAL_TEMP>0` y semillas (réplicas actuales son copias, v9
   L-9). Metaheurísticas BLOQUEADA hasta que decida. Piloto opcional
@@ -368,11 +388,40 @@ hecho; lo abierto está listado acá.)
   antes de correr.
 - **Experto-por-motor**: QLoRA de qwen2.5:3b sobre las trayectorias
   exportadas por export-sft (16 del experto; evaluar engordar el set).
-- **Push: al día** (2026-08-30). `origin/main` = `86ace03`, sin
-  divergencia. El lote desde `95b8b56` que este ítem daba por pendiente
-  ya estaba subido; lo que faltaba eran los cuatro commits del 29-30 de
-  agosto (failover, memoria destilada V2, datos de la sonda, piloto 2),
-  ya pusheados.
+- **Memoria destilada V2 — BLOQUEADA esperando decisión del autor**
+  (2026-08-30/31). El diseño (`docs/distilled-memory-design-2026-08-29.md`)
+  esquiva la frontera de amortización con índice señalizado + detalle
+  bajo demanda, pero el piloto 2
+  (`docs/pilot2-recall-signposting-2026-08-30.md`) lo frena: con prompt
+  neutro `ornith:9b` LEE la memoria solo el 36% de las veces (y 58% con
+  el prompt señalizado, tampoco alcanza el umbral). Conducta modal:
+  hace `glob` del directorio y no lo lee. Tres salidas documentadas sin
+  elegir — aceptar la asimetría (≥20B), cambiar el vehículo de
+  activación midiéndolo antes contra R1, o publicar el nulo.
+- **Gradiente harness×escala: RETIRADO** (2026-08-31/09-02,
+  `docs/harness-gradient-discriminating-2026-08-31.md`). El hallazgo 4
+  de la descomposición de varianza (el harness mueve MÁS a los modelos
+  chicos: 31,1/14,5/5,3 pp) NO se replica en la suite discriminante: ahí
+  el rango CRECE con la escala (48,2 pp en qwen2.5:3b vs 67,9 en
+  qwen2.5:7b). Corroboración externa independiente: WikiSkill (arXiv
+  2608.27454) reporta ganancias crecientes con la capacidad
+  (+12,3/+17,5/+23,9 a 4B/9B/27B). Era artefacto de la saturación de
+  `default.toml`. **No citar en el Paper 1.** Sobrevive el hallazgo 2
+  (la interacción harness×tarea domina a ambos efectos principales), que
+  era el más robusto. Falta el brazo `qwen3.5-coder`: murió por OOM y
+  espera los 32 GB de RAM.
+- **Aceptación independiente (pre-registro nuevo, sin correr)**:
+  `docs/hypothesis-2026-09-02-independent-acceptance.md`. Re-abre la
+  palanca de verificación (H2, REJECT) con un mecanismo distinto que
+  propone Harness-of-Harness (arXiv 2609.01481): lo que faltaba no sería
+  la capacidad del verificador sino su INDEPENDENCIA — el aceptador ve
+  objetivo y artefacto, no la traza de producción. HoH logra +52,25%
+  relativo con el MISMO modelo en los tres roles, lo que aísla la
+  independencia como factor.
+- **Push: al día** (2026-09-02). El lote del 29-30 de agosto (failover,
+  memoria destilada V2, datos de la sonda, piloto 2) más los del 31-08
+  al 02-09 (gradiente, WikiSkill en el Paper 2, pre-registro de
+  aceptación independiente) están pusheados.
 - **Backlog que sobrevive de v8**: A/B Gemma4 de runtime con digest
   fijo (`c6eb396dbd59`); lead-summary y TTC en la cola de Nitro; TUI
   overlay `ask_user` en vivo; P0.2 (costo USD/walltime por turno).
