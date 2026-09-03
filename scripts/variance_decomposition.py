@@ -44,7 +44,12 @@ from collections import defaultdict
 import numpy as np
 
 DOCS = pathlib.Path(__file__).resolve().parent.parent / "docs"
-BAD = ("contaminated", "partial", "diagnostic", "smoke", "offline-grades")
+# `INVALID` faltaba en la primera versión (2026-08-30) pese a que el repo
+# ya usaba ese prefijo para sweeps arruinados por infraestructura — el
+# filtro los habría dejado entrar en cuanto alguno cayera dentro del
+# diseño cruzado. No cambia el resultado publicado (ninguno de los
+# INVALID pertenecía a las 12 celdas), pero era un agujero esperando.
+BAD = ("contaminated", "partial", "diagnostic", "smoke", "offline-grades", "INVALID")
 SUITE_FP = "8deba9d2bffdf3c1"  # default.toml
 
 MODELS = ["ollama:qwen2.5:3b", "ollama:qwen2.5:7b", "ollama:qwen3.5-coder"]

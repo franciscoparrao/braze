@@ -1,5 +1,19 @@
 # Descomposición de varianza: ¿manda el harness o el modelo?
 
+> **⚠ EL HALLAZGO 4 DE ESTE DOCUMENTO SE RETIRA
+> (2026-08-31/09-02, ver `docs/harness-gradient-discriminating-2026-08-31.md`).**
+> El gradiente decreciente (31.1 / 14.5 / 5.3 pp) NO se replica en la
+> suite discriminante: ahí el rango **crece** con la escala (48.2 pp en
+> qwen2.5:3b contra 67.9 pp en qwen2.5:7b), incluso corrigiendo censura.
+> Corroboración externa independiente: WikiSkill \citep{tang2026wikiskill}
+> (Google, 5 benchmarks × 5 modelos) reporta beneficios del andamiaje
+> **crecientes** con la capacidad del ejecutor (+12.3 / +17.5 / +23.9
+> puntos a 4B / 9B / 27B). La saturación de `default.toml` para el coder
+> —limitación que este mismo documento anticipaba— era la explicación.
+> **No citar el hallazgo 4 en el Paper 1.** Los hallazgos 1, 2 y 3 no
+> están afectados; el 2 (la interacción harness×tarea domina) sigue
+> siendo el más robusto.
+
 Fecha: 2026-08-30
 Script: `scripts/variance_decomposition.py` (reproducible, no corre modelos)
 Datos: `docs/variance-decomposition-2026-08-30.json`
