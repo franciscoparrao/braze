@@ -210,6 +210,28 @@ generally not priced, and the effect of the memory's \emph{content} is
 rarely separated from the effect of perturbing the prompt at all. Both
 gaps are the subject of this paper.
 
+\paragraph{Concurrent work: evolved skills at larger scale.} While
+this paper was under preparation, \citet{tang2026wikiskill} introduced
+WikiSkill, which co-evolves agent skills with a persistent wiki and
+reports large accuracy gains over no-skill baselines across five
+benchmarks and five models. Read against our result the two are
+complementary rather than contradictory, for three reasons. First, the
+endpoints differ: WikiSkill measures accuracy and does not price the
+context its skills occupy, even though those skills are injected in
+full into the system prompt on every round and average between 45 and
+143 markdown lines depending on model and benchmark --- precisely the
+per-round tax whose break-even Section~\ref{sec:model} quantifies.
+Second, the mechanism differs: their skills are evolved across
+iterations under a validation gate with rollback, whereas ours is a
+fixed human-written playbook, adopted as the ceiling for automatically
+distilled variants rather than as a competing optimizer. Third, and
+most relevant to scope, their gains grow monotonically with executor
+capability ($+12.3$, $+17.5$ and $+23.9$ points at 4B, 9B and 27B);
+our executor sits below the low end of that range at $\sim$3.6B active
+parameters, so their own gradient predicts our regime to be the least
+favourable one for injected procedural memory. Their design assumes
+the injection side is affordable; this paper measures its price.
+
 \paragraph{Small and local models as executors.} Surveys of small
 language models document the capability and deployment trade-offs of
 the sub-10B regime \citep{lu2024smalllm,corradini2025}; our executor,
