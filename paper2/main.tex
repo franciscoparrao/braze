@@ -207,7 +207,16 @@ and compose \citep{wang2023voyager}; Reflexion stores verbal
 self-reflections from failed trials and conditions subsequent attempts
 on them \citep{shinn2023reflexion}; MemGPT manages the context window
 as virtual memory, paging information between the prompt and external
-storage \citep{packer2023memgpt}. These systems established that
+storage \citep{packer2023memgpt}. Later systems make the distillation
+step automatic: Agent Workflow Memory induces reusable workflows from
+an agent's own trajectories and injects them into subsequent tasks
+\citep{wang2024awm}, and ExpeL extracts transferable insights from
+pools of past experience \citep{zhao2024expel}. A second branch keeps
+memory outside the prompt and retrieves it on demand, from the memory
+stream of Generative Agents \citep{park2023generativeagents} to
+production memory layers that argue for retrieval precisely on cost
+grounds \citep{chhikara2025mem0}; \citet{zhang2025memorysurvey}
+survey the design space. These systems established that
 memory \emph{can} improve agents, in evaluations centered on
 frontier-scale models and success metrics. What carrying the memory
 costs (on every round, in a loop that re-sends its context) is
@@ -553,7 +562,8 @@ studies whose registration is verifiable.
 
 The hypothesis documents and raw run records are additionally
 archived on Zenodo
-(DOI: \url{https://doi.org/10.5281/zenodo.22547685}); that archive
+(concept DOI: \url{https://doi.org/10.5281/zenodo.22547684},
+resolving to the latest archived version); that archive
 supplies permanence,
 not temporal precedence, which the public commit history is what
 establishes. All raw per-run JSON records ($140+140$ runs for
@@ -900,6 +910,10 @@ just-in-time context file), so its cost is paid once per consultation
 rather than $R$ times per task. The condition then compares one
 retrieval against rounds saved, a far weaker bar than the
 $\sim$1{,}200 tokens per task the M1 playbook pays before helping.
+Retrieval-based memory systems already live on this side of the
+condition \citep{park2023generativeagents,chhikara2025mem0}, though
+their evaluations report quality, not the injection trade
+Equation~\eqref{eq:amortization} prices.
 \emph{Raise $\Delta R$}: target interventions at task classes the
 model fails outright, where success converts a full budget of burned
 rounds into a short trajectory and $\Delta R$ is large by
