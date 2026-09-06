@@ -1,9 +1,11 @@
 % main.tex — Paper 2: la frontera de amortización de la memoria
 % procedimental (outline: docs/paper2-honest-outline-2026-08-11.md).
 %
-% Venue DE TRABAJO: EMSE (mismo template svjour3 que el Paper 1; decisión
-% formal la toma /paper-match con el manuscrito completo — S4). La clase
-% y el .bst vienen copiados de paper/ (zip oficial Springer).
+% Venue DECIDIDO (2026-09-06): IST — Information and Software Technology
+% (Elsevier). Primera submission va "Your Paper Your Way" con esta clase
+% svjour3 (copiada de paper/, zip oficial Springer); migrar a elsarticle
+% solo si lo piden en revisión. Paquete de submission:
+% ~/vault/journals/ist/submissions/2026-09-06_paper2-amortization/
 % Compilar: make  (o pdflatex main && bibtex main && pdflatex ×2)
 %
 % Estado S3 (2026-08-15): manuscrito COMPLETO en prosa — abstract,
@@ -24,7 +26,7 @@
 % /paper-submit. NO se corre ningún sweep nuevo para este paper.
 
 \documentclass[smallcondensed,natbib]{svjour3}
-\journalname{Empirical Software Engineering}
+\journalname{Information and Software Technology}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -257,6 +259,13 @@ that the agent-computer interface changes outcomes at fixed model
 treat ``harness engineering'' as a named discipline
 \citep{walkinglabs2026,dex2026wsff}, and LoopsBench extends the framing
 from the harness to the whole evaluation loop \citep{li2026loopsbench}.
+Practitioner-facing empirical work has begun to measure this layer
+directly: interview studies find that configuring and steering agentic
+frameworks is itself a recurring pain point for the developers who
+operate them \citep{hamid2026hands}, and cost--benefit studies of
+assistant output ask how many candidate solutions are worth inspecting
+before returns diminish \citep{oertel2025copilot}; this paper takes
+the same measurement-first stance toward injected memory.
 Two recent results make the memory component specifically urgent.
 CompInt quantifies silent \emph{loss}: user-issued side constraints
 survive context compaction only a minority of the time, and the
@@ -275,9 +284,10 @@ gate would have promoted the false positive our control arm caught.
 
 \paragraph{Negative results and pre-registration in empirical software
 engineering.} Pre-registration separates hypothesis generation from
-confirmation \citep{nosek2018preregistration}, and this journal's open
-science initiative institutionalizes the transparency and
-reproducibility expectations that make a well-documented null
+confirmation \citep{nosek2018preregistration}, and open-science
+initiatives in empirical software engineering journals have
+institutionalized the transparency and reproducibility expectations
+that make a well-documented null
 publishable \citep{mendez2019openscience}; community standards make
 analogous demands on benchmark-based studies \citep{ralph2021standards},
 and the statistical treatment of randomized SE experiments is
@@ -1034,7 +1044,7 @@ pre-registration documents with their decision criteria, the
 benchmark suite definitions, the injected playbook, and the analysis
 scripts are available in the project repository
 (\url{https://github.com/franciscoparrao/braze}) under tag
-\texttt{emse-paper2-submission}.
+\texttt{ist-paper2-submission}.
 Pre-registration is verifiable against the repository's git history:
 each hypothesis document was committed before its sweep was launched.
 
