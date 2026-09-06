@@ -86,7 +86,10 @@ change anywhere (all intervals include zero). On the smaller executor
 the same playbook is outright harmful: it lengthens trajectories on
 every task and significantly reduces success on the fresh ones. As
 the executor weakens, the failure mode shifts from economic to
-behavioral. In the second study, a same-prompt control arm dissolved an
+behavioral. We claim the condition and the measurement procedure as
+general; the measured positions of the frontier are specific to this
+task family, harness, and pair of executors, and the per-cell samples
+leave moderate success-rate effects undetectable. In the second study, a same-prompt control arm dissolved an
 apparently significant $+13$-task gain (McNemar $p=0.011$,
 Holm-corrected) into an unattributable $+4$ ($p=0.541$): without that
 arm, we would have reported a false positive that met its
@@ -332,7 +335,11 @@ Section~\ref{sec:results-ornith} the same section lengthens
 trajectories and reduces success, which is the behavioral component
 and the one that hurts. Equation~\eqref{eq:amortization} prices the
 accounting term; the behavioral term is what the anti-correlation of
-Section~\ref{sec:disc-anticorr} describes.
+Section~\ref{sec:disc-anticorr} describes. For a practitioner whose
+serving stack hides the accounting term from the wall clock behind a
+cached prefix, the behavioral component is the operative risk;
+Equation~\eqref{eq:amortization} remains the design-time acceptance
+criterion for whether an injection should exist at all.
 
 Let $R_{\mathrm{base}}$ and $T_{\mathrm{base}}$ be the mean rounds and
 mean input tokens per round of the memory-free agent on a task, and
@@ -470,7 +477,9 @@ family. Table~\ref{tab:m1} reports point estimates; inference is in
 the text.
 
 Study~1 was subsequently replicated on a second executor:
-\texttt{ornith:9b}, a dense 9B-parameter model (Q4\_K\_M) that
+\texttt{ornith:9b} (Ornith AI; a dense 9B-parameter model of the
+Qwen3.5 architecture family, Q4\_K\_M quantization, Ollama registry
+digest \texttt{a75697c14589}) that
 saturates the project's easier benchmark suite, served through the
 same node with a 300\,s per-task timeout. The replication was
 pre-registered before launch with the same design, seeds, arms, and
@@ -654,22 +663,24 @@ against it.
 \caption{Replication of Study 1 on \texttt{ornith:9b} (dense 9B,
 $n=20$ per cell, seeds 42--61, same suite and arms). Point estimates;
 confidence intervals and Holm-corrected tests in the text. $\Delta R <
-0$ means the playbook \emph{adds} rounds. On this executor the
+0$ means the playbook \emph{adds} rounds. Wall seconds are means
+under the 300\,s cap (censored; six of the eight timeouts fall in
+playbook arms, so those columns are lower bounds). On this executor the
 playbook costs net tokens everywhere and reduces success on the fresh
 tasks.}
 \label{tab:ornith}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{lccccc}
+\begin{tabular}{lcccccc}
 \toprule
 Task & Pass (none$\to$pb) & Rounds (none$\to$pb) & $\Delta R$ &
-Tok/round (none$\to$pb) & Net $\Delta$tokens \\
+Tok/round (none$\to$pb) & Net $\Delta$tokens & Wall s (none$\to$pb) \\
 \midrule
 \textsc{original} (known) & 16/20$\to$11/20 & 3.95$\to$4.45 &
-$-0.50$ & 1756$\to$2154 & $+2709$ \\
+$-0.50$ & 1756$\to$2154 & $+2709$ & 56.5$\to$66.7 \\
 \textsc{loop} (fresh) & 12/20$\to$5/20 & 3.50$\to$5.05 &
-$\mathbf{-1.55}$ & 1750$\to$2332 & $\mathbf{+5794}$ \\
+$\mathbf{-1.55}$ & 1750$\to$2332 & $\mathbf{+5794}$ & 64.5$\to$83.3 \\
 \textsc{move} (fresh) & 10/20$\to$2/20 & 4.40$\to$6.15 &
-$\mathbf{-1.75}$ & 1826$\to$2353 & $\mathbf{+6635}$ \\
+$\mathbf{-1.75}$ & 1826$\to$2353 & $\mathbf{+6635}$ & 86.9$\to$158.6 \\
 \bottomrule
 \end{tabular}%
 }
@@ -715,7 +726,10 @@ methodologically precious: the empty arm is a \textbf{same-prompt
 control}, and any paired discordance between it and the baseline is an
 in-sweep measurement of the noise floor. A third arm
 (\emph{seeded}) synthesizes the memory a previous session would have
-left, with zero experimenter-authored content. That content is
+left, with zero experimenter-authored content; this exercises the
+production \emph{injection} path with synthetic capture --- running
+the capture path across real sessions end-to-end is outside this
+study's scope. That content is
 deliberately thin (a list of files the task prompts largely repeat,
 as the pre-registered prior already noted), so this study bounds the
 attributable effect of a realistic cheap injection; probing rich
@@ -788,7 +802,8 @@ content signal. Between them: the injection cheap enough to be
 harmless was too thin to matter, and the injection rich enough to
 matter was too expensive to amortize on fresh tasks. Two caveats
 bound this reading. The two points differ in content type as well as
-size, and they come from different studies; and the middle of the
+size, and they come from different studies and serving stacks; and
+the middle of the
 size axis is unmeasured: a short, task-tuned procedural hint of,
 say, 50 tokens would face a break-even of only $\sim$0.2 rounds under
 Equation~\eqref{eq:amortization}, and the variant that carries the
@@ -997,7 +1012,9 @@ same-prompt control, it does not pay where it is needed: injected
 memory amortizes --- at best marginally --- only on tasks the model
 already knows, misses break-even by $3$--$6\times$ on fresh ones, and its apparently
 significant effectiveness gain dissolves against a control arm with a
-byte-identical prompt. The amortization condition of
+byte-identical prompt. Those positions are measured on one task
+family and two executors; what travels is the condition and the
+procedure for measuring it. The amortization condition of
 Section~\ref{sec:model} states exactly what would have to change for
 the technique to pay: cut the per-round injection cost by retrieving
 memory on demand instead of carrying it, or raise the rounds saved by
