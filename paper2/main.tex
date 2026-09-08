@@ -2,9 +2,10 @@
 % procedimental (outline: docs/paper2-honest-outline-2026-08-11.md).
 %
 % Venue DECIDIDO (2026-09-06): IST — Information and Software Technology
-% (Elsevier). Primera submission va "Your Paper Your Way" con esta clase
-% svjour3 (copiada de paper/, zip oficial Springer); migrar a elsarticle
-% solo si lo piden en revisión. Paquete de submission:
+% (Elsevier). MIGRADO a elsarticle (2026-09-08, decisión del autor):
+% documentclass [preprint,authoryear], frontmatter Elsevier, refs con
+% elsarticle-harv (author-year, preserva las citas del texto y es
+% YPYW-legal). Paquete de submission:
 % ~/vault/journals/ist/submissions/2026-09-06_paper2-amortization/
 % Compilar: make  (o pdflatex main && bibtex main && pdflatex ×2)
 %
@@ -25,8 +26,8 @@
 % /paper-review-emse, /paper-match (decisión formal de venue),
 % /paper-submit. NO se corre ningún sweep nuevo para este paper.
 
-\documentclass[smallcondensed,natbib]{svjour3}
-\journalname{Information and Software Technology}
+\documentclass[preprint,authoryear]{elsarticle}
+\journal{Information and Software Technology}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -39,22 +40,19 @@
 \newcommand{\braze}{\textsc{braze}}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 
+\begin{document}
+
+\begin{frontmatter}
+
 \title{When Procedural Memory Does Not Pay: The Amortization Frontier
 of Prompt-Injected Memory for Local-First Coding Agents}
-\titlerunning{When Procedural Memory Does Not Pay}
 
 \author{Francisco Parra}
-
-\institute{F. Parra \at
-  Departamento de Ingenier\'ia Inform\'atica, Universidad de Santiago de
-  Chile, Santiago, Chile \\
-  \email{francisco.parra.o@usach.cl}
-}
-
-\date{Received: date / Accepted: date}
-
-\begin{document}
-\maketitle
+\affiliation{organization={Departamento de Ingenier\'ia Inform\'atica,
+    Universidad de Santiago de Chile},
+  city={Santiago},
+  country={Chile}}
+\ead{francisco.parra.o@usach.cl}
 
 % =====================================================================
 \begin{abstract}
@@ -102,10 +100,14 @@ if the injection cost drops (retrieval on demand) or the round
 savings rise (interventions that unlock task classes the model fails outright);
 both are directions whose break-even this paper quantifies but whose
 designs remain future work.
-\keywords{agentic coding \and procedural memory \and small language
-models \and negative results \and pre-registration \and same-prompt
-control}
 \end{abstract}
+
+\begin{keyword}
+agentic coding \sep procedural memory \sep small language models \sep
+negative results \sep pre-registration \sep same-prompt control
+\end{keyword}
+
+\end{frontmatter}
 
 % =====================================================================
 \section{Introduction}\label{sec:intro}
@@ -1049,11 +1051,10 @@ explicit) will need this machinery as its acceptance gate.
 
 % =====================================================================
 % Declaraciones EMSE (rellenar en S4 con /paper-submit)
-\begin{acknowledgements}
+\section*{Acknowledgements}
 The author acknowledges Project 062619MC\_POSTDOC of the
 Vicerrector\'ia de Investigaci\'on, Innovaci\'on y Creaci\'on,
 Universidad de Santiago de Chile.
-\end{acknowledgements}
 
 \section*{Funding}
 
@@ -1100,7 +1101,7 @@ all generated content and takes full responsibility for the
 manuscript.
 
 % =====================================================================
-\bibliographystyle{spbasic}
+\bibliographystyle{elsarticle-harv}
 \bibliography{refs}
 
 \end{document}
