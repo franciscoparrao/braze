@@ -58,48 +58,54 @@ of Prompt-Injected Memory for Local-First Coding Agents}
 \begin{abstract}
 % Fuente: docs/paper2-honest-outline-2026-08-11.md (§ claim + § por qué
 % un nulo es publicable).
-Coding agents built on small, locally hosted language models are
-attractive for cost, privacy, and autonomy. An equally attractive idea
-promises to improve them over time: when the local model fails and a
-cloud model rescues it, distill the intervention into a reusable
-procedural playbook, so that the escalation is paid once and amortized
-across future tasks. We show that this idea, in its natural
-prompt-injected form, faces a narrow and quantifiable
-\emph{amortization frontier}, and that realistic procedural memory
-falls on the wrong side of it precisely where it would be needed. An
-agentic loop re-sends its context on every round, so an injected
-memory section costs its size times the number of rounds and pays for
-itself only if it saves enough rounds. In the configurations we
-measure, break-even is one to nearly two full rounds of interaction.
-We ran
-two independent pre-registered evaluations on a local-first coding
-harness with a 20B-parameter mixture-of-experts executor
-($\sim$3.6B active parameters; 140 and 306 runs), plus a
-pre-registered 140-run replication of the first study on a dense 9B
-executor. A human-written playbook, the ceiling for any automatically distilled
-variant, amortizes only on the task the model already knows, where it
-is redundant. On fresh tasks, where it would matter, it misses
-break-even by a factor of $3$--$6$; success rates show no reliable
-change anywhere (all intervals include zero). On the smaller executor
-the same playbook is outright harmful: it lengthens trajectories on
-every task and significantly reduces success on the fresh ones. As
-the executor weakens, the failure mode shifts from economic to
-behavioral. We claim the condition and the measurement procedure as
-general; the measured positions of the frontier are specific to this
-task family, harness, and pair of executors, and the per-cell samples
-leave moderate success-rate effects undetectable. In the second study, a same-prompt control arm dissolved an
-apparently significant $+13$-task gain (McNemar $p=0.011$,
-Holm-corrected) into an unattributable $+4$ ($p=0.541$): without that
-arm, we would have reported a false positive that met its
-pre-registered promotion criterion. The measured noise floor
-($\sim$20\% of paired cells flip under byte-identical prompts) is
-configuration-specific and an order of magnitude above the floor
-imported from an easier suite. The design lesson carries a measured bar rather
-than a speculative one: prompt-injected procedural memory pays only
-if the injection cost drops (retrieval on demand) or the round
-savings rise (interventions that unlock task classes the model fails outright);
-both are directions whose break-even this paper quantifies but whose
-designs remain future work.
+\textbf{Context:} Coding agents built on small, locally hosted language
+models are attractive for cost, privacy, and autonomy, but fail more
+often than frontier models. An equally attractive idea promises to
+improve them over time: when the local model fails and a cloud model
+rescues it, distill the intervention into a reusable procedural
+playbook and inject it into future tasks, so the escalation is paid
+once and amortized.
+
+\textbf{Objective:} Determine whether prompt-injected procedural
+memory pays for itself in a local-first coding harness, and under what
+condition.
+
+\textbf{Method:} We formalize an \emph{amortization condition} --- an
+agentic loop re-sends its context every round, so an injected section
+of $c$ tokens costs $c$ times the number of rounds and pays for itself
+only if it saves enough rounds --- and test it in two independent
+evaluations on a 20B mixture-of-experts executor ($\sim$3.6B active
+parameters; 140 and 306 runs) plus a pre-registered 140-run
+replication of the first study on a dense 9B executor. The confirmatory
+weight rests on the second study and the replication, whose
+pre-registration is externally verifiable; the first is an exploratory
+pilot. Study~2's middle arm is a \emph{same-prompt control} whose
+prompt is byte-identical to baseline by construction.
+
+\textbf{Results:} Break-even is one to nearly two full rounds; under
+prefix caching this per-round cost is one of token accounting and
+key--value occupancy rather than added latency, and the behavioral
+cost that dominates the weaker executor is separate. A human-written
+playbook, the ceiling for any automatically distilled variant,
+amortizes only on the task the model already knows, where it is
+redundant, and misses break-even by $3$--$6\times$ on fresh tasks;
+success rates show no reliable change anywhere (all intervals include
+zero). On the 9B executor the same playbook is harmful --- lengthening
+trajectories and significantly reducing success on fresh tasks --- so
+the failure mode shifts from economic to behavioral. A same-prompt
+control dissolved an apparently significant $+13$-task gain (McNemar
+$p=0.011$, Holm-corrected) into an unattributable $+4$ ($p=0.541$),
+and the measured noise floor ($\sim$20\% of paired cells flip under
+byte-identical prompts) is an order of magnitude above the floor
+imported from an easier suite.
+
+\textbf{Conclusion:} We claim the condition and the measurement
+procedure as general; the frontier's measured positions are specific
+to this task family, harness, and pair of executors. Prompt-injected
+procedural memory pays only if the injection cost drops (retrieval on
+demand) or the round savings rise (interventions that unlock task
+classes the model fails outright) --- directions whose break-even this
+paper quantifies but whose designs remain future work.
 \end{abstract}
 
 \begin{keyword}
@@ -126,7 +132,12 @@ forever after. Variants of this idea circulate widely in the agent
 literature as skill libraries, stored reflections, and memory
 subsystems (Section~\ref{sec:related}). It sounds obviously good, and
 it is exactly the kind of plausible technique that gets adopted
-without measurement.
+without measurement. It is also a concrete engineering decision ---
+whether a coding-agent harness should carry a distilled memory into
+every session --- of the kind the emerging practice of \emph{harness
+engineering} (Section~\ref{sec:related}) must make, today without a
+measured criterion to guide it. What follows is that criterion and the
+measurement behind it.
 
 This paper measures it, and the measurement says no --- with a
 mechanism. The economics are structural. An agentic loop re-sends the
@@ -152,11 +163,15 @@ sessions, in a three-arm A/B whose middle arm is a \emph{same-prompt
 control}: its prompt is byte-identical to the baseline by construction
 (306 runs). A pre-registered replication of Study~1 on a second, dense
 9B executor (140 further runs) tests whether the pattern is specific
-to one architecture.
+to one architecture. The confirmatory weight of this paper rests on
+Study~2 and this replication, whose pre-registration order is
+externally verifiable against the public repository; Study~1's pilot,
+whose order is not, we report as exploratory
+(Section~\ref{sec:method-prereg}).
 
 Both studies land on the same side of the frontier, though they probe
-different points of it: Study~1 prices content-rich memory, Study~2 a
-content-thin one. The playbook
+different points of it: Study~1 (exploratory) prices content-rich
+memory, Study~2 (confirmatory) a content-thin one. The playbook
 amortizes only on the task the model already knows, where it is
 redundant, and misses break-even by a factor of $3$--$6$ on fresh
 tasks, where it would matter. Success rates show no reliable change
@@ -180,18 +195,20 @@ This paper contributes:
   empirical content is an anti-correlation between when memory helps
   and when it is needed (Sections~\ref{sec:model}
   and~\ref{sec:results});
-\item two independent pre-registered null results that confirm it,
-  plus a pre-registered replication in which the failure deepens from
-  economic to behavioral on a smaller executor, together with the
-  \emph{same-prompt control} as a transferable methodological
-  instrument; without it, this paper would instead
+\item a confirmatory pre-registered null (Study~2) and a
+  pre-registered replication in which the failure deepens from
+  economic to behavioral on a smaller executor --- together with an
+  exploratory pilot (Study~1) that first surfaces the anti-correlation
+  --- and the \emph{same-prompt control} as a transferable
+  methodological instrument; without it, this paper would instead
   report a significant false positive
   (Section~\ref{sec:results-pm});
 \item the multi-session benchmark design A$\to$B$\to$H for measuring
-  procedural transfer under objective oracles, together with its first
-  (partial) instantiation: the pilot exercises sessions B and H
-  against a human-written playbook, and the live tutor of session A
-  is future work (Section~\ref{sec:method});
+  procedural transfer under objective oracles, contributed as a design
+  with a first partial instantiation rather than a completed
+  benchmark: the pilot exercises sessions B and H against a
+  human-written playbook, while the live tutor of session A remains
+  future work (Section~\ref{sec:method});
 \item a design lesson with measured directions rather than
   speculation: injected memory pays only if the injection cost drops
   (retrieval on demand) or the round savings rise (class-unlocking
@@ -485,14 +502,26 @@ test and pass-rate differences carry Newcombe 95\% intervals; rounds
 and wall time use two-sided Welch $t$-tests with Welch intervals,
 Holm-corrected across the three task pairs within each endpoint
 family. Table~\ref{tab:m1} reports point estimates; inference is in
-the text.
+the text. The pilot was sized for the efficiency endpoints, not pass
+rate: at $n=20$ per cell, Fisher's exact test resolves only large
+pass-rate differences (a minimum detectable effect of roughly
+$0.35$--$0.40$ in proportion at $80\%$ power near $p=0.7$), so moderate
+success-rate effects are out of reach by construction and the reliable
+endpoints are $\Delta R$ and the token balance.
 
 Study~1 was subsequently replicated on a second executor:
 \texttt{ornith:9b} (Ornith AI; a dense 9B-parameter model of the
 Qwen3.5 architecture family, Q4\_K\_M quantization, Ollama registry
 digest \texttt{a75697c14589}) that
 saturates the project's easier benchmark suite, served through the
-same node with a 300\,s per-task timeout. The replication was
+same node with a 300\,s per-task timeout. The two executors are chosen
+to span the axis that matters for this regime rather than to sample it
+exhaustively: a sparse mixture-of-experts (gpt-oss:20b, $\sim$3.6B
+active) and a dense model (ornith:9b) of different provenance, both at
+the practical edge of commodity local inference and both strong enough
+to saturate the project's easier suite unaided --- so a memory effect
+here cannot be dismissed as merely rescuing a model that was failing
+anyway. The replication was
 pre-registered before launch with the same design, seeds, arms, and
 analysis plan, plus one rule specific to replication: the
 saturated/fresh classification is re-derived from the memory-free
@@ -631,7 +660,13 @@ and $+0.35$ (CI $[+0.02, +0.68]$, Holm $p=0.072$), a factor of
 $3$--$6$ below break-even, while the per-round overhead stays fixed
 at $+243$ and $+268$ tokens, so the playbook \emph{costs} $+1076$
 (CI $[+11, +2141]$) and $+1132$ (CI $[+560, +1704]$) net tokens per
-task, both intervals excluding zero. Figure~\ref{fig:frontier} places the
+task, both intervals excluding zero. These are net input tokens ---
+the accounting term of Equation~\eqref{eq:amortization}; under a cached
+prefix they do not surface as added wall time (the flat wall-time
+column confirms it), and the behavioral cost that dominates the weaker
+executor of Section~\ref{sec:results-ornith} is a separate quantity,
+priced by the anti-correlation rather than by the token balance.
+Figure~\ref{fig:frontier} places the
 three tasks against the amortization frontier.
 
 Pass rate shows no consistent signal in any pair (Fisher $p=0.72$,
