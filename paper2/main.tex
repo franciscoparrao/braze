@@ -836,7 +836,11 @@ discordances were noise. The collateral finding is itself a result:
 threshold, borrowed from the floor measured on an easier suite,
 underestimated the discriminating-suite floor by an order of magnitude
 ($\sim$20\% of cells flip under identical prompts at temperature 0.2).
-Every future A/B in this regime needs an in-sweep same-prompt control
+That flip rate combines two sources --- tasks marginal near the
+capability frontier and a serving stack that is not bit-exact under a
+fixed seed (Section~\ref{sec:disc-control} disentangles them) --- but
+either way the operative correction is the same:
+every future A/B in this regime needs an in-sweep same-prompt control
 rather than a floor imported from another configuration.
 
 \subsection{Cost of the injected section}
@@ -877,7 +881,32 @@ arrive faster for having read it. Round savings come from skipping
 deliberation the model can already do on its own; they do not come
 from making hard reasoning easier. Prompt-injected procedural memory
 therefore behaves as a reminder, not a teacher, and a reminder is
-worth the most on exactly the tasks where it is worth nothing. This is
+worth the most on exactly the tasks where it is worth nothing.
+
+This reading is not impressionistic. Across all $n=20$ runs per cell on
+the two fresh tasks (80 trajectories), we extract two proxies directly
+from the logged tool-call sequences, rather than hand-coding a subset:
+whether a run reaches a code edit (\texttt{edit\_file}, effectively the
+fix --- $56$ of the $62$ passing fresh runs issue exactly one), and how
+many tool calls precede that first edit. Both say the same thing. First,
+the playbook does not change \emph{whether} the model reaches a fix: the
+fraction of runs that issue a code edit is flat (\textsc{loop}
+$16/20\to19/20$, Fisher $p=0.34$; \textsc{move} $20/20\to20/20$), and
+pass rate is flat-to-negative (Table~\ref{tab:m1}) --- the advice does
+not unlock tasks the model would otherwise fail, which is what a teacher
+would do. Second, where the playbook trims anything, it trims a fraction
+of a step of front-loaded deliberation, not a restructured solution: the
+tool calls preceding the first edit move by at most $\sim$0.4
+(\textsc{loop} $3.7\to3.3$, Mann--Whitney $p=0.24$; \textsc{move}
+$4.4\to4.0$, $p=0.008$), the same small magnitude as the round reduction
+itself, while total tool calls and rounds are statistically
+indistinguishable on \textsc{loop} ($p=0.80$) and shift by only $0.35$
+rounds on \textsc{move} ($p=0.03$, not surviving the Holm correction of
+Table~\ref{tab:m1}). The model applies the same fix by the same route
+with or without the advice; the reminder shaves deliberation it can
+already do, never the $0.9$--$1.2$ rounds the injection cost demands.
+
+This is
 not a quirk of one playbook: the same asymmetry reappears in Study~2,
 where the only contrast that isolates the memory's content is null,
 and in the holdout, where the inapplicable playbook costs its fixed
@@ -921,15 +950,29 @@ significant difference against baseline reflects the treatment)
 assumed a noise floor imported from an easier suite. The measured
 floor on the discriminating suite was an order of magnitude higher:
 $\sim$20\% of paired cells flip under byte-identical prompts at
-temperature 0.2. The general lesson for agentic-system evaluation in
-the small-model regime: when the suite is deliberately calibrated near
-the model's capability frontier, per-configuration noise dominates,
-and the only floor that can be trusted is one measured \emph{inside
-the same sweep}: an arm whose prompt is identical to baseline by
-construction. The instrument is cheap (one extra arm), demands no new
-tooling, and converts ``significant against baseline'' into the only
-question that matters: significant against \emph{what}. The measured
-floor also yields the suite's minimum detectable effect: with
+temperature 0.2. Two distinct mechanisms feed that floor, and they
+generalize differently. One is suite design: tasks deliberately
+calibrated near the model's capability frontier have genuinely marginal
+outcomes, so per-configuration noise dominates on this suite in a way it
+would not on a saturated one. The other is the serving stack, which is
+not bit-exact under a fixed seed (Section~\ref{sec:threats}): identical
+prompts can diverge from non-determinism that is a property of the
+stack, not the suite, and would inflate the flip rate of any benchmark
+run on it. Our data do not apportion the $\sim$20\% between the two, and
+the distinction matters for what travels: to the extent serving
+non-determinism is the larger share, the minimum-detectable-effect
+arithmetic below characterizes this stack rather than this suite, and
+attributing the whole floor to frontier-calibration would over-claim the
+suite-design mechanism. What does \emph{not} depend on the mix is the
+remedy, which is the general lesson for agentic-system evaluation in the
+small-model regime: the only floor that can be trusted is one measured
+\emph{inside the same sweep} --- an arm whose prompt is identical to
+baseline by construction --- because such a control absorbs both sources
+at once, whatever their ratio. The instrument is cheap (one extra arm),
+demands no new tooling, and converts ``significant against baseline''
+into the only question that matters: significant against \emph{what}.
+The measured floor also yields the suite's minimum detectable effect:
+with
 $\sim$21 noise discordant pairs, an exact McNemar at $\alpha=0.05$
 requires a net asymmetry of at least 11 pairs ($\approx$11\,pp on
 this suite); at three repetitions, any true effect smaller than
@@ -1049,7 +1092,12 @@ secondary wall-time contrast. In Study 2, our own pre-registered
 plumbing gate was miscalibrated by an order of magnitude (its
 $\leq 2$-cell threshold was imported from the noise floor of an easier
 suite), and we report that miscalibration as a finding
-(Section~\ref{sec:results-pm}) rather than repair it post hoc. All
+(Section~\ref{sec:results-pm}) rather than repair it post hoc. This
+same non-determinism is one of the two sources of the measured
+$\sim$20\% same-prompt flip rate --- the other being genuine
+task-marginality near the frontier --- which Section~\ref{sec:disc-control}
+disentangles; we do not claim to apportion the two, only that the
+in-sweep same-prompt control neutralizes both. All
 headline contrasts are paired, exact, and multiplicity-corrected; the
 decisive contrast is read against an in-sweep same-prompt control
 rather than an imported floor; and both pre-registrations forbade
