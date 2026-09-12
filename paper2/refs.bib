@@ -28,6 +28,17 @@
 %   * Sugerencia [JUICIO, no confirmado]: wang2023voyager podría
 %     tener versión publicada (TMLR 2024) — decidir en el polish de
 %     S4 si se cita la versión de journal.
+% - HIGIENE DE PAGES (2026-09-11, Tier 3 revisión IST): bibtex emite
+%   "empty pages" para chhikara2025mem0, shinn2023reflexion y
+%   yang2024sweagent. Verificado que NINGUNA fuente autoritativa provee
+%   paginación: CrossRef y OpenAlex sin first/last_page; DataCite marca
+%   Reflexion/SWE-agent como Preprint (NeurIPS es proceedings
+%   electrónico, sin números de página); el BibTeX propio de IOS Press
+%   para Mem0 (ECAI 2025, content-negotiation del DOI) tampoco trae
+%   pages. Se dejan sin pages a propósito — no es omisión, es que no
+%   existen; inventarlas sería fabricación. En elsarticle-harv estas
+%   refs renderizan limpias (sin "pp." colgante); el warning vive solo
+%   en el log de build.
 
 % ---------------------------------------------------------------- self
 @misc{parra2026scaffolding,
