@@ -898,11 +898,11 @@ would do. Second, where the playbook trims anything, it trims a fraction
 of a step of front-loaded deliberation, not a restructured solution: the
 tool calls preceding the first edit move by at most $\sim$0.4
 (\textsc{loop} $3.7\to3.3$, Mann--Whitney $p=0.24$; \textsc{move}
-$4.4\to4.0$, $p=0.008$), the same small magnitude as the round reduction
-itself, while total tool calls and rounds are statistically
-indistinguishable on \textsc{loop} ($p=0.80$) and shift by only $0.35$
-rounds on \textsc{move} ($p=0.03$, not surviving the Holm correction of
-Table~\ref{tab:m1}). The model applies the same fix by the same route
+$4.4\to4.0$, $p=0.008$) --- the same small magnitude as the round
+reduction itself. Total tool calls and rounds tell the same story:
+statistically indistinguishable on \textsc{loop} ($p=0.80$), and shifted
+by only $0.35$ rounds on \textsc{move} ($p=0.03$, which does not survive
+the Holm correction of Table~\ref{tab:m1}). The model applies the same fix by the same route
 with or without the advice; the reminder shaves deliberation it can
 already do, never the $0.9$--$1.2$ rounds the injection cost demands.
 
@@ -959,9 +959,9 @@ not bit-exact under a fixed seed (Section~\ref{sec:threats}): identical
 prompts can diverge from non-determinism that is a property of the
 stack, not the suite, and would inflate the flip rate of any benchmark
 run on it. Our data do not apportion the $\sim$20\% between the two, and
-the distinction matters for what travels: to the extent serving
+the distinction matters for what travels. To the extent serving
 non-determinism is the larger share, the minimum-detectable-effect
-arithmetic below characterizes this stack rather than this suite, and
+arithmetic below characterizes this stack rather than this suite;
 attributing the whole floor to frontier-calibration would over-claim the
 suite-design mechanism. What does \emph{not} depend on the mix is the
 remedy, which is the general lesson for agentic-system evaluation in the
