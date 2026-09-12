@@ -958,17 +958,26 @@ would not on a saturated one. The other is the serving stack, which is
 not bit-exact under a fixed seed (Section~\ref{sec:threats}): identical
 prompts can diverge from non-determinism that is a property of the
 stack, not the suite, and would inflate the flip rate of any benchmark
-run on it. Our data do not apportion the $\sim$20\% between the two, and
-the distinction matters for what travels. To the extent serving
-non-determinism is the larger share, the minimum-detectable-effect
-arithmetic below characterizes this stack rather than this suite;
-attributing the whole floor to frontier-calibration would over-claim the
-suite-design mechanism. What does \emph{not} depend on the mix is the
-remedy, which is the general lesson for agentic-system evaluation in the
-small-model regime: the only floor that can be trusted is one measured
-\emph{inside the same sweep} --- an arm whose prompt is identical to
-baseline by construction --- because such a control absorbs both sources
-at once, whatever their ratio. The instrument is cheap (one extra arm),
+run on it. A direct measurement apportions them. Re-running the same-prompt
+control on a \emph{saturated} suite --- 19 tasks the executor passes at
+$100\%$, where capability is not the limiter, so only genuine stack
+non-determinism could flip an outcome --- produced \emph{zero} discordant
+pairs out of 190 (temperature 0.2, five repetitions, gpt-oss:20b under a
+server-side serving stack, if anything more permissive of non-determinism
+than the in-process one of the main studies). The flip rate that is
+$\sim$16--20\% near the frontier is $0\%$ once the tasks are not marginal.
+The floor is therefore suite-design, not a stack property that would
+inflate any benchmark equally; the stack's own contribution to
+\emph{outcome} flips is bounded near zero for non-marginal tasks. This
+sharpens the lesson rather than softening it: the minimum-detectable-effect
+arithmetic below characterizes this suite, and the noise lives exactly
+where a discriminating A/B operates --- on tasks near the frontier ---
+which is why an in-sweep control is not optional there. That remedy is
+the general lesson for agentic-system evaluation in the small-model
+regime: the only floor that can be trusted is one measured \emph{inside
+the same sweep} --- an arm whose prompt is identical to baseline by
+construction --- and it would have caught this floor whichever source
+dominated, suite-marginality or stack. The instrument is cheap (one extra arm),
 demands no new tooling, and converts ``significant against baseline''
 into the only question that matters: significant against \emph{what}.
 The measured floor also yields the suite's minimum detectable effect:
@@ -1093,11 +1102,14 @@ plumbing gate was miscalibrated by an order of magnitude (its
 $\leq 2$-cell threshold was imported from the noise floor of an easier
 suite), and we report that miscalibration as a finding
 (Section~\ref{sec:results-pm}) rather than repair it post hoc. This
-same non-determinism is one of the two sources of the measured
+same non-determinism is one of the two potential sources of the measured
 $\sim$20\% same-prompt flip rate --- the other being genuine
 task-marginality near the frontier --- which Section~\ref{sec:disc-control}
-disentangles; we do not claim to apportion the two, only that the
-in-sweep same-prompt control neutralizes both. All
+disentangles by direct measurement: on a saturated suite the same-prompt
+flip rate is $0\%$ (0 of 190 pairs), bounding the stack's contribution to
+outcome flips near zero for non-marginal tasks, so the floor is dominated
+by suite-marginality and the in-sweep same-prompt control is the operative
+safeguard regardless. All
 headline contrasts are paired, exact, and multiplicity-corrected; the
 decisive contrast is read against an in-sweep same-prompt control
 rather than an imported floor; and both pre-registrations forbade

@@ -1,0 +1,217 @@
+Corriendo 5 repetición(es) por (tarea, backend) — timeout 180s por intento.
+-> ollama:gpt-oss:20b :: read_file_basic (rep 1/5)
+-> ollama:gpt-oss:20b :: read_file_basic (rep 2/5)
+-> ollama:gpt-oss:20b :: read_file_basic (rep 3/5)
+-> ollama:gpt-oss:20b :: read_file_basic (rep 4/5)
+-> ollama:gpt-oss:20b :: read_file_basic (rep 5/5)
+-> ollama:gpt-oss:20b :: grep_basic (rep 1/5)
+-> ollama:gpt-oss:20b :: grep_basic (rep 2/5)
+-> ollama:gpt-oss:20b :: grep_basic (rep 3/5)
+-> ollama:gpt-oss:20b :: grep_basic (rep 4/5)
+-> ollama:gpt-oss:20b :: grep_basic (rep 5/5)
+-> ollama:gpt-oss:20b :: glob_basic (rep 1/5)
+-> ollama:gpt-oss:20b :: glob_basic (rep 2/5)
+-> ollama:gpt-oss:20b :: glob_basic (rep 3/5)
+-> ollama:gpt-oss:20b :: glob_basic (rep 4/5)
+-> ollama:gpt-oss:20b :: glob_basic (rep 5/5)
+-> ollama:gpt-oss:20b :: write_file_basic (rep 1/5)
+-> ollama:gpt-oss:20b :: write_file_basic (rep 2/5)
+-> ollama:gpt-oss:20b :: write_file_basic (rep 3/5)
+-> ollama:gpt-oss:20b :: write_file_basic (rep 4/5)
+-> ollama:gpt-oss:20b :: write_file_basic (rep 5/5)
+-> ollama:gpt-oss:20b :: edit_file_basic (rep 1/5)
+-> ollama:gpt-oss:20b :: edit_file_basic (rep 2/5)
+-> ollama:gpt-oss:20b :: edit_file_basic (rep 3/5)
+-> ollama:gpt-oss:20b :: edit_file_basic (rep 4/5)
+-> ollama:gpt-oss:20b :: edit_file_basic (rep 5/5)
+-> ollama:gpt-oss:20b :: shell_exec_basic (rep 1/5)
+-> ollama:gpt-oss:20b :: shell_exec_basic (rep 2/5)
+-> ollama:gpt-oss:20b :: shell_exec_basic (rep 3/5)
+-> ollama:gpt-oss:20b :: shell_exec_basic (rep 4/5)
+-> ollama:gpt-oss:20b :: shell_exec_basic (rep 5/5)
+-> ollama:gpt-oss:20b :: no_tool_qa (rep 1/5)
+-> ollama:gpt-oss:20b :: no_tool_qa (rep 2/5)
+-> ollama:gpt-oss:20b :: no_tool_qa (rep 3/5)
+-> ollama:gpt-oss:20b :: no_tool_qa (rep 4/5)
+-> ollama:gpt-oss:20b :: no_tool_qa (rep 5/5)
+-> ollama:gpt-oss:20b :: multi_step_read_count_write (rep 1/5)
+-> ollama:gpt-oss:20b :: multi_step_read_count_write (rep 2/5)
+-> ollama:gpt-oss:20b :: multi_step_read_count_write (rep 3/5)
+-> ollama:gpt-oss:20b :: multi_step_read_count_write (rep 4/5)
+-> ollama:gpt-oss:20b :: multi_step_read_count_write (rep 5/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_filename (rep 1/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_filename (rep 2/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_filename (rep 3/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_filename (rep 4/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_filename (rep 5/5)
+-> ollama:gpt-oss:20b :: distractor_selection_among_files (rep 1/5)
+-> ollama:gpt-oss:20b :: distractor_selection_among_files (rep 2/5)
+-> ollama:gpt-oss:20b :: distractor_selection_among_files (rep 3/5)
+-> ollama:gpt-oss:20b :: distractor_selection_among_files (rep 4/5)
+-> ollama:gpt-oss:20b :: distractor_selection_among_files (rep 5/5)
+-> ollama:gpt-oss:20b :: edit_file_function_body (rep 1/5)
+-> ollama:gpt-oss:20b :: edit_file_function_body (rep 2/5)
+-> ollama:gpt-oss:20b :: edit_file_function_body (rep 3/5)
+-> ollama:gpt-oss:20b :: edit_file_function_body (rep 4/5)
+-> ollama:gpt-oss:20b :: edit_file_function_body (rep 5/5)
+-> ollama:gpt-oss:20b :: no_tool_capital_question (rep 1/5)
+-> ollama:gpt-oss:20b :: no_tool_capital_question (rep 2/5)
+-> ollama:gpt-oss:20b :: no_tool_capital_question (rep 3/5)
+-> ollama:gpt-oss:20b :: no_tool_capital_question (rep 4/5)
+-> ollama:gpt-oss:20b :: no_tool_capital_question (rep 5/5)
+-> ollama:gpt-oss:20b :: no_tool_subtraction (rep 1/5)
+-> ollama:gpt-oss:20b :: no_tool_subtraction (rep 2/5)
+-> ollama:gpt-oss:20b :: no_tool_subtraction (rep 3/5)
+-> ollama:gpt-oss:20b :: no_tool_subtraction (rep 4/5)
+-> ollama:gpt-oss:20b :: no_tool_subtraction (rep 5/5)
+-> ollama:gpt-oss:20b :: multi_step_sum_two_files (rep 1/5)
+-> ollama:gpt-oss:20b :: multi_step_sum_two_files (rep 2/5)
+-> ollama:gpt-oss:20b :: multi_step_sum_two_files (rep 3/5)
+-> ollama:gpt-oss:20b :: multi_step_sum_two_files (rep 4/5)
+-> ollama:gpt-oss:20b :: multi_step_sum_two_files (rep 5/5)
+-> ollama:gpt-oss:20b :: multi_step_multiply_and_write (rep 1/5)
+-> ollama:gpt-oss:20b :: multi_step_multiply_and_write (rep 2/5)
+-> ollama:gpt-oss:20b :: multi_step_multiply_and_write (rep 3/5)
+-> ollama:gpt-oss:20b :: multi_step_multiply_and_write (rep 4/5)
+-> ollama:gpt-oss:20b :: multi_step_multiply_and_write (rep 5/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_config_extension (rep 1/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_config_extension (rep 2/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_config_extension (rep 3/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_config_extension (rep 4/5)
+-> ollama:gpt-oss:20b :: error_recovery_wrong_config_extension (rep 5/5)
+-> ollama:gpt-oss:20b :: error_recovery_edit_wrong_filename (rep 1/5)
+-> ollama:gpt-oss:20b :: error_recovery_edit_wrong_filename (rep 2/5)
+-> ollama:gpt-oss:20b :: error_recovery_edit_wrong_filename (rep 3/5)
+-> ollama:gpt-oss:20b :: error_recovery_edit_wrong_filename (rep 4/5)
+-> ollama:gpt-oss:20b :: error_recovery_edit_wrong_filename (rep 5/5)
+-> ollama:gpt-oss:20b :: distractor_selection_log_with_error (rep 1/5)
+-> ollama:gpt-oss:20b :: distractor_selection_log_with_error (rep 2/5)
+-> ollama:gpt-oss:20b :: distractor_selection_log_with_error (rep 3/5)
+-> ollama:gpt-oss:20b :: distractor_selection_log_with_error (rep 4/5)
+-> ollama:gpt-oss:20b :: distractor_selection_log_with_error (rep 5/5)
+-> ollama:gpt-oss:20b :: distractor_selection_debug_config (rep 1/5)
+-> ollama:gpt-oss:20b :: distractor_selection_debug_config (rep 2/5)
+-> ollama:gpt-oss:20b :: distractor_selection_debug_config (rep 3/5)
+-> ollama:gpt-oss:20b :: distractor_selection_debug_config (rep 4/5)
+-> ollama:gpt-oss:20b :: distractor_selection_debug_config (rep 5/5)
+
+== Resultados por tarea ==
+[PASS] read_file_basic          ollama:gpt-oss:20b    58857ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2032 tokens_out=96
+[PASS] read_file_basic          ollama:gpt-oss:20b   (rep 2)  27936ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2048 tokens_out=80
+[PASS] read_file_basic          ollama:gpt-oss:20b   (rep 3)  39057ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2048 tokens_out=142
+[PASS] read_file_basic          ollama:gpt-oss:20b   (rep 4)  32246ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2032 tokens_out=95
+[PASS] read_file_basic          ollama:gpt-oss:20b   (rep 5)  30191ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2032 tokens_out=84
+[PASS] grep_basic               ollama:gpt-oss:20b    32236ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2031 tokens_out=106
+[PASS] grep_basic               ollama:gpt-oss:20b   (rep 2)  32083ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2031 tokens_out=101
+[PASS] grep_basic               ollama:gpt-oss:20b   (rep 3)  34185ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2031 tokens_out=106
+[PASS] grep_basic               ollama:gpt-oss:20b   (rep 4)  33259ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2031 tokens_out=109
+[PASS] grep_basic               ollama:gpt-oss:20b   (rep 5)  47897ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3154 tokens_out=151
+[PASS] glob_basic               ollama:gpt-oss:20b    42488ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2062 tokens_out=142
+[PASS] glob_basic               ollama:gpt-oss:20b   (rep 2)  37091ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2062 tokens_out=113
+[PASS] glob_basic               ollama:gpt-oss:20b   (rep 3)  37082ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2062 tokens_out=98
+[PASS] glob_basic               ollama:gpt-oss:20b   (rep 4)  42387ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2062 tokens_out=141
+[PASS] glob_basic               ollama:gpt-oss:20b   (rep 5)  47668ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2062 tokens_out=158
+[PASS] write_file_basic         ollama:gpt-oss:20b    30804ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2063 tokens_out=77
+[PASS] write_file_basic         ollama:gpt-oss:20b   (rep 2)  29725ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2063 tokens_out=83
+[PASS] write_file_basic         ollama:gpt-oss:20b   (rep 3)  30221ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2063 tokens_out=77
+[PASS] write_file_basic         ollama:gpt-oss:20b   (rep 4)  28724ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2063 tokens_out=80
+[PASS] write_file_basic         ollama:gpt-oss:20b   (rep 5)  30384ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2063 tokens_out=83
+[PASS] edit_file_basic          ollama:gpt-oss:20b    29395ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2067 tokens_out=95
+[PASS] edit_file_basic          ollama:gpt-oss:20b   (rep 2)  46494ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3191 tokens_out=153
+[PASS] edit_file_basic          ollama:gpt-oss:20b   (rep 3)  51020ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3191 tokens_out=152
+[PASS] edit_file_basic          ollama:gpt-oss:20b   (rep 4)  49941ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3191 tokens_out=156
+[PASS] edit_file_basic          ollama:gpt-oss:20b   (rep 5)  50339ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3191 tokens_out=154
+[PASS] shell_exec_basic         ollama:gpt-oss:20b    29740ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2045 tokens_out=80
+[PASS] shell_exec_basic         ollama:gpt-oss:20b   (rep 2)  29677ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2045 tokens_out=86
+[PASS] shell_exec_basic         ollama:gpt-oss:20b   (rep 3)  47330ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=1  tokens_in=2122 tokens_out=157
+[PASS] shell_exec_basic         ollama:gpt-oss:20b   (rep 4)  60128ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=1  denied=1  tokens_in=2122 tokens_out=248
+[PASS] shell_exec_basic         ollama:gpt-oss:20b   (rep 5)  31453ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2045 tokens_out=80
+[PASS] no_tool_qa               ollama:gpt-oss:20b    19146ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=990 tokens_out=42
+[PASS] no_tool_qa               ollama:gpt-oss:20b   (rep 2)  18782ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=990 tokens_out=42
+[PASS] no_tool_qa               ollama:gpt-oss:20b   (rep 3)  17160ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=990 tokens_out=42
+[PASS] no_tool_qa               ollama:gpt-oss:20b   (rep 4)  17459ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=990 tokens_out=38
+[PASS] no_tool_qa               ollama:gpt-oss:20b   (rep 5)  20300ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=990 tokens_out=48
+[PASS] multi_step_read_count_write ollama:gpt-oss:20b    44665ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3274 tokens_out=119
+[PASS] multi_step_read_count_write ollama:gpt-oss:20b   (rep 2)  44031ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3274 tokens_out=118
+[PASS] multi_step_read_count_write ollama:gpt-oss:20b   (rep 3)  41257ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3274 tokens_out=120
+[PASS] multi_step_read_count_write ollama:gpt-oss:20b   (rep 4)  39259ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3274 tokens_out=112
+[PASS] multi_step_read_count_write ollama:gpt-oss:20b   (rep 5)  42364ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3274 tokens_out=109
+[PASS] error_recovery_wrong_filename ollama:gpt-oss:20b   112374ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=2  denied=1  tokens_in=5923 tokens_out=386
+[PASS] error_recovery_wrong_filename ollama:gpt-oss:20b   (rep 2)  96279ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=1  tokens_in=6052 tokens_out=290
+[PASS] error_recovery_wrong_filename ollama:gpt-oss:20b   (rep 3)  93210ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4451 tokens_out=324
+[PASS] error_recovery_wrong_filename ollama:gpt-oss:20b   (rep 4)  54145ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3245 tokens_out=159
+[PASS] error_recovery_wrong_filename ollama:gpt-oss:20b   (rep 5)  52190ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3245 tokens_out=137
+[PASS] distractor_selection_among_files ollama:gpt-oss:20b    36945ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2106 tokens_out=110
+[PASS] distractor_selection_among_files ollama:gpt-oss:20b   (rep 2)  74550ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=6025 tokens_out=191
+[PASS] distractor_selection_among_files ollama:gpt-oss:20b   (rep 3)  48688ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2106 tokens_out=188
+[PASS] distractor_selection_among_files ollama:gpt-oss:20b   (rep 4)  46691ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2106 tokens_out=127
+[PASS] distractor_selection_among_files ollama:gpt-oss:20b   (rep 5)  35613ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2106 tokens_out=120
+[PASS] edit_file_function_body  ollama:gpt-oss:20b    56209ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3259 tokens_out=179
+[PASS] edit_file_function_body  ollama:gpt-oss:20b   (rep 2)  50253ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3259 tokens_out=183
+[PASS] edit_file_function_body  ollama:gpt-oss:20b   (rep 3)  52454ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3259 tokens_out=159
+[PASS] edit_file_function_body  ollama:gpt-oss:20b   (rep 4)  61648ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3259 tokens_out=200
+[PASS] edit_file_function_body  ollama:gpt-oss:20b   (rep 5)  59904ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3259 tokens_out=188
+[PASS] no_tool_capital_question ollama:gpt-oss:20b    19298ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=994 tokens_out=58
+[PASS] no_tool_capital_question ollama:gpt-oss:20b   (rep 2)  18658ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=994 tokens_out=52
+[PASS] no_tool_capital_question ollama:gpt-oss:20b   (rep 3)  21353ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=994 tokens_out=66
+[PASS] no_tool_capital_question ollama:gpt-oss:20b   (rep 4)  16200ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=994 tokens_out=40
+[PASS] no_tool_capital_question ollama:gpt-oss:20b   (rep 5)  17756ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=994 tokens_out=58
+[PASS] no_tool_subtraction      ollama:gpt-oss:20b    16270ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=991 tokens_out=41
+[PASS] no_tool_subtraction      ollama:gpt-oss:20b   (rep 2)  16521ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=991 tokens_out=40
+[PASS] no_tool_subtraction      ollama:gpt-oss:20b   (rep 3)  14092ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=991 tokens_out=40
+[PASS] no_tool_subtraction      ollama:gpt-oss:20b   (rep 4)  18096ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=991 tokens_out=40
+[PASS] no_tool_subtraction      ollama:gpt-oss:20b   (rep 5)  18348ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=991 tokens_out=40
+[PASS] multi_step_sum_two_files ollama:gpt-oss:20b    60360ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4546 tokens_out=164
+[PASS] multi_step_sum_two_files ollama:gpt-oss:20b   (rep 2)  60864ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4526 tokens_out=155
+[PASS] multi_step_sum_two_files ollama:gpt-oss:20b   (rep 3)  52312ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4526 tokens_out=156
+[PASS] multi_step_sum_two_files ollama:gpt-oss:20b   (rep 4)  61927ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4526 tokens_out=160
+[PASS] multi_step_sum_two_files ollama:gpt-oss:20b   (rep 5)  58048ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4526 tokens_out=159
+[PASS] multi_step_multiply_and_write ollama:gpt-oss:20b    54229ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3275 tokens_out=133
+[PASS] multi_step_multiply_and_write ollama:gpt-oss:20b   (rep 2)  43722ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3275 tokens_out=127
+[PASS] multi_step_multiply_and_write ollama:gpt-oss:20b   (rep 3)  53347ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3275 tokens_out=133
+[PASS] multi_step_multiply_and_write ollama:gpt-oss:20b   (rep 4)  45174ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3275 tokens_out=127
+[PASS] multi_step_multiply_and_write ollama:gpt-oss:20b   (rep 5)  49840ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3275 tokens_out=128
+[PASS] error_recovery_wrong_config_extension ollama:gpt-oss:20b    42475ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3240 tokens_out=128
+[PASS] error_recovery_wrong_config_extension ollama:gpt-oss:20b   (rep 2)  46985ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3236 tokens_out=124
+[PASS] error_recovery_wrong_config_extension ollama:gpt-oss:20b   (rep 3)  38479ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3240 tokens_out=119
+[PASS] error_recovery_wrong_config_extension ollama:gpt-oss:20b   (rep 4)  63052ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3236 tokens_out=194
+[PASS] error_recovery_wrong_config_extension ollama:gpt-oss:20b   (rep 5)  43702ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3240 tokens_out=134
+[PASS] error_recovery_edit_wrong_filename ollama:gpt-oss:20b    50270ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3303 tokens_out=133
+[PASS] error_recovery_edit_wrong_filename ollama:gpt-oss:20b   (rep 2)  46765ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3311 tokens_out=139
+[PASS] error_recovery_edit_wrong_filename ollama:gpt-oss:20b   (rep 3)  54005ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3295 tokens_out=132
+[PASS] error_recovery_edit_wrong_filename ollama:gpt-oss:20b   (rep 4)  47965ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3303 tokens_out=136
+[PASS] error_recovery_edit_wrong_filename ollama:gpt-oss:20b   (rep 5)  49138ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3309 tokens_out=131
+[PASS] distractor_selection_log_with_error ollama:gpt-oss:20b    38943ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2100 tokens_out=120
+[PASS] distractor_selection_log_with_error ollama:gpt-oss:20b   (rep 2)  39526ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2100 tokens_out=111
+[PASS] distractor_selection_log_with_error ollama:gpt-oss:20b   (rep 3)  35388ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2100 tokens_out=118
+[PASS] distractor_selection_log_with_error ollama:gpt-oss:20b   (rep 4)  38110ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2100 tokens_out=97
+[PASS] distractor_selection_log_with_error ollama:gpt-oss:20b   (rep 5)  51737ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3364 tokens_out=140
+[PASS] distractor_selection_debug_config ollama:gpt-oss:20b    38272ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2076 tokens_out=101
+[PASS] distractor_selection_debug_config ollama:gpt-oss:20b   (rep 2)  32810ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2076 tokens_out=94
+[PASS] distractor_selection_debug_config ollama:gpt-oss:20b   (rep 3)  34252ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2072 tokens_out=89
+[PASS] distractor_selection_debug_config ollama:gpt-oss:20b   (rep 4)  30978ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2072 tokens_out=93
+[PASS] distractor_selection_debug_config ollama:gpt-oss:20b   (rep 5)  32534ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2072 tokens_out=110
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+ollama:gpt-oss:20b        95/95 [96,100]%    95/95      2.4        41657      41257           2590              122                 0              5          4            0         0         0         0         0    $0.0000
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+ollama:gpt-oss:20b       k=2 100.0%  k=3 100.0%  k=4 100.0%  k=5 100.0%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+ollama:gpt-oss:20b           19/19      0/19          0/19      1.000      1.000        1.000       0.00
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+ollama:gpt-oss:20b       single_tool              35/35      2.3      40872      37091         125         0         0         0         0    $0.0000
+ollama:gpt-oss:20b       no_tool                  15/15      1.0      17963      18096          46         0         0         0         0    $0.0000
+ollama:gpt-oss:20b       multi_step               15/15      3.3      50093      49840         135         0         0         0         0    $0.0000
+ollama:gpt-oss:20b       error_recovery           15/15      3.3      59402      50270         178         0         0         0         0    $0.0000
+ollama:gpt-oss:20b       distractor_selection     15/15      2.3      41002      38110         121         0         0         0         0    $0.0000
+
+[salud del banco] sin ítems de discriminación anómala.
+
+Resultados JSON escritos en /home/franciscoparrao/noise-floor-default-2026-09-12-v2.json
