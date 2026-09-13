@@ -331,42 +331,54 @@ no sobre la plantilla).
 Paquetes 3 y 4 de v9: ver § "Estado del código" — el grueso ya está
 hecho; lo abierto está listado acá.)
 
-- **SUBMISSION EMSE Paper 1 — queda UN bloqueante del autor**: crear los
-  2 registros OSF (formularios listos en `/tmp/osf/` de la sesión del
-  29-jul) y pegar los IDs en el `\todo` que los espera. Tras eso:
-  verificar 200 anónimo, regenerar `paper/submission-emse/`, subir.
-  **El repo YA ES PÚBLICO** (verificado 2026-08-30 con `gh repo view
-  franciscoparrao/braze --json visibility` → `PUBLIC`; el escaneo de
-  seguridad de la historia completa se había corrido antes, limpio).
-  Eso cierra también el bloqueante que era COMPARTIDO con el Paper 2.
-  Consecuencia operativa vigente: **todo push publica**, incluidos los
-  resultados negativos — coherente con la práctica del proyecto, pero
-  ya no es una decisión reversible.
-- **Paper 2 (CONGELADO a decisión del autor, 2026-08-16)**: ciclo
-  S1→S4 completo — manuscrito 15 págs en `paper2/`, verify-refs,
-  paper-style, review simulado con los 3 reject-level resueltos
-  (incluida la replicación pre-registrada en ornith:9b que REPLICA y
-  profundiza: el fallo pasa de económico a conductual en el 9B), match
-  = EMSE SI "Agentic Software Engineering" (deadline 2026-09-28,
-  rolling), paquete de submission en
-  `~/vault/journals/emse/submissions/2026-08-16_paper2-amortization/`.
-  Quedan 4 inputs del autor (funding, acks, OSF, Declarations) + los
-  bloqueantes de submit (tag, ORCID, modalidad review). El repo público
-  ya NO es bloqueante: se verificó `PUBLIC` el 2026-08-30.
-  **DESCONGELADO PARCIALMENTE el 2026-09-02**: se agregó un
-  `\paragraph{Concurrent work}` en § Related Work posicionando el paper
-  frente a WikiSkill (arXiv 2608.27454, Google, 28-ago), que reporta
-  +12-24 puntos de accuracy con memoria procedimental inyectada. El
-  argumento: miden ejes ortogonales (ellos accuracy, nosotros el costo
-  de contexto que ellos no tarifan pese a inyectar 45-143 líneas por
-  ronda), su mecanismo evoluciona con gating y el nuestro es un playbook
-  fijo, y **su propio gradiente predice nuestro régimen como el menos
-  favorable**. Compila a 17 págs, 0 citas sin resolver. **El paquete de
-  submission en el vault quedó DESACTUALIZADO — hay que regenerarlo.**
-  Ojo al regenerar: `make` en `paper2/` regenera `figs/` desde R y
-  DEGRADA el caption de la fig. 1 (pierde la frase "each computed from
-  that task's measured ... under the none arm"). Revertir `paper2/figs/`
-  tras compilar, o arreglar el script R.
+- **Paper 1: SOMETIDO A EMSE. Sin acciones pendientes.** Tag
+  `emse-submission-2026-07-29`. Corregido el 2026-09-04: este ítem
+  llevaba semanas diciendo que faltaban "los 2 registros OSF", y es
+  FALSO — ese bloqueante **se resolvió eliminándolo**, no cumpliéndolo
+  (commit `c53c7ae`): los registros nunca se presentaron, afirmar "we
+  prepared OSF Registrations" se juzgó un riesgo de integridad (un
+  reviewer lee "prepared" como "filed"), y el párrafo se reescribió a
+  los hechos. Presentarlos ahora solo agregaría un timestamp que
+  también postdata las corridas y habría que declararlo, así que se
+  reporta la auditoría en vez de decorar el registro. **No re-proponer
+  crear los registros OSF: es una decisión tomada, no una tarea
+  olvidada.**
+  El repo es PÚBLICO (verificado 2026-08-30). Consecuencia operativa
+  vigente: **todo push publica**, incluidos los resultados negativos —
+  coherente con la práctica del proyecto, pero ya no es reversible.
+- **Paper 2 — SOMETIDO a IST el 2026-09-13** (00:07; Information and
+  Software Technology, Elsevier; Research paper; autor único). Venue
+  decidido 2026-09-06 (`ad35de8`), migrado a `elsarticle` (`3611c89`);
+  manuscrito **22 págs** en `paper2/`. Ciclo completo: review simulado
+  IST → Tier 1-3 → **Issue 4 cerrado con dato** (sweep `default.toml`:
+  flip same-prompt **0/190** → el piso de ruido de ~20% de la suite
+  discriminante es **marginalidad-de-suite, no del stack**; pre-registro
+  `69078b8`, datos `docs/sweep-noise-floor-*-2026-09-12.*`) →
+  `/paper-prose` → `/tex-review` (verificación mecánica limpia + 2
+  fixes). El **tag público `ist-paper2-submission` (`214f8ff`)** refleja
+  exactamente el PDF sometido — NO confundir con `emse-paper2-submission`
+  (`b2ff011`), commit histórico PREPARADO que **nunca se envió**.
+  Decisiones de submission: data sharing = **Zenodo Dataset DOI
+  `10.5281/zenodo.22547684`** (findable, verificado en DataCite);
+  **preprint SSRN = NO** (opt-out; contenido ya público vía repo+Zenodo;
+  arXiv opcional después, en la versión que el autor prefiera); 5
+  clasificaciones (Artificial intelligence, Agents, Reliability,
+  Performance, Empirical research); disclosure de IA presente en el PDF
+  (antes de refs); self-cite del Paper 1 = "Under review" sin nombrar
+  venue (`f1783f4`). **Pendiente del autor:** firmar/crear password en
+  Editorial Manager tras el email de confirmación; luego esperar la
+  decisión de IST (mediana ~7 días a primera decisión por el triage del
+  EIC Staron). Si llegan reviews reales → `/paper-rebuttal`.
+  Nota histórica (§ Related Work, `\paragraph{Concurrent work}`,
+  2026-09-02): posiciona el paper frente a WikiSkill (arXiv 2608.27454,
+  Google, 28-ago) — miden ejes ortogonales (ellos accuracy, nosotros el
+  costo de contexto que no tarifan pese a inyectar 45-143 líneas por
+  ronda), y **su propio gradiente predice nuestro régimen como el menos
+  favorable**.
+  Ojo operativo al recompilar: `make` en `paper2/` regenera `figs/`
+  desde R y DEGRADA el caption de la fig. 1 (pierde "each computed from
+  that task's measured ... under the none arm"). Usar `pdflatex` directo
+  (no `make`), o revertir `paper2/figs/` tras `make`.
 - **SC-retention**: sweeps gpt-oss + ornith LANZADOS 2026-08-16
   (comandos del apéndice del pre-registro); al cerrar: análisis según
   criterios (adoptar / adoptar-condicional / rechazar-y-publicar-matiz
