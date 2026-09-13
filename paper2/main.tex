@@ -59,53 +59,40 @@ of Prompt-Injected Memory for Local-First Coding Agents}
 % Fuente: docs/paper2-honest-outline-2026-08-11.md (§ claim + § por qué
 % un nulo es publicable).
 \textbf{Context:} Coding agents built on small, locally hosted language
-models are attractive for cost, privacy, and autonomy, but fail more
-often than frontier models. An equally attractive idea promises to
-improve them over time: when the local model fails and a cloud model
-rescues it, distill the intervention into a reusable procedural
-playbook and inject it into future tasks, so the escalation is paid
-once and amortized.
+models are attractive for cost, privacy, and autonomy but fail more
+than frontier models. An appealing fix: when the local model fails and
+a cloud model rescues it, distill the intervention into a reusable
+playbook for future tasks, amortizing the escalation.
 
 \textbf{Objective:} Determine whether prompt-injected procedural
-memory pays for itself in a local-first coding harness, and under what
-condition.
+memory pays for itself in a local-first coding harness, and when.
 
 \textbf{Method:} We formalize an \emph{amortization condition} --- an
-agentic loop re-sends its context every round, so an injected section
-of $c$ tokens costs $c$ times the number of rounds and pays for itself
-only if it saves enough rounds --- and test it in two independent
-evaluations on a 20B mixture-of-experts executor ($\sim$3.6B active
-parameters; 140 and 306 runs) plus a pre-registered 140-run
-replication of the first study on a dense 9B executor. The confirmatory
-weight rests on the second study and the replication, whose
-pre-registration is externally verifiable; the first is an exploratory
-pilot. Study~2's middle arm is a \emph{same-prompt control} whose
-prompt is byte-identical to baseline by construction.
+agentic loop re-sends its context each round, so an injected section of
+$c$ tokens costs $c$ per round and pays only if it saves enough rounds
+--- and test it in two evaluations on a 20B mixture-of-experts executor
+(140 and 306 runs) plus a pre-registered 140-run replication on a dense
+9B executor. Confirmatory weight rests on the second study and the
+replication (pre-registration externally verifiable); the first is
+exploratory. Study~2's middle arm is a \emph{same-prompt control},
+byte-identical to baseline by construction.
 
-\textbf{Results:} Break-even is about one full round ($0.9$--$1.2$); under
-prefix caching this per-round cost is one of token accounting and
-key--value occupancy rather than added latency, and the behavioral
-cost that dominates the weaker executor is separate. A human-written
-playbook, the ceiling for any automatically distilled variant,
-amortizes only on the task the model already knows, where it is
-redundant, and misses break-even by $3$--$6\times$ on fresh tasks;
-success rates show no reliable change anywhere (all intervals include
-zero). On the 9B executor the same playbook is harmful --- lengthening
-trajectories and significantly reducing success on fresh tasks --- so
-the failure mode shifts from economic to behavioral. A same-prompt
-control dissolved an apparently significant $+13$-task gain (McNemar
-$p=0.011$, Holm-corrected) into an unattributable $+4$ ($p=0.541$),
-and the measured noise floor ($\sim$20\% of paired cells flip under
-byte-identical prompts) is an order of magnitude above the floor
-imported from an easier suite.
+\textbf{Results:} Break-even is about one full round ($0.9$--$1.2$). A
+human-written playbook --- the ceiling for any distilled variant ---
+amortizes only on tasks the model already knows and misses break-even
+by $3$--$6\times$ on fresh tasks; success rates show no reliable change.
+On the 9B executor the same playbook is harmful, so the failure mode
+shifts from economic to behavioral. The same-prompt control dissolved
+an apparently significant $+13$-task gain (McNemar $p=0.011$) into an
+unattributable $+4$ ($p=0.541$); the measured noise floor ($\sim$20\%
+of cells flip under byte-identical prompts) is an order of magnitude
+above one imported from an easier suite.
 
-\textbf{Conclusion:} We claim the condition and the measurement
-procedure as general; the frontier's measured positions are specific
-to this task family, harness, and pair of executors. Prompt-injected
-procedural memory pays only if the injection cost drops (retrieval on
-demand) or the round savings rise (interventions that unlock task
-classes the model fails outright) --- directions whose break-even this
-paper quantifies but whose designs remain future work.
+\textbf{Conclusion:} We claim the condition and measurement procedure
+as general; the measured positions are specific to this task family,
+harness, and executors. Injected memory pays only if the injection cost
+drops (retrieval on demand) or round savings rise (unlocking task
+classes the model fails outright).
 \end{abstract}
 
 \begin{keyword}
