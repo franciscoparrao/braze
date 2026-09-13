@@ -82,7 +82,7 @@ pre-registration is externally verifiable; the first is an exploratory
 pilot. Study~2's middle arm is a \emph{same-prompt control} whose
 prompt is byte-identical to baseline by construction.
 
-\textbf{Results:} Break-even is one to nearly two full rounds; under
+\textbf{Results:} Break-even is about one full round ($0.9$--$1.2$); under
 prefix caching this per-round cost is one of token accounting and
 key--value occupancy rather than added latency, and the behavioral
 cost that dominates the weaker executor is separate. A human-written
@@ -965,7 +965,7 @@ non-determinism could flip an outcome --- produced \emph{zero} discordant
 pairs out of 190 (temperature 0.2, five repetitions, gpt-oss:20b under a
 server-side serving stack, if anything more permissive of non-determinism
 than the in-process one of the main studies). The flip rate that is
-$\sim$16--20\% near the frontier is $0\%$ once the tasks are not marginal.
+$\sim$20\% near the frontier is $0\%$ once the tasks are not marginal.
 The floor is therefore suite-design, not a stack property that would
 inflate any benchmark equally; the stack's own contribution to
 \emph{outcome} flips is bounded near zero for non-marginal tasks. This
