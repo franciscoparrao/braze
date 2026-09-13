@@ -286,6 +286,21 @@ impl BackendSpec {
             || self.lead.as_deref().is_some_and(is_local)
     }
 
+    /// Si alguna mitad de este spec —executor, planner o lead— corre por
+    /// el gateway OpenCode Zen (`Provider::Zen`).
+    ///
+    /// Decide si `RunMetadata::zen_base_url` aplica al sweep, con la misma
+    /// lógica condicional que [`uses_local_backend`](Self::uses_local_backend):
+    /// el endpoint de Zen solo es procedencia cuando algún backend de la
+    /// corrida habló de verdad con Zen — registrarlo siempre describiría la
+    /// config, no la corrida.
+    pub fn uses_zen(&self) -> bool {
+        let is_zen = |spec: &BackendSpec| spec.provider == Provider::Zen;
+        is_zen(self)
+            || self.planner.as_deref().is_some_and(is_zen)
+            || self.lead.as_deref().is_some_and(is_zen)
+    }
+
     /// Whether the *executor* half of this spec is a local Ollama model —
     /// what `runner` keys the Ollama context budget on (N-36), mirroring
     /// how production keys it on `default_backend`.
@@ -1413,6 +1428,23 @@ mod tests {
                 .unwrap()
                 .uses_local_backend()
         );
+    }
+
+    /// `uses_zen` gatilla el registro de `zen_base_url` en la metadata:
+    /// verdadero si CUALQUIER mitad corre por Zen, falso para specs que no
+    /// tocan Zen — misma lógica que `uses_local_backend`.
+    #[test]
+    fn uses_zen_detects_a_zen_half_and_ignores_the_rest() {
+        assert!(BackendSpec::parse("zen:big-pickle").unwrap().uses_zen());
+        assert!(
+            BackendSpec::parse("ollama:qwen2.5:3b+lead:zen:big-pickle")
+                .unwrap()
+                .uses_zen()
+        );
+        assert!(!BackendSpec::parse("ollama:qwen2.5:3b").unwrap().uses_zen());
+        assert!(!BackendSpec::parse("openrouter:deepseek/deepseek-v4-flash")
+            .unwrap()
+            .uses_zen());
     }
 
     #[test]

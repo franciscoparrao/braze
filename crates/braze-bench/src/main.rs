@@ -900,6 +900,19 @@ async fn run() -> Result<(), BenchError> {
                     .ok()
                     .flatten()
             },
+            // Presupuesto de contexto y nodo servidor de Ollama —
+            // procedencia que faltaba (incidente OOM 2026-09-12): mismo
+            // gating condicional que `ollama_server_version`, solo cuando
+            // algún backend habla con Ollama.
+            ollama_num_ctx: (!ollama_models.is_empty()).then_some(config.ollama_num_ctx),
+            ollama_base_url: (!ollama_models.is_empty())
+                .then(|| config.ollama_base_url.clone()),
+            // Endpoint de Zen (nunca la key) cuando algún backend corre por
+            // el gateway — ver `BackendSpec::uses_zen`.
+            zen_base_url: specs
+                .iter()
+                .any(|(_, spec)| spec.uses_zen())
+                .then(|| config.zen_base_url.clone()),
             // v9 L-1: the env-only deployment tier travels with the
             // sweep — see `RunMetadata::local_env`.
             local_env: metadata::collect_local_env(std::env::vars()),

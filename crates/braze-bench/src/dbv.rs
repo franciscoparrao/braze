@@ -146,6 +146,28 @@ pub fn drift_report(reference: &RunMetadata, current: &RunMetadata) -> Vec<Drift
         format!("{:?}", reference.ollama_keep_alive),
         format!("{:?}", current.ollama_keep_alive),
     );
+    // num_ctx de Ollama: gobierna cuánto KV/compute reserva el server, así
+    // que un cambio (p.ej. 32768→8192) decide si el request cabe en la
+    // VRAM — qué corre y qué muere con OOM — sin tocar la generación. Es
+    // drift (incidente 2026-09-12).
+    check(
+        "ollama_num_ctx",
+        format!("{:?}", reference.ollama_num_ctx),
+        format!("{:?}", current.ollama_num_ctx),
+    );
+    // Nodo/endpoint servidor: distinto `base_url` = distinto hardware o
+    // serving stack, así que el piso de ruido y la velocidad no son
+    // comparables aunque coincidan modelo, seed y sampling.
+    check(
+        "ollama_base_url",
+        format!("{:?}", reference.ollama_base_url),
+        format!("{:?}", current.ollama_base_url),
+    );
+    check(
+        "zen_base_url",
+        format!("{:?}", reference.zen_base_url),
+        format!("{:?}", current.zen_base_url),
+    );
     // Semántica de grading (2026-08-12): un ref anterior a la métrica
     // dual tiene `passed` estricto; la corrida nueva lo tiene funcional
     // — pareo inválido exactamente en las filas clase e4b/ornith.
@@ -269,6 +291,9 @@ mod tests {
                 digest: Some("d1".to_string()),
             }],
             ollama_server_version: Some("0.32.1".to_string()),
+            ollama_num_ctx: Some(8192),
+            ollama_base_url: Some("http://192.168.1.8:11434".to_string()),
+            zen_base_url: None,
             backend_specs: vec!["ollama:qwen2.5:3b".to_string()],
             local_env: std::collections::BTreeMap::new(),
             ollama_keep_alive: Some("2m".to_string()),
@@ -297,6 +322,28 @@ mod tests {
         current.ollama_keep_alive = None;
         let drift = drift_report(&reference, &current);
         assert!(drift.iter().any(|d| d.field == "ollama_keep_alive"));
+    }
+
+    #[test]
+    fn a_different_num_ctx_is_drift() {
+        // 32768→8192 decide si el request cabe en la VRAM (incidente OOM
+        // 2026-09-12): distinta condición, resultados no comparables.
+        let reference = meta();
+        let mut current = meta();
+        current.ollama_num_ctx = Some(32768);
+        let drift = drift_report(&reference, &current);
+        assert!(drift.iter().any(|d| d.field == "ollama_num_ctx"));
+    }
+
+    #[test]
+    fn a_different_ollama_node_is_drift() {
+        // Distinto base_url = distinto hardware/serving; el piso de ruido
+        // y la velocidad no son comparables.
+        let reference = meta();
+        let mut current = meta();
+        current.ollama_base_url = Some("http://localhost:11434".to_string());
+        let drift = drift_report(&reference, &current);
+        assert!(drift.iter().any(|d| d.field == "ollama_base_url"));
     }
 
     #[test]

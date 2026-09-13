@@ -816,6 +816,9 @@ mod tests {
             engine_version: None,
             ollama_model_digests: vec![],
             ollama_server_version: Some("0.30.7".to_string()),
+            ollama_num_ctx: Some(8192),
+            ollama_base_url: Some("http://localhost:11434".to_string()),
+            zen_base_url: None,
             backend_specs: vec![
                 "ollama:qwen2.5:3b".to_string(),
                 "ollama:qwen2.5:3b+lead:ollama:x+ablate:no-lead".to_string(),

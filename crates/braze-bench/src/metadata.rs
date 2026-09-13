@@ -87,6 +87,36 @@ pub struct RunMetadata {
     /// serving stack. `None` when no Ollama backend is involved or the
     /// lookup failed — best-effort, same posture as the digests.
     pub ollama_server_version: Option<String>,
+    /// El `num_ctx` de Ollama efectivo del sweep (`ollama_num_ctx` de
+    /// config/env), cuando algún backend habló con Ollama.
+    ///
+    /// Es el presupuesto de contexto que gobierna cuánto KV/compute
+    /// reserva el server, y por tanto la variable directa detrás de la
+    /// clase de OOM del incidente 2026-09-12: a `32768` en la RTX 3050 de
+    /// Nitro los buffers de cómputo no caben y el request muere con HTTP
+    /// 500 (`cudaMalloc failed`); a `8192` sí. Ningún campo lo capturaba,
+    /// así que dos sweeps con el mismo modelo, seed y sampling pero
+    /// distinto `num_ctx` —una condición distinta, un resultado distinto—
+    /// podían salir con JSON indistinguible. `None` (omitido) cuando el
+    /// sweep no toca Ollama.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_num_ctx: Option<u32>,
+    /// El `base_url` del servidor Ollama que sirvió (`ollama_base_url` de
+    /// config/env), cuando algún backend habló con Ollama — procedencia de
+    /// QUÉ nodo respondió (Nitro, otro LAN, o `localhost`), que a igualdad
+    /// de modelo/seed/sampling cambia hardware y por tanto el piso de ruido
+    /// y la velocidad. Sin él, los sweeps de Nitro y los locales eran
+    /// indistinguibles en el JSON. `None` (omitido) cuando el sweep no toca
+    /// Ollama.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_base_url: Option<String>,
+    /// El `base_url` del gateway OpenCode Zen (`zen_base_url`) cuando algún
+    /// backend del sweep corrió por Zen — el análogo servido de
+    /// `ollama_base_url` para la línea zen/llama-server. Registra la URL,
+    /// **nunca la `zen_api_key`**. `None` (omitido) cuando ningún backend
+    /// toca Zen. Ver `BackendSpec::uses_zen`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zen_base_url: Option<String>,
     /// The full display name of every backend row this sweep ran —
     /// executor, `+plan:`/`+lead:` halves, AND the `+ablate:` suffix
     /// with every active ablation key (H-17,
