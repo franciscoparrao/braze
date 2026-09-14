@@ -1,7 +1,11 @@
 # Pre-registro: ¿el serving stack mueve el pass rate de gpt-oss:20b?
 
 Fecha: 2026-09-07
-Estado: **DISEÑO. Ninguna corrida lanzada.**
+Estado: **PARCIALMENTE CORRIDO (2026-09-13), DIFERIDO a Nitro 32GB.** Brazo
+local COMPLETO y válido (82/102); brazo zen INVÁLIDO por OOM-kill de RAM a
+46/102 (el muro de 14GB). Sin veredicto H1/H0. Desenlace y desviaciones en
+`docs/ab-serving-stack-2026-09-13-DIFERIDO.md`. Retomar re-corriendo solo el
+brazo zen sobre 32GB, mismo diseño.
 Disparador: hallazgo colateral del A/B pareado Spark-vs-gptoss
 (`docs/ab-spark-vs-gptoss-analysis-2026-09-07.md`): gpt-oss:20b marcó
 **72/102** en la suite discriminante servido por llama-server (fork

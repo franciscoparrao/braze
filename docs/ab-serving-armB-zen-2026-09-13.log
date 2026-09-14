@@ -1,0 +1,120 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 900s por intento.
+-> zen:gpt-oss :: borrar_2_funciones (rep 1/3)
+-> zen:gpt-oss :: borrar_2_funciones (rep 2/3)
+-> zen:gpt-oss :: borrar_2_funciones (rep 3/3)
+-> zen:gpt-oss :: borrar_6_funciones (rep 1/3)
+-> zen:gpt-oss :: borrar_6_funciones (rep 2/3)
+-> zen:gpt-oss :: borrar_6_funciones (rep 3/3)
+-> zen:gpt-oss :: borrar_12_funciones (rep 1/3)
+-> zen:gpt-oss :: borrar_12_funciones (rep 2/3)
+-> zen:gpt-oss :: borrar_12_funciones (rep 3/3)
+-> zen:gpt-oss :: borrar_20_funciones (rep 1/3)
+-> zen:gpt-oss :: borrar_20_funciones (rep 2/3)
+-> zen:gpt-oss :: borrar_20_funciones (rep 3/3)
+-> zen:gpt-oss :: borrar_30_funciones (rep 1/3)
+-> zen:gpt-oss :: borrar_30_funciones (rep 2/3)
+-> zen:gpt-oss :: borrar_30_funciones (rep 3/3)
+-> zen:gpt-oss :: mover_1_funciones (rep 1/3)
+-> zen:gpt-oss :: mover_1_funciones (rep 2/3)
+-> zen:gpt-oss :: mover_1_funciones (rep 3/3)
+-> zen:gpt-oss :: mover_3_funciones (rep 1/3)
+-> zen:gpt-oss :: mover_3_funciones (rep 2/3)
+-> zen:gpt-oss :: mover_3_funciones (rep 3/3)
+-> zen:gpt-oss :: mover_8_funciones (rep 1/3)
+-> zen:gpt-oss :: mover_8_funciones (rep 2/3)
+-> zen:gpt-oss :: mover_8_funciones (rep 3/3)
+-> zen:gpt-oss :: editar_lote_3_temprano (rep 1/3)
+-> zen:gpt-oss :: editar_lote_3_temprano (rep 2/3)
+-> zen:gpt-oss :: editar_lote_3_temprano (rep 3/3)
+-> zen:gpt-oss :: editar_lote_17_medio (rep 1/3)
+-> zen:gpt-oss :: editar_lote_17_medio (rep 2/3)
+-> zen:gpt-oss :: editar_lote_17_medio (rep 3/3)
+-> zen:gpt-oss :: editar_lote_34_tarde (rep 1/3)
+-> zen:gpt-oss :: editar_lote_34_tarde (rep 2/3)
+-> zen:gpt-oss :: editar_lote_34_tarde (rep 3/3)
+-> zen:gpt-oss :: renombrar_campo_2_usos (rep 1/3)
+-> zen:gpt-oss :: renombrar_campo_2_usos (rep 2/3)
+-> zen:gpt-oss :: renombrar_campo_2_usos (rep 3/3)
+-> zen:gpt-oss :: renombrar_campo_5_usos (rep 1/3)
+-> zen:gpt-oss :: renombrar_campo_5_usos (rep 2/3)
+braze-bench: 'cargo check' de grading excedió 120s en /tmp/braze-bench-sandbox-2229537-renombrar_campo_5_usos-37
+-> zen:gpt-oss :: renombrar_campo_5_usos (rep 3/3)
+-> zen:gpt-oss :: renombrar_campo_10_usos (rep 1/3)
+-> zen:gpt-oss :: renombrar_campo_10_usos (rep 2/3)
+-> zen:gpt-oss :: renombrar_campo_10_usos (rep 3/3)
+-> zen:gpt-oss :: arreglar_1_errores (rep 1/3)
+-> zen:gpt-oss :: arreglar_1_errores (rep 2/3)
+-> zen:gpt-oss :: arreglar_1_errores (rep 3/3)
+-> zen:gpt-oss :: arreglar_2_errores (rep 1/3)
+
+braze-bench: BRAZO 'zen:gpt-oss' ABORTADO: 3 fallos consecutivos de nivel harness/backend en <2000ms cada uno — el brazo está estructuralmente roto (¿modelo ausente, binario desincronizado, breaker abierto?), no flaky. Las filas corridas se conservan; las restantes no se corren.
+
+== Resultados por tarea ==
+[FAIL] borrar_2_funciones       zen:gpt-oss          119659ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=1  denied=0  tokens_in=19017 tokens_out=1213 [AssertionMaxRounds]
+[FAIL] borrar_2_funciones       zen:gpt-oss          (rep 2) 109623ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=1  denied=0  tokens_in=19498 tokens_out=1165 [AssertionMaxRounds]
+[PASS] borrar_2_funciones       zen:gpt-oss          (rep 3) 125315ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=1  denied=0  tokens_in=17671 tokens_out=1417
+[PASS] borrar_6_funciones       zen:gpt-oss          107601ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=1  denied=0  tokens_in=13937 tokens_out=1296
+[FAIL] borrar_6_funciones       zen:gpt-oss          (rep 2) 203005ms  rounds=13 tool_calls=12  schema_fail=0  exec_fail=0  denied=0  tokens_in=36706 tokens_out=1694 [AssertionMaxRounds]
+[PASS] borrar_6_funciones       zen:gpt-oss          (rep 3) 203321ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=1  denied=0  tokens_in=23932 tokens_out=1675
+[PASS] borrar_12_funciones      zen:gpt-oss          517891ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=1  denied=0  tokens_in=35062 tokens_out=2523
+[PASS] borrar_12_funciones      zen:gpt-oss          (rep 2) 793769ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=1  denied=0  tokens_in=47638 tokens_out=2612
+[PASS] borrar_12_funciones      zen:gpt-oss          (rep 3) 206125ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=13269 tokens_out=905
+[PASS] borrar_20_funciones      zen:gpt-oss          606443ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=37174 tokens_out=2001
+[PASS] borrar_20_funciones      zen:gpt-oss          (rep 2) 444923ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=25862 tokens_out=1111
+[PASS] borrar_20_funciones      zen:gpt-oss          (rep 3) 686718ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=34353 tokens_out=1547
+[FAIL] borrar_30_funciones      zen:gpt-oss          900010ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=26496 tokens_out=844 [Timeout] (error: task exceeded its time budget)
+[FAIL] borrar_30_funciones      zen:gpt-oss          (rep 2) 900016ms  rounds=8 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=39453 tokens_out=860 [Timeout] (error: task exceeded its time budget)
+[FAIL] borrar_30_funciones      zen:gpt-oss          (rep 3) 900033ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=22843 tokens_out=866 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_1_funciones        zen:gpt-oss          900010ms  rounds=4 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=5374 tokens_out=871 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_1_funciones        zen:gpt-oss          (rep 2) 900009ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=7867 tokens_out=704 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_1_funciones        zen:gpt-oss          (rep 3) 900013ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=9272 tokens_out=795 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_3_funciones        zen:gpt-oss          900013ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=2061 tokens_out=88 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_3_funciones        zen:gpt-oss          (rep 2) 900013ms  rounds=4 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=6801 tokens_out=465 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_3_funciones        zen:gpt-oss          (rep 3) 900014ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4239 tokens_out=372 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_8_funciones        zen:gpt-oss          900010ms  rounds=1 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1030 tokens_out=53 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_8_funciones        zen:gpt-oss          (rep 2) 900011ms  rounds=1 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1030 tokens_out=80 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_8_funciones        zen:gpt-oss          (rep 3) 900014ms  rounds=1 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1030 tokens_out=56 [Timeout] (error: task exceeded its time budget)
+[PASS] editar_lote_3_temprano   zen:gpt-oss          526139ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6812 tokens_out=255
+[PASS] editar_lote_3_temprano   zen:gpt-oss          (rep 2) 808192ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=18856 tokens_out=374
+[FAIL] editar_lote_3_temprano   zen:gpt-oss          (rep 3) 900008ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3806 tokens_out=135 [Timeout] (error: task exceeded its time budget)
+[PASS] editar_lote_17_medio     zen:gpt-oss          796735ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=16441 tokens_out=358
+[PASS] editar_lote_17_medio     zen:gpt-oss          (rep 2) 857644ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=15546 tokens_out=391
+[PASS] editar_lote_17_medio     zen:gpt-oss          (rep 3) 855418ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=18570 tokens_out=365
+[FAIL] editar_lote_34_tarde     zen:gpt-oss          900022ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6726 tokens_out=150 [Timeout] (error: task exceeded its time budget)
+[FAIL] editar_lote_34_tarde     zen:gpt-oss          (rep 2) 900110ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7623 tokens_out=205 [Timeout] (error: task exceeded its time budget)
+[FAIL] editar_lote_34_tarde     zen:gpt-oss          (rep 3) 900012ms  rounds=4 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=10085 tokens_out=269 [Timeout] (error: task exceeded its time budget)
+[FAIL] renombrar_campo_2_usos   zen:gpt-oss          900012ms  rounds=6 tool_calls=6  schema_fail=1  exec_fail=1  denied=0  tokens_in=12075 tokens_out=415 [Timeout] (error: task exceeded its time budget)
+[FAIL] renombrar_campo_2_usos   zen:gpt-oss          (rep 2) 900035ms  rounds=4 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=6278 tokens_out=243 [Timeout] (error: task exceeded its time budget)
+[FAIL] renombrar_campo_2_usos   zen:gpt-oss          (rep 3) 900038ms  rounds=6 tool_calls=6  schema_fail=0  exec_fail=1  denied=0  tokens_in=11586 tokens_out=342 [Timeout] (error: task exceeded its time budget)
+[FAIL] renombrar_campo_5_usos   zen:gpt-oss          900058ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=4073 tokens_out=176 [Timeout] (error: task exceeded its time budget)
+[FAIL] renombrar_campo_5_usos   zen:gpt-oss          (rep 2) 900203ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=9436 tokens_out=325 [Timeout] (error: task exceeded its time budget)
+[FAIL] renombrar_campo_5_usos   zen:gpt-oss          (rep 3) 231685ms  rounds=0 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=0 tokens_out=0 [ModelBackendError] (error: model backend error: request to model backend failed: zen request failed: error sending request for url (http://127.0.0.1:8090/chat/completions))
+[FAIL] renombrar_campo_10_usos  zen:gpt-oss            3752ms  rounds=0 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=0 tokens_out=0 [ModelBackendError] (error: model backend error: request to model backend failed: zen request failed: error sending request for url (http://127.0.0.1:8090/chat/completions))
+[FAIL] renombrar_campo_10_usos  zen:gpt-oss          (rep 2)   4140ms  rounds=0 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=0 tokens_out=0 [ModelBackendError] (error: model backend error: request to model backend failed: zen request failed: error sending request for url (http://127.0.0.1:8090/chat/completions))
+[FAIL] renombrar_campo_10_usos  zen:gpt-oss          (rep 3)   3848ms  rounds=0 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=0 tokens_out=0 [ModelBackendError] (error: model backend error: request to model backend failed: zen request failed: error sending request for url (http://127.0.0.1:8090/chat/completions))
+[FAIL] arreglar_1_errores       zen:gpt-oss            4236ms  rounds=0 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=0 tokens_out=0 [ModelBackendError] (error: model backend error: request to model backend failed: zen request failed: error sending request for url (http://127.0.0.1:8090/chat/completions))
+[FAIL] arreglar_1_errores       zen:gpt-oss          (rep 2)      0ms  rounds=0 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=0 tokens_out=0 [HarnessError] (error: model backend error: circuit breaker for zen:http://127.0.0.1:8090/chat/completions:gpt-oss open after 5 consecutive transport failures — next probe in 30s (BRAZE_CIRCUIT_BREAKER=off disables))
+[FAIL] arreglar_1_errores       zen:gpt-oss          (rep 3)      1ms  rounds=0 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=0 tokens_out=0 [HarnessError] (error: model backend error: circuit breaker for zen:http://127.0.0.1:8090/chat/completions:gpt-oss open after 5 consecutive transport failures — next probe in 30s (BRAZE_CIRCUIT_BREAKER=off disables))
+[FAIL] arreglar_2_errores       zen:gpt-oss               1ms  rounds=0 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=0 tokens_out=0 [HarnessError] (error: model backend error: circuit breaker for zen:http://127.0.0.1:8090/chat/completions:gpt-oss open after 5 consecutive transport failures — next probe in 30s (BRAZE_CIRCUIT_BREAKER=off disables))
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+zen:gpt-oss                14/43 [20,47]%    14/43      5.0       630624     857644          13943              679                 1             10          0            3         0         0         0         0          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+zen:gpt-oss              k=2 26.2%  k=3 21.4%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+zen:gpt-oss                   3/16      3/16         10/16      0.188      0.292        0.375       0.36
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+zen:gpt-oss              escalera_borrado          9/15      8.6     454963     444923        1449         0         0         0         0          -
+zen:gpt-oss              escalera_movimiento        0/9      2.9     900012     900013         387         0         0         0         0          -
+zen:gpt-oss              localizacion               5/9      3.9     827142     857644         278         0         0         0         0          -
+zen:gpt-oss              consistencia               0/9      2.7     527086     900012         167         0         0         0         0          -
+zen:gpt-oss              escalera_errores           0/1      0.0       4236       4236           0         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/ab-serving-armB-zen-2026-09-13.json

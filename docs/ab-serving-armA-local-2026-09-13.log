@@ -1,0 +1,249 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 900s por intento.
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_2_funciones (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_2_funciones (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_2_funciones (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_6_funciones (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_6_funciones (rep 2/3)
+[2m2026-09-13T04:19:39.147623Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m allocating 768.00 MiB on device 0: cudaMalloc failed: out of memory [3mmodule[0m[2m=[0m"ggml::ggml_backend_cuda_buffer_type_alloc_buffer"
+[2m2026-09-13T04:19:39.148231Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to allocate CUDA0 buffer of size 805306368 [3mmodule[0m[2m=[0m"ggml::alloc_tensor_range"
+[2m2026-09-13T04:19:39.155349Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to initialize the context: failed to allocate buffer for kv cache [3mmodule[0m[2m=[0m"ggml::llama_init_from_model"
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_6_funciones (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_12_funciones (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_12_funciones (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_12_funciones (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_20_funciones (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_20_funciones (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_20_funciones (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_30_funciones (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_30_funciones (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_30_funciones (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_1_funciones (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_1_funciones (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_1_funciones (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_3_funciones (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_3_funciones (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_3_funciones (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_8_funciones (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_8_funciones (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_8_funciones (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_3_temprano (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_3_temprano (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_3_temprano (rep 3/3)
+[2m2026-09-13T05:56:00.495273Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m allocating 768.00 MiB on device 0: cudaMalloc failed: out of memory [3mmodule[0m[2m=[0m"ggml::ggml_backend_cuda_buffer_type_alloc_buffer"
+[2m2026-09-13T05:56:00.496050Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to allocate CUDA0 buffer of size 805306368 [3mmodule[0m[2m=[0m"ggml::alloc_tensor_range"
+[2m2026-09-13T05:56:00.502980Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to initialize the context: failed to allocate buffer for kv cache [3mmodule[0m[2m=[0m"ggml::llama_init_from_model"
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_17_medio (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_17_medio (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_17_medio (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_34_tarde (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_34_tarde (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_34_tarde (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_2_usos (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_2_usos (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_2_usos (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_5_usos (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_5_usos (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_5_usos (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_10_usos (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_10_usos (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: renombrar_campo_10_usos (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_1_errores (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_1_errores (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_1_errores (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_2_errores (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_2_errores (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_2_errores (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_3_errores (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_3_errores (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_3_errores (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_4_errores (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_4_errores (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: arreglar_4_errores (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_0 (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_0 (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_0 (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_1 (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_1 (rep 2/3)
+[2m2026-09-13T07:04:56.529050Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m allocating 768.00 MiB on device 0: cudaMalloc failed: out of memory [3mmodule[0m[2m=[0m"ggml::ggml_backend_cuda_buffer_type_alloc_buffer"
+[2m2026-09-13T07:04:56.530711Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to allocate CUDA0 buffer of size 805306368 [3mmodule[0m[2m=[0m"ggml::alloc_tensor_range"
+[2m2026-09-13T07:04:56.537658Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to initialize the context: failed to allocate buffer for kv cache [3mmodule[0m[2m=[0m"ggml::llama_init_from_model"
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_1 (rep 3/3)
+[2m2026-09-13T07:06:39.837367Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m allocating 768.00 MiB on device 0: cudaMalloc failed: out of memory [3mmodule[0m[2m=[0m"ggml::ggml_backend_cuda_buffer_type_alloc_buffer"
+[2m2026-09-13T07:06:39.837771Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to allocate CUDA0 buffer of size 805306368 [3mmodule[0m[2m=[0m"ggml::alloc_tensor_range"
+[2m2026-09-13T07:06:39.844535Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to initialize the context: failed to allocate buffer for kv cache [3mmodule[0m[2m=[0m"ggml::llama_init_from_model"
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_2 (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_2 (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: preservar_vecino_2 (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: fix_dos_errores_una_linea (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: fix_dos_errores_una_linea (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: fix_dos_errores_una_linea (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: localizar_y_editar_archivo_largo (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: localizar_y_editar_archivo_largo (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: localizar_y_editar_archivo_largo (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: agregar_metodo_a_impl_existente (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: agregar_metodo_a_impl_existente (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: agregar_metodo_a_impl_existente (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_item_a_modulo_nuevo (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_item_a_modulo_nuevo (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_item_a_modulo_nuevo (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: cambio_coordinado_dos_archivos (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: cambio_coordinado_dos_archivos (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: cambio_coordinado_dos_archivos (rep 3/3)
+[2m2026-09-13T07:46:36.417518Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m allocating 768.00 MiB on device 0: cudaMalloc failed: out of memory [3mmodule[0m[2m=[0m"ggml::ggml_backend_cuda_buffer_type_alloc_buffer"
+[2m2026-09-13T07:46:36.418482Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to allocate CUDA0 buffer of size 805306368 [3mmodule[0m[2m=[0m"ggml::alloc_tensor_range"
+[2m2026-09-13T07:46:36.424605Z[0m [31mERROR[0m [2mllama-cpp-2[0m[2m:[0m failed to initialize the context: failed to allocate buffer for kv cache [3mmodule[0m[2m=[0m"ggml::llama_init_from_model"
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_bloque_deprecado (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_bloque_deprecado (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: borrar_bloque_deprecado (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_almacen_completo (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_almacen_completo (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: mover_almacen_completo (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: tres_archivos_coordinados (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: tres_archivos_coordinados (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: tres_archivos_coordinados (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: contar_metodos_de_almacen (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: contar_metodos_de_almacen (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: contar_metodos_de_almacen (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: reportar_campo_de_item (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: reportar_campo_de_item (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: reportar_campo_de_item (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: localizar_funcion_por_valor (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: localizar_funcion_por_valor (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: localizar_funcion_por_valor (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_25_lejano (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_25_lejano (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_25_lejano (rep 3/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_39_lejano (rep 1/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_39_lejano (rep 2/3)
+-> local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf :: editar_lote_39_lejano (rep 3/3)
+
+== Resultados por tarea ==
+[FAIL] borrar_2_funciones       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 269475ms  rounds=21 tool_calls=20  schema_fail=3  exec_fail=1  denied=0  tokens_in=43328 tokens_out=1879 [MaxIterationsExhausted] (error: turn exceeded the maximum of 20 model/tool-call round trips without converging)
+[FAIL] borrar_2_funciones       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 274469ms  rounds=21 tool_calls=20  schema_fail=4  exec_fail=0  denied=0  tokens_in=45972 tokens_out=2147 [MaxIterationsExhausted] (error: turn exceeded the maximum of 20 model/tool-call round trips without converging)
+[FAIL] borrar_2_funciones       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 115296ms  rounds=9 tool_calls=8  schema_fail=1  exec_fail=0  denied=0  tokens_in=18385 tokens_out=876 [AssertionMaxRounds]
+[FAIL] borrar_6_funciones       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 253547ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=1  denied=0  tokens_in=29799 tokens_out=2288 [AssertionMaxRounds]
+[PASS] borrar_6_funciones       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 269649ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=1  denied=0  tokens_in=23577 tokens_out=1944
+[PASS] borrar_6_funciones       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 160899ms  rounds=7 tool_calls=6  schema_fail=1  exec_fail=1  denied=0  tokens_in=15182 tokens_out=1526
+[PASS] borrar_12_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 148082ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=1  denied=1  tokens_in=15202 tokens_out=1287
+[FAIL] borrar_12_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 737628ms  rounds=20 tool_calls=19  schema_fail=2  exec_fail=4  denied=0  tokens_in=102037 tokens_out=5762 [AssertionCargoCheck]
+[FAIL] borrar_12_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 771223ms  rounds=14 tool_calls=13  schema_fail=6  exec_fail=2  denied=0  tokens_in=64147 tokens_out=6645 [AssertionCargoCheck]
+[FAIL] borrar_20_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 462965ms  rounds=15 tool_calls=14  schema_fail=1  exec_fail=3  denied=2  tokens_in=73257 tokens_out=3075 [AssertionMaxRounds]
+[FAIL] borrar_20_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 475434ms  rounds=20 tool_calls=19  schema_fail=2  exec_fail=4  denied=0  tokens_in=104377 tokens_out=2569 [AssertionCargoCheck]
+[PASS] borrar_20_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 186153ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=1  denied=0  tokens_in=24315 tokens_out=1493
+[PASS] borrar_30_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 278417ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=2  denied=0  tokens_in=48937 tokens_out=1697
+[PASS] borrar_30_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 249612ms  rounds=10 tool_calls=9  schema_fail=1  exec_fail=1  denied=0  tokens_in=41723 tokens_out=1582
+[PASS] borrar_30_funciones      local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 266757ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=1  denied=0  tokens_in=48287 tokens_out=1568
+[FAIL] mover_1_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 224452ms  rounds=14 tool_calls=13  schema_fail=1  exec_fail=1  denied=0  tokens_in=33874 tokens_out=1924 [AssertionMaxRounds]
+[PASS] mover_1_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 240724ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=19696 tokens_out=2608
+[PASS] mover_1_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  94652ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12183 tokens_out=948
+[PASS] mover_3_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 161605ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=9966 tokens_out=1699
+[PASS] mover_3_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  98767ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=13656 tokens_out=752
+[PASS] mover_3_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  97634ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12819 tokens_out=790
+[PASS] mover_8_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 168902ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=12462 tokens_out=1757
+[PASS] mover_8_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 219795ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=23914 tokens_out=1931
+[PASS] mover_8_funciones        local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 412802ms  rounds=14 tool_calls=13  schema_fail=0  exec_fail=1  denied=0  tokens_in=50773 tokens_out=3733
+[PASS] editar_lote_3_temprano   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  86976ms  rounds=5 tool_calls=4  schema_fail=1  exec_fail=0  denied=0  tokens_in=16416 tokens_out=618
+[PASS] editar_lote_3_temprano   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  42307ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6355 tokens_out=386
+[FAIL] editar_lote_3_temprano   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 203636ms  rounds=9 tool_calls=8  schema_fail=1  exec_fail=0  denied=0  tokens_in=44540 tokens_out=702 [AssertionMaxRounds]
+[PASS] editar_lote_17_medio     local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  98086ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=20391 tokens_out=585
+[PASS] editar_lote_17_medio     local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  76664ms  rounds=5 tool_calls=4  schema_fail=1  exec_fail=0  denied=0  tokens_in=14849 tokens_out=494
+[PASS] editar_lote_17_medio     local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  73947ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=14561 tokens_out=406
+[PASS] editar_lote_34_tarde     local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  51156ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=10667 tokens_out=277
+[PASS] editar_lote_34_tarde     local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  50415ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=10667 tokens_out=265
+[PASS] editar_lote_34_tarde     local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  52053ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=10667 tokens_out=290
+[FAIL] renombrar_campo_2_usos   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 258042ms  rounds=20 tool_calls=19  schema_fail=3  exec_fail=3  denied=0  tokens_in=50911 tokens_out=1355 [AssertionCargoCheck]
+[FAIL] renombrar_campo_2_usos   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 252551ms  rounds=13 tool_calls=12  schema_fail=1  exec_fail=2  denied=0  tokens_in=33902 tokens_out=1907 [AssertionMaxRounds]
+[FAIL] renombrar_campo_2_usos   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 209962ms  rounds=11 tool_calls=10  schema_fail=1  exec_fail=1  denied=0  tokens_in=27545 tokens_out=1486 [AssertionMaxRounds]
+[PASS] renombrar_campo_5_usos   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 212473ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=1  denied=0  tokens_in=26124 tokens_out=1635
+[PASS] renombrar_campo_5_usos   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 133138ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=9761 tokens_out=1244
+[FAIL] renombrar_campo_5_usos   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 282640ms  rounds=21 tool_calls=20  schema_fail=0  exec_fail=1  denied=0  tokens_in=59343 tokens_out=1364 [MaxIterationsExhausted] (error: turn exceeded the maximum of 20 model/tool-call round trips without converging)
+[FAIL] renombrar_campo_10_usos  local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 324935ms  rounds=21 tool_calls=20  schema_fail=0  exec_fail=1  denied=0  tokens_in=70105 tokens_out=1375 [MaxIterationsExhausted] (error: turn exceeded the maximum of 20 model/tool-call round trips without converging)
+[FAIL] renombrar_campo_10_usos  local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 340089ms  rounds=21 tool_calls=20  schema_fail=0  exec_fail=0  denied=0  tokens_in=71766 tokens_out=1665 [MaxIterationsExhausted] (error: turn exceeded the maximum of 20 model/tool-call round trips without converging)
+[FAIL] renombrar_campo_10_usos  local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 285439ms  rounds=20 tool_calls=19  schema_fail=0  exec_fail=1  denied=0  tokens_in=63212 tokens_out=1143 [AssertionCargoCheck]
+[PASS] arreglar_1_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  32204ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4770 tokens_out=300
+[PASS] arreglar_1_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  40310ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6830 tokens_out=280
+[PASS] arreglar_1_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  61513ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=8399 tokens_out=534
+[FAIL] arreglar_2_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  78197ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=10568 tokens_out=794 [AssertionFiles]
+[PASS] arreglar_2_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  60103ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6993 tokens_out=662
+[PASS] arreglar_2_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  58223ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6993 tokens_out=639
+[PASS] arreglar_3_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  93470ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=13857 tokens_out=870
+[PASS] arreglar_3_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  68826ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=9462 tokens_out=645
+[PASS] arreglar_3_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  64787ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=9462 tokens_out=590
+[PASS] arreglar_4_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 163417ms  rounds=9 tool_calls=8  schema_fail=1  exec_fail=0  denied=0  tokens_in=25704 tokens_out=1458
+[PASS] arreglar_4_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 163235ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=27142 tokens_out=1247
+[PASS] arreglar_4_errores       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 110915ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=18594 tokens_out=891
+[PASS] preservar_vecino_0       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 120412ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5750 tokens_out=1277
+[PASS] preservar_vecino_0       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  38535ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4825 tokens_out=421
+[PASS] preservar_vecino_0       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  43158ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4823 tokens_out=519
+[PASS] preservar_vecino_1       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  32960ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4818 tokens_out=310
+[PASS] preservar_vecino_1       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 103646ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12689 tokens_out=576
+[PASS] preservar_vecino_1       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 190650ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5741 tokens_out=1321
+[PASS] preservar_vecino_2       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  37982ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4845 tokens_out=381
+[PASS] preservar_vecino_2       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  58149ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4836 tokens_out=806
+[PASS] preservar_vecino_2       local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 120566ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5761 tokens_out=1206
+[PASS] fix_dos_errores_una_linea local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  74545ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=15588 tokens_out=394
+[PASS] fix_dos_errores_una_linea local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  51485ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=9463 tokens_out=347
+[PASS] fix_dos_errores_una_linea local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  52012ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=9463 tokens_out=331
+[PASS] localizar_y_editar_archivo_largo local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  74843ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=13858 tokens_out=477
+[PASS] localizar_y_editar_archivo_largo local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  52759ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=9425 tokens_out=387
+[PASS] localizar_y_editar_archivo_largo local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  51322ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=9425 tokens_out=364
+[PASS] agregar_metodo_a_impl_existente local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  77484ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=1  tokens_in=14155 tokens_out=453
+[PASS] agregar_metodo_a_impl_existente local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  78356ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=14162 tokens_out=457
+[PASS] agregar_metodo_a_impl_existente local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  77659ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=14156 tokens_out=455
+[PASS] mover_item_a_modulo_nuevo local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 408701ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=40629 tokens_out=3820
+[PASS] mover_item_a_modulo_nuevo local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 228066ms  rounds=8 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=34006 tokens_out=2101
+[PASS] mover_item_a_modulo_nuevo local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 272181ms  rounds=10 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=37101 tokens_out=2680
+[PASS] cambio_coordinado_dos_archivos local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 225449ms  rounds=16 tool_calls=15  schema_fail=1  exec_fail=1  denied=0  tokens_in=48477 tokens_out=1067
+[FAIL] cambio_coordinado_dos_archivos local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 244716ms  rounds=17 tool_calls=16  schema_fail=1  exec_fail=1  denied=0  tokens_in=49615 tokens_out=1184 [AssertionMaxRounds]
+[PASS] cambio_coordinado_dos_archivos local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 179473ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=24635 tokens_out=705
+[PASS] borrar_bloque_deprecado  local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 432806ms  rounds=13 tool_calls=12  schema_fail=0  exec_fail=1  denied=0  tokens_in=88214 tokens_out=2248
+[PASS] borrar_bloque_deprecado  local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 272928ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=1  denied=0  tokens_in=40605 tokens_out=2079
+[FAIL] borrar_bloque_deprecado  local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 285523ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=61254 tokens_out=1714 [AssertionCargoCheck]
+[PASS] mover_almacen_completo   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 238827ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=31874 tokens_out=1949
+[PASS] mover_almacen_completo   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 245317ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=33010 tokens_out=1992
+[PASS] mover_almacen_completo   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 392437ms  rounds=14 tool_calls=12  schema_fail=1  exec_fail=0  denied=0  tokens_in=57242 tokens_out=3040
+[PASS] tres_archivos_coordinados local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf 226344ms  rounds=11 tool_calls=10  schema_fail=1  exec_fail=0  denied=0  tokens_in=31335 tokens_out=1984
+[PASS] tres_archivos_coordinados local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2) 199458ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=28613 tokens_out=1737
+[PASS] tres_archivos_coordinados local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3) 246546ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=24946 tokens_out=2917
+[PASS] contar_metodos_de_almacen local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  14444ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2781 tokens_out=96
+[PASS] contar_metodos_de_almacen local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  14323ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2781 tokens_out=96
+[PASS] contar_metodos_de_almacen local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  19135ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3857 tokens_out=117
+[PASS] reportar_campo_de_item   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  14460ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2771 tokens_out=95
+[PASS] reportar_campo_de_item   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  19532ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3838 tokens_out=125
+[PASS] reportar_campo_de_item   local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  14569ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2771 tokens_out=99
+[PASS] localizar_funcion_por_valor local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  17462ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3571 tokens_out=98
+[PASS] localizar_funcion_por_valor local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  18151ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3571 tokens_out=112
+[PASS] localizar_funcion_por_valor local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  33418ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=8175 tokens_out=121
+[PASS] editar_lote_25_lejano    local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  56513ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11193 tokens_out=350
+[PASS] editar_lote_25_lejano    local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  54858ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11193 tokens_out=317
+[PASS] editar_lote_25_lejano    local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  56965ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11193 tokens_out=358
+[PASS] editar_lote_39_lejano    local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  53964ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11193 tokens_out=300
+[PASS] editar_lote_39_lejano    local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 2)  57547ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11193 tokens_out=376
+[PASS] editar_lote_39_lejano    local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf (rep 3)  50468ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11193 tokens_out=234
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf  82/102 [72,87]%   82/102      7.9       162743     113106          24461             1208                35             40          4            0         0         0         0         5          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf k=2 71.6%  k=3 64.7%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf     22/34      9/34          3/34      0.647      0.804        0.912       0.20
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf escalera_borrado          7/15     12.7     327974     269475        2423         0         0         0         2          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf escalera_movimiento        8/9      7.9     191037     168902        1794         0         0         0         0          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf localizacion             14/15      4.6      71037      56513         397         0         0         0         0          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf consistencia               2/9     15.8     255474     258042        1464         0         0         0         3          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf escalera_errores         11/12      5.6      82933      66806         742         0         0         0         0          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf preservacion               9/9      3.3      82895      58149         757         0         0         0         0          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf piso                       6/6      4.3      59494      52386         383         0         0         0         0          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf banda                    10/12     10.2     231945     236391        1580         0         0         0         0          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf techo                      6/6     10.5     258155     242072        2270         0         0         0         0          -
+local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf lectura                    9/9      2.4      18388      17462         107         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/ab-serving-armA-local-2026-09-13.json
