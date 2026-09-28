@@ -94,3 +94,38 @@ cd ~/proyectos/braze && BRAZE_OLLAMA_BASE_URL=http://192.168.1.8:11434 RUST_LOG=
 Duración esperada: agosto promedió 186 s por corrida (máx. 577 s, cerca
 del timeout); 160 corridas ≈ 8 h en Nitro (RTX 3050 6 GB + CPU). Nitro
 sin otra carga (`ollama ps` vacío al lanzar).
+
+## Incidencia de infraestructura (2026-09-26, intento 1 abortado)
+
+Lanzado a las 04:45. A las 05:35:48 el OOM-killer de Nitro mató el proceso
+`llama-server` de 6,8 GB de RSS anónimo — **el runner de Ollama 0.32 para
+ornith** (usuario `ollama`, hijo de `ollama.service`, binario
+`/usr/local/lib/ollama/llama-server`; una primera lectura lo confundió con
+el fork de Bonsai, corregido al verificar padre y ruta) — y
+`ollama.service` cayó con `oom-kill` y se reinició. Causa: presión de
+memoria en Nitro (14 GB; con ornith residente el runner arranca en ~2 GB y
+crece con el KV cache de `num_ctx` 8192 durante las tareas largas de
+sc-compaction, más GNOME, Chrome y tres sesiones de Claude residentes de
+otros trabajos). Las requests del sweep fallaron con "error sending
+request", el circuit breaker abrió y el fail-fast de brazo (v9) cortó tras
+**27 corridas** (tratado 2/24 con 3 errores de transporte y 1 timeout;
+control 0/3, todos transporte). El parcial se conserva por transparencia
+como `docs/sweep-sc-retention-ornith-r2-aborted-1-2026-09-26.{json,log}`
+y **NO entra en ningún análisis** (pareo incompleto). Relanzado completo a
+las 05:40 con el comando idéntico — completar una medición abortada por
+infraestructura no es iteración de tratamiento (mismo criterio que
+agosto). `num_ctx` NO se baja: cambiaría el instrumento. Riesgo declarado:
+puede repetirse; si ocurre, se relanza y se anota. Mitigación fuera del
+experimento: liberar memoria en Nitro (sesiones ociosas) o subirla a 32 GB
+(pendiente desde julio).
+
+**Intento 2 (05:40 → 06:13:50): mismo OOM**, runner de ornith a 7,0 GB de
+RSS anónimo, 22 corridas (todas del brazo tratado, la última de 541 s y 19
+rondas justo antes del kill). Parcial conservado como
+`…-aborted-2-…`, fuera del análisis. Es reproducible, no transitorio: con
+~3,6 GB de procesos residentes ajenos al sweep (GNOME 1,2, tres sesiones
+de Claude, Chrome), a Nitro le quedan ~7 GB para el runner y las tareas
+largas de sc-compaction lo llevan a ese techo. En agosto el mismo sweep
+completó 80 corridas: esas sesiones no existían. **No se relanza hasta
+liberar memoria en Nitro**; el instrumento no se toca (`num_ctx`, KV cache
+sin cuantizar).
