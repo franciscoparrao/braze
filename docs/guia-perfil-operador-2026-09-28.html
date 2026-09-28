@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>braze como agente diario — guía de uso</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: oklch(97% 0.012 85);
+    --ink: oklch(24% 0.02 60);
+    --ink-soft: oklch(42% 0.02 60);
+    --rule: oklch(86% 0.02 80);
+    --accent: oklch(46% 0.11 150);
+    --accent-soft: oklch(93% 0.04 150);
+    --warn: oklch(60% 0.14 55);
+    --warn-soft: oklch(95% 0.04 70);
+    --code-bg: oklch(93% 0.012 85);
+    --display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --body: "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  html { background: var(--paper); color: var(--ink); }
+  body {
+    margin: 0;
+    font-family: var(--body);
+    font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+    line-height: 1.55;
+  }
+  .page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 4vw, 3rem) 6rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 3rem;
+  }
+  @media (min-width: 64rem) {
+    .page { grid-template-columns: 14rem minmax(0, 1fr); }
+    nav { position: sticky; top: 2rem; align-self: start; }
+  }
+  header { grid-column: 1 / -1; margin-bottom: clamp(2rem, 5vw, 4rem); }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: clamp(2.2rem, 2rem + 2.5vw, 4rem);
+    line-height: 1.05;
+    margin: 0.4rem 0 1rem;
+    letter-spacing: -0.01em;
+    max-width: 22ch;
+  }
+  h1 em { font-style: italic; font-weight: 600; color: var(--accent); }
+  .lede { color: var(--ink-soft); max-width: 60ch; margin: 0; }
+  nav ol {
+    list-style: none; padding: 0; margin: 0;
+    border-left: 2px solid var(--rule);
+  }
+  nav li a {
+    display: block; padding: 0.3rem 0 0.3rem 0.9rem;
+    color: var(--ink-soft); text-decoration: none; font-size: 0.95rem;
+  }
+  nav li a:hover { color: var(--accent); }
+  nav .n { font-family: var(--mono); font-size: 0.75rem; margin-right: 0.4rem; color: var(--accent); }
+  main { min-width: 0; }
+  section { padding: 2.5rem 0; border-top: 1px solid var(--rule); }
+  section:first-of-type { border-top: 0; padding-top: 0; }
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(1.5rem, 1.3rem + 0.8vw, 2rem);
+    margin: 0 0 1rem;
+    display: flex; align-items: baseline; gap: 0.75rem;
+  }
+  h2 .n { font-family: var(--mono); font-size: 0.85rem; font-weight: 400; color: var(--accent); }
+  p { margin: 0 0 1rem; max-width: 68ch; }
+  ul { padding-left: 1.2rem; max-width: 68ch; }
+  li { margin-bottom: 0.45rem; }
+  code {
+    font-family: var(--mono); font-size: 0.88em;
+    background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px;
+  }
+  pre {
+    font-family: var(--mono); font-size: 0.85rem; line-height: 1.5;
+    background: var(--ink); color: var(--paper);
+    padding: 1rem 1.25rem; border-radius: 6px;
+    overflow-x: auto; margin: 1rem 0 1.25rem;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; font-size: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 0.5rem 0 1.5rem; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 600; color: var(--ink-soft); font-size: 0.85rem; letter-spacing: 0.04em; text-transform: uppercase; }
+  .table-wrap { overflow-x: auto; }
+  .note {
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    padding: 0.8rem 1rem; margin: 1rem 0 1.5rem; max-width: 68ch;
+  }
+  .warn { background: var(--warn-soft); border-left-color: var(--warn); }
+  .note p:last-child { margin-bottom: 0; }
+  .models { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 1.25rem; max-width: 68ch; }
+  .models span {
+    font-family: var(--mono); font-size: 0.8rem;
+    border: 1px solid var(--rule); padding: 0.15rem 0.5rem; border-radius: 999px;
+  }
+  .models span.pick { border-color: var(--accent); background: var(--accent-soft); }
+  .prompt { font-family: var(--mono); font-size: 0.85rem; white-space: pre; background: var(--code-bg); padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0 1.25rem; overflow-x: auto; }
+  footer { grid-column: 1 / -1; margin-top: 3rem; color: var(--ink-soft); font-size: 0.85rem; border-top: 1px solid var(--rule); padding-top: 1rem; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div class="kicker">braze · perfil operador · 2026-09-28</div>
+    <h1>braze como <em>agente diario</em>: guía de uso</h1>
+    <p class="lede">Para usar braze en vez de OpenCode o Claude Code en el trabajo real e ir reportando lo que falle. Todo lo que dice esta página está verificado en vivo con <code>glm-5.3-flash</code> por OpenCode Go.</p>
+  </header>
+
+  <nav aria-label="Secciones">
+    <ol>
+      <li><a href="#config"><span class="n">1</span>Qué tienes configurado</a></li>
+      <li><a href="#arrancar"><span class="n">2</span>Arrancar una sesión</a></li>
+      <li><a href="#skills"><span class="n">3</span>Skills</a></li>
+      <li><a href="#permisos"><span class="n">4</span>Permisos</a></li>
+      <li><a href="#web"><span class="n">5</span>Web</a></li>
+      <li><a href="#modelo"><span class="n">6</span>Elegir el modelo de Go</a></li>
+      <li><a href="#reportar"><span class="n">7</span>Qué reportar</a></li>
+      <li><a href="#limites"><span class="n">8</span>Límites conocidos</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <section id="config">
+      <h2><span class="n">01</span>Qué tienes configurado</h2>
+      <p>Todo vive en <code>~/.config/braze/</code>, fuera de cualquier repo.</p>
+      <div class="table-wrap"><table>
+        <tr><th>archivo</th><th>qué hace</th></tr>
+        <tr><td><code>config.json</code></td><td>backend por default <code>zen</code> → OpenCode Go con <code>glm-5.3-flash</code>; skills desde <code>~/.claude/skills</code>; memoria de proyecto; <code>references</code> a <code>~/.claude/*</code> y <code>~/vault</code>; hooks de sesión; tools web; tope de AGENTS.md 48 KB</td></tr>
+        <tr><td><code>policy.toml</code></td><td>permisos permanentes: qué corre sin preguntar, qué se deniega siempre, qué hosts web se permiten</td></tr>
+        <tr><td><code>AGENTS.md</code></td><td>enlace a <code>~/.claude/CLAUDE.md</code>: tus instrucciones globales, inyectadas antes de las del proyecto</td></tr>
+      </table></div>
+      <p>El binario instalado es <code>~/.cargo/bin/braze</code> (y <code>braze-bench</code>). Después de un <code>git pull</code> con cambios de código hay que reinstalarlo:</p>
+      <pre><code>cd ~/proyectos/braze &amp;&amp; cargo install --path crates/braze-cli --force</code></pre>
+    </section>
+
+    <section id="arrancar">
+      <h2><span class="n">02</span>Arrancar una sesión</h2>
+      <pre><code>cd ~/proyectos/&lt;proyecto&gt;
+braze chat --tui          # interfaz completa (recomendado)
+braze chat                # chat plano, sin interfaz
+braze run "una tarea"     # un solo turno, imprime y sale</code></pre>
+      <ul>
+        <li>braze imprime el <code>session id</code> al inicio; <code>braze chat --resume &lt;id&gt;</code> continúa esa conversación con sus permisos ya aprobados.</li>
+        <li><code>/model</code> cambia de backend o modelo a mitad de sesión (<code>/model zen:kimi-k3</code>); <code>/skills</code> abre el picker; <code>/permissions</code>, <code>/tasks</code>, <code>/help</code>, <code>/quit</code>.</li>
+        <li>Para que el proyecto tenga instrucciones propias, enlaza su <code>CLAUDE.md</code>: <code>ln -s CLAUDE.md AGENTS.md</code>. Braze lee <code>AGENTS.md</code>, no <code>CLAUDE.md</code>.</li>
+        <li>Al arrancar, y tras cada compactación, corre <code>context_resume.sh</code> y lee el <code>MEMORY.md</code> nativo del proyecto: el modelo parte sabiendo la tarea actual. Si no hay <code>session_state</code> para el directorio, esa sección no aparece; no es error.</li>
+      </ul>
+    </section>
+
+    <section id="skills">
+      <h2><span class="n">03</span>Skills</h2>
+      <ul>
+        <li><code>$nombre argumentos</code> o <code>/nombre argumentos</code>. Los argumentos reemplazan <code>$ARGUMENTS</code> en el cuerpo de la skill, como en Claude Code.</li>
+        <li>Se cargan solo por mención explícita. No hay carga automática por descripción, a propósito.</li>
+        <li>Máximo 3 skills por turno y 4.000 tokens por cuerpo (config <code>skills</code>).</li>
+        <li>Una skill que pide <code>Agent</code> (subagentes) no va a poder lanzarlo: braze no tiene subagente genérico todavía. Las que piden <code>WebFetch</code>/<code>WebSearch</code> sí funcionan. LSP no existe.</li>
+      </ul>
+    </section>
+
+    <section id="permisos">
+      <h2><span class="n">04</span>Permisos</h2>
+      <p>Lo que no está en la política y no es de solo lectura pide confirmación:</p>
+      <div class="prompt">run `curl --version`
+¿Permitir? [y = sí / N = no / a = siempre]:</div>
+      <ul>
+        <li><code>y</code> aprueba esta vez (y se recuerda dentro de la sesión).</li>
+        <li><code>a</code> aprueba y agrega una regla <code>allow</code> a <code>policy.toml</code>, que vale en el acto para toda la sesión y para las siguientes. La regla generaliza como Claude Code: el programa (<code>python3</code>), <code>git commit*</code> para multiplexores, el directorio para archivos fuera del proyecto, el host para URLs.</li>
+        <li>En la TUI es la tecla <code>a</code> en el overlay.</li>
+        <li><code>braze permissions policy</code> valida y lista la política. <code>braze permissions suggest</code> mina las sesiones pasadas y propone reglas TOML listas para pegar.</li>
+      </ul>
+      <div class="note warn"><p>Sin terminal (<code>braze run</code>, cron, pipes) todo lo que pregunte se deniega. Si algo debe correr sin supervisión, tiene que estar en la política.</p></div>
+      <p>Lo que hoy pide confirmación siempre: <code>bash -c</code>, <code>sh -c</code>, pipes, <code>git push</code>, <code>rm -rf</code>, escrituras fuera del proyecto. Lo que se deniega siempre: leer o escribir <code>~/.config/braze/</code>, secretos (<code>.env</code>, <code>.ssh</code>, <code>.pem</code>), <code>sudo</code>, <code>dd</code>, <code>mkfs</code>.</p>
+    </section>
+
+    <section id="web">
+      <h2><span class="n">05</span>Web</h2>
+      <p><code>web_search</code> (DuckDuckGo, sin API key) y <code>web_fetch</code> (HTML a texto, tope 200 KB). Solo los hosts de la regla <code>web-allowed-hosts</code> pasan sin preguntar: buscador, docs.rs, crates.io, GitHub, Wikipedia, arXiv, PyPI, MDN, Stack Overflow, readthedocs. Cualquier otro host pregunta; responde <code>a</code> para agregarlo.</p>
+      <p>Para abrir todo: <code>match = ["*"]</code> en esa regla, aceptando que el modelo podría exfiltrar datos por una URL.</p>
+    </section>
+
+    <section id="modelo">
+      <h2><span class="n">06</span>Elegir el modelo de Go</h2>
+      <p>Go ofrece hoy 30 modelos, todos OpenAI-compatibles y con la misma key por el backend <code>zen</code>:</p>
+      <div class="models">
+        <span class="pick">glm-5.3-flash</span><span>glm-5.3</span><span class="pick">deepseek-v4.1-flash</span><span>deepseek-v4-flash</span><span>deepseek-v4-pro</span><span>kimi-k2.7-code</span><span>kimi-k3</span><span>qwen3.8-flash</span><span>qwen3.8-max</span><span>minimax-m3</span><span>grok-4.7</span><span>mimo-v2.6-pro</span><span>…</span>
+      </div>
+      <p>El criterio no es "el más grande" sino el que mejor completa las tareas de braze por menos rondas y latencia, porque el harness está tuneado para modelos que siguen el tool calling limpio. El instrumento para decidirlo es el bench del proyecto, con la suite chica primero:</p>
+      <pre><code>cd ~/proyectos/braze
+braze-bench crates/braze-bench/suites/fast-core.toml \
+  --backends "zen:glm-5.3-flash,zen:deepseek-v4.1-flash,zen:kimi-k2.7-code,zen:qwen3.8-flash" \
+  --repetitions 2 --seed 7 --task-timeout-secs 300 \
+  --output docs/sweep-go-fast-core-$(date +%F).json</code></pre>
+      <p><code>fast-core.toml</code> son 13 tareas; con 4 modelos y 2 repeticiones son 104 corridas, unos minutos y una fracción de la cuota diaria de Go. El reporte da pass rate, <code>pass^k</code>, rondas y latencia por modelo, y la comparación pareada contra el primer brazo. Si dos empatan, gana el más rápido; para discriminar más, <code>discriminating.toml</code> (34 tareas).</p>
+      <p>Para cambiar el default: <code>zen_model</code> en <code>config.json</code>, <code>--model &lt;id&gt;</code> en la línea de comandos, o <code>/model zen:&lt;id&gt;</code> en la TUI.</p>
+      <div class="note"><p>Punto de partida hasta tener el sweep: <code>glm-5.3-flash</code> (verificado en todo lo anterior) y, como segunda opción, <code>deepseek-v4.1-flash</code>, porque la familia DeepSeek flash fue la mejor del proyecto vía OpenRouter (49/50 en <code>default.toml</code>).</p></div>
+    </section>
+
+    <section id="reportar">
+      <h2><span class="n">07</span>Qué reportar cuando algo falle</h2>
+      <ul>
+        <li>El comando exacto y el directorio.</li>
+        <li>El <code>session id</code> que braze imprimió. El rollout completo está en <code>~/.local/share/braze/sessions/&lt;id&gt;.jsonl</code>; basta la ruta.</li>
+        <li>Si es raro, la misma sesión con trazas: <code>RUST_LOG=braze=info,braze_engine=info braze chat …</code> (van a stderr).</li>
+        <li>Qué esperabas que pasara. Sobre todo si una skill hizo algo distinto que en Claude Code.</li>
+      </ul>
+    </section>
+
+    <section id="limites">
+      <h2><span class="n">08</span>Límites conocidos hoy</h2>
+      <ul>
+        <li>Sin subagente genérico ni LSP.</li>
+        <li>Las skills están escritas para Claude; un modelo de Go puede seguirlas peor. Ese es el riesgo real del plan, no la ingeniería.</li>
+        <li><code>web_search</code> depende del HTML de DuckDuckGo: si cambia, falla con un error claro en vez de inventar resultados.</li>
+        <li>El discovery de skills salta <code>.trash/</code> y prefiere el <code>SKILL.md</code> más superficial ante duplicados; si una skill "no aparece", revisa que su <code>SKILL.md</code> tenga <code>name:</code> y <code>description:</code>.</li>
+        <li>Compactación: se dispara a 40 eventos tácticos; el resumen es extractivo salvo que configures <code>enable_lead_summary</code>.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>Misma guía en Markdown: <code>docs/guia-perfil-operador-2026-09-28.md</code>. Commits del perfil operador: <code>173194a</code> policy engine · <code>2545eaf</code> hooks · <code>7d980d7</code> skills · <code>b11e905</code> web · <code>2d2fde6</code> siempre.</footer>
+</div>
+</body>
+</html>
