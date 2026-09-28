@@ -9,6 +9,7 @@
 mod cli_args;
 mod error;
 mod permissions_report;
+mod session_hooks;
 mod terminal_prompt;
 mod terminal_question;
 
@@ -687,6 +688,9 @@ async fn build_engine(
     // E′ I.5: when `Some`, the `ask_user` tool is exposed (interactive
     // plain chat only) — `run`/the bench pass `None` (no human to ask).
     ask_user_prompt: Option<std::sync::Arc<dyn braze_permissions::QuestionPrompt>>,
+    // Perfil operador: `source` que reciben los `hooks.session_start`
+    // (`startup` | `resume`), mismo vocabulario que Claude Code.
+    hook_source: &str,
 ) -> Result<
     (
         braze_engine::Engine,
@@ -1108,6 +1112,41 @@ async fn build_engine(
     if let Some(hook) = &project_memory_hook {
         engine = engine.with_hook(hook.clone());
     }
+    // Perfil operador (2026-09-28): hooks de sesión externos. Los
+    // `session_start` corren acá, una vez, y su stdout queda en el slot
+    // que el engine anexa al system prompt; los `post_compact` se
+    // registran como EngineHook que refresca el slot tras cada
+    // compactación. Un hook roto no bloquea el arranque (warning).
+    if !config.hooks.is_empty() {
+        let slot: braze_engine::SessionContextSlot =
+            std::sync::Arc::new(std::sync::RwLock::new(None));
+        let session_id = *live_session
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let input = session_hooks::HookInput {
+            cwd,
+            source: hook_source,
+            session_id,
+        };
+        if let Some(text) = session_hooks::run_hooks(&config.hooks.session_start, &input).await {
+            tracing::info!(
+                bytes = text.len(),
+                hooks = config.hooks.session_start.len(),
+                source = hook_source,
+                "session context cargado desde los hooks de sesión"
+            );
+            *slot.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(text);
+        }
+        engine = engine.with_session_context(std::sync::Arc::clone(&slot));
+        if !config.hooks.post_compact.is_empty() {
+            engine = engine.with_hook(std::sync::Arc::new(session_hooks::SessionHooksRunner::new(
+                config.hooks.post_compact.clone(),
+                slot,
+                cwd.to_path_buf(),
+                std::sync::Arc::clone(&live_session),
+            )));
+        }
+    }
 
     if let Some(budget) = ollama_budget {
         engine = engine.with_context_budget(budget);
@@ -1458,6 +1497,12 @@ async fn run() -> Result<(), CliError> {
             None
         };
 
+    let hook_source = match &cli.command {
+        Command::Chat {
+            resume: Some(_), ..
+        } => "resume",
+        _ => "startup",
+    };
     let (engine, status_line, project_memory_hook) = build_engine(
         &config,
         planner_spec.clone(),
@@ -1469,6 +1514,7 @@ async fn run() -> Result<(), CliError> {
         supervised,
         &cwd,
         ask_user_prompt,
+        hook_source,
     )
     .await?;
 
@@ -1608,6 +1654,9 @@ async fn run() -> Result<(), CliError> {
                         Some(std::sync::Arc::new(braze_tui::ChannelQuestionPrompt::new(
                             question_tx.clone(),
                         ))),
+                        // El rebuild por `/model` continúa la misma
+                        // sesión: para los hooks es un `resume`.
+                        "resume",
                     )
                     .await
                     // El engine reconstruido registra su propio hook de

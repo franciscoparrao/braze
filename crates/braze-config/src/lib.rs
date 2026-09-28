@@ -33,8 +33,8 @@ mod prompt;
 
 pub use api_key::ApiKey;
 pub use config::{
-    Config, FormatterConfig, McpServerConfigStub, ModelPricing, ReferenceConfig, SkillsConfig,
-    default_formatters,
+    Config, FormatterConfig, HookCommand, McpServerConfigStub, ModelPricing, ReferenceConfig,
+    SessionHooksConfig, SkillsConfig, default_formatters,
 };
 pub use context_file::{find_nearest_agents_md, load_agents_md, load_agents_md_from};
 pub use error::ConfigError;

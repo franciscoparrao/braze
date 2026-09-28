@@ -139,6 +139,10 @@ const NARRATION_WITHOUT_ACTION_THRESHOLD: u32 = 2;
 /// (`BRAZE_PLANNER_MAX_TOKENS`, v4 P0.2/healf rounds).
 const PLANNER_MAX_TOKENS: u32 = 1024;
 
+/// Contexto de sesión compartido entre el engine (lector) y quien lo
+/// produce fuera de él (escritor) — ver `Engine::with_session_context`.
+pub type SessionContextSlot = Arc<std::sync::RwLock<Option<String>>>;
+
 /// The agentic loop. Orchestrates model calls, tool dispatch (via
 /// background tasks + push notification), differential context
 /// compaction, and session persistence.
@@ -371,6 +375,15 @@ pub struct Engine {
     /// `loaded_agents_md` (que dedupe por path); el raíz NO está acá (vive
     /// en `self.system_prompt`).
     loaded_agents_md_bodies: std::sync::Mutex<Vec<String>>,
+    /// Contexto de sesión producido FUERA del engine (perfil operador,
+    /// 2026-09-28): el composition root corre sus hooks externos
+    /// (`hooks.session_start` / `hooks.post_compact` del config) y deja
+    /// el stdout en este slot; el engine solo lo LEE al armar cada
+    /// request, como sección "Session context" del system prompt. El
+    /// engine no spawnea procesos ni sabe de dónde vino el texto — sigue
+    /// audit-only; el slot es el seam mínimo para que un hook pueda
+    /// refrescar el contexto tras una compactación sin mutar el turno.
+    session_context: Option<SessionContextSlot>,
     /// Cap de tokens por body inyectado (config `skills.max_body_tokens`).
     skills_max_body_tokens: usize,
     /// Cuántas skills puede cargar la mención de UN turno (config
@@ -501,6 +514,7 @@ impl Engine {
             agents_md_root: None,
             loaded_agents_md: std::sync::Mutex::new(std::collections::HashSet::new()),
             loaded_agents_md_bodies: std::sync::Mutex::new(Vec::new()),
+            session_context: None,
             skills_max_body_tokens: 1200,
             skills_max_loaded_per_turn: 2,
             textual_rescue_enabled: true,
@@ -765,6 +779,16 @@ impl Engine {
     /// other builders.
     pub fn with_hook(mut self, hook: std::sync::Arc<dyn crate::hooks::EngineHook>) -> Self {
         self.hooks.push(crate::hooks::RegisteredHook::new(hook));
+        self
+    }
+
+    /// Slot de contexto de sesión (perfil operador): lo que contenga se
+    /// anexa al system prompt de cada request bajo "Session context". Quien
+    /// lo llena (hooks externos del CLI) puede reemplazarlo en cualquier
+    /// momento — p.ej. tras `CompactionOccurred` — y el próximo request lo
+    /// ve. `None`/vacío = sin sección. Chainable.
+    pub fn with_session_context(mut self, slot: SessionContextSlot) -> Self {
+        self.session_context = Some(slot);
         self
     }
 

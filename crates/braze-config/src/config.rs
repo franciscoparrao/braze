@@ -153,6 +153,52 @@ fn default_skills_max_loaded_per_turn() -> usize {
     2
 }
 
+/// Un comando externo de hook de sesión (perfil operador, 2026-09-28):
+/// argv (sin shell), timeout y cap de bytes de su stdout. Recibe por stdin
+/// un JSON `{"cwd","source","session_id"}` — el mismo contrato que el
+/// `SessionStart` de Claude Code, para que los scripts del autor corran
+/// sin cambios. Solo desde el config file (estructurado, como `references`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookCommand {
+    pub command: Vec<String>,
+    #[serde(default = "default_hook_timeout_secs")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_hook_max_bytes")]
+    pub max_bytes: usize,
+}
+
+/// Hooks de sesión externos: `session_start` corre al construir el engine
+/// (`source` = `startup` | `resume`), `post_compact` tras cada
+/// `CompactionOccurred` (`source` = `compact`). La salida (stdout) de cada
+/// uno entra al system prompt como sección "Session context" — DATOS
+/// capeados, no instrucciones del binario. Un hook que falla o se cuelga
+/// degrada a "sin contexto" con warning; nunca bloquea el arranque. Los
+/// comandos vienen del config global, fuera del workdir: el modelo no los
+/// edita sin confirmación.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SessionHooksConfig {
+    #[serde(default)]
+    pub session_start: Vec<HookCommand>,
+    #[serde(default)]
+    pub post_compact: Vec<HookCommand>,
+}
+
+impl SessionHooksConfig {
+    pub fn is_empty(&self) -> bool {
+        self.session_start.is_empty() && self.post_compact.is_empty()
+    }
+}
+
+fn default_hook_timeout_secs() -> u64 {
+    10
+}
+
+/// ~2k tokens: el `resume` del autor es ≤1.500 chars; el cap existe para
+/// que un script que vuelca de más no se coma el contexto.
+fn default_hook_max_bytes() -> usize {
+    8192
+}
+
 /// Tabla default, fechada **2026-07-09** — los precios de API envejecen;
 /// al agregar un modelo nuevo a los sweeps, agregar su entrada acá (o en
 /// el config file) con el precio vigente. Un modelo sin entrada produce
@@ -713,6 +759,10 @@ pub struct Config {
     /// desde el config file (estructurado, como `references`).
     #[serde(default)]
     pub skills: SkillsConfig,
+    /// Hooks de sesión externos (perfil operador); ver
+    /// [`SessionHooksConfig`]. Solo desde el config file.
+    #[serde(default)]
+    pub hooks: SessionHooksConfig,
 }
 
 /// Espejo de `braze_engine::tool_search::DEFAULT_TOOL_SEARCH_THRESHOLD`
@@ -818,6 +868,7 @@ impl Default for Config {
             enable_project_memory: false,
             enable_lead_summary: false,
             skills: SkillsConfig::default(),
+            hooks: SessionHooksConfig::default(),
         }
     }
 }
@@ -1141,6 +1192,9 @@ impl Config {
         if let Some(v) = overrides.skills {
             self.skills = v;
         }
+        if let Some(v) = overrides.hooks {
+            self.hooks = v;
+        }
     }
 
     /// Resuelve la entrada de pricing para `(backend, model)`: el backend
@@ -1223,6 +1277,28 @@ mod tests {
         let env = vec![("BRAZE_TUI_THEME".to_string(), "light".to_string())];
         let config = Config::load_with(None, env).unwrap();
         assert_eq!(config.tui_theme, "light");
+    }
+
+    /// Hooks de sesión: vacíos por default; se cargan del config file con
+    /// timeout y cap por default.
+    #[test]
+    fn session_hooks_load_from_the_config_file_with_defaults() {
+        assert!(Config::default().hooks.is_empty());
+        let dir = temp_dir("session_hooks_load_from_the_config_file");
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"hooks": {"session_start": [{"command": ["bash", "/x/resume.sh"]}],
+                          "post_compact": [{"command": ["/x/y"], "timeout_secs": 3, "max_bytes": 100}]}}"#,
+        )
+        .unwrap();
+        let config = Config::load_with(Some(&path), Vec::<(String, String)>::new()).unwrap();
+        assert_eq!(config.hooks.session_start.len(), 1);
+        assert_eq!(config.hooks.session_start[0].command, vec!["bash", "/x/resume.sh"]);
+        assert_eq!(config.hooks.session_start[0].timeout_secs, 10);
+        assert_eq!(config.hooks.session_start[0].max_bytes, 8192);
+        assert_eq!(config.hooks.post_compact[0].timeout_secs, 3);
+        assert_eq!(config.hooks.post_compact[0].max_bytes, 100);
     }
 
     /// Policy engine (backport enclave M3): `policy_file` es `None` por

@@ -102,6 +102,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "references",
     // Policy engine (backport enclave M3, 2026-09-28): ruta al policy.toml.
     "policy_file",
+    // Hooks de sesión externos (perfil operador, 2026-09-28).
+    "hooks",
     // C′.1 — umbral de deferral de tools por provider (search_tools).
     "tool_search_threshold",
     // C′.2 — lista de tareas tipada (task_add/task_update).

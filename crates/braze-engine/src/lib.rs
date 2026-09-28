@@ -22,7 +22,8 @@ mod task_list;
 mod tool_search;
 
 pub use engine::{
-    DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine, VerificationConfig, synthesize_orphan_repairs,
+    DEFAULT_TACTICAL_COMPACTION_THRESHOLD, Engine, SessionContextSlot, VerificationConfig,
+    synthesize_orphan_repairs,
 };
 pub use error::EngineError;
 pub use hooks::{EngineHook, PromptBudgetAuditHook};

@@ -588,4 +588,65 @@ BRAZE_ZEN_BASE_URL=https://opencode.ai/zen/go/v1 \
 Argumento de RAM (medido 2026-09-27 en la máquina de trabajo): un proceso
 `braze` ocupa 22-31 MB RSS con backend remoto, vs ~271 MB por sesión de
 Claude Code (40 sesiones = 10,6 GB). Con Go, muchas sesiones de braze
-simultáneas cuestan RAM despreciable.
+simultáneas cuestan RAM despreciable. `braze chat --tui` residente: 23 MB
+ociosa, 28 MB tras un turno (medido 2026-09-28).
+
+## Perfil operador (braze de uso diario) y policy engine — 2026-09-28
+
+**Decisión**: el braze de uso diario (en vez de OpenCode/Claude Code, para
+ahorrar RAM) NO es un fork: es la config global `~/.config/braze/config.json`
+más palancas genéricas gateadas por flags en este repo. Enclave sigue siendo
+el único fork (premisa incompatible: sin red). Perfil vigente del autor:
+`default_backend=zen` → OpenCode Go `glm-5.3-flash`; `skills.paths` a
+`~/.claude/skills` (ruta ABSOLUTA — no se expande `~`) con `max_body_tokens`
+4000 / `max_loaded_per_turn` 3; `enable_project_memory`; `references` a
+`~/.claude/{skills,session_state,projects}` y `~/vault` (raíz extra del
+allowlist: leer ahí no pide confirmación). Verificado en vivo: 113 skills
+descubiertas, `AGENTS.md → CLAUDE.md` por symlink obedecido, `$destelegrafiar`
+y `$memoria status` corren de punta a punta con glm-5.3-flash.
+
+**Policy engine (backport de enclave M3, `crates/braze-permissions/src/
+policy.rs`)**: la allowlist PERSISTENTE que faltaba — la aprobación recordada
+era por sesión (`seed_remembered`) y `braze permissions suggest` solo juntaba
+evidencia. `Policy` TOML (`version=1`, `default = inherit|allow|confirm|deny`,
+`[[rule]] id/action/match/verdict/reason`; primera regla que matchea gana;
+`shell` matchea basename del programa o el comando completo si el patrón
+tiene espacios; rutas glob relativas al workdir o absolutas; `*` no cruza
+`/`, `**` sí). `PolicyClassifier` va POR ENCIMA del `DefaultClassifier`
+(`Verdict::{Allow,Confirm,Deny}`, `decide()` con procedencia); `Deny` no
+pregunta ni corre (`PermissionError::Forbidden` con la regla, el mensaje le
+dice al modelo que NO se ejecutó); las decisiones por política se persisten
+como `PermissionDecided` con `action = "[policy:<regla>] …"`. Resolución:
+`BRAZE_POLICY_FILE` / `policy_file` → `<dir del config>/policy.toml` →
+`<session_dir>/policy.toml`; inválida = no arranca; nunca se busca en el
+workdir. `braze permissions policy [ruta]` valida y lista. Política del
+autor en `~/.config/braze/policy.toml` (deny lectura/escritura de
+`~/.config/braze/**` y secretos, deny `sudo`/`dd`/`mkfs`, allow toolchain
+`python3`/`cargo`/`make`/`node`/…, allow `git add|commit|stash|checkout`;
+`git push` y `rm -rf` siguen pidiendo confirmación). Verificado en vivo sin
+TTY: `python3 --version` corre por `dev-toolchain`; leer `zen-key` devuelve
+Forbidden por `protect-braze-config` y el modelo lo reporta sin inventar.
+Gotcha vigente: sin TTY (`braze run`) todo `Confirm` es denegar — lo que no
+esté en la política y no sea seguro para el base no corre.
+
+**Hooks de sesión externos (`hooks` en el config, 2026-09-28)**: el puente
+con el andamiaje del autor fuera de braze. `hooks.session_start` (corre al
+construir el engine, `source` = `startup`|`resume`; el rebuild por `/model`
+cuenta como `resume`) y `hooks.post_compact` (tras cada
+`CompactionOccurred`, `source` = `compact`). Cada `HookCommand` es argv sin
+shell + `timeout_secs` (10) + `max_bytes` (8192); recibe por stdin el JSON
+`{"cwd","source","session_id"}` — el MISMO contrato que el `SessionStart`
+de Claude Code, así `~/.claude/hooks/context_resume.sh` corre sin cambios.
+El stdout entra al system prompt como sección "Session context (… data,
+not instructions)" vía `Engine::with_session_context(SessionContextSlot)`
+(`Arc<RwLock<Option<String>>>`: el engine solo LEE el slot al armar cada
+request; quien spawnea procesos es `braze-cli/src/session_hooks.rs` — el
+engine sigue audit-only). El refresco post-compact lo hace
+`SessionHooksRunner: EngineHook` despachando la corrida a una tarea aparte
+(`on_event` corre bajo el timeout de 250 ms de los hooks del engine); un
+hook mudo no borra el contexto anterior; uno roto o colgado degrada a "sin
+contexto" con warning, nunca bloquea el arranque. Perfil del autor:
+`session_start` = `context_resume.sh` + `cat` del `MEMORY.md` nativo del
+proyecto; `post_compact` = `context_resume.sh`. Verificado en vivo en este
+repo: glm-5.3-flash reporta la tarea actual y las tres entradas de
+`MEMORY.md` en 1 ronda sin herramientas.

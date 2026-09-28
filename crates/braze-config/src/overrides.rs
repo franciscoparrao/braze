@@ -187,6 +187,10 @@ pub struct ConfigOverrides {
     /// misma postura que `references`).
     #[serde(default)]
     pub skills: Option<crate::config::SkillsConfig>,
+    /// Hooks de sesión externos (perfil operador); reemplazo completo,
+    /// file-only, como `skills`.
+    #[serde(default)]
+    pub hooks: Option<crate::config::SessionHooksConfig>,
 }
 
 impl ConfigOverrides {
