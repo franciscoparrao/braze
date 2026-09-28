@@ -17,6 +17,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# `x-opencode-session` (OpenCode Go exige un id de sesión por request;
+# ver openrouter.rs::with_opencode_session).
+uuid = { workspace = true }
 
 # LocalBackend (feature `local`): inferencia in-process sobre llama.cpp,
 # reusando los GGUF de Ollama. Opcional y off por default — compila

@@ -436,7 +436,10 @@ fn build_model_backend(
             // OpenRouter. Verificado contra la API real (2026-08-29):
             // chunks SSE, tool_calls parciales y `usage` son estándar;
             // Zen agrega `reasoning_content` y un `cost` string que el
-            // wire ignora sin romper.
+            // wire ignora sin romper. OpenCode Go (2026-09-27): misma key,
+            // base `https://opencode.ai/zen/go/v1` (`BRAZE_ZEN_BASE_URL`), y
+            // EXIGE `x-opencode-session` — `with_opencode_session` lo manda
+            // siempre (Zen normal lo ignora).
             let api_key = config.zen_api_key.clone().ok_or_else(|| {
                 CliError::Startup(
                     "falta ZEN_API_KEY (config file o BRAZE_ZEN_API_KEY) para el backend zen"
@@ -460,6 +463,7 @@ fn build_model_backend(
                     config.zen_base_url.clone(),
                 )
                 .with_provider_label("zen")
+                .with_opencode_session()
                 .with_prompt_caching_enabled(config.enable_prompt_caching),
             ))
         }

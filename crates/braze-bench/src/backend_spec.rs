@@ -656,6 +656,8 @@ impl BackendSpec {
                     config.zen_base_url.clone(),
                 )
                 .with_provider_label("zen")
+                // OpenCode Go exige x-opencode-session; un id por brazo.
+                .with_opencode_session()
                 .with_temperature(sampling.temperature)
                 .with_prompt_caching_enabled(
                     config.enable_prompt_caching && !self.ablation().disable_prompt_caching,

@@ -553,3 +553,39 @@ crudos en `docs/sweep-deepseek-v4-flash.json`/`.log`:
 Esto no cambia el default de `braze-config` (`ollama_model = "llama3.1"`,
 `crates/braze-config/src/config.rs`) — queda como criterio para elegir qué
 modelo configurar/tener disponible localmente, no como un cambio de código.
+
+## Proveedor `zen` (OpenCode Zen y OpenCode Go) — 2026-09-27
+
+`Provider::Zen` reusa `OpenRouterBackend` (API OpenAI-compatible) con
+`BRAZE_ZEN_API_KEY` / `BRAZE_ZEN_MODEL` / `BRAZE_ZEN_BASE_URL` (default
+`https://opencode.ai/zen/v1`). Sirve para tres cosas distintas — no confundir
+la etiqueta `zen:` de un sweep con "OpenCode Zen" sin mirar `zen_base_url` en
+la metadata (ver `docs/sweep-spark-x25-provenance-2026-09-06.md`):
+
+- **OpenCode Zen** (pago por uso): base default, ids de modelo planos
+  (`glm-5.3-flash`, `kimi-k2.5`, …). Los modelos Claude de Zen van por
+  `/messages` (API Anthropic) y NO aplican a este backend.
+- **OpenCode Go** (plan fijo, modelos abiertos): `BRAZE_ZEN_BASE_URL=
+  https://opencode.ai/zen/go/v1`, misma key. **Exige el header
+  `x-opencode-session`** (sin él: `400 Bad Request: Request is missing
+  x-opencode-session`). Desde el 2026-09-27 `OpenRouterBackend` acepta
+  headers extra (`with_header`) y el arm `zen` del CLI y del bench llaman
+  `with_opencode_session()` SIEMPRE: un UUID v4 por instancia de backend
+  (una sesión de braze = una sesión de Go; el bench crea un backend por
+  brazo). Zen normal y OpenRouter ignoran el header, así no hace falta
+  distinguir base URL. Verificado en vivo con `glm-5.3-flash`: texto y
+  loop con `read_file` (`assistant_tool_call` + `usage` reales) por Go, y
+  el mismo comando por Zen normal sigue respondiendo.
+- **Endpoint local OpenAI-compatible** (`llama-server`, fork de Bonsai):
+  `BRAZE_ZEN_BASE_URL=http://…/v1`, `BRAZE_ZEN_API_KEY=local`.
+
+Receta Go:
+```
+BRAZE_ZEN_API_KEY=$(tr -d '\n' < ~/.config/braze/zen-key) \
+BRAZE_ZEN_BASE_URL=https://opencode.ai/zen/go/v1 \
+  braze run --backend zen --model glm-5.3-flash "…"
+```
+Argumento de RAM (medido 2026-09-27 en la máquina de trabajo): un proceso
+`braze` ocupa 22-31 MB RSS con backend remoto, vs ~271 MB por sesión de
+Claude Code (40 sesiones = 10,6 GB). Con Go, muchas sesiones de braze
+simultáneas cuestan RAM despreciable.

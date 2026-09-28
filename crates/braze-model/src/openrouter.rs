@@ -54,6 +54,12 @@ pub struct OpenRouterBackend {
     /// `openrouter HTTP 400`, que manda a diagnosticar el proveedor
     /// equivocado — encontrado en vivo el 2026-08-29.
     provider_label: &'static str,
+    /// Headers adicionales en cada request (nombre, valor). Vacío para
+    /// OpenRouter. OpenCode Go (`/zen/go/v1`) EXIGE `x-opencode-session`
+    /// — sin él responde `400 MissingSessionID` (verificado 2026-09-27) —
+    /// y lo usa para enrutar con afinidad de sesión; ver
+    /// [`OpenRouterBackend::with_opencode_session`].
+    extra_headers: Vec<(String, String)>,
 }
 
 impl OpenRouterBackend {
@@ -69,6 +75,7 @@ impl OpenRouterBackend {
             prompt_caching_enabled: true,
             max_retries: crate::retry::DEFAULT_MAX_RETRIES,
             provider_label: "openrouter",
+            extra_headers: Vec::new(),
         }
     }
 
@@ -85,7 +92,30 @@ impl OpenRouterBackend {
             prompt_caching_enabled: true,
             max_retries: crate::retry::DEFAULT_MAX_RETRIES,
             provider_label: "openrouter",
+            extra_headers: Vec::new(),
         }
+    }
+
+    /// Agrega un header a TODOS los requests de este backend (gateways que
+    /// exigen identificación propia). Chainable.
+    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.extra_headers.push((name.into(), value.into()));
+        self
+    }
+
+    /// OpenCode Go (`https://opencode.ai/zen/go/v1`): manda
+    /// `x-opencode-session` con un id único por instancia de backend —
+    /// una sesión de braze, un id — que Go exige para enrutar con afinidad
+    /// de sesión (y por tanto con caché). Inocuo contra Zen normal y
+    /// OpenRouter, que lo ignoran; por eso el proveedor `zen` lo manda
+    /// siempre y no hace falta distinguir la base URL.
+    pub fn with_opencode_session(self) -> Self {
+        self.with_header("x-opencode-session", uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Los headers extra configurados (para tests y diagnóstico).
+    pub fn extra_headers(&self) -> &[(String, String)] {
+        &self.extra_headers
     }
 
     /// Overrides the sampling temperature sent to OpenRouter — e.g. so
@@ -173,11 +203,15 @@ impl ModelBackend for OpenRouterBackend {
         let breaker_key = format!("{}:{url}:{}", self.provider_label, self.model);
         let guard = crate::circuit_breaker::acquire(&breaker_key)?;
         let send_result = crate::retry::send_with_retry(self.provider_label, self.max_retries, || {
-            self.client
+            let mut req = self
+                .client
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("content-type", "application/json")
-                .json(&body)
+                .header("content-type", "application/json");
+            for (name, value) in &self.extra_headers {
+                req = req.header(name.as_str(), value.as_str());
+            }
+            req.json(&body)
         })
         .await;
         let response = match send_result {
@@ -476,6 +510,21 @@ mod tests {
         assert_eq!(text, "Hi there");
         assert!(saw_usage);
         assert!(saw_done);
+    }
+
+    #[test]
+    fn opencode_session_header_is_a_fresh_uuid_per_backend_and_openrouter_sends_none() {
+        let plain = OpenRouterBackend::with_base_url("k".into(), "m".into(), "u".into());
+        assert!(plain.extra_headers().is_empty(), "OpenRouter no lleva headers propios");
+        let a = OpenRouterBackend::with_base_url("k".into(), "m".into(), "u".into()).with_opencode_session();
+        let b = OpenRouterBackend::with_base_url("k".into(), "m".into(), "u".into()).with_opencode_session();
+        let (na, va) = &a.extra_headers()[0];
+        let (nb, vb) = &b.extra_headers()[0];
+        assert_eq!((na.as_str(), nb.as_str()), ("x-opencode-session", "x-opencode-session"));
+        assert!(uuid::Uuid::parse_str(va).is_ok(), "{va}");
+        assert_ne!(va, vb, "una sesión de braze, un id: dos backends no comparten sesión de Go");
+        let c = a.with_header("x-title", "braze");
+        assert_eq!(c.extra_headers().len(), 2);
     }
 
     #[tokio::test]
