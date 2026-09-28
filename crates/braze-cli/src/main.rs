@@ -204,6 +204,7 @@ fn build_permission_guard(
     tui_mode: bool,
     supervised: bool,
     approval_tx: tokio::sync::mpsc::UnboundedSender<braze_tui::ApprovalRequest>,
+    policy: &braze_permissions::Policy,
 ) -> braze_permissions::PermissionGuard {
     // opencode-10 (docs/opencode-a-braze.md § 10): every configured
     // reference directory is an extra allowlist root — OpenCode's
@@ -222,13 +223,51 @@ fn build_permission_guard(
     // `--supervised`: every action goes through the confirmation prompt
     // below, regardless of what `DefaultClassifier` would normally rate
     // it — see `AlwaysIrreversibleClassifier`'s doc comment.
-    let classifier: Box<dyn braze_permissions::ActionClassifier> = if supervised {
+    let base: Box<dyn braze_permissions::ActionClassifier> = if supervised {
         Box::new(braze_permissions::AlwaysIrreversibleClassifier)
     } else {
         Box::new(braze_permissions::DefaultClassifier::new(
             allowlist_for_classifier,
         ))
     };
+    // Policy engine (backport enclave M3, 2026-09-28): la política
+    // declarativa va POR ENCIMA del base — la regla que matchea manda
+    // (`allow` no pregunta, `deny` no corre ni pregunta), sin regla
+    // `default` decide (`inherit` = el base). Es la allowlist persistente
+    // que la aprobación por sesión (`seed_remembered`) no daba: un
+    // `python3` aprobado hoy volvía a preguntar mañana.
+    let classifier: Box<dyn braze_permissions::ActionClassifier> = Box::new(
+        braze_permissions::PolicyClassifier::new(policy.clone(), base, cwd.to_path_buf()),
+    );
+    // Las decisiones POR POLÍTICA se persisten como `PermissionDecided`
+    // etiquetadas con la regla (las confirmaciones humanas ya las persiste
+    // el prompt), así `braze permissions suggest` y el rollout ven qué
+    // regla actuó. El hook es síncrono; el append es async → al runtime.
+    let hook_store = std::sync::Arc::clone(&store);
+    let hook_session = std::sync::Arc::clone(&live_session);
+    let decision_hook: braze_permissions::DecisionHook =
+        std::sync::Arc::new(move |action, decision, outcome| {
+            let allowed = match outcome {
+                braze_permissions::GuardOutcome::AllowedByPolicy => true,
+                braze_permissions::GuardOutcome::DeniedByPolicy => false,
+                _ => return,
+            };
+            let session = *hook_session.lock().unwrap_or_else(|p| p.into_inner());
+            let event = braze_events::AgentEvent::PermissionDecided {
+                action: format!(
+                    "[policy:{}] {action}",
+                    decision.rule.as_deref().unwrap_or("-")
+                ),
+                allowed,
+                key: braze_permissions::derive_permission_key(action),
+            };
+            let store = std::sync::Arc::clone(&hook_store);
+            tokio::spawn(async move {
+                if let Err(e) = store.append(&session, &event).await {
+                    tracing::error!(error = %e, "no se pudo persistir la decisión de política");
+                }
+            });
+        });
     let confirmation: Box<dyn braze_permissions::ConfirmationPrompt> = if tui_mode {
         // N-12 (docs/AUDITORIA-2026-07-v2.md): the TUI's confirmation
         // prompt reads the *current* session out of this shared handle
@@ -251,9 +290,88 @@ fn build_permission_guard(
         Box::new(TerminalConfirmationPrompt::new(session, store))
     };
     let guard =
-        braze_permissions::PermissionGuard::new(allowlist_for_guard, classifier, confirmation);
+        braze_permissions::PermissionGuard::new(allowlist_for_guard, classifier, confirmation)
+            .with_decision_hook(decision_hook);
     guard.seed_remembered(replayed_keys.iter().cloned());
     guard
+}
+
+/// Policy engine: resuelve y carga la política declarativa. Orden:
+/// `config.policy_file` (`BRAZE_POLICY_FILE` / `policy_file`), si no
+/// `<dir del config>/policy.toml` si existe (hermano de `config.json`), si
+/// no `<session_dir>/policy.toml` si existe, si no política vacía (solo el
+/// clasificador base). Devuelve la política y su origen. Una política
+/// inválida es error de arranque: arrancar sin la política que el operador
+/// escribió sería fingir una postura. Nunca se busca en el workdir.
+fn load_policy(
+    config: &braze_config::Config,
+) -> Result<(braze_permissions::Policy, Option<std::path::PathBuf>), CliError> {
+    let path = config.policy_file.clone().or_else(|| {
+        let beside_config = braze_config::config_file_path()
+            .and_then(|p| p.parent().map(|d| d.join("policy.toml")))
+            .filter(|p| p.exists());
+        beside_config.or_else(|| {
+            let p = config.session_dir.join("policy.toml");
+            p.exists().then_some(p)
+        })
+    });
+    match path {
+        Some(p) => {
+            let policy = braze_permissions::Policy::load(&p)
+                .map_err(|e| CliError::Startup(e.to_string()))?;
+            tracing::info!(
+                file = %p.display(),
+                rules = policy.rules.len(),
+                default = ?policy.default,
+                "política de permisos cargada"
+            );
+            Ok((policy, Some(p)))
+        }
+        None => Ok((braze_permissions::Policy::empty(), None)),
+    }
+}
+
+/// `braze permissions policy [ruta]`: valida y lista una política (la
+/// dada, o la que cargaría el binario con esta config).
+fn run_policy(
+    file: Option<&std::path::Path>,
+    config: &braze_config::Config,
+) -> Result<(), CliError> {
+    let (policy, source) = match file {
+        Some(p) => (
+            braze_permissions::Policy::load(p).map_err(|e| CliError::Startup(e.to_string()))?,
+            Some(p.to_path_buf()),
+        ),
+        None => load_policy(config)?,
+    };
+    match &source {
+        Some(p) => println!("Política: {} (válida)", p.display()),
+        None => println!(
+            "Sin archivo de política: solo el clasificador base (`inherit`). \
+             Se busca en BRAZE_POLICY_FILE / policy_file, <dir del config>/policy.toml \
+             y <session_dir>/policy.toml."
+        ),
+    }
+    println!(
+        "default = {}; {} regla(s):",
+        format!("{:?}", policy.default).to_lowercase(),
+        policy.rules.len()
+    );
+    for r in &policy.rules {
+        println!(
+            "  {:<8} {:<7} {:<28} {}{}",
+            r.verdict.label(),
+            format!("{:?}", r.action).to_lowercase(),
+            r.id,
+            r.patterns.join(", "),
+            if r.reason.is_empty() {
+                String::new()
+            } else {
+                format!("  — {}", r.reason)
+            }
+        );
+    }
+    Ok(())
 }
 
 /// E′ I.6: snapshot recortado del entorno para el system prompt —
@@ -683,6 +801,9 @@ async fn build_engine(
     // `build_permission_guard` — since `PermissionGuard` isn't
     // shared/`Clone` across providers. All of them share the same
     // `replayed_keys`, seeded from the same session's own prior decisions.
+    // Policy engine: una sola carga por arranque, compartida por todos los
+    // guards (uno por provider). Inválida = no arranca.
+    let (policy, _policy_file) = load_policy(config)?;
     let local_guard = build_permission_guard(
         cwd,
         &config.references,
@@ -692,6 +813,7 @@ async fn build_engine(
         tui_mode,
         supervised,
         approval_tx.clone(),
+        &policy,
     );
 
     let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard)
@@ -744,6 +866,7 @@ async fn build_engine(
             tui_mode,
             supervised,
             approval_tx.clone(),
+            &policy,
         );
         match braze_mcp_client::McpToolProvider::connect(
             server.name.clone(),
@@ -1099,7 +1222,10 @@ async fn run_permissions(
 ) -> Result<(), CliError> {
     use braze_session::SessionStore;
 
-    let PermissionsAction::Suggest(args) = action;
+    let args = match action {
+        PermissionsAction::Suggest(args) => args,
+        PermissionsAction::Policy { file } => return run_policy(file.as_deref(), config),
+    };
 
     let store = braze_session::FileSessionStore::new(config.session_dir.clone());
     let session_ids = store

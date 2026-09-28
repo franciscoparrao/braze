@@ -77,6 +77,9 @@ pub struct ConfigOverrides {
     pub best_of_n: Option<usize>,
     #[serde(default)]
     pub tui_theme: Option<String>,
+    /// Política declarativa de permisos (`BRAZE_POLICY_FILE` / `policy_file`).
+    #[serde(default)]
+    pub policy_file: Option<PathBuf>,
     #[serde(default)]
     pub disable_textual_tool_call_rescue: Option<bool>,
     #[serde(default)]
@@ -354,6 +357,7 @@ impl ConfigOverrides {
                 "TUI_THEME" => {
                     overrides.tui_theme = Some(value.to_string());
                 }
+                "POLICY_FILE" => overrides.policy_file = Some(PathBuf::from(value)),
                 "PLANNER_BACKEND" => overrides.planner_backend = Some(value.to_string()),
                 "PLANNER_MODEL" => overrides.planner_model = Some(value.to_string()),
                 "LEAD_BACKEND" => overrides.lead_backend = Some(value.to_string()),

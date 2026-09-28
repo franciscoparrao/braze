@@ -46,17 +46,20 @@ mod confirm;
 mod error;
 mod guard;
 mod human_wait;
+mod policy;
 mod question;
 mod sandbox;
 
 pub use action::{ActionDescriptor, sanitize_control_chars};
 pub use allowlist::WorkdirAllowlist;
 pub use classifier::{
-    ActionClassifier, AlwaysIrreversibleClassifier, DefaultClassifier, Reversibility,
+    ActionClassifier, AlwaysIrreversibleClassifier, Decision, DefaultClassifier, Reversibility,
+    Verdict,
 };
 pub use confirm::ConfirmationPrompt;
 pub use error::PermissionError;
-pub use guard::{PermissionGuard, derive_permission_key};
+pub use guard::{DecisionHook, GuardOutcome, PermissionGuard, derive_permission_key};
+pub use policy::{Fallback, Policy, PolicyAction, PolicyClassifier, PolicyError, Rule, glob};
 pub use human_wait::{
     HumanWait, accumulated as human_wait_accumulated, is_waiting as human_is_waiting,
 };

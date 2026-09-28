@@ -1,13 +1,48 @@
 use std::collections::HashSet;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use braze_types::PermissionKey;
 
 use crate::action::ActionDescriptor;
 use crate::allowlist::{WorkdirAllowlist, normalize_lexically};
-use crate::classifier::{ActionClassifier, Reversibility};
+use crate::classifier::{ActionClassifier, Decision, Verdict};
 use crate::confirm::ConfirmationPrompt;
 use crate::error::PermissionError;
+
+/// Qué pasó con una acción en el guard, para auditarlo (Enclave M3). Solo
+/// se notifican los casos con información: lo que una política decidió y
+/// lo que un humano respondió; un `Allow` del clasificador base (leer un
+/// archivo del workdir) no se notifica — sería ruido.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuardOutcome {
+    /// Una regla de política lo permitió sin preguntar.
+    AllowedByPolicy,
+    /// Una regla de política (o `default = deny`) lo prohibió sin preguntar.
+    DeniedByPolicy,
+    /// Se preguntó y la persona (o el prompt headless) aprobó.
+    Approved,
+    /// Se preguntó y se rechazó.
+    Rejected,
+    /// Ya estaba aprobado en esta sesión (cache de recordados).
+    Remembered,
+}
+
+impl GuardOutcome {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AllowedByPolicy => "allowed_by_policy",
+            Self::DeniedByPolicy => "denied_by_policy",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::Remembered => "remembered",
+        }
+    }
+}
+
+/// Callback de auditoría del guard: recibe la acción, la decisión (con la
+/// regla, si la hubo) y el desenlace. Síncrono y barato: el frontend lo
+/// usa para escribir al audit trail.
+pub type DecisionHook = Arc<dyn Fn(&ActionDescriptor, &Decision, GuardOutcome) + Send + Sync>;
 
 /// Maps an action to its session-remember identity. `None` means the
 /// action is never remembered (either it can't produce a stable key, or —
@@ -66,6 +101,8 @@ pub struct PermissionGuard {
     /// Keys of previously *confirmed* irreversible actions in this session.
     /// A denial is never recorded here — see `check`.
     remembered: Mutex<HashSet<PermissionKey>>,
+    /// Auditoría de decisiones (Enclave M3); `None` = sin auditar.
+    hook: Option<DecisionHook>,
 }
 
 impl PermissionGuard {
@@ -79,6 +116,19 @@ impl PermissionGuard {
             classifier,
             prompt,
             remembered: Mutex::new(HashSet::new()),
+            hook: None,
+        }
+    }
+
+    /// Notifica cada decisión con información (política o humano) al hook.
+    pub fn with_decision_hook(mut self, hook: DecisionHook) -> Self {
+        self.hook = Some(hook);
+        self
+    }
+
+    fn notify(&self, action: &ActionDescriptor, decision: &Decision, outcome: GuardOutcome) {
+        if let Some(hook) = &self.hook {
+            hook(action, decision, outcome);
         }
     }
 
@@ -97,12 +147,29 @@ impl PermissionGuard {
     /// prompt.confirm(); Err(Denied) if the user says no. A denial is never
     /// cached — the next attempt always re-prompts.
     pub async fn check(&self, action: &ActionDescriptor) -> Result<(), PermissionError> {
-        match self.classifier.classify(action) {
-            Reversibility::Reversible => Ok(()),
-            Reversibility::Irreversible => {
+        let decision = self.classifier.decide(action);
+        match decision.verdict {
+            Verdict::Allow => {
+                if decision.rule.is_some() {
+                    self.notify(action, &decision, GuardOutcome::AllowedByPolicy);
+                }
+                Ok(())
+            }
+            // Enclave M3: prohibido por política — ni cache de recordados
+            // ni prompt; la única salida es cambiar la política.
+            Verdict::Deny => {
+                self.notify(action, &decision, GuardOutcome::DeniedByPolicy);
+                Err(PermissionError::Forbidden {
+                    action: action.to_string(),
+                    rule: decision.rule.clone().unwrap_or_else(|| "policy".to_string()),
+                    reason: decision.reason.clone().unwrap_or_default(),
+                })
+            }
+            Verdict::Confirm => {
                 if let Some(key) = derive_permission_key(action)
                     && self.remembered.lock().unwrap().contains(&key)
                 {
+                    self.notify(action, &decision, GuardOutcome::Remembered);
                     return Ok(());
                 }
                 // Incidente roam #3: el reloj del `tool_completion_timeout`
@@ -116,8 +183,10 @@ impl PermissionGuard {
                     if let Some(key) = derive_permission_key(action) {
                         self.remembered.lock().unwrap().insert(key);
                     }
+                    self.notify(action, &decision, GuardOutcome::Approved);
                     Ok(())
                 } else {
+                    self.notify(action, &decision, GuardOutcome::Rejected);
                     Err(PermissionError::Denied(action.to_string()))
                 }
             }
@@ -160,6 +229,65 @@ mod tests {
         )));
         let prompt = Box::new(CountingPrompt { answer, calls });
         PermissionGuard::new(allowlist, classifier, prompt)
+    }
+
+    /// Policy engine (M3) sobre el guard: `deny` no pregunta y devuelve
+    /// `Forbidden` con la regla; `allow` por regla no pregunta; el hook ve
+    /// ambas decisiones más el desenlace de las confirmaciones, y NO ve
+    /// los allow del clasificador base (ruido).
+    #[tokio::test]
+    async fn policy_deny_never_prompts_and_every_informative_decision_reaches_the_hook() {
+        use crate::policy::{Policy, PolicyClassifier};
+        let policy = Policy::from_toml(
+            "[[rule]]\nid=\"no-curl\"\naction=\"shell\"\nmatch=[\"curl\"]\nverdict=\"deny\"\nreason=\"sin egress\"\n\
+             [[rule]]\nid=\"echo-ok\"\naction=\"shell\"\nmatch=[\"echo\"]\nverdict=\"allow\"\n",
+        )
+        .unwrap();
+        let root = PathBuf::from("/home/user/project");
+        let base = Box::new(DefaultClassifier::new(WorkdirAllowlist::new(root.clone())));
+        let classifier = Box::new(PolicyClassifier::new(policy, base, root.clone()));
+        type Seen = Arc<Mutex<Vec<(String, Option<String>, GuardOutcome)>>>;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_hook = Arc::clone(&seen);
+        let guard = PermissionGuard::new(
+            WorkdirAllowlist::new(root),
+            classifier,
+            Box::new(CountingPrompt { answer: false, calls: calls.clone() }),
+        )
+        .with_decision_hook(Arc::new(move |action, decision, outcome| {
+            seen_hook.lock().unwrap().push((action.to_string(), decision.rule.clone(), outcome));
+        }));
+        let sh = |c: &[&str]| ActionDescriptor::ShellCommand { command: c.iter().map(|s| s.to_string()).collect() };
+
+        // deny: Forbidden con la regla, sin prompt.
+        let err = guard.check(&sh(&["curl", "http://x"])).await.unwrap_err();
+        match err {
+            PermissionError::Forbidden { rule, reason, .. } => {
+                assert_eq!(rule, "no-curl");
+                assert_eq!(reason, "sin egress");
+            }
+            other => panic!("esperaba Forbidden, vino {other:?}"),
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "deny nunca pregunta");
+        // allow por regla: sin prompt, y el hook lo ve.
+        assert!(guard.check(&sh(&["echo", "hola"])).await.is_ok());
+        // allow del base (leer en el workdir): sin prompt y SIN hook.
+        assert!(guard.check(&ActionDescriptor::ReadPath { path: PathBuf::from("src/a.rs") }).await.is_ok());
+        // confirm (rm → base irreversible): pregunta, se rechaza, el hook lo ve.
+        assert!(matches!(guard.check(&sh(&["rm", "x"])).await, Err(PermissionError::Denied(_))));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let seen = seen.lock().unwrap();
+        let outcomes: Vec<(Option<&str>, GuardOutcome)> = seen.iter().map(|(_, r, o)| (r.as_deref(), *o)).collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                (Some("no-curl"), GuardOutcome::DeniedByPolicy),
+                (Some("echo-ok"), GuardOutcome::AllowedByPolicy),
+                (None, GuardOutcome::Rejected),
+            ]
+        );
     }
 
     #[tokio::test]

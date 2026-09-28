@@ -15,9 +15,61 @@ impl Reversibility {
     }
 }
 
+/// Veredicto de tres estados (Enclave M3, policy engine): `Allow` corre
+/// sin preguntar, `Confirm` pasa por el prompt (el flujo de siempre para
+/// lo irreversible), `Deny` no corre ni pregunta. El clasificador base
+/// solo produce los dos primeros; `Deny` lo aporta una
+/// [`Policy`](crate::Policy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Verdict {
+    Allow,
+    Confirm,
+    Deny,
+}
+
+impl Verdict {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Confirm => "confirm",
+            Self::Deny => "deny",
+        }
+    }
+}
+
+/// Veredicto más su procedencia (la regla de política que lo produjo, si
+/// alguna). `rule = None` = lo decidió el clasificador base.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Decision {
+    pub verdict: Verdict,
+    pub rule: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl Decision {
+    pub fn bare(verdict: Verdict) -> Self {
+        Self {
+            verdict,
+            rule: None,
+            reason: None,
+        }
+    }
+}
+
 /// Sync, pure computation — no I/O, so no async-trait here.
 pub trait ActionClassifier: Send + Sync {
     fn classify(&self, action: &ActionDescriptor) -> Reversibility;
+
+    /// Veredicto de tres estados con procedencia. Default: derivado de
+    /// [`Self::classify`] (nunca `Deny`); una política lo sobreescribe.
+    /// El guard consulta ESTE método.
+    fn decide(&self, action: &ActionDescriptor) -> Decision {
+        Decision::bare(match self.classify(action) {
+            Reversibility::Reversible => Verdict::Allow,
+            Reversibility::Irreversible => Verdict::Confirm,
+        })
+    }
 }
 
 /// WriteFile/DeleteFile: Reversible inside the WorkdirAllowlist, else

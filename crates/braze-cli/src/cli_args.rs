@@ -176,6 +176,14 @@ pub enum PermissionsAction {
     /// because approval replay is session-scoped. Read-only: nothing is
     /// applied, this is the evidence for a future allowlist.
     Suggest(SuggestArgs),
+    /// Valida y lista la política declarativa de permisos (policy engine,
+    /// backport de enclave M3): la ruta dada, o la que cargaría esta config
+    /// (`BRAZE_POLICY_FILE` / `policy_file`, `<dir del config>/policy.toml`,
+    /// `<session_dir>/policy.toml`). Exit ≠ 0 si es inválida.
+    Policy {
+        /// Ruta al policy.toml a validar (opcional).
+        file: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Args, Debug)]

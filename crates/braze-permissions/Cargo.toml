@@ -12,6 +12,9 @@ braze-types = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# Policy engine declarativo (Enclave M3, crate::policy): reglas en TOML.
+serde = { workspace = true }
+toml = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

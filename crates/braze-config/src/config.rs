@@ -367,6 +367,16 @@ pub struct Config {
     /// resolves it via `Theme::from_name` and errors at startup on an
     /// unrecognized name, same as `default_backend`.
     pub tui_theme: String,
+    /// Política declarativa de permisos (`braze_permissions::Policy`, TOML;
+    /// backport del policy engine de enclave M3, 2026-09-28). `None` =
+    /// `<dir del config>/policy.toml` si existe (el hermano de
+    /// `config.json`, p.ej. `~/.config/braze/policy.toml`), si no
+    /// `<session_dir>/policy.toml` si existe, si no sin política (solo el
+    /// clasificador base). Debe vivir donde el modelo NO escribe sin
+    /// confirmación (nunca en el workdir: una política editable por el
+    /// agente sería auto-escalación). `BRAZE_POLICY_FILE` o `policy_file`
+    /// en el config file.
+    pub policy_file: Option<PathBuf>,
     /// Disables `Engine`'s textual tool-call rescue (B5,
     /// docs/AUDITORIA-2026-07.md) — N-15 (docs/AUDITORIA-2026-07-v2.md):
     /// the rescue is purely syntactic, so a user literally asking to see
@@ -768,6 +778,7 @@ impl Default for Config {
             mcp_servers: Vec::new(),
             best_of_n: 1,
             tui_theme: "dark".to_string(),
+            policy_file: None,
             disable_textual_tool_call_rescue: false,
             enable_prompt_caching: true,
             disable_post_edit_check: false,
@@ -1008,6 +1019,9 @@ impl Config {
         if let Some(v) = overrides.tui_theme {
             self.tui_theme = v;
         }
+        if let Some(v) = overrides.policy_file {
+            self.policy_file = Some(v);
+        }
         if let Some(v) = overrides.disable_textual_tool_call_rescue {
             self.disable_textual_tool_call_rescue = v;
         }
@@ -1209,6 +1223,31 @@ mod tests {
         let env = vec![("BRAZE_TUI_THEME".to_string(), "light".to_string())];
         let config = Config::load_with(None, env).unwrap();
         assert_eq!(config.tui_theme, "light");
+    }
+
+    /// Policy engine (backport enclave M3): `policy_file` es `None` por
+    /// default y se fija por env o por el config file.
+    #[test]
+    fn policy_file_defaults_to_none_and_is_overridable_via_env_and_file() {
+        let config = Config::load_with(None, Vec::<(String, String)>::new()).unwrap();
+        assert_eq!(config.policy_file, None);
+        let env = vec![(
+            "BRAZE_POLICY_FILE".to_string(),
+            "/etc/braze/policy.toml".to_string(),
+        )];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(
+            config.policy_file.as_deref(),
+            Some(std::path::Path::new("/etc/braze/policy.toml"))
+        );
+        let dir = temp_dir("policy_file_from_config_file");
+        let path = dir.join("config.json");
+        std::fs::write(&path, r#"{"policy_file": "/srv/policy.toml"}"#).unwrap();
+        let config = Config::load_with(Some(&path), Vec::<(String, String)>::new()).unwrap();
+        assert_eq!(
+            config.policy_file.as_deref(),
+            Some(std::path::Path::new("/srv/policy.toml"))
+        );
     }
 
     #[test]

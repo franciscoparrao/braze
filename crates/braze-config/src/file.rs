@@ -100,6 +100,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     // opencode-10 (docs/opencode-a-braze.md § 10) — directorios de
     // referencia externos con descripción anunciada al modelo.
     "references",
+    // Policy engine (backport enclave M3, 2026-09-28): ruta al policy.toml.
+    "policy_file",
     // C′.1 — umbral de deferral de tools por provider (search_tools).
     "tool_search_threshold",
     // C′.2 — lista de tareas tipada (task_add/task_update).
