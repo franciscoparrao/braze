@@ -125,6 +125,10 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     // pese a aplicarse el valor. Encontrado al mapear el sandbox bwrap.
     "enable_landlock_write_sandbox",
     "disable_agents_md",
+    // Perfil operador (2026-09-28): tope del AGENTS.md e instrucciones
+    // globales del operador.
+    "agents_md_max_bytes",
+    "instructions_file",
     "enable_bwrap_tool_sandbox",
     "bwrap_allow_network",
     "enable_tool_output_spill",

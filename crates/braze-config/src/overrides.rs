@@ -130,6 +130,13 @@ pub struct ConfigOverrides {
     pub enable_tool_output_spill: Option<bool>,
     #[serde(default)]
     pub disable_agents_md: Option<bool>,
+    /// Tope de bytes del AGENTS.md / instrucciones globales
+    /// (`BRAZE_AGENTS_MD_MAX_BYTES`).
+    #[serde(default)]
+    pub agents_md_max_bytes: Option<usize>,
+    /// Instrucciones globales del operador (`BRAZE_INSTRUCTIONS_FILE`).
+    #[serde(default)]
+    pub instructions_file: Option<PathBuf>,
     #[serde(default)]
     pub tool_output_max_bytes: Option<u32>,
     #[serde(default)]
@@ -697,6 +704,20 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.disable_agents_md = Some(parsed);
+                }
+                "AGENTS_MD_MAX_BYTES" => {
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.agents_md_max_bytes = Some(parsed);
+                }
+                "INSTRUCTIONS_FILE" => {
+                    overrides.instructions_file = Some(PathBuf::from(value));
                 }
                 // Unrecognized `BRAZE_*` var: ignore (forward-compatible
                 // with a different braze version), but log it — bajo

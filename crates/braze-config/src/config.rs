@@ -193,6 +193,11 @@ fn default_hook_timeout_secs() -> u64 {
     10
 }
 
+/// Mismo tope histórico de `context_file.rs` (y del output por tool).
+fn default_agents_md_max_bytes() -> usize {
+    8_000
+}
+
 /// ~2k tokens: el `resume` del autor es ≤1.500 chars; el cap existe para
 /// que un script que vuelca de más no se coma el contexto.
 fn default_hook_max_bytes() -> usize {
@@ -629,6 +634,19 @@ pub struct Config {
     /// estándar que el interop promete.
     #[serde(default)]
     pub disable_agents_md: bool,
+    /// Tope de bytes del `AGENTS.md` inyectado (raíz y JIT de subdir) y
+    /// del archivo de instrucciones globales. Default 8.000 (el tope
+    /// histórico); el perfil operador lo sube porque un `CLAUDE.md` de
+    /// proyecto real pesa varias veces eso. `BRAZE_AGENTS_MD_MAX_BYTES`.
+    #[serde(default = "default_agents_md_max_bytes")]
+    pub agents_md_max_bytes: usize,
+    /// Instrucciones globales del operador (perfil operador, 2026-09-28):
+    /// el equivalente de `~/.claude/CLAUDE.md`. `None` = `<dir del
+    /// config>/AGENTS.md` si existe, si no nada. Se inyecta ANTES del
+    /// AGENTS.md del proyecto, con el mismo tope; `disable_agents_md`
+    /// también lo apaga. `BRAZE_INSTRUCTIONS_FILE`.
+    #[serde(default)]
+    pub instructions_file: Option<PathBuf>,
     /// Per-tool-result byte budget before `LocalToolsProvider::wrap`
     /// truncates and appends an actionable "narrow your query" trailer
     /// (v4 P2.4). Default 8000 — the historical `MAX_TOOL_OUTPUT_BYTES`
@@ -852,6 +870,8 @@ impl Default for Config {
             bwrap_allow_network: false,
             enable_tool_output_spill: true,
             disable_agents_md: false,
+            agents_md_max_bytes: default_agents_md_max_bytes(),
+            instructions_file: None,
             tool_output_max_bytes: default_tool_output_max_bytes(),
             tool_output_max_lines: None,
             formatters: default_formatters(),
@@ -906,8 +926,45 @@ impl Config {
         let env_overrides = ConfigOverrides::from_env(env_vars)?;
         config.apply_overrides(env_overrides);
 
+        config.expand_home_in_paths();
         config.validate()?;
         Ok(config)
+    }
+
+    /// Perfil operador (2026-09-28): `~` y `~/…` al comienzo de las rutas
+    /// del config se expanden con `$HOME` — un config global se escribe
+    /// una vez y vale en cualquier máquina. Aplica a `skills.paths`,
+    /// `references[].path`, `policy_file` e `instructions_file`; los argv
+    /// de `hooks` no se tocan (los ejecuta el shell del comando, si lo hay).
+    /// Sin `HOME`, las rutas quedan como están.
+    fn expand_home_in_paths(&mut self) {
+        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+            return;
+        };
+        let expand = |p: &mut PathBuf| {
+            if let Some(rest) = p.to_str().and_then(|s| {
+                s.strip_prefix("~/")
+                    .map(Some)
+                    .or_else(|| (s == "~").then_some(None))
+            }) {
+                *p = match rest {
+                    Some(rest) => home.join(rest),
+                    None => home.clone(),
+                };
+            }
+        };
+        for path in &mut self.skills.paths {
+            expand(path);
+        }
+        for reference in &mut self.references {
+            expand(&mut reference.path);
+        }
+        if let Some(p) = &mut self.policy_file {
+            expand(p);
+        }
+        if let Some(p) = &mut self.instructions_file {
+            expand(p);
+        }
     }
 
     /// Cross-field / range validation that can't be expressed per-field
@@ -1142,6 +1199,12 @@ impl Config {
         if let Some(v) = overrides.disable_agents_md {
             self.disable_agents_md = v;
         }
+        if let Some(v) = overrides.agents_md_max_bytes {
+            self.agents_md_max_bytes = v;
+        }
+        if let Some(v) = overrides.instructions_file {
+            self.instructions_file = Some(v);
+        }
         if let Some(v) = overrides.tool_output_max_bytes {
             self.tool_output_max_bytes = v;
         }
@@ -1277,6 +1340,51 @@ mod tests {
         let env = vec![("BRAZE_TUI_THEME".to_string(), "light".to_string())];
         let config = Config::load_with(None, env).unwrap();
         assert_eq!(config.tui_theme, "light");
+    }
+
+    /// Perfil operador: `~/` se expande con `$HOME` en las rutas del
+    /// config; `agents_md_max_bytes` e `instructions_file` cargan del
+    /// archivo y del env.
+    #[test]
+    fn home_expands_in_config_paths_and_agents_md_knobs_load() {
+        let home = std::env::var("HOME").expect("HOME en el entorno de test");
+        let dir = temp_dir("home_expands_in_config_paths");
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"skills": {"paths": ["~/.claude/skills", "/abs"]},
+                "references": [{"path": "~/vault"}],
+                "policy_file": "~/.config/braze/policy.toml",
+                "instructions_file": "~/.config/braze/AGENTS.md",
+                "agents_md_max_bytes": 40000}"#,
+        )
+        .unwrap();
+        let config = Config::load_with(Some(&path), Vec::<(String, String)>::new()).unwrap();
+        assert_eq!(
+            config.skills.paths,
+            vec![PathBuf::from(&home).join(".claude/skills"), PathBuf::from("/abs")]
+        );
+        assert_eq!(config.references[0].path, PathBuf::from(&home).join("vault"));
+        assert_eq!(
+            config.policy_file.as_deref(),
+            Some(PathBuf::from(&home).join(".config/braze/policy.toml").as_path())
+        );
+        assert_eq!(
+            config.instructions_file.as_deref(),
+            Some(PathBuf::from(&home).join(".config/braze/AGENTS.md").as_path())
+        );
+        assert_eq!(config.agents_md_max_bytes, 40_000);
+        assert_eq!(Config::default().agents_md_max_bytes, 8_000);
+        let env = vec![
+            ("BRAZE_AGENTS_MD_MAX_BYTES".to_string(), "123".to_string()),
+            ("BRAZE_INSTRUCTIONS_FILE".to_string(), "~/x.md".to_string()),
+        ];
+        let config = Config::load_with(None, env).unwrap();
+        assert_eq!(config.agents_md_max_bytes, 123);
+        assert_eq!(
+            config.instructions_file.as_deref(),
+            Some(PathBuf::from(&home).join("x.md").as_path())
+        );
     }
 
     /// Hooks de sesión: vacíos por default; se cargan del config file con

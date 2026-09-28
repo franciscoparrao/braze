@@ -363,6 +363,9 @@ pub struct Engine {
     /// con `braze_memory::resolve_project_root(cwd)` salvo
     /// `disable_agents_md`.
     agents_md_root: Option<std::path::PathBuf>,
+    /// Tope de bytes por `AGENTS.md` de subdir cargado JIT (config
+    /// `agents_md_max_bytes`; default el mismo 8.000 del raíz).
+    agents_md_max_bytes: usize,
     /// Rutas canónicas de los `AGENTS.md` ya cargados esta sesión — dedup
     /// del descubrimiento JIT. Sembrado con el `AGENTS.md` raíz (ya en el
     /// system prompt) para no re-inyectarlo. Session-scoped como
@@ -512,6 +515,7 @@ impl Engine {
             insistent_task_tools: false,
             loaded_skills: std::sync::Mutex::new(Vec::new()),
             agents_md_root: None,
+            agents_md_max_bytes: 8_000,
             loaded_agents_md: std::sync::Mutex::new(std::collections::HashSet::new()),
             loaded_agents_md_bodies: std::sync::Mutex::new(Vec::new()),
             session_context: None,
@@ -779,6 +783,13 @@ impl Engine {
     /// other builders.
     pub fn with_hook(mut self, hook: std::sync::Arc<dyn crate::hooks::EngineHook>) -> Self {
         self.hooks.push(crate::hooks::RegisteredHook::new(hook));
+        self
+    }
+
+    /// Tope de bytes por `AGENTS.md` de subdirectorio cargado JIT
+    /// (`Config::agents_md_max_bytes`). Chainable.
+    pub fn with_agents_md_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.agents_md_max_bytes = max_bytes.max(1);
         self
     }
 

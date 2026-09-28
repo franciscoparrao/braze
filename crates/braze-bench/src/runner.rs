@@ -453,6 +453,9 @@ pub async fn run_task(
         None,
         combined_memory_snapshot.as_deref(),
         None,
+        // Sin instrucciones globales del operador: mismo argumento que
+        // el AGENTS.md — el bench mide el prompt default de producción.
+        None,
     );
 
     // N-36: mirrors `braze-cli::main.rs`'s own Ollama-only context budget

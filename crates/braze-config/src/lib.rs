@@ -36,7 +36,10 @@ pub use config::{
     Config, FormatterConfig, HookCommand, McpServerConfigStub, ModelPricing, ReferenceConfig,
     SessionHooksConfig, SkillsConfig, default_formatters,
 };
-pub use context_file::{find_nearest_agents_md, load_agents_md, load_agents_md_from};
+pub use context_file::{
+    find_nearest_agents_md, load_agents_md, load_agents_md_from, load_agents_md_from_with_cap,
+    load_agents_md_with_cap, load_instructions_file,
+};
 pub use error::ConfigError;
 pub use overrides::ConfigOverrides;
 pub use paths::{config_file_path, default_session_dir};

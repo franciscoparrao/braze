@@ -952,7 +952,30 @@ async fn build_engine(
     let agents_md_snapshot = if config.disable_agents_md {
         None
     } else {
-        braze_config::load_agents_md(cwd)
+        braze_config::load_agents_md_with_cap(cwd, config.agents_md_max_bytes)
+    };
+    // Perfil operador (2026-09-28): instrucciones globales del operador —
+    // `instructions_file`, o `<dir del config>/AGENTS.md` si existe (el
+    // equivalente de `~/.claude/CLAUDE.md`). Mismo tope que el AGENTS.md
+    // del proyecto. Opt-out compartido con `disable_agents_md`.
+    let global_instructions_snapshot = if config.disable_agents_md {
+        None
+    } else {
+        config
+            .instructions_file
+            .clone()
+            .or_else(|| {
+                braze_config::config_file_path()
+                    .and_then(|p| p.parent().map(|d| d.join("AGENTS.md")))
+                    .filter(|p| p.is_file())
+            })
+            .and_then(|path| {
+                braze_config::load_instructions_file(
+                    &path,
+                    config.agents_md_max_bytes,
+                    "instrucciones globales",
+                )
+            })
     };
     // Carga JIT de AGENTS.md por subdirectorio
     // (docs/agents-md-jit-design-2026-08-11.md): salvo `disable_agents_md`,
@@ -978,6 +1001,7 @@ async fn build_engine(
             environment_snapshot.as_deref(),
             project_memory_snapshot.as_deref(),
             agents_md_snapshot.as_deref(),
+            global_instructions_snapshot.as_deref(),
         )
     });
 
@@ -1082,7 +1106,9 @@ async fn build_engine(
     // Carga JIT de AGENTS.md por subdir — techo en el git root, dedup
     // sembrado con el raíz. Solo si `disable_agents_md` no lo apagó.
     if let Some((root, root_md)) = agents_md_jit_root {
-        engine = engine.with_agents_md_jit(root, root_md);
+        engine = engine
+            .with_agents_md_jit(root, root_md)
+            .with_agents_md_max_bytes(config.agents_md_max_bytes);
     }
     // J-13 (docs/AUDITORIA-2026-07-v7.md): ask_user espera a un HUMANO —
     // dispatch inline, exento del timeout de 120s de los background

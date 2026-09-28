@@ -650,3 +650,28 @@ contexto" con warning, nunca bloquea el arranque. Perfil del autor:
 proyecto; `post_compact` = `context_resume.sh`. Verificado en vivo en este
 repo: glm-5.3-flash reporta la tarea actual y las tres entradas de
 `MEMORY.md` en 1 ronda sin herramientas.
+
+**Skills a paridad con Claude Code (2026-09-28)**: (1) `~/` se expande con
+`$HOME` en `skills.paths`, `references[].path`, `policy_file` e
+`instructions_file` (`Config::expand_home_in_paths`, tras aplicar
+overrides); (2) `/nombre args` al COMIENZO del input es alias de `$nombre`
+(`SkillRegistry::mentions_with_args` → `Mention {name, args}`; los args de
+`$nombre` son el resto de su línea, los de `/nombre` todo el resto del
+input; la TUI deja pasar al modelo cualquier `/x` que no sea uno de sus 6
+comandos, así el alias vale en CLI y TUI); (3) `$ARGUMENTS` en el body se
+sustituye ANTES de capar (`load_body_with_args`); (4) discovery salta
+directorios ocultos (`.trash/` de Claude Code) y, ante duplicados en un
+mismo root, gana el `SKILL.md` más superficial (`<n>/` sobre
+`synced/<uuid>/<n>/`): las 113 skills del autor sin avisos de duplicado
+(las 6 copias de `.trash/` ya no se recorren; `synced/` aporta 8 skills
+con nombre propio, p.ej. `pdf`, `xlsx`); (5)
+`agents_md_max_bytes` (default 8.000; el perfil del autor usa 48.000
+porque este `CLAUDE.md` pesa ~41 KB) capa el AGENTS.md raíz, los JIT de
+subdir (`Engine::with_agents_md_max_bytes`) y las instrucciones globales;
+(6) instrucciones GLOBALES del operador: `instructions_file` o `<dir del
+config>/AGENTS.md` si existe (el autor enlaza ahí su `~/.claude/CLAUDE.md`),
+inyectadas como sección "Operator instructions (global …)" ANTES de las del
+proyecto (`default_system_prompt` ganó el parámetro; el bench pasa `None`).
+NO se mapea `allowed-tools`: en Claude Code es permiso, y en braze los
+permisos los decide el policy engine, no la skill. Sin router automático
+por descripción (decisión D′ vigente).

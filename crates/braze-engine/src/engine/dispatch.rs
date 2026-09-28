@@ -1555,7 +1555,8 @@ impl Engine {
         let Some(dir) = found.parent() else {
             return Ok(());
         };
-        let Some(body) = braze_config::load_agents_md_from(dir) else {
+        let Some(body) = braze_config::load_agents_md_from_with_cap(dir, self.agents_md_max_bytes)
+        else {
             return Ok(());
         };
         self.loaded_agents_md_bodies.lock().unwrap().push(body);

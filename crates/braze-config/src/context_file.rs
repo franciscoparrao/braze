@@ -62,16 +62,34 @@ pub fn load_agents_md_from(dir: &Path) -> Option<String> {
     load_agents_md(dir)
 }
 
+/// [`load_agents_md_from`] con tope configurable (`agents_md_max_bytes`).
+pub fn load_agents_md_from_with_cap(dir: &Path, max_bytes: usize) -> Option<String> {
+    load_agents_md_with_cap(dir, max_bytes)
+}
+
 /// Lee `AGENTS.md` del directorio dado. `None` si no existe, no se puede
 /// leer (un context file ilegible no debe abortar el arranque — se traza
 /// y se sigue) o está vacío tras trim.
 pub fn load_agents_md(cwd: &Path) -> Option<String> {
-    let path = cwd.join("AGENTS.md");
-    let raw = match std::fs::read_to_string(&path) {
+    load_agents_md_with_cap(cwd, AGENTS_MD_MAX_BYTES)
+}
+
+/// [`load_agents_md`] con tope configurable (`agents_md_max_bytes`,
+/// perfil operador 2026-09-28: un `CLAUDE.md` de proyecto real pesa
+/// varias veces el tope default y el operador puede preferir pagarlo).
+pub fn load_agents_md_with_cap(cwd: &Path, max_bytes: usize) -> Option<String> {
+    load_instructions_file(&cwd.join("AGENTS.md"), max_bytes, "AGENTS.md")
+}
+
+/// Lee un archivo de instrucciones (trim + cap con nota de truncado) —
+/// el `AGENTS.md` de un directorio, o el archivo global del operador
+/// (`instructions_file`). `label` nombra el archivo en los avisos.
+pub fn load_instructions_file(path: &Path, max_bytes: usize, label: &str) -> Option<String> {
+    let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
         Err(err) => {
-            tracing::warn!(path = %path.display(), error = %err, "AGENTS.md ilegible; se ignora");
+            tracing::warn!(path = %path.display(), error = %err, "{label} ilegible; se ignora");
             return None;
         }
     };
@@ -79,22 +97,22 @@ pub fn load_agents_md(cwd: &Path) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    if trimmed.len() <= AGENTS_MD_MAX_BYTES {
+    if trimmed.len() <= max_bytes {
         return Some(trimmed.to_string());
     }
     // Truncado en el borde de char más cercano bajo el tope.
-    let cut = (0..=AGENTS_MD_MAX_BYTES)
+    let cut = (0..=max_bytes)
         .rev()
         .find(|i| trimmed.is_char_boundary(*i))
         .unwrap_or(0);
     tracing::warn!(
         path = %path.display(),
         bytes = trimmed.len(),
-        max = AGENTS_MD_MAX_BYTES,
-        "AGENTS.md excede el tope; se inyecta truncado"
+        max = max_bytes,
+        "{label} excede el tope; se inyecta truncado"
     );
     Some(format!(
-        "{}\n\n[AGENTS.md truncado a {AGENTS_MD_MAX_BYTES} bytes de {} — leer el archivo \
+        "{}\n\n[{label} truncado a {max_bytes} bytes de {} — leer el archivo \
          completo con read_file si hace falta]",
         &trimmed[..cut],
         trimmed.len()
@@ -111,6 +129,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Perfil operador: el tope es configurable y vale también para un
+    /// archivo de instrucciones arbitrario (las globales del operador).
+    #[test]
+    fn the_cap_is_configurable_and_applies_to_any_instructions_file() {
+        let dir = temp_dir("cap");
+        std::fs::write(dir.join("AGENTS.md"), "x".repeat(50)).unwrap();
+        let capped = load_agents_md_with_cap(&dir, 10).unwrap();
+        assert!(capped.starts_with(&"x".repeat(10)));
+        assert!(capped.contains("[AGENTS.md truncado a 10 bytes de 50"));
+        assert_eq!(load_agents_md_with_cap(&dir, 50).as_deref(), Some("x".repeat(50).as_str()));
+        std::fs::write(dir.join("global.md"), "  global  ").unwrap();
+        assert_eq!(
+            load_instructions_file(&dir.join("global.md"), 8_000, "global").as_deref(),
+            Some("global")
+        );
+        assert!(load_instructions_file(&dir.join("nope.md"), 8_000, "global").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -92,8 +92,13 @@ impl SkillRegistry {
             }
             let mut found = Vec::new();
             collect_skill_files(root, 0, &mut found);
-            found.sort(); // orden estable dentro del root
-            for file in found {
+            // Orden estable dentro del root: por profundidad primero, así
+            // ante nombres duplicados gana el `SKILL.md` más superficial
+            // (`skills/<n>/SKILL.md` sobre una copia en
+            // `skills/synced/<uuid>/<n>/SKILL.md`, el layout que Claude
+            // Code deja al sincronizar — perfil operador, 2026-09-28).
+            found.sort();
+            for (_, file) in found {
                 match parse_skill_file(&file) {
                     Some(stub) => {
                         if let Some(existing) = skills.iter().find(|s| s.name == stub.name) {
@@ -101,7 +106,7 @@ impl SkillRegistry {
                                 name = %stub.name,
                                 kept = ?existing.path,
                                 ignored = ?stub.path,
-                                "duplicate skill name; earlier config path wins"
+                                "duplicate skill name; earlier config path / shallower file wins"
                             );
                         } else {
                             skills.push(stub);
@@ -151,6 +156,21 @@ impl SkillRegistry {
     /// de ser legible (se degradó desde el discovery — warning, no
     /// error: la skill simplemente no se carga).
     pub fn load_body(&self, name: &str, max_body_tokens: usize) -> Option<LoadedSkill> {
+        self.load_body_with_args(name, max_body_tokens, "")
+    }
+
+    /// Como [`Self::load_body`], sustituyendo `$ARGUMENTS` en el body por
+    /// `args` (el texto que siguió a la mención — ver
+    /// [`Self::mentions_with_args`]), ANTES de capar. Es el contrato de
+    /// argumentos de las skills de Claude Code; un body sin `$ARGUMENTS`
+    /// no cambia (el texto del usuario sigue en su mensaje de todos
+    /// modos).
+    pub fn load_body_with_args(
+        &self,
+        name: &str,
+        max_body_tokens: usize,
+        args: &str,
+    ) -> Option<LoadedSkill> {
         let stub = self.find(name)?;
         let raw = match std::fs::read_to_string(&stub.path) {
             Ok(contents) => contents,
@@ -160,6 +180,13 @@ impl SkillRegistry {
             }
         };
         let body = skill_body(&raw);
+        let substituted;
+        let body: &str = if body.contains(ARGUMENTS_PLACEHOLDER) {
+            substituted = body.replace(ARGUMENTS_PLACEHOLDER, args.trim());
+            &substituted
+        } else {
+            body
+        };
         let cap_chars = max_body_tokens.saturating_mul(4);
         let (body, truncated) = if body.len() > cap_chars {
             // Corte en boundary de char para no partir UTF-8.
@@ -188,9 +215,47 @@ impl SkillRegistry {
     /// Extrae las menciones `$skill` de un input de usuario que
     /// resuelven contra este registry, en orden de aparición y sin
     /// duplicados. `$` seguido de `[a-z0-9_-]+` (case-insensitive) — el
-    /// trigger explícito de la v1.
+    /// trigger explícito de la v1. Solo los nombres; ver
+    /// [`Self::mentions_with_args`] para los argumentos.
     pub fn explicit_mentions(&self, input: &str) -> Vec<String> {
-        let mut mentions = Vec::new();
+        self.mentions_with_args(input)
+            .into_iter()
+            .map(|m| m.name)
+            .collect()
+    }
+
+    /// Menciones con sus argumentos (perfil operador, 2026-09-28 — paridad
+    /// con la invocación de skills de Claude Code):
+    ///
+    /// - `/nombre args…` al COMIENZO del input (tras whitespace): alias de
+    ///   `$nombre`; los argumentos son todo el resto del input.
+    /// - `$nombre args…` en cualquier parte: los argumentos son el resto
+    ///   de ESA línea (hasta el salto de línea), así varias menciones en
+    ///   líneas distintas no se pisan.
+    ///
+    /// Solo resuelven nombres del registry: `/home/x` sin skill `home` no
+    /// es una mención. Orden de aparición, sin duplicados (gana la
+    /// primera aparición, con sus args).
+    pub fn mentions_with_args(&self, input: &str) -> Vec<Mention> {
+        let mut mentions: Vec<Mention> = Vec::new();
+        let mut push = |name: String, args: &str| {
+            if self.find(&name).is_some() && !mentions.iter().any(|m| m.name == name) {
+                mentions.push(Mention {
+                    name,
+                    args: args.trim().to_string(),
+                });
+            }
+        };
+        // `/nombre` solo al comienzo: el alias de slash command.
+        let leading = input.trim_start();
+        if let Some(rest) = leading.strip_prefix('/') {
+            let end = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                .unwrap_or(rest.len());
+            if end > 0 {
+                push(normalize_name(&rest[..end]), &rest[end..]);
+            }
+        }
         let bytes = input.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
@@ -205,10 +270,11 @@ impl SkillRegistry {
                     end += 1;
                 }
                 if end > start {
-                    let candidate = normalize_name(&input[start..end]);
-                    if self.find(&candidate).is_some() && !mentions.contains(&candidate) {
-                        mentions.push(candidate);
-                    }
+                    let line_end = input[end..]
+                        .find('\n')
+                        .map(|n| end + n)
+                        .unwrap_or(input.len());
+                    push(normalize_name(&input[start..end]), &input[end..line_end]);
                 }
                 i = end;
             } else {
@@ -217,6 +283,19 @@ impl SkillRegistry {
         }
         mentions
     }
+}
+
+/// Placeholder de argumentos en el body de una skill (contrato de Claude
+/// Code): se sustituye por el texto que siguió a la mención.
+pub const ARGUMENTS_PLACEHOLDER: &str = "$ARGUMENTS";
+
+/// Una mención resuelta con sus argumentos — ver
+/// [`SkillRegistry::mentions_with_args`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mention {
+    pub name: String,
+    /// Texto que siguió a la mención, ya `trim()`eado; vacío si nada.
+    pub args: String,
 }
 
 /// Un body ya leído y capado, listo para inyectarse como addendum.
@@ -244,8 +323,10 @@ fn normalize_name(raw: &str) -> String {
     raw.trim().to_lowercase().replace(' ', "-")
 }
 
-/// Recorre `dir` hasta [`MAX_DISCOVERY_DEPTH`] juntando cada `SKILL.md`.
-fn collect_skill_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+/// Recorre `dir` hasta [`MAX_DISCOVERY_DEPTH`] juntando cada `SKILL.md`
+/// con su profundidad. Salta los directorios ocultos (`.trash/`, `.git/`):
+/// una skill "borrada" que Claude Code movió a `.trash/` no es una skill.
+fn collect_skill_files(dir: &Path, depth: usize, out: &mut Vec<(usize, PathBuf)>) {
     if depth > MAX_DISCOVERY_DEPTH {
         return;
     }
@@ -255,9 +336,15 @@ fn collect_skill_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_skill_files(&path, depth + 1, out);
+            let hidden = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'));
+            if !hidden {
+                collect_skill_files(&path, depth + 1, out);
+            }
         } else if path.file_name().is_some_and(|n| n == "SKILL.md") {
-            out.push(path);
+            out.push((depth, path));
         }
     }
 }
@@ -463,6 +550,55 @@ mod tests {
         assert_eq!(mentions, vec!["review".to_string(), "testing".to_string()]);
         assert!(registry.explicit_mentions("sin menciones").is_empty());
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Perfil operador: los directorios ocultos no se recorren (`.trash/`
+    /// de Claude Code) y, ante nombres duplicados dentro de un mismo root,
+    /// gana el archivo más superficial (`<n>/SKILL.md` sobre
+    /// `synced/<uuid>/<n>/SKILL.md`).
+    #[test]
+    fn discovery_skips_hidden_dirs_and_prefers_the_shallower_duplicate() {
+        let root = temp_skills_dir("hidden-shallow");
+        write_skill(&root, "memo", "memo", "la buena", "body");
+        write_skill(&root, "synced/uuid-1/memo", "memo", "copia sincronizada", "body");
+        write_skill(&root, ".trash/123/old", "old", "borrada", "body");
+        let registry = SkillRegistry::discover(std::slice::from_ref(&root));
+        assert_eq!(registry.stubs().len(), 1, "{:?}", registry.stubs());
+        assert_eq!(registry.find("memo").unwrap().description, "la buena");
+        assert!(registry.find("old").is_none(), ".trash/ no se recorre");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Paridad con Claude Code: `/nombre args` al comienzo es alias de
+    /// `$nombre`, los args de `$nombre` son el resto de su línea, y
+    /// `$ARGUMENTS` en el body se sustituye antes de capar.
+    #[test]
+    fn slash_alias_arguments_and_placeholder_substitution() {
+        let root = temp_skills_dir("args");
+        write_skill(&root, "d", "destelegrafiar", "d", "Modo: $ARGUMENTS\nfin");
+        write_skill(&root, "r", "review", "d", "sin placeholder");
+        let registry = SkillRegistry::discover(std::slice::from_ref(&root));
+
+        let m = registry.mentions_with_args("  /destelegrafiar check borrador.md\nsegunda línea");
+        assert_eq!(
+            m,
+            vec![Mention {
+                name: "destelegrafiar".into(),
+                args: "check borrador.md\nsegunda línea".into()
+            }]
+        );
+        let m = registry.mentions_with_args("usa $review a fondo\ny $destelegrafiar fix x.md");
+        assert_eq!(m[0], Mention { name: "review".into(), args: "a fondo".into() });
+        assert_eq!(m[1], Mention { name: "destelegrafiar".into(), args: "fix x.md".into() });
+        assert!(registry.mentions_with_args("/home/x no es skill").is_empty());
+        assert!(registry.mentions_with_args("ruta /review/x").is_empty(), "solo al comienzo");
+        assert_eq!(registry.explicit_mentions("$review $review"), vec!["review".to_string()]);
+
+        let loaded = registry.load_body_with_args("destelegrafiar", 1000, "check borrador.md").unwrap();
+        assert_eq!(loaded.body, "Modo: check borrador.md\nfin");
+        assert_eq!(registry.load_body("destelegrafiar", 1000).unwrap().body, "Modo: \nfin");
+        assert_eq!(registry.load_body_with_args("review", 1000, "algo").unwrap().body, "sin placeholder");
         let _ = std::fs::remove_dir_all(&root);
     }
 

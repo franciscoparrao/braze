@@ -1251,9 +1251,9 @@ impl Engine {
         let Some(registry) = &self.skill_registry else {
             return Ok(());
         };
-        let mentions = registry.explicit_mentions(user_input);
+        let mentions = registry.mentions_with_args(user_input);
         let mut loaded_this_turn = 0usize;
-        for name in mentions {
+        for braze_skills::Mention { name, args } in mentions {
             if self
                 .loaded_skills
                 .lock()
@@ -1278,12 +1278,13 @@ impl Engine {
                 .await?;
                 continue;
             }
-            match registry.load_body(&name, self.skills_max_body_tokens) {
+            match registry.load_body_with_args(&name, self.skills_max_body_tokens, &args) {
                 Some(loaded) => {
                     tracing::info!(
                         skill = %loaded.name,
                         estimated_tokens = loaded.estimated_tokens,
                         truncated = loaded.truncated,
+                        args = %args,
                         "skill loaded from explicit mention"
                     );
                     self.append_and_notify(

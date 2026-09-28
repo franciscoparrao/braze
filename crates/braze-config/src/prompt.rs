@@ -149,6 +149,11 @@ pub fn default_system_prompt(
     environment: Option<&str>,
     project_memory: Option<&str>,
     agents_md: Option<&str>,
+    // Perfil operador (2026-09-28): instrucciones GLOBALES del operador
+    // (`instructions_file`, default `<dir del config>/AGENTS.md`) — el
+    // equivalente del `~/.claude/CLAUDE.md`. Van ANTES de las del proyecto:
+    // las del repo son más específicas y se leen después.
+    global_instructions: Option<&str>,
 ) -> String {
     let family_hint = model_name
         .map(ModelFamily::from_model_name)
@@ -168,6 +173,18 @@ pub fn default_system_prompt(
     // puro (recibe strings, no lee disco), que es lo que mantiene al
     // bench midiendo el prompt de producción sin heredar el AGENTS.md
     // de la máquina del operador.
+    // Perfil operador: sección propia, antes del AGENTS.md del proyecto.
+    let global_instructions_section = match global_instructions {
+        Some(content) if !content.trim().is_empty() => {
+            format!(
+                "\n\nOperator instructions (global, from the operator's own config directory — \
+                 not part of this repository):\n{}",
+                content.trim_end()
+            )
+        }
+        _ => String::new(),
+    };
+
     let agents_md_section = match agents_md {
         Some(content) if !content.trim().is_empty() => {
             format!(
@@ -228,7 +245,7 @@ pub fn default_system_prompt(
          narrate never actually happens.\n\
          - Relative paths are resolved against the working directory above.\n\
          - Old tool results may appear collapsed to one line to save space — \
-         re-run the tool if you need their full content.{family_hint}{references_section}{environment_section}{agents_md_section}{project_memory_section}",
+         re-run the tool if you need their full content.{family_hint}{references_section}{environment_section}{global_instructions_section}{agents_md_section}{project_memory_section}",
         cwd.display()
     )
 }
@@ -282,10 +299,32 @@ pub fn ollama_context_budget_tokens(
 mod tests {
     use super::*;
 
+    /// Perfil operador: las instrucciones globales del operador van en su
+    /// propia sección, ANTES del AGENTS.md del proyecto; vacías = sin
+    /// sección.
+    #[test]
+    fn global_instructions_get_their_own_section_before_the_project_ones() {
+        let with = default_system_prompt(
+            Path::new("/p"),
+            None,
+            &[],
+            None,
+            None,
+            Some("Regla del repo."),
+            Some("Español de Chile, sin voseo."),
+        );
+        let global = with.find("Operator instructions (global").expect("sección global");
+        let project = with.find("Project instructions (AGENTS.md").expect("sección proyecto");
+        assert!(global < project, "global antes que proyecto");
+        assert!(with.contains("Español de Chile, sin voseo."));
+        let blank = default_system_prompt(Path::new("/p"), None, &[], None, None, None, Some("  "));
+        assert!(!blank.contains("Operator instructions"));
+    }
+
     #[test]
     fn default_system_prompt_includes_cwd_and_anti_loop_guidance() {
         let prompt =
-            default_system_prompt(Path::new("/home/user/project"), None, &[], None, None, None);
+            default_system_prompt(Path::new("/home/user/project"), None, &[], None, None, None, None);
         assert!(prompt.contains("/home/user/project"));
         assert!(prompt.contains("Never call the same tool"));
     }
@@ -293,7 +332,7 @@ mod tests {
     #[test]
     fn default_system_prompt_tells_the_model_to_act_not_just_narrate() {
         let prompt =
-            default_system_prompt(Path::new("/home/user/project"), None, &[], None, None, None);
+            default_system_prompt(Path::new("/home/user/project"), None, &[], None, None, None, None);
         assert!(prompt.contains("call the tool for it in the same turn"));
     }
 
@@ -301,7 +340,7 @@ mod tests {
 
     #[test]
     fn no_model_name_gets_no_family_hint() {
-        let prompt = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
+        let prompt = default_system_prompt(Path::new("/p"), None, &[], None, None, None, None);
         assert!(!prompt.contains("tool_call"));
         assert!(!prompt.contains("<function="));
     }
@@ -309,7 +348,7 @@ mod tests {
     #[test]
     fn an_unrecognized_model_name_gets_no_family_hint() {
         let prompt =
-            default_system_prompt(Path::new("/p"), Some("llama3.1"), &[], None, None, None);
+            default_system_prompt(Path::new("/p"), Some("llama3.1"), &[], None, None, None, None);
         assert!(!prompt.contains("tool_call"));
         assert!(!prompt.contains("<function="));
     }
@@ -317,7 +356,7 @@ mod tests {
     #[test]
     fn a_qwen2_model_gets_the_tagged_json_hint() {
         let prompt =
-            default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"), &[], None, None, None);
+            default_system_prompt(Path::new("/p"), Some("qwen2.5:3b"), &[], None, None, None, None);
         assert!(prompt.contains("<tool_call>"));
         assert!(!prompt.contains("<function="));
     }
@@ -331,6 +370,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(prompt.contains("<function="));
         assert!(!prompt.contains("<tool_call>"));
@@ -339,7 +379,7 @@ mod tests {
     #[test]
     fn model_family_matching_is_case_insensitive() {
         let prompt =
-            default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"), &[], None, None, None);
+            default_system_prompt(Path::new("/p"), Some("QWEN2.5:3B"), &[], None, None, None, None);
         assert!(prompt.contains("<tool_call>"));
     }
 
@@ -352,7 +392,7 @@ mod tests {
     #[test]
     fn a_glm_model_gets_the_arg_tag_hint_including_openrouter_style_names() {
         let prompt =
-            default_system_prompt(Path::new("/p"), Some("z-ai/glm-5.2"), &[], None, None, None);
+            default_system_prompt(Path::new("/p"), Some("z-ai/glm-5.2"), &[], None, None, None, None);
         assert!(prompt.contains("<arg_key>"), "got: {prompt}");
         assert!(prompt.contains("<arg_value>"));
         assert!(!prompt.contains("<tool_call>"));
@@ -366,7 +406,7 @@ mod tests {
     #[test]
     fn a_gemma_model_gets_no_hint_no_observed_leak_grammar() {
         let prompt =
-            default_system_prompt(Path::new("/p"), Some("gemma4:e4b"), &[], None, None, None);
+            default_system_prompt(Path::new("/p"), Some("gemma4:e4b"), &[], None, None, None, None);
         assert!(!prompt.contains("<arg_key>"));
         assert!(!prompt.contains("<tool_call>"));
         assert!(!prompt.contains("<function="));
@@ -388,12 +428,12 @@ mod tests {
                 description: None,
             },
         ];
-        let prompt = default_system_prompt(Path::new("/p"), None, &references, None, None, None);
+        let prompt = default_system_prompt(Path::new("/p"), None, &references, None, None, None, None);
         assert!(prompt.contains("Reference directories"), "got: {prompt}");
         assert!(prompt.contains("/home/user/api-docs: API reference docs"));
         assert!(!prompt.contains("/home/user/scratch"));
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None, None);
         assert!(!without.contains("Reference directories"));
     }
 
@@ -408,6 +448,7 @@ mod tests {
             Some("- date: 2026-07-10\n- git branch: main"),
             None,
             None,
+            None,
         );
         assert!(
             with.contains("Environment:\n- date: 2026-07-10"),
@@ -415,10 +456,10 @@ mod tests {
         );
         assert!(with.contains("- git branch: main"));
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None, None);
         assert!(!without.contains("Environment:"));
 
-        let blank = default_system_prompt(Path::new("/p"), None, &[], Some("   "), None, None);
+        let blank = default_system_prompt(Path::new("/p"), None, &[], Some("   "), None, None, None);
         assert!(
             !blank.contains("Environment:"),
             "blank snapshot adds nothing"
@@ -438,6 +479,7 @@ mod tests {
             None,
             Some("Objective: build the CLI\n- src/main.rs (write_file)"),
             None,
+            None,
         );
         assert!(
             with.contains("Project memory (from earlier sessions):\nObjective: build the CLI"),
@@ -445,10 +487,10 @@ mod tests {
         );
         assert!(with.contains("- src/main.rs (write_file)"));
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None, None);
         assert!(!without.contains("Project memory"));
 
-        let blank = default_system_prompt(Path::new("/p"), None, &[], None, Some("   "), None);
+        let blank = default_system_prompt(Path::new("/p"), None, &[], None, Some("   "), None, None);
         assert!(
             !blank.contains("Project memory"),
             "blank section adds nothing"
@@ -464,6 +506,7 @@ mod tests {
             None,
             None,
             Some("# Reglas del repo\n- correr rustfmt antes de commitear"),
+            None,
         );
         assert!(
             with.contains(
@@ -472,10 +515,10 @@ mod tests {
             "got: {with}"
         );
 
-        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None);
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None, None);
         assert!(!without.contains("AGENTS.md"));
 
-        let blank = default_system_prompt(Path::new("/p"), None, &[], None, None, Some("   "));
+        let blank = default_system_prompt(Path::new("/p"), None, &[], None, None, Some("   "), None);
         assert!(!blank.contains("AGENTS.md"), "blanco tras trim = ausente");
     }
 
