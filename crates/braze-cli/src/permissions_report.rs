@@ -35,6 +35,81 @@ pub struct PermissionStat {
     pub sessions: usize,
 }
 
+/// Reglas TOML listas para pegar en `policy.toml` (perfil operador,
+/// 2026-09-28): una regla `allow` por acción aprobada al menos
+/// `min_count` veces y NUNCA denegada, derivada con la misma
+/// generalización que "siempre" (`rule_for_always`), deduplicada por
+/// patrón. Vacío si no hay candidatas.
+pub fn render_suggested_rules(
+    stats: &[PermissionStat],
+    min_count: usize,
+    root: &std::path::Path,
+) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut ids = std::collections::HashSet::new();
+    let mut blocks = Vec::new();
+    for stat in stats {
+        if stat.approved < min_count.max(1) || stat.denied > 0 {
+            continue;
+        }
+        let action = match &stat.key {
+            PermissionKey::Shell { command } => braze_permissions::ActionDescriptor::ShellCommand {
+                command: command.clone(),
+            },
+            PermissionKey::WriteFile { path } => {
+                braze_permissions::ActionDescriptor::WriteFile { path: path.clone() }
+            }
+            PermissionKey::DeleteFile { path } => {
+                braze_permissions::ActionDescriptor::DeleteFile { path: path.clone() }
+            }
+            PermissionKey::ReadPath { path } => {
+                braze_permissions::ActionDescriptor::ReadPath { path: path.clone() }
+            }
+            PermissionKey::McpToolCall { server, tool } => {
+                braze_permissions::ActionDescriptor::McpToolCall {
+                    server: server.clone(),
+                    tool: tool.clone(),
+                }
+            }
+            PermissionKey::Fetch { url } => {
+                braze_permissions::ActionDescriptor::Fetch { url: url.clone() }
+            }
+        };
+        let Some(mut rule) = braze_permissions::rule_for_always(&action, root) else {
+            continue;
+        };
+        if !seen.insert((rule.action.label(), rule.patterns.clone())) {
+            continue;
+        }
+        // Ids únicos dentro de la sugerencia (pegarlas todas debe dar una
+        // política válida); `to_toml` ya escapa los strings vía `toml`.
+        let base_id = rule.id.clone();
+        let mut n = 2;
+        while !ids.insert(rule.id.clone()) {
+            rule.id = format!("{base_id}-{n}");
+            n += 1;
+        }
+        rule.reason = format!(
+            "sugerida por `braze permissions suggest`: aprobada {} en {} sesión(es)",
+            if stat.approved == 1 {
+                "1 vez".to_string()
+            } else {
+                format!("{} veces", stat.approved)
+            },
+            stat.sessions
+        );
+        blocks.push(rule.to_toml());
+    }
+    if blocks.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\nReglas sugeridas para policy.toml (revisar antes de pegar; una regla al final \
+         no pisa un `deny` anterior):\n\n{}",
+        blocks.join("\n")
+    )
+}
+
 /// Categoría legible + etiqueta de una `PermissionKey`, para el reporte.
 pub fn category_and_label(key: &PermissionKey) -> (&'static str, String) {
     let (category, label) = match key {

@@ -656,6 +656,27 @@ Forbidden por `protect-braze-config` y el modelo lo reporta sin inventar.
 Gotcha vigente: sin TTY (`braze run`) todo `Confirm` es denegar — lo que no
 esté en la política y no sea seguro para el base no corre.
 
+**"Siempre" en el prompt de confirmación (2026-09-28)**: tercera respuesta
+`a` en el chat plano (`[y = sí / N = no / a = siempre]`) y tecla `a` en el
+overlay de la TUI (`ApprovalDecision::{Deny,Once,Always}` reemplaza al
+`bool` del canal). `Always` aprueba Y escribe una regla `allow` derivada de
+la acción (`rule_for_always`, la misma generalización que el "always
+allow" de Claude Code: basename del programa; `git commit*`/`cargo test*`
+para multiplexores; ruta relativa exacta bajo el workdir o `<padre>/**`
+fuera de él, salvo padres muy altos como `/tmp` donde queda la ruta exacta;
+`servidor/tool` para MCP; host para fetch) al FINAL del `policy.toml`
+cargado — o de `<dir del config>/policy.toml` si no había — con id único y
+validación del archivo resultante antes de escribir (tmp + rename), y a la
+política VIVA (`SharedPolicy = Arc<RwLock<Policy>>`, compartida por los
+`PolicyClassifier` de todos los guards): la regla vale en el acto, para
+otros argumentos y sin reiniciar. Un `deny` anterior sigue mandando
+(primera regla que matchea). Si el archivo falla, aprueba solo esta vez y
+lo dice. `braze permissions suggest` emite además reglas TOML listas para
+pegar (aprobadas ≥ `--min-count` veces y nunca denegadas, misma
+derivación, ids únicos). Verificado en vivo por pty en `braze chat`: `curl
+--version` pregunta → `a` → regla `always-shell-curl` en el archivo, corre,
+y la segunda invocación no vuelve a preguntar.
+
 **Hooks de sesión externos (`hooks` en el config, 2026-09-28)**: el puente
 con el andamiaje del autor fuera de braze. `hooks.session_start` (corre al
 construir el engine, `source` = `startup`|`resume`; el rebuild por `/model`

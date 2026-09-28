@@ -60,7 +60,8 @@ pub use confirm::ConfirmationPrompt;
 pub use error::PermissionError;
 pub use guard::{DecisionHook, GuardOutcome, PermissionGuard, derive_permission_key};
 pub use policy::{
-    Fallback, Policy, PolicyAction, PolicyClassifier, PolicyError, Rule, glob, url_host,
+    Fallback, Policy, PolicyAction, PolicyClassifier, PolicyError, PolicyWriter, Rule,
+    SharedPolicy, glob, rule_for_always, url_host,
 };
 pub use human_wait::{
     HumanWait, accumulated as human_wait_accumulated, is_waiting as human_is_waiting,

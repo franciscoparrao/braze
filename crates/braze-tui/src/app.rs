@@ -24,7 +24,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::approval::ApprovalRequest;
+use crate::approval::{ApprovalDecision, ApprovalRequest};
 use crate::composer_trigger::{ComposerTrigger, detect_trigger, token_suffix_len};
 use crate::error::TuiError;
 use crate::history_cell::{
@@ -454,7 +454,7 @@ impl App {
                     if self.turn_running {
                         self.pending_approvals.push_back(request);
                     } else {
-                        let _ = request.respond.send(false);
+                        let _ = request.respond.send(ApprovalDecision::Deny);
                     }
                 }
                 Some(request) = self.question_rx.recv() => {
@@ -497,7 +497,14 @@ impl App {
 
         if !self.pending_approvals.is_empty() {
             match key.code {
-                KeyCode::Char('y' | 'Y') => self.answer_pending_approval(true, terminal)?,
+                KeyCode::Char('y' | 'Y') => {
+                    self.answer_pending_approval(ApprovalDecision::Once, terminal)?
+                }
+                // Perfil operador: "siempre" = aprobar y agregar la regla a
+                // la política (lo escribe `ChannelConfirmationPrompt`).
+                KeyCode::Char('a' | 'A') => {
+                    self.answer_pending_approval(ApprovalDecision::Always, terminal)?
+                }
                 KeyCode::Char('n' | 'N') | KeyCode::Esc => {
                     // Bajo (docs/AUDITORIA-2026-07-v2.md, "last_esc_at no
                     // se limpia cuando otro handler consume el Esc"): this
@@ -506,7 +513,7 @@ impl App {
                     // timestamp here could make a later, unrelated single
                     // idle Esc misread as the second tap.
                     self.last_esc_at = None;
-                    self.answer_pending_approval(false, terminal)?
+                    self.answer_pending_approval(ApprovalDecision::Deny, terminal)?
                 }
                 // Ignore everything else while a decision is pending —
                 // no typing into the composer, no accidental submit.
@@ -1397,7 +1404,7 @@ impl App {
         // ambiguous case) rather than leave a stale prompt that could
         // resurface confusingly once a new turn starts.
         for request in self.pending_approvals.drain(..) {
-            let _ = request.respond.send(false);
+            let _ = request.respond.send(ApprovalDecision::Deny);
         }
         // Same for pending `ask_user` questions: anything still queued
         // belongs to the turn just abandoned — answer "no answer" (the
@@ -1427,18 +1434,22 @@ impl App {
     /// (see `pending_approvals`'s doc comment).
     fn answer_pending_approval(
         &mut self,
-        allowed: bool,
+        decision: ApprovalDecision,
         terminal: &mut Terminal<Backend>,
     ) -> Result<(), TuiError> {
         let Some(request) = self.pending_approvals.pop_front() else {
             return Ok(());
         };
-        let description = request.description.clone();
+        let mut description = request.description.clone();
+        if decision == ApprovalDecision::Always {
+            description.push_str("  (siempre: regla agregada a la política)");
+        }
+        let allowed = decision.allowed();
         // The other end (`ChannelConfirmationPrompt::confirm`) may have
         // stopped awaiting already only if it was itself dropped/aborted
         // (e.g. its turn got interrupted) — sending is best-effort, not
         // fatal if so.
-        let _ = request.respond.send(allowed);
+        let _ = request.respond.send(decision);
         self.commit_cell(
             &PermissionCell {
                 description,
@@ -1766,7 +1777,7 @@ impl App {
             let muted = Style::default().fg(self.theme.muted);
             let hint = if !self.pending_approvals.is_empty() {
                 Line::from(Span::styled(
-                    "esperando tu decisión... (y permitir · n/Esc denegar)",
+                    "esperando tu decisión... (y permitir · a siempre · n/Esc denegar)",
                     muted,
                 ))
             } else if self.switching_model {
@@ -1819,7 +1830,7 @@ impl App {
 
         if let Some(request) = self.pending_approvals.front() {
             let mut answer_hint =
-                "esta acción puede ser irreversible — y permitir · n/Esc denegar".to_string();
+                "esta acción puede ser irreversible — y permitir · a siempre (regla en la política) · n/Esc denegar".to_string();
             if self.pending_approvals.len() > 1 {
                 answer_hint.push_str(&format!("  ({} pendientes)", self.pending_approvals.len()));
             }

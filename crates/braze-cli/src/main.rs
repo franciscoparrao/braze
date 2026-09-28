@@ -205,7 +205,10 @@ fn build_permission_guard(
     tui_mode: bool,
     supervised: bool,
     approval_tx: tokio::sync::mpsc::UnboundedSender<braze_tui::ApprovalRequest>,
-    policy: &braze_permissions::Policy,
+    policy: &braze_permissions::SharedPolicy,
+    // "Siempre" en el prompt: escribe la regla al policy.toml y a la
+    // política viva compartida por todos los guards.
+    policy_writer: Option<std::sync::Arc<braze_permissions::PolicyWriter>>,
 ) -> braze_permissions::PermissionGuard {
     // opencode-10 (docs/opencode-a-braze.md § 10): every configured
     // reference directory is an extra allowlist root — OpenCode's
@@ -237,9 +240,12 @@ fn build_permission_guard(
     // `default` decide (`inherit` = el base). Es la allowlist persistente
     // que la aprobación por sesión (`seed_remembered`) no daba: un
     // `python3` aprobado hoy volvía a preguntar mañana.
-    let classifier: Box<dyn braze_permissions::ActionClassifier> = Box::new(
-        braze_permissions::PolicyClassifier::new(policy.clone(), base, cwd.to_path_buf()),
-    );
+    let classifier: Box<dyn braze_permissions::ActionClassifier> =
+        Box::new(braze_permissions::PolicyClassifier::new_shared(
+            std::sync::Arc::clone(policy),
+            base,
+            cwd.to_path_buf(),
+        ));
     // Las decisiones POR POLÍTICA se persisten como `PermissionDecided`
     // etiquetadas con la regla (las confirmaciones humanas ya las persiste
     // el prompt), así `braze permissions suggest` y el rollout ven qué
@@ -276,11 +282,11 @@ fn build_permission_guard(
         // id into the identical `Arc` once the user backtracks, so a
         // later permission decision lands in the right session's
         // rollout log instead of the one this guard was built for.
-        Box::new(braze_tui::ChannelConfirmationPrompt::new(
-            live_session,
-            store,
-            approval_tx,
-        ))
+        let mut prompt = braze_tui::ChannelConfirmationPrompt::new(live_session, store, approval_tx);
+        if let Some(writer) = policy_writer {
+            prompt = prompt.with_policy_writer(writer);
+        }
+        Box::new(prompt)
     } else {
         // The plain chat/run loop has no backtrack (a TUI-only feature)
         // and never re-seeds this after startup, so a one-time read is
@@ -288,7 +294,11 @@ fn build_permission_guard(
         let session = *live_session
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        Box::new(TerminalConfirmationPrompt::new(session, store))
+        let mut prompt = TerminalConfirmationPrompt::new(session, store);
+        if let Some(writer) = policy_writer {
+            prompt = prompt.with_policy_writer(writer);
+        }
+        Box::new(prompt)
     };
     let guard =
         braze_permissions::PermissionGuard::new(allowlist_for_guard, classifier, confirmation)
@@ -805,9 +815,23 @@ async fn build_engine(
     // `build_permission_guard` — since `PermissionGuard` isn't
     // shared/`Clone` across providers. All of them share the same
     // `replayed_keys`, seeded from the same session's own prior decisions.
-    // Policy engine: una sola carga por arranque, compartida por todos los
-    // guards (uno por provider). Inválida = no arranca.
-    let (policy, _policy_file) = load_policy(config)?;
+    // Policy engine: una sola carga por arranque, compartida (viva) por
+    // todos los guards (uno por provider). Inválida = no arranca. El
+    // escritor de "siempre" apunta al archivo cargado, o al que se
+    // crearía junto al config si no había ninguno.
+    let (policy, policy_file) = load_policy(config)?;
+    let policy: braze_permissions::SharedPolicy =
+        std::sync::Arc::new(std::sync::RwLock::new(policy));
+    let policy_path = policy_file.unwrap_or_else(|| {
+        braze_config::config_file_path()
+            .and_then(|p| p.parent().map(|d| d.join("policy.toml")))
+            .unwrap_or_else(|| config.session_dir.join("policy.toml"))
+    });
+    let policy_writer = Some(std::sync::Arc::new(braze_permissions::PolicyWriter::new(
+        policy_path,
+        std::sync::Arc::clone(&policy),
+        cwd.to_path_buf(),
+    )));
     let local_guard = build_permission_guard(
         cwd,
         &config.references,
@@ -818,6 +842,7 @@ async fn build_engine(
         supervised,
         approval_tx.clone(),
         &policy,
+        policy_writer.clone(),
     );
 
     let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard)
@@ -873,6 +898,7 @@ async fn build_engine(
             supervised,
             approval_tx.clone(),
             &policy,
+            policy_writer.clone(),
         );
         match braze_mcp_client::McpToolProvider::connect(
             server.name.clone(),
@@ -1317,6 +1343,11 @@ async fn run_permissions(
     print!(
         "{}",
         permissions_report::render_report(&stats, args.top, args.min_count)
+    );
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    print!(
+        "{}",
+        permissions_report::render_suggested_rules(&stats, args.min_count, &cwd)
     );
     println!(
         "\n({} sesiones leídas de {})",

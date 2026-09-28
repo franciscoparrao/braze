@@ -26,7 +26,23 @@ use tokio::sync::{mpsc, oneshot};
 /// `ChannelConfirmationPrompt::confirm`'s safety-default handling).
 pub struct ApprovalRequest {
     pub description: String,
-    pub respond: oneshot::Sender<bool>,
+    pub respond: oneshot::Sender<ApprovalDecision>,
+}
+
+/// La respuesta del humano al overlay: `Always` aprueba Y agrega una regla
+/// `allow` a la política (archivo + política viva) — el "always allow" de
+/// Claude Code — vía el `PolicyWriter` que tenga el prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    Deny,
+    Once,
+    Always,
+}
+
+impl ApprovalDecision {
+    pub fn allowed(self) -> bool {
+        !matches!(self, Self::Deny)
+    }
 }
 
 /// N-12 (docs/AUDITORIA-2026-07-v2.md): `session` is a *shared, mutable*
@@ -45,6 +61,9 @@ pub struct ChannelConfirmationPrompt {
     session: Arc<Mutex<SessionId>>,
     store: Arc<dyn braze_session::SessionStore>,
     tx: mpsc::UnboundedSender<ApprovalRequest>,
+    /// "Siempre": escribe la regla derivada de la acción. `None` = la
+    /// respuesta `Always` equivale a `Once`.
+    policy_writer: Option<Arc<braze_permissions::PolicyWriter>>,
 }
 
 impl ChannelConfirmationPrompt {
@@ -53,7 +72,17 @@ impl ChannelConfirmationPrompt {
         store: Arc<dyn braze_session::SessionStore>,
         tx: mpsc::UnboundedSender<ApprovalRequest>,
     ) -> Self {
-        Self { session, store, tx }
+        Self {
+            session,
+            store,
+            tx,
+            policy_writer: None,
+        }
+    }
+
+    pub fn with_policy_writer(mut self, writer: Arc<braze_permissions::PolicyWriter>) -> Self {
+        self.policy_writer = Some(writer);
+        self
     }
 
     /// The session id to persist against for *this* `confirm()` call —
@@ -103,11 +132,31 @@ impl ConfirmationPrompt for ChannelConfirmationPrompt {
             description: action.to_string(),
             respond: respond_tx,
         };
-        let allowed = if self.tx.send(request).is_err() {
-            false
+        let decision = if self.tx.send(request).is_err() {
+            ApprovalDecision::Deny
         } else {
-            respond_rx.await.unwrap_or(false)
+            respond_rx.await.unwrap_or(ApprovalDecision::Deny)
         };
+        if decision == ApprovalDecision::Always {
+            match self.policy_writer.as_deref() {
+                Some(writer) => match writer.allow_always(action) {
+                    Ok(rule) => tracing::info!(
+                        rule = %rule.id,
+                        pattern = %rule.patterns.join(", "),
+                        file = %writer.path().display(),
+                        "regla `allow` agregada a la política desde el overlay (siempre)"
+                    ),
+                    Err(err) => tracing::warn!(
+                        error = %err,
+                        "no se pudo guardar la regla de 'siempre'; aprobado solo esta vez"
+                    ),
+                },
+                None => tracing::warn!(
+                    "'siempre' sin archivo de política configurado; aprobado solo esta vez"
+                ),
+            }
+        }
+        let allowed = decision.allowed();
 
         if let Err(err) = self
             .store
@@ -160,7 +209,7 @@ mod tests {
 
         let request = rx.recv().await.expect("expected an ApprovalRequest");
         assert_eq!(request.description, "delete file /tmp/x");
-        request.respond.send(true).expect("respond channel open");
+        request.respond.send(ApprovalDecision::Once).expect("respond channel open");
 
         assert!(confirm.await.expect("task join"));
 
@@ -171,6 +220,48 @@ mod tests {
             other => panic!("expected PermissionDecided, got {other:?}"),
         }
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// "Siempre" desde el overlay: aprueba, persiste `allowed: true` y
+    /// escribe la regla derivada en el policy.toml del `PolicyWriter`.
+    #[tokio::test]
+    async fn answering_always_allows_and_writes_the_rule_to_the_policy_file() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let policy_path = dir.join("policy.toml");
+        let shared: braze_permissions::SharedPolicy =
+            Arc::new(std::sync::RwLock::new(braze_permissions::Policy::empty()));
+        let writer = Arc::new(braze_permissions::PolicyWriter::new(
+            policy_path.clone(),
+            Arc::clone(&shared),
+            PathBuf::from("/ws"),
+        ));
+        let prompt =
+            ChannelConfirmationPrompt::new(Arc::new(Mutex::new(session)), Arc::clone(&store), tx)
+                .with_policy_writer(writer);
+
+        let action = ActionDescriptor::ShellCommand {
+            command: vec!["python3".into(), "x.py".into()],
+        };
+        let confirm = tokio::spawn(async move { prompt.confirm(&action).await });
+        let request = rx.recv().await.expect("expected an ApprovalRequest");
+        request
+            .respond
+            .send(ApprovalDecision::Always)
+            .expect("respond channel open");
+        assert!(confirm.await.expect("task join"));
+
+        let on_disk = braze_permissions::Policy::load(&policy_path).expect("policy escrita");
+        assert_eq!(on_disk.rules.len(), 1);
+        assert_eq!(on_disk.rules[0].id, "always-shell-python3");
+        assert_eq!(shared.read().unwrap().rules.len(), 1, "política viva actualizada");
+        let events = store.load(&session).await.expect("load events");
+        match &events[1] {
+            AgentEvent::PermissionDecided { allowed, .. } => assert!(*allowed),
+            other => panic!("expected PermissionDecided, got {other:?}"),
+        }
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
@@ -198,7 +289,7 @@ mod tests {
         };
         let confirm = tokio::spawn(async move { prompt.confirm(&action).await });
         let request = rx.recv().await.expect("expected an ApprovalRequest");
-        request.respond.send(true).expect("respond channel open");
+        request.respond.send(ApprovalDecision::Once).expect("respond channel open");
         assert!(confirm.await.expect("task join"));
 
         let new_events = store

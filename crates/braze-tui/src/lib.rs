@@ -25,7 +25,7 @@ mod status_bar;
 mod terminal;
 mod theme;
 
-pub use approval::{ApprovalRequest, ChannelConfirmationPrompt};
+pub use approval::{ApprovalDecision, ApprovalRequest, ChannelConfirmationPrompt};
 pub use question::{ChannelQuestionPrompt, QuestionRequest};
 
 /// One entry the `/skills` picker offers: the normalized skill name (as

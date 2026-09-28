@@ -21,11 +21,44 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 pub struct TerminalConfirmationPrompt {
     session: SessionId,
     store: Arc<dyn braze_session::SessionStore>,
+    /// "Siempre" (`a`): agrega una regla `allow` a la política (archivo +
+    /// política viva) además de aprobar. `None` = solo y/n.
+    policy_writer: Option<Arc<braze_permissions::PolicyWriter>>,
 }
 
 impl TerminalConfirmationPrompt {
     pub fn new(session: SessionId, store: Arc<dyn braze_session::SessionStore>) -> Self {
-        Self { session, store }
+        Self {
+            session,
+            store,
+            policy_writer: None,
+        }
+    }
+
+    pub fn with_policy_writer(mut self, writer: Arc<braze_permissions::PolicyWriter>) -> Self {
+        self.policy_writer = Some(writer);
+        self
+    }
+}
+
+/// Aplica "siempre": escribe la regla y devuelve la línea a mostrar. Si
+/// falla, se aprueba solo esta vez y se dice por qué.
+pub fn apply_always(
+    writer: Option<&braze_permissions::PolicyWriter>,
+    action: &ActionDescriptor,
+) -> String {
+    match writer {
+        Some(writer) => match writer.allow_always(action) {
+            Ok(rule) => format!(
+                "regla `{}` ({} {}) agregada a {}",
+                rule.id,
+                rule.action.label(),
+                rule.patterns.join(", "),
+                writer.path().display()
+            ),
+            Err(err) => format!("no se pudo guardar la regla ({err}); aprobado solo esta vez"),
+        },
+        None => "sin archivo de política configurado; aprobado solo esta vez".to_string(),
     }
 }
 
@@ -54,7 +87,7 @@ impl ConfirmationPrompt for TerminalConfirmationPrompt {
         }
 
         let mut stdout = tokio::io::stdout();
-        let prompt = format!("{action}\n¿Permitir? [y/N]: ");
+        let prompt = format!("{action}\n¿Permitir? [y = sí / N = no / a = siempre]: ");
 
         let allowed = if !crate::terminal_question::stdin_is_interactive() {
             // Nobody can answer, and a blocking read would never return
@@ -76,7 +109,14 @@ impl ConfirmationPrompt for TerminalConfirmationPrompt {
                 Ok(0) => false, // EOF: no definitive "yes" was ever read.
                 Ok(_) => {
                     let answer = line.trim().to_ascii_lowercase();
-                    answer == "y" || answer == "yes"
+                    if matches!(answer.as_str(), "a" | "always" | "siempre") {
+                        let note = apply_always(self.policy_writer.as_deref(), action);
+                        let _ = stdout.write_all(format!("{note}\n").as_bytes()).await;
+                        let _ = stdout.flush().await;
+                        true
+                    } else {
+                        matches!(answer.as_str(), "y" | "yes" | "s" | "si" | "sí")
+                    }
                 }
                 Err(_) => false,
             }

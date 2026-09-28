@@ -41,6 +41,7 @@
 //! error de arranque, no un warning.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
 
@@ -63,6 +64,20 @@ pub enum PolicyAction {
     /// (`*.wikipedia.org`, `docs.rs`), o sobre la URL completa si el
     /// patrón contiene `://` (`https://github.com/org/**`).
     Fetch,
+}
+
+impl PolicyAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::Shell => "shell",
+            Self::Write => "write",
+            Self::Delete => "delete",
+            Self::Read => "read",
+            Self::Mcp => "mcp",
+            Self::Fetch => "fetch",
+        }
+    }
 }
 
 /// Qué hacer cuando ninguna regla matchea.
@@ -171,6 +186,226 @@ impl Policy {
     pub fn evaluate(&self, action: &ActionDescriptor, root: &Path) -> Option<&Rule> {
         self.rules.iter().find(|r| rule_matches(r, action, root))
     }
+
+    /// Agrega `rule` al FINAL del archivo `path` (creándolo con cabecera
+    /// si no existe), con id único respecto de las reglas presentes, y
+    /// valida el archivo resultante ANTES de escribirlo (tmp + rename):
+    /// una política que dejó de parsear no arrancaría el binario. Devuelve
+    /// la regla tal como quedó escrita (id posiblemente sufijado). Al
+    /// final = las reglas anteriores (p.ej. un `deny`) siguen mandando:
+    /// primera que matchea gana.
+    pub fn append_rule_to_file(path: &Path, rule: &Rule) -> Result<Rule, PolicyError> {
+        let existing = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => NEW_POLICY_HEADER.to_string(),
+            Err(source) => {
+                return Err(PolicyError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
+        };
+        let current = Policy::from_toml(&existing)?;
+        let mut rule = rule.clone();
+        let base_id = rule.id.clone();
+        let mut n = 2;
+        while current.rules.iter().any(|r| r.id == rule.id) {
+            rule.id = format!("{base_id}-{n}");
+            n += 1;
+        }
+        let new_text = format!("{}\n\n{}", existing.trim_end(), rule.to_toml());
+        Policy::from_toml(&new_text)?;
+        if let Some(dir) = path.parent()
+            && !dir.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(dir).map_err(|source| PolicyError::Io {
+                path: dir.to_path_buf(),
+                source,
+            })?;
+        }
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, new_text.as_bytes()).map_err(|source| PolicyError::Io {
+            path: tmp.clone(),
+            source,
+        })?;
+        std::fs::rename(&tmp, path).map_err(|source| PolicyError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        Ok(rule)
+    }
+}
+
+/// Cabecera de un `policy.toml` creado por la respuesta "siempre" cuando
+/// no existía ninguno.
+const NEW_POLICY_HEADER: &str = "# braze — política de permisos (policy engine).\n\
+# Primera regla que matchea gana; sin regla, `default = \"inherit\"` = el\n\
+# clasificador base. Validar con `braze permissions policy`.\n\
+\n\
+version = 1\n\
+default = \"inherit\"\n";
+
+impl Rule {
+    /// Render TOML de la regla (un bloque `[[rule]]`), con strings
+    /// escapados por el crate `toml`.
+    pub fn to_toml(&self) -> String {
+        let quote = |s: &str| toml::Value::String(s.to_string()).to_string();
+        let mut out = format!(
+            "[[rule]]\nid = {}\naction = \"{}\"\n",
+            quote(&self.id),
+            self.action.label()
+        );
+        if !self.patterns.is_empty() {
+            let patterns: Vec<String> = self.patterns.iter().map(|p| quote(p)).collect();
+            out.push_str(&format!("match = [{}]\n", patterns.join(", ")));
+        }
+        out.push_str(&format!("verdict = \"{}\"\n", self.verdict.label()));
+        if !self.reason.is_empty() {
+            out.push_str(&format!("reason = {}\n", quote(&self.reason)));
+        }
+        out
+    }
+}
+
+/// La regla `allow` que "siempre" en el prompt de confirmación deriva de
+/// una acción — la misma generalización que Claude Code hace con "always
+/// allow": ni la acción exacta (volvería a preguntar con otro argumento)
+/// ni todo el programa cuando es un multiplexor (`git`, `cargo`, `npm`…:
+/// aprobar `git commit` no aprueba `git push`).
+///
+/// - shell: basename del programa; para multiplexores conocidos,
+///   `programa subcomando*`.
+/// - write/delete/read: la ruta relativa exacta si está bajo `root`, o el
+///   directorio padre absoluto con `/**` si está fuera.
+/// - mcp: `servidor/tool`. fetch: el host.
+/// - `Other`: nada (`None`).
+pub fn rule_for_always(action: &ActionDescriptor, root: &Path) -> Option<Rule> {
+    const MULTIPLEXERS: &[&str] = &[
+        "git", "cargo", "npm", "npx", "pnpm", "yarn", "pip", "pip3", "uv", "poetry", "conda",
+        "docker", "podman", "kubectl", "systemctl", "apt", "apt-get", "brew", "snap", "gh", "go",
+    ];
+    let (policy_action, pattern) = match action {
+        ActionDescriptor::ShellCommand { command } => {
+            let program = command.first()?;
+            let base = Path::new(program)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| program.clone());
+            let pattern = match command.get(1) {
+                Some(sub) if MULTIPLEXERS.contains(&base.as_str()) && !sub.starts_with('-') => {
+                    format!("{base} {sub}*")
+                }
+                _ => base,
+            };
+            (PolicyAction::Shell, pattern)
+        }
+        ActionDescriptor::WriteFile { path } => (PolicyAction::Write, path_pattern(path, root)),
+        ActionDescriptor::DeleteFile { path } => (PolicyAction::Delete, path_pattern(path, root)),
+        ActionDescriptor::ReadPath { path } => (PolicyAction::Read, path_pattern(path, root)),
+        ActionDescriptor::McpToolCall { server, tool } => {
+            (PolicyAction::Mcp, format!("{server}/{tool}"))
+        }
+        ActionDescriptor::Fetch { url } => (PolicyAction::Fetch, url_host(url)?),
+        ActionDescriptor::Other { .. } => return None,
+    };
+    // Slug del id: para rutas, los dos últimos componentes (el comienzo
+    // de una ruta absoluta es igual en todas y truncar por delante daba
+    // ids repetidos); ≤ 32 chars.
+    let slug_source: String = if pattern.contains('/') {
+        pattern
+            .trim_end_matches("/**")
+            .rsplit('/')
+            .filter(|c| !c.is_empty())
+            .take(2)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("-")
+    } else {
+        pattern.clone()
+    };
+    let slug: String = slug_source
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .chars()
+        .take(32)
+        .collect::<String>()
+        .trim_end_matches('-')
+        .to_string();
+    let slug = if slug.is_empty() {
+        "rule".to_string()
+    } else {
+        slug
+    };
+    Some(Rule {
+        id: format!("always-{}-{}", policy_action.label(), slug),
+        action: policy_action,
+        patterns: vec![pattern],
+        verdict: Verdict::Allow,
+        reason: "aprobado con 'siempre' desde el prompt de confirmación".to_string(),
+    })
+}
+
+fn path_pattern(path: &Path, root: &Path) -> String {
+    let abs = normalize_lexically(&if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    });
+    match abs.strip_prefix(root) {
+        Ok(rel) if !rel.as_os_str().is_empty() => rel.to_string_lossy().into_owned(),
+        _ => match abs.parent() {
+            // El directorio padre con `/**` solo si tiene al menos dos
+            // componentes (`/home/u/notas`): `/**`, `/tmp/**` o `/home/**`
+            // serían permisos gigantes derivados de un solo archivo.
+            Some(dir) if dir.components().count() >= 3 => {
+                format!("{}/**", dir.to_string_lossy().trim_end_matches('/'))
+            }
+            _ => abs.to_string_lossy().into_owned(),
+        },
+    }
+}
+
+/// Política compartida entre los clasificadores de todos los guards (uno
+/// por provider) y el escritor de "siempre": una regla agregada en caliente
+/// vale para el próximo `check` de cualquiera de ellos.
+pub type SharedPolicy = Arc<RwLock<Policy>>;
+
+/// "Siempre" en el prompt de confirmación: deriva la regla
+/// ([`rule_for_always`]), la agrega al archivo de política y a la política
+/// viva ([`SharedPolicy`]) en ese orden — si el archivo falla, nada cambia
+/// en memoria y el caller decide (aprobar solo esta vez).
+pub struct PolicyWriter {
+    path: PathBuf,
+    shared: SharedPolicy,
+    root: PathBuf,
+}
+
+impl PolicyWriter {
+    pub fn new(path: PathBuf, shared: SharedPolicy, root: PathBuf) -> Self {
+        Self { path, shared, root }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn allow_always(&self, action: &ActionDescriptor) -> Result<Rule, PolicyError> {
+        let rule = rule_for_always(action, &self.root).ok_or_else(|| {
+            PolicyError::Invalid("esta acción no admite una regla permanente".to_string())
+        })?;
+        let rule = Policy::append_rule_to_file(&self.path, &rule)?;
+        self.shared
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .rules
+            .push(rule.clone());
+        Ok(rule)
+    }
 }
 
 fn rule_matches(rule: &Rule, action: &ActionDescriptor, root: &Path) -> bool {
@@ -273,18 +508,24 @@ fn glob_match(p: &[char], t: &[char]) -> bool {
 /// base: la regla que matchea manda; sin regla, `default` decide (y
 /// `inherit` delega al base).
 pub struct PolicyClassifier {
-    policy: Policy,
+    policy: SharedPolicy,
     base: Box<dyn ActionClassifier>,
     root: PathBuf,
 }
 
 impl PolicyClassifier {
     pub fn new(policy: Policy, base: Box<dyn ActionClassifier>, root: PathBuf) -> Self {
+        Self::new_shared(Arc::new(RwLock::new(policy)), base, root)
+    }
+
+    /// Con una política compartida (ver [`SharedPolicy`]): las reglas que
+    /// "siempre" agregue en caliente se ven en el próximo `decide`.
+    pub fn new_shared(policy: SharedPolicy, base: Box<dyn ActionClassifier>, root: PathBuf) -> Self {
         Self { policy, base, root }
     }
 
-    pub fn policy(&self) -> &Policy {
-        &self.policy
+    pub fn shared_policy(&self) -> SharedPolicy {
+        Arc::clone(&self.policy)
     }
 }
 
@@ -297,14 +538,18 @@ impl ActionClassifier for PolicyClassifier {
     }
 
     fn decide(&self, action: &ActionDescriptor) -> Decision {
-        if let Some(rule) = self.policy.evaluate(action, &self.root) {
+        let policy = self
+            .policy
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(rule) = policy.evaluate(action, &self.root) {
             return Decision {
                 verdict: rule.verdict,
                 rule: Some(rule.id.clone()),
                 reason: (!rule.reason.is_empty()).then(|| rule.reason.clone()),
             };
         }
-        match self.policy.default {
+        match policy.default {
             Fallback::Inherit => self.base.decide(action),
             Fallback::Allow => Decision::bare(Verdict::Allow),
             Fallback::Confirm => Decision::bare(Verdict::Confirm),
@@ -447,6 +692,63 @@ verdict = "confirm"
         assert_eq!(c.decide(&f("http://evil.example/?d=secreto")).verdict, Verdict::Deny);
         assert_eq!(url_host("not a url"), None);
         assert_eq!(url_host("https://a.b:8080/c").as_deref(), Some("a.b"));
+    }
+
+    /// "Siempre": la regla derivada generaliza como Claude Code (programa
+    /// / `git sub*` / directorio padre / host), el archivo se crea o
+    /// extiende con id único y queda válido, y la política viva la ve en
+    /// el acto para cualquier clasificador que la comparta.
+    #[test]
+    fn always_derives_a_rule_appends_it_to_the_file_and_applies_it_live() {
+        let root = PathBuf::from("/ws");
+        let r = |a: &ActionDescriptor| rule_for_always(a, &root).unwrap();
+        assert_eq!(r(&sh(&["python3", "x.py"])).patterns, vec!["python3"]);
+        assert_eq!(r(&sh(&["/usr/bin/git", "commit", "-m", "x"])).patterns, vec!["git commit*"]);
+        assert_eq!(r(&sh(&["git", "-C", "/x", "status"])).patterns, vec!["git"], "flag primero: solo el programa");
+        let w = |p: &str| ActionDescriptor::WriteFile { path: PathBuf::from(p) };
+        assert_eq!(r(&w("/ws/.git/hooks/pre-commit")).patterns, vec![".git/hooks/pre-commit"]);
+        assert_eq!(r(&w("/home/u/notas/a.md")).patterns, vec!["/home/u/notas/**"]);
+        assert_eq!(r(&w("/home/u/notas/a.md")).id, "always-write-u-notas");
+        assert_eq!(r(&w("/tmp/x.txt")).patterns, vec!["/tmp/x.txt"], "padre muy alto: ruta exacta");
+        assert_eq!(r(&w("/x")).patterns, vec!["/x"]);
+        assert_eq!(r(&ActionDescriptor::Fetch { url: "https://Docs.rs/x".into() }).patterns, vec!["docs.rs"]);
+        assert_eq!(r(&ActionDescriptor::McpToolCall { server: "db".into(), tool: "query".into() }).patterns, vec!["db/query"]);
+        assert!(rule_for_always(&ActionDescriptor::Other { label: "x".into() }, &root).is_none());
+        let rule = r(&sh(&["python3"]));
+        assert_eq!(rule.id, "always-shell-python3");
+        assert!(rule.to_toml().starts_with("[[rule]]\nid = \"always-shell-python3\"\naction = \"shell\"\nmatch = [\"python3\"]\nverdict = \"allow\"\n"));
+
+        let dir = std::env::temp_dir().join(format!("braze-policy-always-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("policy.toml");
+        // Sin archivo: se crea con cabecera. Con archivo: se extiende, id único.
+        let shared: SharedPolicy = Arc::new(RwLock::new(Policy::empty()));
+        let writer = PolicyWriter::new(path.clone(), Arc::clone(&shared), root.clone());
+        let classifier = PolicyClassifier::new_shared(
+            Arc::clone(&shared),
+            Box::new(DefaultClassifier::new(WorkdirAllowlist::new(root.clone()))),
+            root.clone(),
+        );
+        assert_eq!(classifier.decide(&sh(&["python3", "a.py"])).verdict, Verdict::Confirm);
+        let written = writer.allow_always(&sh(&["python3", "a.py"])).unwrap();
+        assert_eq!(written.id, "always-shell-python3");
+        assert_eq!(classifier.decide(&sh(&["python3", "otro.py"])).rule.as_deref(), Some("always-shell-python3"), "vale en caliente y para otro argumento");
+        let again = writer.allow_always(&sh(&["python3"])).unwrap();
+        assert_eq!(again.id, "always-shell-python3-2", "id único");
+        let on_disk = Policy::load(&path).unwrap();
+        assert_eq!(on_disk.rules.len(), 2);
+        assert_eq!(on_disk.default, Fallback::Inherit);
+        // Un deny anterior sigue mandando: la regla nueva va al final.
+        std::fs::write(&path, "[[rule]]\nid=\"no-curl\"\naction=\"shell\"\nmatch=[\"curl\"]\nverdict=\"deny\"\n").unwrap();
+        *shared.write().unwrap() = Policy::load(&path).unwrap();
+        writer.allow_always(&sh(&["curl", "x"])).unwrap();
+        assert_eq!(classifier.decide(&sh(&["curl", "y"])).verdict, Verdict::Deny);
+        // Archivo inválido: error, nada cambia en memoria.
+        std::fs::write(&path, "version = 9").unwrap();
+        let before = shared.read().unwrap().rules.len();
+        assert!(writer.allow_always(&sh(&["ls"])).is_err());
+        assert_eq!(shared.read().unwrap().rules.len(), before);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
