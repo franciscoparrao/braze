@@ -118,10 +118,27 @@ quieres discriminar más, repite con `discriminating.toml` (34 tareas).
 Para cambiar el default: `zen_model` en `config.json`, `--model <id>` en
 la línea de comandos, o `/model zen:<id>` en la TUI.
 
-Punto de partida hasta tener el sweep: `glm-5.3-flash` (verificado en
-todo lo anterior) y, como segunda opción, `deepseek-v4.1-flash`, porque
-la familia DeepSeek flash fue la mejor del proyecto vía OpenRouter (49/50
-en `default.toml`).
+**Resultado del sweep (2026-09-28, `docs/sweep-go-fast-core-2026-09-28.json`,
+13 tareas × 2 repeticiones, semilla 7, temperatura 0,2):**
+
+| modelo | pass rate | pass^2 | rondas | latencia media | tokens in |
+|---|---|---|---|---|---|
+| `deepseek-v4.1-flash` | 26/26 | 100 % | 4,1 | 11,0 s | 10,5 k |
+| `qwen3.8-flash` | 25/26 | 92 % | 5,3 | 19,0 s | 15,1 k |
+| `glm-5.3-flash` | 23/26 | 77 % | 3,5 | 24,9 s | 6,5 k |
+| `kimi-k2.7-code` | no medible | — | — | — | — |
+
+`deepseek-v4.1-flash` gana en todo lo que importa: sin fallos, robusto en
+las 13 tareas en ambas repeticiones, y el más rápido. Es el default del
+perfil desde hoy. `glm-5.3-flash` usa menos tokens de entrada, pero
+falla 3 de 26 y tarda más del doble. `kimi-k2.7-code` no se pudo medir:
+Go solo acepta `temperature = 1` para ese modelo y el bench fija 0,2.
+Otro gotcha de Go: `glm-5.3-flash` rechaza el parámetro `seed`; braze lo
+reintenta sin él desde el commit `c4d7f99`.
+
+La comparación pareada (McNemar) no alcanza significancia con n = 26,
+así que la diferencia deepseek vs qwen es direccional; la de latencia sí
+es grande y estable.
 
 ## 7. Qué reportar cuando algo falle
 

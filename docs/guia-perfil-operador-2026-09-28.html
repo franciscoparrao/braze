@@ -198,7 +198,7 @@ braze run "una tarea"     # un solo turno, imprime y sale</code></pre>
       <h2><span class="n">06</span>Elegir el modelo de Go</h2>
       <p>Go ofrece hoy 30 modelos, todos OpenAI-compatibles y con la misma key por el backend <code>zen</code>:</p>
       <div class="models">
-        <span class="pick">glm-5.3-flash</span><span>glm-5.3</span><span class="pick">deepseek-v4.1-flash</span><span>deepseek-v4-flash</span><span>deepseek-v4-pro</span><span>kimi-k2.7-code</span><span>kimi-k3</span><span>qwen3.8-flash</span><span>qwen3.8-max</span><span>minimax-m3</span><span>grok-4.7</span><span>mimo-v2.6-pro</span><span>…</span>
+        <span>glm-5.3-flash</span><span>glm-5.3</span><span class="pick">deepseek-v4.1-flash</span><span>deepseek-v4-flash</span><span>deepseek-v4-pro</span><span>kimi-k2.7-code</span><span>kimi-k3</span><span>qwen3.8-flash</span><span>qwen3.8-max</span><span>minimax-m3</span><span>grok-4.7</span><span>mimo-v2.6-pro</span><span>…</span>
       </div>
       <p>El criterio no es "el más grande" sino el que mejor completa las tareas de braze por menos rondas y latencia, porque el harness está tuneado para modelos que siguen el tool calling limpio. El instrumento para decidirlo es el bench del proyecto, con la suite chica primero:</p>
       <pre><code>cd ~/proyectos/braze
@@ -208,7 +208,16 @@ braze-bench crates/braze-bench/suites/fast-core.toml \
   --output docs/sweep-go-fast-core-$(date +%F).json</code></pre>
       <p><code>fast-core.toml</code> son 13 tareas; con 4 modelos y 2 repeticiones son 104 corridas, unos minutos y una fracción de la cuota diaria de Go. El reporte da pass rate, <code>pass^k</code>, rondas y latencia por modelo, y la comparación pareada contra el primer brazo. Si dos empatan, gana el más rápido; para discriminar más, <code>discriminating.toml</code> (34 tareas).</p>
       <p>Para cambiar el default: <code>zen_model</code> en <code>config.json</code>, <code>--model &lt;id&gt;</code> en la línea de comandos, o <code>/model zen:&lt;id&gt;</code> en la TUI.</p>
-      <div class="note"><p>Punto de partida hasta tener el sweep: <code>glm-5.3-flash</code> (verificado en todo lo anterior) y, como segunda opción, <code>deepseek-v4.1-flash</code>, porque la familia DeepSeek flash fue la mejor del proyecto vía OpenRouter (49/50 en <code>default.toml</code>).</p></div>
+      <p><strong>Resultado del sweep</strong> (2026-09-28, <code>docs/sweep-go-fast-core-2026-09-28.json</code>, 13 tareas × 2 repeticiones, semilla 7, temperatura 0,2):</p>
+      <div class="table-wrap"><table>
+        <tr><th>modelo</th><th>pass rate</th><th>pass^2</th><th>rondas</th><th>latencia media</th><th>tokens in</th></tr>
+        <tr><td><code>deepseek-v4.1-flash</code></td><td>26/26</td><td>100 %</td><td>4,1</td><td>11,0 s</td><td>10,5 k</td></tr>
+        <tr><td><code>qwen3.8-flash</code></td><td>25/26</td><td>92 %</td><td>5,3</td><td>19,0 s</td><td>15,1 k</td></tr>
+        <tr><td><code>glm-5.3-flash</code></td><td>23/26</td><td>77 %</td><td>3,5</td><td>24,9 s</td><td>6,5 k</td></tr>
+        <tr><td><code>kimi-k2.7-code</code></td><td>no medible</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      </table></div>
+      <div class="note"><p><code>deepseek-v4.1-flash</code> gana en todo lo que importa: sin fallos, robusto en las 13 tareas en ambas repeticiones, y el más rápido. Es el default del perfil desde hoy. <code>glm-5.3-flash</code> usa menos tokens de entrada, pero falla 3 de 26 y tarda más del doble. <code>kimi-k2.7-code</code> no se pudo medir: Go solo acepta <code>temperature = 1</code> para ese modelo y el bench fija 0,2. Otro gotcha de Go: <code>glm-5.3-flash</code> rechaza el parámetro <code>seed</code>; braze lo reintenta sin él desde el commit <code>c4d7f99</code>.</p></div>
+      <p>La comparación pareada (McNemar) no alcanza significancia con n = 26, así que la diferencia deepseek vs qwen es direccional; la de latencia sí es grande y estable.</p>
     </section>
 
     <section id="reportar">

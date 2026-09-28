@@ -632,6 +632,16 @@ allowlist: leer ahí no pide confirmación). Verificado en vivo: 113 skills
 descubiertas, `AGENTS.md → CLAUDE.md` por symlink obedecido, `$destelegrafiar`
 y `$memoria status` corren de punta a punta con glm-5.3-flash.
 
+**Modelo de Go por default: `deepseek-v4.1-flash`** (sweep
+`docs/sweep-go-fast-core-2026-09-28.json`, fast-core × 2 reps, seed 7:
+26/26, pass^2 100 %, 11,0 s/tarea; qwen3.8-flash 25/26 a 19,0 s;
+glm-5.3-flash 23/26 a 24,9 s; McNemar n.s. con n=26 — la latencia es la
+diferencia grande). Gotchas de Go: `glm-5.3-flash` rechaza `seed`
+(braze reintenta sin él, `c4d7f99`); `kimi-k2.7-code` solo acepta
+`temperature = 1` → no medible con el 0,2 del bench (correrlo aparte con
+`--temperature 1` si interesa). Guía de uso del perfil:
+`docs/guia-perfil-operador-2026-09-28.{md,html}`.
+
 **Policy engine (backport de enclave M3, `crates/braze-permissions/src/
 policy.rs`)**: la allowlist PERSISTENTE que faltaba — la aprobación recordada
 era por sesión (`seed_remembered`) y `braze permissions suggest` solo juntaba
