@@ -936,6 +936,10 @@ async fn build_engine(
         "ollama" => Some(config.ollama_model.clone()),
         "openrouter" => config.openrouter_model.clone(),
         "anthropic" => config.anthropic_model.clone(),
+        // Perfil operador: el modelo de Zen/Go también va al prompt (línea
+        // "you are running as the model …"); antes quedaba fuera y el
+        // modelo salía a averiguar quién era por el entorno.
+        "zen" => config.zen_model.clone(),
         _ => None,
     };
     // E′ I.6 (docs/harness-engineering-hooks-skills-2026-07-10.md): el

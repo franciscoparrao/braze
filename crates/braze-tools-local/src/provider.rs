@@ -554,6 +554,11 @@ impl LocalToolsProvider {
             Ok(content) => (content, false),
             Err(content) => (content, true),
         };
+        // Perfil operador (2026-09-28): valores que parecen credenciales
+        // (`ZENODO_TOKEN=…`, `"api_key": "…"`, `Bearer …`) se redactan
+        // ANTES de truncar y spillear — ni el contexto que viaja al
+        // proveedor ni `.braze/spill/` retienen el valor. Ver `scrub.rs`.
+        let content = crate::scrub::scrub_secrets(content);
         ToolResult {
             tool_call_id: call.id.clone(),
             content: truncate_output_with_spill(

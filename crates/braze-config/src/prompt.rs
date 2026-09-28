@@ -160,6 +160,21 @@ pub fn default_system_prompt(
         .and_then(ModelFamily::tool_call_hint)
         .map(|hint| format!("\n- {hint}"))
         .unwrap_or_default();
+    // Perfil operador (2026-09-28, primer reporte de uso real):
+    // preguntado "¿qué modelo eres?", el modelo sin esta línea salió a
+    // averiguarlo por el entorno (`env | grep model`, la config, lanzar
+    // otro braze) y volcó un token al contexto. Decírselo cuesta una
+    // línea.
+    let model_line = model_name
+        .filter(|m| !m.trim().is_empty())
+        .map(|m| {
+            format!(
+                " You are running as the model `{m}`; if asked which model you are, answer \
+                 from this line — never inspect environment variables, configuration files \
+                 or processes to find out."
+            )
+        })
+        .unwrap_or_default();
 
     let environment_section = match environment {
         Some(snapshot) if !snapshot.trim().is_empty() => {
@@ -229,7 +244,7 @@ pub fn default_system_prompt(
     };
 
     format!(
-        "You are braze, an agentic CLI assistant. Working directory: {}.\n\
+        "You are braze, an agentic CLI assistant. Working directory: {}.{model_line}\n\
          \n\
          Rules:\n\
          - Never call the same tool with the same arguments twice in one turn — \
@@ -298,6 +313,25 @@ pub fn ollama_context_budget_tokens(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Perfil operador: el prompt dice qué modelo corre (y que no salga a
+    /// averiguarlo); sin nombre de modelo no hay línea.
+    #[test]
+    fn the_prompt_names_the_running_model() {
+        let with = default_system_prompt(
+            Path::new("/p"),
+            Some("deepseek-v4.1-flash"),
+            &[],
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(with.contains("running as the model `deepseek-v4.1-flash`"), "{with}");
+        assert!(with.contains("never inspect environment variables"));
+        let without = default_system_prompt(Path::new("/p"), None, &[], None, None, None, None);
+        assert!(!without.contains("running as the model"));
+    }
 
     /// Perfil operador: las instrucciones globales del operador van en su
     /// propia sección, ANTES del AGENTS.md del proyecto; vacías = sin

@@ -24,6 +24,7 @@ mod post_edit_check;
 mod provider;
 mod read_file;
 mod schema;
+mod scrub;
 mod shell_exec;
 mod syntactic_gate;
 #[cfg(feature = "web")]

@@ -286,12 +286,26 @@ pub fn rule_for_always(action: &ActionDescriptor, root: &Path) -> Option<Rule> {
     ];
     let (policy_action, pattern) = match action {
         ActionDescriptor::ShellCommand { command } => {
+            // Intérpretes con script inline (`bash -lc …`, `python3 -c …`):
+            // generalizar al programa sería permitir CUALQUIER comando —
+            // "siempre" queda como el comando exacto (primer reporte de uso
+            // real, 2026-09-28: el modelo pedía `bash -lc env | grep …`).
+            const INTERPRETERS: &[&str] = &[
+                "bash", "sh", "zsh", "dash", "fish", "ksh", "python", "python3", "node",
+                "perl", "ruby",
+            ];
             let program = command.first()?;
             let base = Path::new(program)
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| program.clone());
+            let inline_script = INTERPRETERS.contains(&base.as_str())
+                && command
+                    .iter()
+                    .skip(1)
+                    .any(|a| matches!(a.as_str(), "-c" | "-lc" | "-e" | "-ic"));
             let pattern = match command.get(1) {
+                _ if inline_script => command.join(" "),
                 Some(sub) if MULTIPLEXERS.contains(&base.as_str()) && !sub.starts_with('-') => {
                     format!("{base} {sub}*")
                 }
@@ -705,6 +719,13 @@ verdict = "confirm"
         assert_eq!(r(&sh(&["python3", "x.py"])).patterns, vec!["python3"]);
         assert_eq!(r(&sh(&["/usr/bin/git", "commit", "-m", "x"])).patterns, vec!["git commit*"]);
         assert_eq!(r(&sh(&["git", "-C", "/x", "status"])).patterns, vec!["git"], "flag primero: solo el programa");
+        assert_eq!(
+            r(&sh(&["bash", "-lc", "env | grep model"])).patterns,
+            vec!["bash -lc env | grep model"],
+            "script inline: comando exacto, nunca todo bash"
+        );
+        assert_eq!(r(&sh(&["python3", "-c", "print(1)"])).patterns, vec!["python3 -c print(1)"]);
+        assert_eq!(r(&sh(&["bash", "script.sh"])).patterns, vec!["bash"], "sin -c: el programa");
         let w = |p: &str| ActionDescriptor::WriteFile { path: PathBuf::from(p) };
         assert_eq!(r(&w("/ws/.git/hooks/pre-commit")).patterns, vec![".git/hooks/pre-commit"]);
         assert_eq!(r(&w("/home/u/notas/a.md")).patterns, vec!["/home/u/notas/**"]);
