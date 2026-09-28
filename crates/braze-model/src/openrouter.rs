@@ -60,6 +60,13 @@ pub struct OpenRouterBackend {
     /// y lo usa para enrutar con afinidad de sesión; ver
     /// [`OpenRouterBackend::with_opencode_session`].
     extra_headers: Vec<(String, String)>,
+    /// Se enciende cuando el proveedor rechaza `seed` como parámetro no
+    /// soportado (OpenCode Go con `glm-5.3-flash`, 2026-09-28: `400
+    /// [unsupported_parameter] "seed" is not supported by this
+    /// endpoint`); desde ahí el campo se omite en esta instancia. `seed`
+    /// es best-effort por contrato (ver [`OpenRouterBackend::with_seed`]):
+    /// que un proveedor no lo acepte no puede tumbar un brazo del bench.
+    seed_unsupported: std::sync::atomic::AtomicBool,
 }
 
 impl OpenRouterBackend {
@@ -76,6 +83,7 @@ impl OpenRouterBackend {
             max_retries: crate::retry::DEFAULT_MAX_RETRIES,
             provider_label: "openrouter",
             extra_headers: Vec::new(),
+            seed_unsupported: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -93,6 +101,7 @@ impl OpenRouterBackend {
             max_retries: crate::retry::DEFAULT_MAX_RETRIES,
             provider_label: "openrouter",
             extra_headers: Vec::new(),
+            seed_unsupported: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -117,6 +126,60 @@ impl OpenRouterBackend {
     pub fn extra_headers(&self) -> &[(String, String)] {
         &self.extra_headers
     }
+
+    /// `true` si el proveedor rechazó `seed` y esta instancia ya lo omite.
+    pub fn seed_disabled_by_provider(&self) -> bool {
+        self.seed_unsupported
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// El `seed` efectivo para el próximo request: el configurado, salvo
+    /// que el proveedor ya lo haya rechazado.
+    fn effective_seed(&self) -> Option<u64> {
+        if self.seed_disabled_by_provider() {
+            None
+        } else {
+            self.seed
+        }
+    }
+
+    /// POST del body con auth, headers extra y los reintentos H-19.
+    async fn send_body<B: serde::Serialize + Sync>(
+        &self,
+        url: &str,
+        body: &B,
+    ) -> Result<reqwest::Response, ModelError> {
+        crate::retry::send_with_retry(self.provider_label, self.max_retries, || {
+            let mut req = self
+                .client
+                .post(url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("content-type", "application/json");
+            for (name, value) in &self.extra_headers {
+                req = req.header(name.as_str(), value.as_str());
+            }
+            req.json(body)
+        })
+        .await
+    }
+}
+
+/// ¿Es este error un rechazo del parámetro `seed` por el proveedor? Forma
+/// vista en OpenCode Go: `[unsupported_parameter] "seed" is not supported
+/// by this endpoint` (con `"param":"seed"` en el JSON, que
+/// `http_error_to_model_error` no conserva — se mira el mensaje).
+fn is_unsupported_seed_error(err: &ModelError) -> bool {
+    let ModelError::Request(message) = err else {
+        return false;
+    };
+    let lower = message.to_ascii_lowercase();
+    lower.contains("seed")
+        && (lower.contains("unsupported_parameter")
+            || lower.contains("not supported")
+            || lower.contains("unsupported parameter"))
+}
+
+impl OpenRouterBackend {
 
     /// Overrides the sampling temperature sent to OpenRouter — e.g. so
     /// `braze-bench` can give every backend in a sweep the same value
@@ -180,11 +243,12 @@ impl ModelBackend for OpenRouterBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let body = build_request(
+        let seed = self.effective_seed();
+        let mut body = build_request(
             &req,
             &self.model,
             self.temperature,
-            self.seed,
+            seed,
             self.prompt_caching_enabled,
         );
         tracing::info!(
@@ -202,18 +266,32 @@ impl ModelBackend for OpenRouterBackend {
         // `AnthropicBackend::complete`'s identical comment.
         let breaker_key = format!("{}:{url}:{}", self.provider_label, self.model);
         let guard = crate::circuit_breaker::acquire(&breaker_key)?;
-        let send_result = crate::retry::send_with_retry(self.provider_label, self.max_retries, || {
-            let mut req = self
-                .client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("content-type", "application/json");
-            for (name, value) in &self.extra_headers {
-                req = req.header(name.as_str(), value.as_str());
-            }
-            req.json(&body)
-        })
-        .await;
+        let mut send_result = self.send_body(&url, &body).await;
+        // `seed` es best-effort: si el proveedor lo rechaza como parámetro
+        // no soportado (Go + glm-5.3-flash), se reintenta UNA vez sin él y
+        // se omite de ahí en adelante en esta instancia. Sin esto, un
+        // `--seed` del bench abortaba el brazo entero por fail-fast.
+        if seed.is_some()
+            && let Err(err) = &send_result
+            && is_unsupported_seed_error(err)
+        {
+            tracing::warn!(
+                provider = self.provider_label,
+                model = %self.model,
+                error = %err,
+                "el proveedor rechaza `seed`; se reintenta sin él y se omite en esta instancia"
+            );
+            self.seed_unsupported
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            body = build_request(
+                &req,
+                &self.model,
+                self.temperature,
+                None,
+                self.prompt_caching_enabled,
+            );
+            send_result = self.send_body(&url, &body).await;
+        }
         let response = match send_result {
             Ok(response) => response,
             Err(err) => {
@@ -510,6 +588,54 @@ mod tests {
         assert_eq!(text, "Hi there");
         assert!(saw_usage);
         assert!(saw_done);
+    }
+
+    /// `seed` best-effort: el proveedor lo rechaza (400 unsupported
+    /// parameter, la forma de OpenCode Go con glm-5.3-flash) → se
+    /// reintenta sin él en el acto, el turno completa, y la instancia deja
+    /// de mandarlo. Un 400 por otra causa NO dispara el reintento.
+    #[tokio::test]
+    async fn an_unsupported_seed_is_retried_without_it_and_then_omitted() {
+        let seed_error = br#"{"error":{"param":"seed","type":"invalid_request_error","message":"Upstream request failed: [unsupported_parameter] \"seed\" is not supported by this endpoint"}}"#.to_vec();
+        let sse_body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let addr = crate::test_support::spawn_sequenced_http_server(vec![
+            (400, "application/json", seed_error),
+            (200, "text/event-stream", sse_body.as_bytes().to_vec()),
+        ])
+        .await;
+        let backend = OpenRouterBackend::with_base_url(
+            "test-key".to_string(),
+            "glm-5.3-flash".to_string(),
+            format!("http://{addr}"),
+        )
+        .with_provider_label("zen")
+        .with_seed(7)
+        .with_max_retries(0);
+        assert!(!backend.seed_disabled_by_provider());
+        let mut stream = backend
+            .complete(sample_request())
+            .await
+            .expect("el reintento sin seed debe pasar");
+        let mut text = String::new();
+        while let Some(event) = stream.next().await {
+            if let CompletionEvent::TextDelta(t) = event.expect("sin error de stream") {
+                text.push_str(&t);
+            }
+        }
+        assert_eq!(text, "ok");
+        assert!(backend.seed_disabled_by_provider(), "queda omitido para esta instancia");
+
+        // Otro 400 (no es por seed): error tal cual, sin reintento.
+        let other = br#"{"error":{"message":"model not found","type":"invalid_request_error"}}"#.to_vec();
+        let addr = crate::test_support::spawn_canned_http_server(400, "application/json", other).await;
+        let backend = OpenRouterBackend::with_base_url("k".into(), "m".into(), format!("http://{addr}"))
+            .with_seed(7)
+            .with_max_retries(0);
+        assert!(matches!(backend.complete(sample_request()).await, Err(ModelError::Request(_))));
+        assert!(!backend.seed_disabled_by_provider());
     }
 
     #[test]
