@@ -453,6 +453,7 @@ dependencies = [
  "braze-permissions",
  "braze-tools-core",
  "braze-types",
+ "reqwest",
  "serde",
  "serde_json",
  "syn 3.0.3",

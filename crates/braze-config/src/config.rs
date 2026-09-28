@@ -626,6 +626,13 @@ pub struct Config {
     /// head+tail del truncado es siempre-on aparte de este flag.
     #[serde(default = "default_true")]
     pub enable_tool_output_spill: bool,
+    /// Tools web `web_fetch` / `web_search` (perfil operador,
+    /// 2026-09-28; feature `web` de braze-tools-local). Off por default:
+    /// cambian el inventario de tools que el bench mide, y la red es
+    /// default-deny (cada URL pasa por `ActionDescriptor::Fetch` → la
+    /// política decide por host). `BRAZE_ENABLE_WEB_TOOLS`.
+    #[serde(default)]
+    pub enable_web_tools: bool,
     /// Interop AGENTS.md (v8/v9): por default braze lee `AGENTS.md` de la
     /// raíz del working directory y lo inyecta como sección del system
     /// prompt — el context file estándar entre harnesses, versionado en
@@ -869,6 +876,7 @@ impl Default for Config {
             enable_bwrap_tool_sandbox: false,
             bwrap_allow_network: false,
             enable_tool_output_spill: true,
+            enable_web_tools: false,
             disable_agents_md: false,
             agents_md_max_bytes: default_agents_md_max_bytes(),
             instructions_file: None,
@@ -1195,6 +1203,9 @@ impl Config {
         }
         if let Some(v) = overrides.enable_tool_output_spill {
             self.enable_tool_output_spill = v;
+        }
+        if let Some(v) = overrides.enable_web_tools {
+            self.enable_web_tools = v;
         }
         if let Some(v) = overrides.disable_agents_md {
             self.disable_agents_md = v;

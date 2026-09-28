@@ -58,6 +58,11 @@ pub enum PolicyAction {
     Delete,
     Read,
     Mcp,
+    /// Salidas a la red de las tools web (braze, perfil operador
+    /// 2026-09-28). `match`: glob sobre el HOST de la URL
+    /// (`*.wikipedia.org`, `docs.rs`), o sobre la URL completa si el
+    /// patrón contiene `://` (`https://github.com/org/**`).
+    Fetch,
 }
 
 /// Qué hacer cuando ninguna regla matchea.
@@ -197,8 +202,28 @@ fn rule_matches(rule: &Rule, action: &ActionDescriptor, root: &Path) -> bool {
             let full = format!("{server}/{tool}");
             rule.patterns.iter().any(|p| glob(p, &full) || glob(p, server))
         }
+        (PolicyAction::Fetch, ActionDescriptor::Fetch { url }) => {
+            let host = url_host(url).unwrap_or_default();
+            rule.patterns.iter().any(|p| {
+                if p.contains("://") {
+                    glob(p, url)
+                } else {
+                    !host.is_empty() && glob(p, &host)
+                }
+            })
+        }
         _ => false,
     }
+}
+
+/// Host de una URL `scheme://[user@]host[:port]/…`, en minúsculas y sin
+/// puerto ni userinfo. `None` si no tiene `://`.
+pub fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
+    let host = authority.split(':').next().unwrap_or(authority);
+    Some(host.to_ascii_lowercase())
 }
 
 fn path_matches(patterns: &[String], path: &Path, root: &Path) -> bool {
@@ -399,6 +424,29 @@ verdict = "confirm"
         // `any` sin match: catch-all explícito.
         let p = Policy::from_toml("[[rule]]\nid=\"all\"\naction=\"any\"\nverdict=\"confirm\"\n").unwrap();
         assert_eq!(classifier(p).decide(&sh(&["ls"])).verdict, Verdict::Confirm);
+    }
+
+    /// `fetch`: glob sobre el host (sin puerto/userinfo, case-insensitive)
+    /// o sobre la URL completa si el patrón lleva `://`; sin regla, el
+    /// base lo marca `Confirm` (default-deny de red).
+    #[test]
+    fn fetch_rules_match_host_or_full_url() {
+        let p = Policy::from_toml(
+            "[[rule]]\nid=\"docs\"\naction=\"fetch\"\nmatch=[\"docs.rs\", \"*.wikipedia.org\", \"https://github.com/braze/**\"]\nverdict=\"allow\"\n\
+             [[rule]]\nid=\"no-evil\"\naction=\"fetch\"\nmatch=[\"evil.example\"]\nverdict=\"deny\"\n",
+        )
+        .unwrap();
+        let c = classifier(p);
+        let f = |u: &str| ActionDescriptor::Fetch { url: u.to_string() };
+        assert_eq!(c.decide(&f("https://docs.rs/tokio")).rule.as_deref(), Some("docs"));
+        assert_eq!(c.decide(&f("https://user@DOCS.RS:443/x?q=1")).rule.as_deref(), Some("docs"), "host normalizado");
+        assert_eq!(c.decide(&f("https://en.wikipedia.org/wiki/Rust")).verdict, Verdict::Allow);
+        assert_eq!(c.decide(&f("https://wikipedia.org/")).verdict, Verdict::Confirm, "* no cubre el apex");
+        assert_eq!(c.decide(&f("https://github.com/braze/x/blob/main/a.rs")).verdict, Verdict::Allow);
+        assert_eq!(c.decide(&f("https://github.com/otro/x")).verdict, Verdict::Confirm, "URL completa");
+        assert_eq!(c.decide(&f("http://evil.example/?d=secreto")).verdict, Verdict::Deny);
+        assert_eq!(url_host("not a url"), None);
+        assert_eq!(url_host("https://a.b:8080/c").as_deref(), Some("a.b"));
     }
 
     #[test]

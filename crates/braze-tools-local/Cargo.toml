@@ -28,6 +28,14 @@ thiserror = { workspace = true }
 # surface as tool-result noise.
 tracing = { workspace = true }
 syn = { version = "3.0.3", features = ["full", "parsing"] }
+# Tools web `web_fetch`/`web_search` (perfil operador, 2026-09-28) —
+# feature `web`, on por default en braze. Un build soberano (enclave) la
+# apaga y el crate vuelve a no linkear ningún cliente HTTP.
+reqwest = { workspace = true, optional = true }
+
+[features]
+default = ["web"]
+web = ["dep:reqwest"]
 
 [dev-dependencies]
 # Unique throwaway fixture-project dirs for the post-edit check tests.

@@ -828,7 +828,9 @@ async fn build_engine(
         .with_formatters(config.formatters.clone())
         .with_bwrap_sandbox(config.enable_bwrap_tool_sandbox)
         .with_bwrap_allow_network(config.bwrap_allow_network)
-        .with_tool_output_spill(config.enable_tool_output_spill);
+        .with_tool_output_spill(config.enable_tool_output_spill)
+        // Perfil operador: tools web, off salvo config explícita.
+        .with_web_tools(config.enable_web_tools);
     let mut providers: Vec<Box<dyn braze_tools_core::ToolProvider>> =
         vec![Box::new(local_provider)];
 

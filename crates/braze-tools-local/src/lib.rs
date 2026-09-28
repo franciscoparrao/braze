@@ -26,6 +26,8 @@ mod read_file;
 mod schema;
 mod shell_exec;
 mod syntactic_gate;
+#[cfg(feature = "web")]
+mod web;
 mod write_file;
 
 #[cfg(test)]

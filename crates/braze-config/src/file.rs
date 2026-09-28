@@ -132,6 +132,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "enable_bwrap_tool_sandbox",
     "bwrap_allow_network",
     "enable_tool_output_spill",
+    // Tools web (perfil operador, 2026-09-28).
+    "enable_web_tools",
 ];
 
 /// Read and parse the config file at `path` into [`ConfigOverrides`].

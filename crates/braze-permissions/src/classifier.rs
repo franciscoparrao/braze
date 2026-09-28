@@ -211,6 +211,9 @@ impl ActionClassifier for DefaultClassifier {
             // An MCP server is arbitrary, unaudited code — there is no
             // safe-by-construction subset to allowlist, unlike shell.
             ActionDescriptor::McpToolCall { .. } => Reversibility::Irreversible,
+            // Red: default-deny, igual que un programa desconocido en el
+            // shell. La política (`action = "fetch"`) abre hosts por glob.
+            ActionDescriptor::Fetch { .. } => Reversibility::Irreversible,
             ActionDescriptor::Other { .. } => Reversibility::Reversible,
         }
     }

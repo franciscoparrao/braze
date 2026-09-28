@@ -43,6 +43,7 @@ pub fn category_and_label(key: &PermissionKey) -> (&'static str, String) {
         PermissionKey::DeleteFile { path } => ("delete", path.display().to_string()),
         PermissionKey::ReadPath { path } => ("read", path.display().to_string()),
         PermissionKey::McpToolCall { server, tool } => ("mcp", format!("{server}::{tool}")),
+        PermissionKey::Fetch { url } => ("fetch", url.clone()),
     };
     // J-19 (docs/AUDITORIA-2026-07-v7.md): the keys were persisted from
     // model/MCP-controlled strings — a session log can carry ANSI escapes

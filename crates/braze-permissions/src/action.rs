@@ -33,6 +33,14 @@ pub enum ActionDescriptor {
         server: String,
         tool: String,
     },
+    /// Una salida a la red (`web_fetch`/`web_search`, perfil operador
+    /// 2026-09-28). `Irreversible` por default en `DefaultClassifier`
+    /// (default-deny como el shell: la red es exfiltración posible y
+    /// contenido no confiable de vuelta); una regla `fetch` de la
+    /// política permite hosts o URLs por glob.
+    Fetch {
+        url: String,
+    },
     /// Anything not classifiable by the fixed MVP table. Always treated as
     /// Reversible by DefaultClassifier.
     Other {
@@ -65,6 +73,7 @@ impl fmt::Display for ActionDescriptor {
             Self::McpToolCall { server, tool } => {
                 format!("call MCP tool `{tool}` on server `{server}`")
             }
+            Self::Fetch { url } => format!("fetch URL `{url}`"),
             Self::Other { label } => label.clone(),
         };
         f.write_str(&sanitize_control_chars(&raw))

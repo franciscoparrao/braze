@@ -675,3 +675,22 @@ proyecto (`default_system_prompt` ganó el parámetro; el bench pasa `None`).
 NO se mapea `allowed-tools`: en Claude Code es permiso, y en braze los
 permisos los decide el policy engine, no la skill. Sin router automático
 por descripción (decisión D′ vigente).
+
+**Tools web `web_fetch` / `web_search` (2026-09-28,
+`crates/braze-tools-local/src/web.rs`, feature `web` on por default;
+enclave la apaga y el crate no linkea reqwest)**: el mínimo de
+WebFetch/WebSearch de Claude Code que 63/57 skills piden. Gate
+`enable_web_tools` (default OFF: cambia el inventario de tools que el bench
+mide — `schema::web_stubs` va aparte de las 6 base). **Red = default-deny**:
+cada URL es un `ActionDescriptor::Fetch { url }` (→ `PermissionKey::Fetch`,
+Irreversible en el base) y la política lo abre con `action = "fetch"` —
+glob sobre el HOST (`*.wikipedia.org`, `docs.rs`) o sobre la URL completa
+si el patrón lleva `://`; `web_search` pide permiso sobre la URL exacta del
+buscador (`html.duckduckgo.com`), así una regla de host la habilita. Lo
+que vuelve es DATO no confiable (cabecera explícita), HTML→texto a mano
+(sin scripts/estilos/tags, entidades decodificadas), cap 200 KB
+(`max_bytes`), timeout 30 s, ≤5 redirects. Búsqueda por el endpoint HTML
+de DuckDuckGo sin API key — parser frágil por naturaleza: si el markup
+cambia devuelve error, nunca inventa resultados. La política del autor
+permite el buscador y una lista de hosts de documentación; el resto pide
+confirmación (= denegado en `braze run`).

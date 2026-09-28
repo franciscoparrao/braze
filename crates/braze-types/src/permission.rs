@@ -35,6 +35,14 @@ pub enum PermissionKey {
         server: String,
         tool: String,
     },
+    /// Una salida a la red por las tools web (`web_fetch`/`web_search`,
+    /// perfil operador 2026-09-28): la URL completa, por la misma razón
+    /// que `Shell` lleva el argv entero — aprobar un host no aprueba
+    /// cualquier URL de ese host (la query string es el canal de
+    /// exfiltración obvio).
+    Fetch {
+        url: String,
+    },
 }
 
 /// `deserialize_with` for the `key: Option<PermissionKey>` field on
@@ -120,6 +128,13 @@ mod tests {
     fn read_path_round_trips() {
         round_trip(PermissionKey::ReadPath {
             path: PathBuf::from("/etc/shadow"),
+        });
+    }
+
+    #[test]
+    fn fetch_round_trips() {
+        round_trip(PermissionKey::Fetch {
+            url: "https://docs.rs/tokio?x=1".to_string(),
         });
     }
 

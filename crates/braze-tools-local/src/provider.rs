@@ -113,6 +113,12 @@ pub struct LocalToolsProvider {
     /// `Config::enable_tool_output_spill` / `+ablate:no-spill` lo apaga.
     /// El head+tail del truncado es siempre-on, independiente de este flag.
     spill_enabled: bool,
+    /// Anuncia y despacha `web_fetch`/`web_search` (perfil operador,
+    /// 2026-09-28; feature `web`). Off por default: el bench mide el
+    /// inventario de seis tools, y la red es default-deny — cada URL pasa
+    /// por `ActionDescriptor::Fetch` en el guard antes de salir.
+    /// `Config::enable_web_tools` (vía `braze-cli`) lo enciende.
+    web_tools: bool,
 }
 
 impl LocalToolsProvider {
@@ -135,6 +141,7 @@ impl LocalToolsProvider {
             bwrap_sandbox: false,
             bwrap_allow_network: false,
             spill_enabled: true,
+            web_tools: false,
         }
     }
 
@@ -155,6 +162,7 @@ impl LocalToolsProvider {
             bwrap_sandbox: false,
             bwrap_allow_network: false,
             spill_enabled: true,
+            web_tools: false,
         }
     }
 
@@ -228,6 +236,17 @@ impl LocalToolsProvider {
     /// `docs/tool-output-spill-design-2026-08-11.md`.
     pub fn with_tool_output_spill(mut self, enabled: bool) -> Self {
         self.spill_enabled = enabled;
+        self
+    }
+
+    /// Enables the web tools (`web_fetch`, `web_search`) — chainable. See
+    /// `web_tools`'s field doc comment. Without the `web` cargo feature
+    /// this is a no-op (the tools are never advertised).
+    pub fn with_web_tools(mut self, enabled: bool) -> Self {
+        self.web_tools = enabled && cfg!(feature = "web");
+        if enabled && !cfg!(feature = "web") {
+            tracing::warn!("web tools requested but this build has no `web` feature; ignored");
+        }
         self
     }
 
@@ -391,6 +410,39 @@ impl LocalToolsProvider {
         Ok(self.wrap(call, glob::glob(args).await))
     }
 
+    #[cfg(feature = "web")]
+    async fn invoke_web_fetch(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let args: crate::web::WebFetchArgs = parse_args(call)?;
+        self.check_fetch(call, &args.url).await?;
+        Ok(self.wrap(call, crate::web::fetch(args).await))
+    }
+
+    #[cfg(feature = "web")]
+    async fn invoke_web_search(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+        let args: crate::web::WebSearchArgs = parse_args(call)?;
+        // El permiso se pide sobre la URL exacta que va a salir — una
+        // regla `fetch` sobre el host del buscador habilita la búsqueda.
+        let url = crate::web::search_url(&args.query);
+        self.check_fetch(call, &url).await?;
+        Ok(self.wrap(call, crate::web::search(args).await))
+    }
+
+    /// Red: cada URL es un `ActionDescriptor::Fetch` — default-deny
+    /// (confirmación) salvo regla `fetch` en la política.
+    #[cfg(feature = "web")]
+    async fn check_fetch(&self, call: &ToolCall, url: &str) -> Result<(), ToolError> {
+        let action = ActionDescriptor::Fetch {
+            url: url.to_string(),
+        };
+        self.guard
+            .check(&action)
+            .await
+            .map_err(|err| ToolError::InvocationFailed {
+                name: call.name.clone(),
+                message: Self::denied_message(&err),
+            })
+    }
+
     /// Shared by `write_file` and `edit_file`: both are writes for
     /// permission purposes (there is no separate `ActionDescriptor` for
     /// "edit").
@@ -432,7 +484,11 @@ impl ToolProvider for LocalToolsProvider {
     }
 
     async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
-        Ok(schema::all_stubs(PROVIDER_ID))
+        let mut stubs = schema::all_stubs(PROVIDER_ID);
+        if self.web_tools {
+            stubs.extend(schema::web_stubs(PROVIDER_ID));
+        }
+        Ok(stubs)
     }
 
     async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
@@ -447,6 +503,10 @@ impl ToolProvider for LocalToolsProvider {
             "shell_exec" => self.invoke_shell_exec(call).await,
             "grep" => self.invoke_grep(call).await,
             "glob" => self.invoke_glob(call).await,
+            #[cfg(feature = "web")]
+            "web_fetch" if self.web_tools => self.invoke_web_fetch(call).await,
+            #[cfg(feature = "web")]
+            "web_search" if self.web_tools => self.invoke_web_search(call).await,
             other => Err(ToolError::NotFound(other.to_string())),
         }
     }

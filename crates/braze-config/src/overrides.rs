@@ -128,6 +128,9 @@ pub struct ConfigOverrides {
     /// (`BRAZE_ENABLE_TOOL_OUTPUT_SPILL`).
     #[serde(default)]
     pub enable_tool_output_spill: Option<bool>,
+    /// Tools web (`BRAZE_ENABLE_WEB_TOOLS`).
+    #[serde(default)]
+    pub enable_web_tools: Option<bool>,
     #[serde(default)]
     pub disable_agents_md: Option<bool>,
     /// Tope de bytes del AGENTS.md / instrucciones globales
@@ -693,6 +696,17 @@ impl ConfigOverrides {
                                 reason: e.to_string(),
                             })?;
                     overrides.enable_tool_output_spill = Some(parsed);
+                }
+                "ENABLE_WEB_TOOLS" => {
+                    let parsed =
+                        value
+                            .parse::<bool>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.enable_web_tools = Some(parsed);
                 }
                 "DISABLE_AGENTS_MD" => {
                     let parsed =

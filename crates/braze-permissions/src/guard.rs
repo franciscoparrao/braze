@@ -90,6 +90,7 @@ pub fn derive_permission_key(action: &ActionDescriptor) -> Option<PermissionKey>
             server: server.clone(),
             tool: tool.clone(),
         }),
+        ActionDescriptor::Fetch { url } => Some(PermissionKey::Fetch { url: url.clone() }),
         ActionDescriptor::Other { .. } => None,
     }
 }
