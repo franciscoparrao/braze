@@ -444,6 +444,33 @@ hecho; lo abierto está listado acá.)
 
 ## Modelos locales recomendados (Ollama)
 
+### Bonsai 2 (ternario 1.58-bit, vía fork PrismML) — probado 2026-09-19, NO adoptado
+
+Bonsai (PrismML) es la compresión ternaria de Qwen3.8 (Apache-2.0): 27B (5.6GB)
+y 8B (2.1GB) en pesos ternarios {−1,0,+1}. **Gotcha crítico (clase de bug del
+proyecto): requiere el fork `github.com/PrismML-Eng/llama.cpp` (kernels
+ternarios + activation transform Hadamard). llama.cpp STOCK —lo que linkea el
+`LocalBackend` in-process— CARGA el GGUF y produce BASURA sin warning.** Por eso
+NO se corre por LocalBackend; se corre el `llama-server` del fork como endpoint
+OpenAI-compatible y braze le habla por el backend `zen` (`--backends zen:<m>`,
+`BRAZE_ZEN_BASE_URL`). Fork compilado y GGUFs en Nitro (`~/bonsai-llama`,
+`~/models/Ternary-Bonsai-{2-27B-PTQ1_0,8B-PQ2_0}.gguf`).
+
+- **Hardware**: el 27B es VRAM-bound — no cabe en los 6GB de la RTX 3050 → CPU a
+  **~1.2 tok/s**, impráctico; necesita ≥24GB VRAM (PrismML cita 143 tok/s en RTX
+  5090). El 8B (2.1GB) cabe entero → **~54 tok/s**, usable.
+- **Bench 8B** (`default.toml`, 3 reps, zen→fork en Nitro,
+  `docs/sweep-bonsai8b-default-2026-09-19.json`): **39/57 = 68,4%**. Tool calling
+  nativo IMPECABLE (`schema_fail=0`, `rescues=0`), `single_tool` 21/21. Punto
+  ciego: `error_recovery` **0/9** (no se recupera de un tool call fallido).
+- **Veredicto: por detrás de los recomendados.** En la MISMA `default.toml`,
+  **Spark-X2.5-4B satura (57/57=100%)** y **Ornith:9b también satura** — ambos
+  superan al Bonsai 8B (68,4%) siendo Spark incluso más chico (4B). Único
+  atractivo de Bonsai: Apache-2.0 + footprint ternario mínimo. No reemplaza a
+  gpt-oss:20b / Ornith / Spark para este proyecto.
+
+---
+
 **El mejor modelo local del proyecto es `gpt-oss:20b` corriendo en
 Nitro** — y desde el 2026-07-21, **la mejor forma de correrlo es el
 LocalBackend** (camino Harmony: 57/57 y pass^3=100% en `default.toml`,
