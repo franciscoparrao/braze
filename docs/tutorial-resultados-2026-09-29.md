@@ -75,10 +75,19 @@ dos son las palancas del siguiente sprint.
   del vault. El costo es del tamaño de la tarea, no de fricción de
   permisos.
 - **Ej. 6** (`/tex-review`): el markup DSML ya NO se muestra como
-  respuesta (el rescate funciona), pero el turno ahora muere con "final
+  respuesta (el rescate funciona), pero el turno moría con "final
   response truncated by the token budget". Causa: `max_tokens` era 4096 y
   la review completa no cabe. Subido el perfil a 16384 (Go lo acepta).
-  Falta re-verificar.
+- **Ej. 6, tercera pasada** (max_tokens 16384, tras el fix 0ce833c):
+  **PASA.** `stop_reason: stop`, review completa y sustantiva (recalculó
+  las cifras del paper con Python, descartó un falso positivo, dio
+  pendientes accionables). Cero truncado, cero DSML crudo, cero 400. Sigue
+  llegando al tope de 21 rondas: convergió por el `summary_fallback` —
+  justo la ronda donde antes se filtraba el DSML — y ahora ese fallback
+  entrega texto limpio. Costo: 293 k tokens in, 17 k out. Nota: la skill
+  escribió su auditoría a `~/vault/journals/_audits/` (ruta permitida por
+  `references`), un efecto real sobre el vault del autor con fecha
+  desactualizada en el nombre (bug de la skill, no de braze).
 - **Ej. 11**: **bug real encontrado.** Ver abajo.
 
 ## BUG: sesión irreanudable por orden de mensajes (ej. 11)
