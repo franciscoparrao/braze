@@ -193,6 +193,11 @@ fn default_hook_timeout_secs() -> u64 {
     10
 }
 
+/// Mismo valor que `braze_engine::history::TACTICAL_FULL_OBSERVATIONS`.
+fn default_tactical_full_observations() -> usize {
+    5
+}
+
 /// Mismo tope histórico de `context_file.rs` (y del output por tool).
 fn default_agents_md_max_bytes() -> usize {
     8_000
@@ -397,6 +402,15 @@ pub struct Config {
     /// wider raw window than Ollama's small, fixed `num_ctx`), so it's
     /// configurable rather than a single constant for every backend.
     pub tactical_window: usize,
+    /// Cuántas observaciones (tool results) recientes se mantienen
+    /// completas en el contexto; las anteriores se colapsan a una línea
+    /// (colapso ACI). Default 5, el valor histórico del bench. Perfil
+    /// operador (2026-09-29, ejercicio 11 del tutorial): en una tarea de
+    /// "lee estos 15 archivos y sintetiza" el modelo perdió el contenido
+    /// de las lecturas antes de poder usarlo; con modelos de 128k de
+    /// contexto conviene subirlo. `BRAZE_TACTICAL_FULL_OBSERVATIONS`.
+    #[serde(default = "default_tactical_full_observations")]
+    pub tactical_full_observations: usize,
     /// Number of raw tactical events above which `Engine::run_turn`
     /// triggers a compaction pass — see
     /// `braze_engine::DEFAULT_TACTICAL_COMPACTION_THRESHOLD`'s doc
@@ -849,6 +863,7 @@ impl Default for Config {
             // this is the historical hardcoded value, now just the
             // default a caller can override.
             tactical_window: 20,
+            tactical_full_observations: default_tactical_full_observations(),
             tactical_compaction_threshold: 40,
             mcp_servers: Vec::new(),
             best_of_n: 1,
@@ -1122,6 +1137,9 @@ impl Config {
         }
         if let Some(v) = overrides.tactical_window {
             self.tactical_window = v;
+        }
+        if let Some(v) = overrides.tactical_full_observations {
+            self.tactical_full_observations = v.max(1);
         }
         if let Some(v) = overrides.tactical_compaction_threshold {
             self.tactical_compaction_threshold = v;

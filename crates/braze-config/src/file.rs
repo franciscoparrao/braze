@@ -59,6 +59,8 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "system_prompt",
     "session_dir",
     "tactical_window",
+    // Perfil operador (2026-09-29): observaciones completas en el contexto.
+    "tactical_full_observations",
     "tactical_compaction_threshold",
     "mcp_servers",
     "best_of_n",

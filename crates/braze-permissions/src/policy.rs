@@ -439,6 +439,11 @@ fn rule_matches(rule: &Rule, action: &ActionDescriptor, root: &Path) -> bool {
             rule.patterns.iter().any(|p| {
                 if p.contains(char::is_whitespace) {
                     glob(p, &joined)
+                } else if p.contains('/') {
+                    // Patrón con `/` sin espacios: la RUTA del programa
+                    // (`/home/u/.claude/skills/**` permite los scripts
+                    // propios de las skills, invocados directo).
+                    glob(p, program)
                 } else {
                     glob(p, &base)
                 }
@@ -649,6 +654,15 @@ verdict = "confirm"
         assert_eq!((d.verdict, d.rule.as_deref()), (Verdict::Deny, Some("no-network-tools")));
         assert_eq!(d.reason.as_deref(), Some("sin egress"));
         assert_eq!(c.decide(&sh(&["/usr/bin/ssh", "h"])).verdict, Verdict::Deny, "basename");
+        // Patrón con `/`: ruta del programa (scripts propios de skills/vault).
+        let p = Policy::from_toml(
+            "[[rule]]\nid=\"own-scripts\"\naction=\"shell\"\nmatch=[\"/home/u/.claude/skills/**\", \"bash /home/u/vault/_bin/**\"]\nverdict=\"allow\"\n",
+        )
+        .unwrap();
+        let c2 = classifier(p);
+        assert_eq!(c2.decide(&sh(&["/home/u/.claude/skills/memoria/scripts/x.py", "--quick"])).verdict, Verdict::Allow);
+        assert_eq!(c2.decide(&sh(&["bash", "/home/u/vault/_bin/vault-lint.sh", "--quick"])).verdict, Verdict::Allow);
+        assert_eq!(c2.decide(&sh(&["/home/u/otro/x.sh"])).verdict, Verdict::Confirm);
         assert_eq!(c.decide(&sh(&["git", "push", "origin"])).verdict, Verdict::Deny, "comando completo");
         // Sin regla: hereda del base (git status es seguro → allow; rm → confirm).
         let d = c.decide(&sh(&["git", "status"]));

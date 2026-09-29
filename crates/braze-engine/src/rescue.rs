@@ -231,6 +231,132 @@ pub(crate) fn extract_tagged_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
     (calls, remaining.trim().to_string())
 }
 
+/// Rescue for DeepSeek's "DSML" textual tool calls (observed 2026-09-29
+/// with `deepseek-v4.1-flash` via OpenCode Go, in the tools-free summary
+/// round: told to answer without tools, the model wrote its calls in its
+/// native template instead). Shape, with `｜` = U+FF5C fullwidth bar:
+///
+/// ```text
+/// <｜DSML｜ calls>
+/// <｜DSML｜ invoke name="shell_exec">
+/// <｜DSML｜ parameter name="command" string="false">["sed", "-n", "1,5p", "x"]</｜DSML｜ parameter>
+/// </｜DSML｜ invoke>
+/// </｜DSML｜ calls>
+/// ```
+///
+/// `string="false"` = the value is JSON; anything else (or absent) = a
+/// string. The bars around `DSML` vary (`｜`, `｜｜`, ASCII `|`), so the
+/// scanner keys on the ASCII words (`invoke name="`, `parameter name="`,
+/// `invoke>`, `parameter>`) and only requires `DSML` nearby. Same
+/// contract as [`extract_tagged_tool_calls`]: parsed blocks are removed,
+/// surrounding prose stays, malformed blocks stay verbatim, empty `Vec`
+/// means "leave the text untouched".
+pub(crate) fn extract_dsml_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
+    const INVOKE_OPEN: &str = "invoke name=\"";
+    const INVOKE_CLOSE: &str = "invoke>";
+    const PARAM_OPEN: &str = "parameter name=\"";
+    const PARAM_CLOSE: &str = "parameter>";
+
+    if !text.contains("DSML") || !text.contains(INVOKE_OPEN) {
+        return (Vec::new(), text.to_string());
+    }
+    let mut calls = Vec::new();
+    let mut remaining = String::new();
+    let mut rest = text;
+    while let Some(rel) = rest.find(INVOKE_OPEN) {
+        // The tag starts at the `<` that opens this invoke (walk back over
+        // the bar/DSML marker); if there's no `<` nearby it isn't DSML.
+        // `<` + hasta dos barras fullwidth (3 bytes c/u) a cada lado de
+        // `DSML` + espacio = 18 bytes en la forma observada; 40 deja margen.
+        let Some(tag_start) = rest[..rel].rfind('<').filter(|&i| rel - i <= 40) else {
+            remaining.push_str(&rest[..rel + INVOKE_OPEN.len()]);
+            rest = &rest[rel + INVOKE_OPEN.len()..];
+            continue;
+        };
+        let absolute_start = text.len() - rest.len() + tag_start;
+        let name_start = rel + INVOKE_OPEN.len();
+        let Some(name_len) = rest[name_start..].find('"') else {
+            break;
+        };
+        let name = &rest[name_start..name_start + name_len];
+        // Block end: the closing `…invoke>` after this open.
+        let Some(close_rel) = rest[name_start..].find(INVOKE_CLOSE) else {
+            break; // unclosed: keep the tail verbatim below
+        };
+        let close_abs = name_start + close_rel + INVOKE_CLOSE.len();
+        let block = &rest[tag_start..close_abs];
+        let body = &rest[name_start + name_len..name_start + close_rel];
+        if is_inside_code_fence(text, absolute_start) || name.is_empty() {
+            remaining.push_str(&rest[..close_abs]);
+            rest = &rest[close_abs..];
+            continue;
+        }
+        // Parameters.
+        let mut args = serde_json::Map::new();
+        let mut ok = true;
+        let mut p = body;
+        while let Some(prel) = p.find(PARAM_OPEN) {
+            let ks = prel + PARAM_OPEN.len();
+            let Some(klen) = p[ks..].find('"') else {
+                ok = false;
+                break;
+            };
+            let key = p[ks..ks + klen].to_string();
+            let Some(gt_rel) = p[ks + klen..].find('>') else {
+                ok = false;
+                break;
+            };
+            let attrs = &p[ks + klen..ks + klen + gt_rel];
+            let is_json = attrs.contains("string=\"false\"");
+            let vs = ks + klen + gt_rel + 1;
+            // Value runs to the `</…parameter>` closer.
+            let Some(vend_rel) = p[vs..].find(PARAM_CLOSE) else {
+                ok = false;
+                break;
+            };
+            let raw_end = vs + vend_rel;
+            let close_lt = p[vs..raw_end].rfind("</").map(|i| vs + i).unwrap_or(raw_end);
+            let raw = p[vs..close_lt].trim();
+            let value = if is_json {
+                match serde_json::from_str::<serde_json::Value>(raw) {
+                    Ok(v) => v,
+                    Err(_) => serde_json::Value::String(raw.to_string()),
+                }
+            } else {
+                serde_json::Value::String(raw.to_string())
+            };
+            args.insert(key, value);
+            p = &p[raw_end + PARAM_CLOSE.len()..];
+        }
+        if ok {
+            calls.push(ToolCall {
+                id: format!("dsml-{}", uuid::Uuid::new_v4()),
+                name: name.to_string(),
+                arguments: serde_json::Value::Object(args),
+            });
+            remaining.push_str(&rest[..tag_start]);
+        } else {
+            remaining.push_str(block);
+        }
+        rest = &rest[close_abs..];
+    }
+    if calls.is_empty() {
+        return (calls, text.to_string());
+    }
+    remaining.push_str(rest);
+    // Strip the empty `<…DSML… calls>` / `</…DSML… calls>` wrappers left
+    // behind once every invoke inside them was extracted.
+    let cleaned: String = remaining
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !(t.contains("DSML") && t.ends_with("calls>"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (calls, cleaned.trim().to_string())
+}
+
 /// `true` when `offset` (a byte index into `text`) falls inside a
 /// ``` ... ``` fenced region — toggled each time a literal "```" marker
 /// is seen (doesn't require the fence to be alone on its own line; models
@@ -1087,6 +1213,34 @@ mod tests {
         let (calls, remaining) = extract_tagged_tool_calls(text);
         assert_eq!(calls.len(), 1);
         assert_eq!(remaining, "y <tool_call>{\"na");
+    }
+
+    /// DSML (DeepSeek): dos invokes en un bloque `calls`, parámetro JSON
+    /// (`string="false"`) y string; prosa alrededor conservada; un bloque
+    /// dentro de un fence no se ejecuta; texto sin DSML queda intacto.
+    #[test]
+    fn dsml_blocks_are_rescued_with_json_and_string_parameters() {
+        let text = "Voy a leer.\n<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name=\"shell_exec\">\n\
+            <｜｜DSML｜｜ parameter name=\"command\" string=\"false\">[\"sed\", \"-n\", \"1,5p\", \"main.tex\"]</｜｜DSML｜｜ parameter>\n\
+            </｜｜DSML｜｜ invoke>\n<｜｜DSML｜｜ invoke name=\"read_file\">\n\
+            <｜｜DSML｜｜ parameter name=\"path\">main.tex</｜｜DSML｜｜ parameter>\n\
+            <｜｜DSML｜｜ parameter name=\"limit\" string=\"false\">20</｜｜DSML｜｜ parameter>\n\
+            </｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>\nListo.";
+        let (calls, remaining) = extract_dsml_tool_calls(text);
+        assert_eq!(calls.len(), 2, "{calls:?}");
+        assert_eq!(calls[0].name, "shell_exec");
+        assert_eq!(calls[0].arguments["command"], serde_json::json!(["sed", "-n", "1,5p", "main.tex"]));
+        assert_eq!(calls[1].name, "read_file");
+        assert_eq!(calls[1].arguments["path"], serde_json::json!("main.tex"));
+        assert_eq!(calls[1].arguments["limit"], serde_json::json!(20));
+        assert!(remaining.starts_with("Voy a leer.") && remaining.ends_with("Listo.") && !remaining.contains("DSML"), "{remaining}");
+        // Fenced example: not a real call.
+        let fenced = "```\n<｜DSML｜ invoke name=\"x\">\n<｜DSML｜ parameter name=\"a\">1</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n```";
+        assert!(extract_dsml_tool_calls(fenced).0.is_empty());
+        // Sin DSML: intacto.
+        let (calls, text) = extract_dsml_tool_calls("invoke name=\"x\" sin DSML");
+        assert!(calls.is_empty());
+        assert_eq!(text, "invoke name=\"x\" sin DSML");
     }
 
     #[test]

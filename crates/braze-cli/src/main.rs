@@ -1098,6 +1098,9 @@ async fn build_engine(
         config.max_tokens,
     )
     .with_tactical_compaction_threshold(config.tactical_compaction_threshold)
+    // Perfil operador: cuántos tool results recientes quedan completos
+    // (los demás se colapsan a una línea). Default 5 = el histórico.
+    .with_tactical_full_observations(config.tactical_full_observations)
     .with_best_of_n(config.best_of_n)
     .with_textual_rescue_enabled(!config.disable_textual_tool_call_rescue)
     .with_max_turn_iterations(config.max_turn_iterations as usize)

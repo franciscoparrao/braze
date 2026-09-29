@@ -356,6 +356,7 @@ impl Engine {
                     "<function=> XML (qwen3-coder)",
                 ),
                 (extract_pythonic_tool_calls, "pythonic [func(...)] (Llama)"),
+                (extract_dsml_tool_calls, "DSML <｜DSML｜ invoke> (DeepSeek)"),
             ];
 
             let mut rescued_from_ladder = false;

@@ -49,7 +49,8 @@ use crate::error::EngineError;
 use crate::history::build_messages_with_full_observations;
 use crate::rescue::{
     EnvelopeResponse, coerce_arguments_to_schema, extract_function_xml_tool_calls,
-    extract_pythonic_tool_calls, extract_tagged_tool_calls, parse_envelope_response,
+    extract_dsml_tool_calls, extract_pythonic_tool_calls, extract_tagged_tool_calls,
+    parse_envelope_response,
     try_parse_textual_tool_call,
 };
 

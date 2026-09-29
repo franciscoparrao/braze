@@ -245,6 +245,10 @@ pub(super) fn strip_leaked_tool_call_shapes(text: &str) -> String {
         extract_tagged_tool_calls as fn(&str) -> (Vec<ToolCall>, String),
         extract_function_xml_tool_calls,
         extract_pythonic_tool_calls,
+        // DeepSeek DSML (2026-09-29): observado justo aquí, en la ronda
+        // sin tools — el modelo escribió sus calls en su plantilla nativa
+        // y el markup crudo se mostró como respuesta final.
+        extract_dsml_tool_calls,
     ] {
         let (calls, remaining) = extract(text);
         if !calls.is_empty() {
@@ -276,6 +280,19 @@ mod tests {
     // docs/usability-log-2026-07-07-si2.md: attempt_tools_free_summary_round
     // had no rescue logic at all, so a leaked tool-call block there used
     // to get persisted verbatim as if it were the model's real answer) ---
+
+    /// DSML de DeepSeek en la ronda sin tools (2026-09-29, ejercicio 6 del
+    /// tutorial): solo markup → vacío (el turno no converge en vez de
+    /// mostrar basura como respuesta); con prosa alrededor, queda la prosa.
+    #[test]
+    fn a_leaked_dsml_block_strips_to_empty_or_to_its_prose() {
+        let only = "<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name=\"shell_exec\">\n\
+            <｜｜DSML｜｜ parameter name=\"command\" string=\"false\">[\"sed\", \"-n\", \"1,5p\", \"main.tex\"]</｜｜DSML｜｜ parameter>\n\
+            </｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>";
+        assert_eq!(strip_leaked_tool_call_shapes(only).trim(), "");
+        let with_prose = format!("Resumen: falta revisar la sección 4.\n{only}");
+        assert_eq!(strip_leaked_tool_call_shapes(&with_prose).trim(), "Resumen: falta revisar la sección 4.");
+    }
 
     #[test]
     fn a_leaked_tagged_call_with_no_other_text_strips_to_empty() {

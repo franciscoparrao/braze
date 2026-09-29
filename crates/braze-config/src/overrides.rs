@@ -69,6 +69,10 @@ pub struct ConfigOverrides {
     pub session_dir: Option<PathBuf>,
     #[serde(default)]
     pub tactical_window: Option<usize>,
+    /// Observaciones recientes que se mantienen completas
+    /// (`BRAZE_TACTICAL_FULL_OBSERVATIONS`).
+    #[serde(default)]
+    pub tactical_full_observations: Option<usize>,
     #[serde(default)]
     pub tactical_compaction_threshold: Option<usize>,
     #[serde(default)]
@@ -372,6 +376,17 @@ impl ConfigOverrides {
                     overrides.tui_theme = Some(value.to_string());
                 }
                 "POLICY_FILE" => overrides.policy_file = Some(PathBuf::from(value)),
+                "TACTICAL_FULL_OBSERVATIONS" => {
+                    let parsed =
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.tactical_full_observations = Some(parsed);
+                }
                 "PLANNER_BACKEND" => overrides.planner_backend = Some(value.to_string()),
                 "PLANNER_MODEL" => overrides.planner_model = Some(value.to_string()),
                 "LEAD_BACKEND" => overrides.lead_backend = Some(value.to_string()),
