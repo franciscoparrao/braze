@@ -65,6 +65,61 @@ de tarea; está en las skills largas (subagentes, 20 rondas) y en las
 tareas de síntesis sobre muchos archivos (observaciones colapsadas). Esas
 dos son las palancas del siguiente sprint.
 
+## Segunda pasada (ejercicios 2, 5, 6, 11 con el binario ya arreglado)
+
+- **Ej. 2**: mejor que antes. 4 rondas, 0 permisos pedidos, usó `read_file`
+  y `shell_exec` sin recurrir a `bash -lc`. La regla `own-scripts` y el
+  prompt no cambiaron esto; fue variación del modelo, pero limpio.
+- **Ej. 5** (`$memoria status`): sigue caro (19 rondas, 343 k tokens) pero
+  ya no hay denegaciones — la regla `own-scripts` dejó pasar los scripts
+  del vault. El costo es del tamaño de la tarea, no de fricción de
+  permisos.
+- **Ej. 6** (`/tex-review`): el markup DSML ya NO se muestra como
+  respuesta (el rescate funciona), pero el turno ahora muere con "final
+  response truncated by the token budget". Causa: `max_tokens` era 4096 y
+  la review completa no cabe. Subido el perfil a 16384 (Go lo acepta).
+  Falta re-verificar.
+- **Ej. 11**: **bug real encontrado.** Ver abajo.
+
+## BUG: sesión irreanudable por orden de mensajes (ej. 11)
+
+En una tarea con muchas lecturas, deepseek repitió llamadas idénticas a
+`read_file` (servidas de caché) y, por el despacho en background, el
+rollout quedó con esta forma:
+
+```
+assistant [3 tool_calls: A, B, C]
+tool      [resultado de C]
+assistant [1 tool_call: D]
+tool      [resultado de A]
+tool      [resultado de B]
+tool      [resultado de D]
+```
+
+`push_grouped` agrupa bloques CONSECUTIVOS del mismo tipo pero NO
+reordena, así que el request a Go queda: `assistant(A,B,C)` →
+`tool(C)` → `assistant(D)` → `tool(B,A,D)`. La API OpenAI-compatible exige
+que cada mensaje `assistant` con `tool_calls` sea seguido inmediatamente
+por un mensaje `tool` por CADA una de sus llamadas, antes de cualquier
+otro mensaje. Aquí `assistant(D)` se interpone entre `assistant(A,B,C)` y
+los resultados de A y B → **HTTP 400**, y como el rollout queda así
+grabado, la sesión ya no se puede reanudar: `--resume` reproduce el mismo
+request roto en cada intento.
+
+Por qué no aparecía con Anthropic: es el proveedor principal y su API es
+más tolerante con este intercalado; Go/OpenAI es estricto.
+
+**Arreglo pendiente (no hecho en esta pasada — merece su propio commit con
+tests):** un post-paso en el builder de mensajes
+(`crates/braze-engine/src/history.rs`) que garantice que los `ToolResult`
+de cada mensaje de asistente van juntos e inmediatamente después de él,
+reordenando por `tool_use_id` en vez de por orden de llegada al rollout.
+Es la corrección correcta porque hace a braze tolerante a cualquier orden
+de completación del despacho en background, no solo a este caso.
+Alternativa más chica: hacerlo en `openrouter_wire::to_openrouter_messages`
+(solo el lado OpenAI), pero deja el rollout mal ordenado en disco.
+Sesión de repro: `8224e2f5-c9c0-4895-807f-148320b28b1c`.
+
 ## Costo de la pasada
 
 Once sesiones con Go, unos 1,1 M de tokens de entrada en total; las dos
