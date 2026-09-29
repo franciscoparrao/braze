@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>braze como agente diario — guía de uso</title>
+<title>Perfeccionar el harness — tutorial con braze</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
@@ -22,227 +22,278 @@
     --mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
   }
   html { background: var(--paper); color: var(--ink); }
-  body {
-    margin: 0;
-    font-family: var(--body);
-    font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
-    line-height: 1.55;
-  }
-  .page {
-    max-width: 72rem;
-    margin: 0 auto;
-    padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 4vw, 3rem) 6rem;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0 3rem;
-  }
-  @media (min-width: 64rem) {
-    .page { grid-template-columns: 14rem minmax(0, 1fr); }
-    nav { position: sticky; top: 2rem; align-self: start; }
-  }
+  body { margin: 0; font-family: var(--body); font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem); line-height: 1.55; }
+  .page { max-width: 74rem; margin: 0 auto; padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 4vw, 3rem) 6rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 3rem; }
+  @media (min-width: 64rem) { .page { grid-template-columns: 15rem minmax(0, 1fr); } nav { position: sticky; top: 2rem; align-self: start; } }
   header { grid-column: 1 / -1; margin-bottom: clamp(2rem, 5vw, 4rem); }
-  .kicker {
-    font-family: var(--mono);
-    font-size: 0.8rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent);
-  }
-  h1 {
-    font-family: var(--display);
-    font-weight: 300;
-    font-size: clamp(2.2rem, 2rem + 2.5vw, 4rem);
-    line-height: 1.05;
-    margin: 0.4rem 0 1rem;
-    letter-spacing: -0.01em;
-    max-width: 22ch;
-  }
+  .kicker { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-family: var(--display); font-weight: 300; font-size: clamp(2.2rem, 2rem + 2.5vw, 4rem); line-height: 1.05; margin: 0.4rem 0 1rem; letter-spacing: -0.01em; max-width: 24ch; }
   h1 em { font-style: italic; font-weight: 600; color: var(--accent); }
-  .lede { color: var(--ink-soft); max-width: 60ch; margin: 0; }
-  nav ol {
-    list-style: none; padding: 0; margin: 0;
-    border-left: 2px solid var(--rule);
-  }
-  nav li a {
-    display: block; padding: 0.3rem 0 0.3rem 0.9rem;
-    color: var(--ink-soft); text-decoration: none; font-size: 0.95rem;
-  }
+  .lede { color: var(--ink-soft); max-width: 62ch; margin: 0 0 0.75rem; }
+  nav ol { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--rule); }
+  nav li a { display: block; padding: 0.28rem 0 0.28rem 0.9rem; color: var(--ink-soft); text-decoration: none; font-size: 0.92rem; }
   nav li a:hover { color: var(--accent); }
+  nav li.block a { font-weight: 600; color: var(--ink); margin-top: 0.6rem; }
   nav .n { font-family: var(--mono); font-size: 0.75rem; margin-right: 0.4rem; color: var(--accent); }
   main { min-width: 0; }
-  section { padding: 2.5rem 0; border-top: 1px solid var(--rule); }
-  section:first-of-type { border-top: 0; padding-top: 0; }
-  h2 {
-    font-family: var(--display);
-    font-weight: 600;
-    font-size: clamp(1.5rem, 1.3rem + 0.8vw, 2rem);
-    margin: 0 0 1rem;
-    display: flex; align-items: baseline; gap: 0.75rem;
-  }
-  h2 .n { font-family: var(--mono); font-size: 0.85rem; font-weight: 400; color: var(--accent); }
-  p { margin: 0 0 1rem; max-width: 68ch; }
-  ul { padding-left: 1.2rem; max-width: 68ch; }
-  li { margin-bottom: 0.45rem; }
-  code {
-    font-family: var(--mono); font-size: 0.88em;
-    background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px;
-  }
-  pre {
-    font-family: var(--mono); font-size: 0.85rem; line-height: 1.5;
-    background: var(--ink); color: var(--paper);
-    padding: 1rem 1.25rem; border-radius: 6px;
-    overflow-x: auto; margin: 1rem 0 1.25rem;
-  }
+  section.block { padding: 2.5rem 0 0.5rem; border-top: 1px solid var(--rule); }
+  section.block:first-of-type { border-top: 0; padding-top: 0; }
+  h2 { font-family: var(--display); font-weight: 600; font-size: clamp(1.5rem, 1.3rem + 0.8vw, 2rem); margin: 0 0 0.5rem; }
+  h2 .n { font-family: var(--mono); font-size: 0.85rem; font-weight: 400; color: var(--accent); margin-right: 0.6rem; }
+  .why { color: var(--ink-soft); max-width: 66ch; margin: 0 0 1.5rem; }
+  article.ex { margin: 0 0 2rem; padding-left: 1rem; border-left: 3px solid var(--accent-soft); }
+  article.ex h3 { font-family: var(--display); font-weight: 600; font-size: 1.25rem; margin: 0 0 0.5rem; }
+  article.ex h3 .n { font-family: var(--mono); font-size: 0.8rem; font-weight: 400; color: var(--accent); margin-right: 0.5rem; }
+  dl { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.35rem 1rem; margin: 0 0 0.5rem; max-width: 72ch; }
+  dt { font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); padding-top: 0.2rem; }
+  dd { margin: 0; }
+  dd p { margin: 0 0 0.4rem; }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+  pre { font-family: var(--mono); font-size: 0.85rem; line-height: 1.5; background: var(--ink); color: var(--paper); padding: 0.85rem 1.1rem; border-radius: 6px; overflow-x: auto; margin: 0.4rem 0 0.6rem; }
   pre code { background: transparent; padding: 0; color: inherit; font-size: inherit; }
   table { border-collapse: collapse; width: 100%; margin: 0.5rem 0 1.5rem; font-size: 0.95rem; }
-  th, td { text-align: left; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
   th { font-weight: 600; color: var(--ink-soft); font-size: 0.85rem; letter-spacing: 0.04em; text-transform: uppercase; }
   .table-wrap { overflow-x: auto; }
-  .note {
-    background: var(--accent-soft); border-left: 3px solid var(--accent);
-    padding: 0.8rem 1rem; margin: 1rem 0 1.5rem; max-width: 68ch;
-  }
+  .note { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 0.8rem 1rem; margin: 1rem 0 1.5rem; max-width: 70ch; }
   .warn { background: var(--warn-soft); border-left-color: var(--warn); }
   .note p:last-child { margin-bottom: 0; }
-  .models { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 1.25rem; max-width: 68ch; }
-  .models span {
-    font-family: var(--mono); font-size: 0.8rem;
-    border: 1px solid var(--rule); padding: 0.15rem 0.5rem; border-radius: 999px;
-  }
-  .models span.pick { border-color: var(--accent); background: var(--accent-soft); }
-  .prompt { font-family: var(--mono); font-size: 0.85rem; white-space: pre; background: var(--code-bg); padding: 0.75rem 1rem; border-radius: 4px; margin: 0.75rem 0 1.25rem; overflow-x: auto; }
+  p { margin: 0 0 1rem; max-width: 70ch; }
+  ul { padding-left: 1.2rem; max-width: 70ch; } li { margin-bottom: 0.4rem; }
   footer { grid-column: 1 / -1; margin-top: 3rem; color: var(--ink-soft); font-size: 0.85rem; border-top: 1px solid var(--rule); padding-top: 1rem; }
 </style>
 </head>
 <body>
 <div class="page">
   <header>
-    <div class="kicker">braze · perfil operador · 2026-09-28</div>
-    <h1>braze como <em>agente diario</em>: guía de uso</h1>
-    <p class="lede">Para usar braze en vez de OpenCode o Claude Code en el trabajo real e ir reportando lo que falle. Todo lo que dice esta página está verificado en vivo con <code>glm-5.3-flash</code> por OpenCode Go.</p>
+    <div class="kicker">braze · perfil operador · tutorial · 2026-09-28</div>
+    <h1>Perfeccionar el <em>harness</em> usándolo</h1>
+    <p class="lede">Trece ejercicios en progresión, del que no puede romper nada al que compara braze con Claude Code en una tarea real. Cada uno prueba una pieza del harness, dice qué esperar y qué palanca tocar cuando falla. La idea es que cada fricción termine en un ajuste de la política, de la config, de una skill o del código, no en un rodeo.</p>
+    <p class="lede">La referencia de comandos y archivos está al final. El binario que ejecuta todo esto es <code>~/.cargo/bin/braze</code>, reinstalado hoy con el prompt que nombra el modelo, el scrubber de secretos y el "siempre" acotado.</p>
   </header>
 
   <nav aria-label="Secciones">
     <ol>
-      <li><a href="#config"><span class="n">1</span>Qué tienes configurado</a></li>
-      <li><a href="#arrancar"><span class="n">2</span>Arrancar una sesión</a></li>
-      <li><a href="#skills"><span class="n">3</span>Skills</a></li>
-      <li><a href="#permisos"><span class="n">4</span>Permisos</a></li>
-      <li><a href="#web"><span class="n">5</span>Web</a></li>
-      <li><a href="#modelo"><span class="n">6</span>Elegir el modelo de Go</a></li>
-      <li><a href="#reportar"><span class="n">7</span>Qué reportar</a></li>
-      <li><a href="#limites"><span class="n">8</span>Límites conocidos</a></li>
+      <li class="block"><a href="#metodo">Método</a></li>
+      <li class="block"><a href="#a">A · Orientación</a></li>
+      <li><a href="#e1"><span class="n">1</span>Quién eres</a></li>
+      <li><a href="#e2"><span class="n">2</span>Leer un repo</a></li>
+      <li><a href="#e3"><span class="n">3</span>Contexto de sesión</a></li>
+      <li class="block"><a href="#b">B · Skills</a></li>
+      <li><a href="#e4"><span class="n">4</span>Skill de guía</a></li>
+      <li><a href="#e5"><span class="n">5</span>Skill con script</a></li>
+      <li><a href="#e6"><span class="n">6</span>Skill que pide subagentes</a></li>
+      <li class="block"><a href="#c">C · Editar y verificar</a></li>
+      <li><a href="#e7"><span class="n">7</span>Cambio con tests</a></li>
+      <li><a href="#e8"><span class="n">8</span>Fallo honesto</a></li>
+      <li class="block"><a href="#d">D · Permisos y web</a></li>
+      <li><a href="#e9"><span class="n">9</span>Confirmar, negar, siempre</a></li>
+      <li><a href="#e10"><span class="n">10</span>Web con política</a></li>
+      <li class="block"><a href="#e">E · Sesiones largas</a></li>
+      <li><a href="#e11"><span class="n">11</span>Compactar y reanudar</a></li>
+      <li><a href="#e12"><span class="n">12</span>Cambiar de modelo</a></li>
+      <li class="block"><a href="#f">F · Comparación</a></li>
+      <li><a href="#e13"><span class="n">13</span>Misma tarea, dos harness</a></li>
+      <li class="block"><a href="#ref">Referencia</a></li>
     </ol>
   </nav>
 
   <main>
-    <section id="config">
-      <h2><span class="n">01</span>Qué tienes configurado</h2>
-      <p>Todo vive en <code>~/.config/braze/</code>, fuera de cualquier repo.</p>
+    <section class="block" id="metodo">
+      <h2>Método</h2>
+      <p>Cada ejercicio tiene la misma forma: <strong>haz</strong> (el comando), <strong>espera</strong> (lo que un harness sano produce), <strong>si falla</strong> (la palanca: qué archivo o pieza ajusta ese comportamiento) y <strong>reporta</strong> (lo que necesito para reproducirlo). Anota siempre el <code>session id</code> que braze imprime al arrancar; el rollout completo queda en <code>~/.local/share/braze/sessions/&lt;id&gt;.jsonl</code>.</p>
+      <p>Regla de oro mientras pruebas: cuando aparezca un prompt de permiso con un <code>bash -lc …</code> largo que no entiendes, responde <code>n</code>. El modelo tiene tools directas para leer, buscar y editar; si insiste en scripts, eso es un hallazgo sobre el prompt, no algo que aprobar.</p>
+      <div class="note warn"><p>Primer hallazgo real ya corregido: preguntado "¿qué modelo eres?", el modelo volcó <code>env</code> al contexto y un token viajó al proveedor. Ahora el prompt nombra el modelo, los tool results redactan valores que parecen credenciales, y "siempre" sobre un <code>bash -c</code> aprueba solo ese comando exacto. Rota el token de Zenodo si no lo hiciste.</p></div>
+      <div class="note"><p><strong>Primera pasada ya corrida</strong> (2026-09-29, por el asistente sobre clones): 10 de 13 ejercicios en verde, tres hallazgos convertidos en arreglos (DSML de DeepSeek en el rescate, scripts propios en la política, observaciones completas configurables). Tabla, session ids y hallazgos en <code>docs/tutorial-resultados-2026-09-29.md</code>. Vale la pena que repitas los ejercicios 2, 5, 6 y 11 con el binario nuevo: son los que dependen del modelo.</p></div>
+      <p>Las palancas, de más barata a más cara: <code>policy.toml</code> (qué corre sin preguntar), <code>config.json</code> (modelo, skills, hooks, topes), el <code>SKILL.md</code> de una skill, el system prompt (<code>crates/braze-config/src/prompt.rs</code>) y el resto del código. Antes de subir de nivel, agota el anterior.</p>
+    </section>
+
+    <section class="block" id="a">
+      <h2><span class="n">A</span>Orientación</h2>
+      <p class="why">Riesgo cero: solo lectura. Prueban el prompt, las tools de lectura y los hooks de contexto.</p>
+
+      <article class="ex" id="e1">
+        <h3><span class="n">1</span>Quién eres</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>cd ~/proyectos/&lt;cualquiera&gt; &amp;&amp; braze run "¿Qué modelo eres y quién te ejecuta?"</code></pre></dd>
+          <dt>Espera</dt><dd>Una ronda, cero tools, y el nombre <code>deepseek-v4.1-flash</code> sacado de su propio prompt.</dd>
+          <dt>Si falla</dt><dd>Si vuelve a usar tools para averiguarlo, la línea del prompt no está llegando: revisa que <code>which braze</code> sea <code>~/.cargo/bin/braze</code> con fecha de hoy. Si es el binario correcto, es un problema de obediencia del modelo: prueba el mismo comando con <code>--model qwen3.8-flash</code>.</dd>
+          <dt>Reporta</dt><dd>La salida completa y el session id. Es el ejercicio más barato y el que más dice sobre el modelo.</dd>
+        </dl>
+      </article>
+
+      <article class="ex" id="e2">
+        <h3><span class="n">2</span>Leer un repo</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>cd ~/proyectos/&lt;repo real que no sea braze&gt;
+braze chat --tui
+&gt; Explícame la estructura de este repositorio en diez líneas: qué hace, dónde está el punto de entrada y dónde los tests.</code></pre></dd>
+          <dt>Espera</dt><dd><code>glob</code>, <code>read_file</code> y <code>grep</code>, entre 3 y 8 rondas, ninguna pregunta de permiso, y una respuesta que nombre archivos reales.</dd>
+          <dt>Si falla</dt><dd><p>Pide permiso para <code>bash -lc find …</code> o <code>cat</code>: responde <code>n</code> y observa si se corrige usando las tools. Si no se corrige, es un hallazgo de prompt: anota el comando exacto que pidió.</p><p>Más de 10 rondas o se pierde: mira el rollout; si repite lecturas, es el colapso de observaciones (<code>tactical_window</code>).</p></dd>
+          <dt>Reporta</dt><dd>Rondas, si pidió permisos y cuáles, y si el resumen era correcto.</dd>
+        </dl>
+      </article>
+
+      <article class="ex" id="e3">
+        <h3><span class="n">3</span>Contexto de sesión</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>cd ~/proyectos/&lt;proyecto con session_state&gt;
+braze run "Sin usar herramientas: ¿cuál es la tarea actual del proyecto y qué quedó pendiente?"</code></pre></dd>
+          <dt>Espera</dt><dd>La respuesta cita tu <code>resume</code> de <code>context_manager.py</code> y el <code>MEMORY.md</code> del proyecto, en una ronda.</dd>
+          <dt>Si falla</dt><dd><p>No sabe nada: comprueba que el directorio tenga slug exacto con <code>python3 ~/.claude/session_state/context_manager.py detect --dir $PWD --exact</code>. El hook detecta por ruta exacta, no por ancestro.</p><p>Sabe pero mezcla proyectos: el <code>MEMORY.md</code> se busca por la ruta del cwd transformada; revisa <code>~/.claude/projects/</code>.</p><p>Palanca: <code>hooks.session_start</code> en <code>config.json</code>; trazas con <code>RUST_LOG=braze=info</code>.</p></dd>
+          <dt>Reporta</dt><dd>El slug detectado y la respuesta.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="block" id="b">
+      <h2><span class="n">B</span>Skills</h2>
+      <p class="why">Prueban el discovery, los argumentos, el presupuesto de cuerpo y, sobre todo, cuánto sigue un modelo de Go una skill escrita para Claude. Este es el riesgo real del plan.</p>
+
+      <article class="ex" id="e4">
+        <h3><span class="n">4</span>Skill de guía pura</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>braze run '/destelegrafiar check &lt;un-documento-tuyo.md&gt;'</code></pre></dd>
+          <dt>Espera</dt><dd>La tabla de hallazgos con los patrones de la skill, leyendo el archivo con <code>read_file</code>. Compara con lo que te da Claude Code sobre el mismo archivo.</dd>
+          <dt>Si falla</dt><dd><p>"Skill no encontrada": <code>braze chat --tui</code>, <code>/skills</code>, y busca el nombre; si no está, su <code>SKILL.md</code> no tiene <code>name:</code> o <code>description:</code>.</p><p>Se carga pero ignora las instrucciones: mira en el rollout <code>skill_loaded … truncated</code>; si es <code>true</code>, sube <code>skills.max_body_tokens</code>. Si no, es fidelidad del modelo: repite con <code>--model qwen3.8-flash</code> y anota la diferencia.</p></dd>
+          <dt>Reporta</dt><dd>El nombre de la skill, si cargó, y en qué se apartó del comportamiento en Claude Code.</dd>
+        </dl>
+      </article>
+
+      <article class="ex" id="e5">
+        <h3><span class="n">5</span>Skill con script</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>braze run '$memoria status'</code></pre></dd>
+          <dt>Espera</dt><dd>Corre los scripts de la skill con <code>python3</code> sin preguntar (regla <code>dev-toolchain</code>), lee <code>~/.claude/session_state</code> y <code>~/vault</code> sin preguntar (<code>references</code>), y entrega el estado en menos de 10 rondas.</dd>
+          <dt>Si falla</dt><dd><p>"read path denied" fuera del proyecto: falta esa ruta en <code>references</code> de <code>config.json</code>.</p><p>Deniega un comando: sin terminal todo <code>confirm</code> es <code>no</code>. Repite en <code>braze chat --tui</code> y responde <code>a</code> a lo que sea legítimo; luego confirma con <code>braze permissions policy</code> que la regla quedó.</p><p>Muchas rondas y tokens: anota cuáles comandos pidió que fueron denegados; son candidatos a la política.</p></dd>
+          <dt>Reporta</dt><dd>Rondas, tokens de entrada (los imprime <code>--output-format json</code>) y los comandos denegados.</dd>
+        </dl>
+      </article>
+
+      <article class="ex" id="e6">
+        <h3><span class="n">6</span>Skill que pide subagentes</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>braze run '/tex-review --quick &lt;un-manuscrito.tex&gt;'</code></pre></dd>
+          <dt>Espera</dt><dd>Braze no tiene subagente genérico. Un buen desenlace es que el modelo diga que no dispone de <code>Agent</code> y haga la revisión él mismo, en secuencia, con las herramientas que sí tiene. Un mal desenlace es que invente que lanzó agentes.</dd>
+          <dt>Si falla</dt><dd>Es el ejercicio que decide si construir el subagente genérico. Si la revisión secuencial te sirve, no hace falta; si no, es el siguiente punto del roadmap.</dd>
+          <dt>Reporta</dt><dd>Qué hizo en lugar de los subagentes y si el resultado era usable.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="block" id="c">
+      <h2><span class="n">C</span>Editar y verificar</h2>
+      <p class="why">Escritura dentro del proyecto: <code>edit_file</code>, el check post-edición y la política de herramientas. Hazlo en una rama.</p>
+
+      <article class="ex" id="e7">
+        <h3><span class="n">7</span>Cambio acotado con tests</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>cd ~/proyectos/&lt;repo con tests&gt; &amp;&amp; git switch -c prueba-braze
+braze chat --tui
+&gt; Renombra la función &lt;X&gt; a &lt;Y&gt; en todo el proyecto y corre los tests. Dime qué cambiaste.</code></pre></dd>
+          <dt>Espera</dt><dd><code>grep</code> para localizar, <code>edit_file</code> por archivo, <code>cargo test</code> o <code>pytest</code> sin preguntar, y un resumen honesto del resultado de los tests. En Rust, el check post-edición le devuelve los errores de compilación en el mismo tool result.</dd>
+          <dt>Si falla</dt><dd><p>Usa <code>write_file</code> reescribiendo archivos enteros: es una preferencia conocida de modelos chicos; anótalo. Si además pierde contenido, es grave: reporta con el diff.</p><p>Pide permiso para el runner de tests: agrégalo a <code>dev-toolchain</code> en <code>policy.toml</code> o responde <code>a</code>.</p><p>Palancas: <code>formatters</code> en config para el check post-edición en otros lenguajes; <code>disable_syntactic_edit_gate</code> si el gate rechaza ediciones válidas.</p></dd>
+          <dt>Reporta</dt><dd>El <code>git diff</code> resultante y si los tests corrieron de verdad (el rollout lo muestra).</dd>
+        </dl>
+      </article>
+
+      <article class="ex" id="e8">
+        <h3><span class="n">8</span>Fallo honesto</h3>
+        <dl>
+          <dt>Haz</dt><dd>Pide algo que va a fallar de forma segura: <pre><code>&gt; Corre los tests con el comando `pytest --nope` y dime el resultado.</code></pre></dd>
+          <dt>Espera</dt><dd>Reporta el error tal cual, sin inventar que pasó. Si la política deniega el comando, debe decir que no corrió y darte el comando para que lo corras tú.</dd>
+          <dt>Si falla</dt><dd>Fabrica éxito: es el peor modo de fallo y depende del modelo. Repite con otro modelo de Go y anota cuál lo hace bien. Palanca de código: el mensaje de denegación en <code>braze-tools-local</code>.</dd>
+          <dt>Reporta</dt><dd>La frase exacta con la que reportó el fallo.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="block" id="d">
+      <h2><span class="n">D</span>Permisos y web</h2>
+      <p class="why">Prueban el policy engine, la respuesta "siempre" y las tools web con hosts permitidos.</p>
+
+      <article class="ex" id="e9">
+        <h3><span class="n">9</span>Confirmar, negar, siempre</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>braze chat
+&gt; Ejecuta con shell_exec exactamente: tree -L 1     (o cualquier programa que no esté en la política)</code></pre></dd>
+          <dt>Espera</dt><dd>El prompt <code>[y = sí / N = no / a = siempre]</code>. Responde <code>n</code> y mira que el modelo lo reporte sin insistir. Vuelve a pedirlo, responde <code>a</code>, y comprueba: <pre><code>braze permissions policy      # debe listar always-shell-tree
+braze permissions suggest     # propone reglas desde tus sesiones</code></pre></dd>
+          <dt>Si falla</dt><dd>Con <code>a</code> no aparece la regla: mira si el mensaje dijo "no se pudo guardar"; la política se valida antes de escribir y un archivo inválido lo impide. Si la regla es más amplia de lo que quieres, edítala a mano: primera regla que matchea gana, así que un <code>deny</code> arriba manda.</dd>
+          <dt>Reporta</dt><dd>La regla que quedó escrita y si te pareció bien generalizada.</dd>
+        </dl>
+      </article>
+
+      <article class="ex" id="e10">
+        <h3><span class="n">10</span>Web con política</h3>
+        <dl>
+          <dt>Haz</dt><dd><pre><code>braze run "Busca en la web cómo se usa &lt;una función de una librería que uses&gt; y resume con un ejemplo, citando la URL."</code></pre></dd>
+          <dt>Espera</dt><dd><code>web_search</code> y luego <code>web_fetch</code> a un host de la lista permitida, sin preguntar; resumen con la URL real.</dd>
+          <dt>Si falla</dt><dd><p>"no results parsed": DuckDuckGo cambió el markup o devolvió un bot-check; reporta y de momento dale la URL directa.</p><p>Pregunta por un host: si es uno que usas seguido, <code>a</code> en la TUI o agrégalo a <code>web-allowed-hosts</code>. Si quieres todo abierto, <code>match = ["*"]</code>, aceptando el riesgo de exfiltración por URL.</p></dd>
+          <dt>Reporta</dt><dd>La consulta, los hosts que pidió y si el resumen correspondía a la página.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="block" id="e">
+      <h2><span class="n">E</span>Sesiones largas</h2>
+      <p class="why">Compactación, refresco de contexto y reanudación: lo que decide si braze sirve para una tarde entera y no para cinco minutos.</p>
+
+      <article class="ex" id="e11">
+        <h3><span class="n">11</span>Compactar y reanudar</h3>
+        <dl>
+          <dt>Haz</dt><dd>Una tarea que pida muchas lecturas (más de 40 eventos): "lee los diez archivos de <code>src/</code> y haz un mapa de dependencias". Luego cierra con <code>/quit</code> y reanuda: <pre><code>braze chat --resume &lt;session id&gt;
+&gt; ¿En qué quedamos y qué falta?</code></pre></dd>
+          <dt>Espera</dt><dd>En el rollout aparecen <code>compaction_occurred</code> y, con <code>RUST_LOG=braze=info</code>, "session context refrescado tras compactación". Al reanudar, recuerda la tarea y no vuelve a pedir permisos ya aprobados.</dd>
+          <dt>Si falla</dt><dd>Pierde el hilo tras compactar: el resumen es extractivo por default. Palancas: <code>tactical_compaction_threshold</code> más alto, o <code>enable_lead_summary</code> para que un modelo redacte el resumen. Si pierde justamente una restricción que le diste ("no toques X"), es la ruta SC: decláralas al inicio como constraints.</dd>
+          <dt>Reporta</dt><dd>El session id y qué olvidó.</dd>
+        </dl>
+      </article>
+
+      <article class="ex" id="e12">
+        <h3><span class="n">12</span>Cambiar de modelo</h3>
+        <dl>
+          <dt>Haz</dt><dd>En la TUI, a mitad de una sesión: <pre><code>/model zen:qwen3.8-flash</code></pre> y repite la última petición.</dd>
+          <dt>Espera</dt><dd>El cambio es inmediato y conserva la conversación. qwen fue el segundo del sweep: parecido en aciertos, más lento.</dd>
+          <dt>Si falla</dt><dd>Un modelo de Go rechaza un parámetro: braze ya degrada <code>seed</code>; <code>kimi-k2.7-code</code> exige temperatura 1 y no sirve con el default. Otros errores 400 de Go son reporte directo.</dd>
+          <dt>Reporta</dt><dd>Cuál modelo hizo mejor la misma tarea, con rondas y tiempo.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section class="block" id="f">
+      <h2><span class="n">F</span>Comparación</h2>
+      <article class="ex" id="e13">
+        <h3><span class="n">13</span>Misma tarea, dos harness</h3>
+        <dl>
+          <dt>Haz</dt><dd>Toma una tarea real de tu día, de las que le darías a Claude Code, y dásela primero a braze y después a Claude Code, con el mismo texto.</dd>
+          <dt>Espera</dt><dd>No espero paridad. Espero saber dónde está la brecha: en el modelo (deepseek vs Claude), en las tools que faltan (subagentes, LSP) o en el harness (permisos, contexto, skills).</dd>
+          <dt>Si falla</dt><dd>Este ejercicio no falla: produce el dato que ordena el roadmap. Cada brecha atribuible al harness es un punto a construir; las atribuibles al modelo se miden con el bench antes de tocar código.</dd>
+          <dt>Reporta</dt><dd>La tarea, los dos resultados y tu veredicto en una frase. Con tres de estos ya tenemos el siguiente sprint.</dd>
+        </dl>
+      </article>
+      <div class="note"><p>Plantilla de reporte, para copiar: <code>tarea · directorio · comando · session id · qué esperaba · qué pasó · ejercicio n.º</code>.</p></div>
+    </section>
+
+    <section class="block" id="ref">
+      <h2>Referencia</h2>
       <div class="table-wrap"><table>
-        <tr><th>archivo</th><th>qué hace</th></tr>
-        <tr><td><code>config.json</code></td><td>backend por default <code>zen</code> → OpenCode Go con <code>glm-5.3-flash</code>; skills desde <code>~/.claude/skills</code>; memoria de proyecto; <code>references</code> a <code>~/.claude/*</code> y <code>~/vault</code>; hooks de sesión; tools web; tope de AGENTS.md 48 KB</td></tr>
-        <tr><td><code>policy.toml</code></td><td>permisos permanentes: qué corre sin preguntar, qué se deniega siempre, qué hosts web se permiten</td></tr>
-        <tr><td><code>AGENTS.md</code></td><td>enlace a <code>~/.claude/CLAUDE.md</code>: tus instrucciones globales, inyectadas antes de las del proyecto</td></tr>
+        <tr><th>qué</th><th>dónde</th></tr>
+        <tr><td>Config global (modelo, skills, hooks, references, topes)</td><td><code>~/.config/braze/config.json</code></td></tr>
+        <tr><td>Política de permisos (allow / confirm / deny; hosts web)</td><td><code>~/.config/braze/policy.toml</code> · validar con <code>braze permissions policy</code></td></tr>
+        <tr><td>Instrucciones globales</td><td><code>~/.config/braze/AGENTS.md</code> → <code>~/.claude/CLAUDE.md</code></td></tr>
+        <tr><td>Instrucciones por proyecto</td><td><code>AGENTS.md</code> en la raíz (enlázalo a <code>CLAUDE.md</code>)</td></tr>
+        <tr><td>Rollouts de sesión</td><td><code>~/.local/share/braze/sessions/&lt;id&gt;.jsonl</code></td></tr>
+        <tr><td>Trazas</td><td><code>RUST_LOG=braze=info,braze_engine=info braze …</code> (stderr)</td></tr>
+        <tr><td>Reinstalar tras cambios de código</td><td><code>cd ~/proyectos/braze &amp;&amp; cargo install --path crates/braze-cli --force</code></td></tr>
+        <tr><td>Modelos de Go y cómo elegir</td><td><code>docs/guia-perfil-operador-2026-09-28.md</code> § 6 (sweep: deepseek-v4.1-flash 26/26, qwen3.8-flash 25/26, glm-5.3-flash 23/26)</td></tr>
+        <tr><td>Comandos de la TUI</td><td><code>/model</code>, <code>/skills</code>, <code>/permissions</code>, <code>/tasks</code>, <code>/help</code>, <code>/quit</code>; skills con <code>$nombre args</code> o <code>/nombre args</code></td></tr>
       </table></div>
-      <p>El binario instalado es <code>~/.cargo/bin/braze</code> (y <code>braze-bench</code>). Después de un <code>git pull</code> con cambios de código hay que reinstalarlo:</p>
-      <pre><code>cd ~/proyectos/braze &amp;&amp; cargo install --path crates/braze-cli --force</code></pre>
-    </section>
-
-    <section id="arrancar">
-      <h2><span class="n">02</span>Arrancar una sesión</h2>
-      <pre><code>cd ~/proyectos/&lt;proyecto&gt;
-braze chat --tui          # interfaz completa (recomendado)
-braze chat                # chat plano, sin interfaz
-braze run "una tarea"     # un solo turno, imprime y sale</code></pre>
-      <ul>
-        <li>braze imprime el <code>session id</code> al inicio; <code>braze chat --resume &lt;id&gt;</code> continúa esa conversación con sus permisos ya aprobados.</li>
-        <li><code>/model</code> cambia de backend o modelo a mitad de sesión (<code>/model zen:kimi-k3</code>); <code>/skills</code> abre el picker; <code>/permissions</code>, <code>/tasks</code>, <code>/help</code>, <code>/quit</code>.</li>
-        <li>Para que el proyecto tenga instrucciones propias, enlaza su <code>CLAUDE.md</code>: <code>ln -s CLAUDE.md AGENTS.md</code>. Braze lee <code>AGENTS.md</code>, no <code>CLAUDE.md</code>.</li>
-        <li>Al arrancar, y tras cada compactación, corre <code>context_resume.sh</code> y lee el <code>MEMORY.md</code> nativo del proyecto: el modelo parte sabiendo la tarea actual. Si no hay <code>session_state</code> para el directorio, esa sección no aparece; no es error.</li>
-      </ul>
-    </section>
-
-    <section id="skills">
-      <h2><span class="n">03</span>Skills</h2>
-      <ul>
-        <li><code>$nombre argumentos</code> o <code>/nombre argumentos</code>. Los argumentos reemplazan <code>$ARGUMENTS</code> en el cuerpo de la skill, como en Claude Code.</li>
-        <li>Se cargan solo por mención explícita. No hay carga automática por descripción, a propósito.</li>
-        <li>Máximo 3 skills por turno y 4.000 tokens por cuerpo (config <code>skills</code>).</li>
-        <li>Una skill que pide <code>Agent</code> (subagentes) no va a poder lanzarlo: braze no tiene subagente genérico todavía. Las que piden <code>WebFetch</code>/<code>WebSearch</code> sí funcionan. LSP no existe.</li>
-      </ul>
-    </section>
-
-    <section id="permisos">
-      <h2><span class="n">04</span>Permisos</h2>
-      <p>Lo que no está en la política y no es de solo lectura pide confirmación:</p>
-      <div class="prompt">run `curl --version`
-¿Permitir? [y = sí / N = no / a = siempre]:</div>
-      <ul>
-        <li><code>y</code> aprueba esta vez (y se recuerda dentro de la sesión).</li>
-        <li><code>a</code> aprueba y agrega una regla <code>allow</code> a <code>policy.toml</code>, que vale en el acto para toda la sesión y para las siguientes. La regla generaliza como Claude Code: el programa (<code>python3</code>), <code>git commit*</code> para multiplexores, el directorio para archivos fuera del proyecto, el host para URLs.</li>
-        <li>En la TUI es la tecla <code>a</code> en el overlay.</li>
-        <li><code>braze permissions policy</code> valida y lista la política. <code>braze permissions suggest</code> mina las sesiones pasadas y propone reglas TOML listas para pegar.</li>
-      </ul>
-      <div class="note warn"><p>Sin terminal (<code>braze run</code>, cron, pipes) todo lo que pregunte se deniega. Si algo debe correr sin supervisión, tiene que estar en la política.</p></div>
-      <p>Lo que hoy pide confirmación siempre: <code>bash -c</code>, <code>sh -c</code>, pipes, <code>git push</code>, <code>rm -rf</code>, escrituras fuera del proyecto. Lo que se deniega siempre: leer o escribir <code>~/.config/braze/</code>, secretos (<code>.env</code>, <code>.ssh</code>, <code>.pem</code>), <code>sudo</code>, <code>dd</code>, <code>mkfs</code>.</p>
-    </section>
-
-    <section id="web">
-      <h2><span class="n">05</span>Web</h2>
-      <p><code>web_search</code> (DuckDuckGo, sin API key) y <code>web_fetch</code> (HTML a texto, tope 200 KB). Solo los hosts de la regla <code>web-allowed-hosts</code> pasan sin preguntar: buscador, docs.rs, crates.io, GitHub, Wikipedia, arXiv, PyPI, MDN, Stack Overflow, readthedocs. Cualquier otro host pregunta; responde <code>a</code> para agregarlo.</p>
-      <p>Para abrir todo: <code>match = ["*"]</code> en esa regla, aceptando que el modelo podría exfiltrar datos por una URL.</p>
-    </section>
-
-    <section id="modelo">
-      <h2><span class="n">06</span>Elegir el modelo de Go</h2>
-      <p>Go ofrece hoy 30 modelos, todos OpenAI-compatibles y con la misma key por el backend <code>zen</code>:</p>
-      <div class="models">
-        <span>glm-5.3-flash</span><span>glm-5.3</span><span class="pick">deepseek-v4.1-flash</span><span>deepseek-v4-flash</span><span>deepseek-v4-pro</span><span>kimi-k2.7-code</span><span>kimi-k3</span><span>qwen3.8-flash</span><span>qwen3.8-max</span><span>minimax-m3</span><span>grok-4.7</span><span>mimo-v2.6-pro</span><span>…</span>
-      </div>
-      <p>El criterio no es "el más grande" sino el que mejor completa las tareas de braze por menos rondas y latencia, porque el harness está tuneado para modelos que siguen el tool calling limpio. El instrumento para decidirlo es el bench del proyecto, con la suite chica primero:</p>
-      <pre><code>cd ~/proyectos/braze
-braze-bench crates/braze-bench/suites/fast-core.toml \
-  --backends "zen:glm-5.3-flash,zen:deepseek-v4.1-flash,zen:kimi-k2.7-code,zen:qwen3.8-flash" \
-  --repetitions 2 --seed 7 --task-timeout-secs 300 \
-  --output docs/sweep-go-fast-core-$(date +%F).json</code></pre>
-      <p><code>fast-core.toml</code> son 13 tareas; con 4 modelos y 2 repeticiones son 104 corridas, unos minutos y una fracción de la cuota diaria de Go. El reporte da pass rate, <code>pass^k</code>, rondas y latencia por modelo, y la comparación pareada contra el primer brazo. Si dos empatan, gana el más rápido; para discriminar más, <code>discriminating.toml</code> (34 tareas).</p>
-      <p>Para cambiar el default: <code>zen_model</code> en <code>config.json</code>, <code>--model &lt;id&gt;</code> en la línea de comandos, o <code>/model zen:&lt;id&gt;</code> en la TUI.</p>
-      <p><strong>Resultado del sweep</strong> (2026-09-28, <code>docs/sweep-go-fast-core-2026-09-28.json</code>, 13 tareas × 2 repeticiones, semilla 7, temperatura 0,2):</p>
-      <div class="table-wrap"><table>
-        <tr><th>modelo</th><th>pass rate</th><th>pass^2</th><th>rondas</th><th>latencia media</th><th>tokens in</th></tr>
-        <tr><td><code>deepseek-v4.1-flash</code></td><td>26/26</td><td>100 %</td><td>4,1</td><td>11,0 s</td><td>10,5 k</td></tr>
-        <tr><td><code>qwen3.8-flash</code></td><td>25/26</td><td>92 %</td><td>5,3</td><td>19,0 s</td><td>15,1 k</td></tr>
-        <tr><td><code>glm-5.3-flash</code></td><td>23/26</td><td>77 %</td><td>3,5</td><td>24,9 s</td><td>6,5 k</td></tr>
-        <tr><td><code>kimi-k2.7-code</code></td><td>no medible</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
-      </table></div>
-      <div class="note"><p><code>deepseek-v4.1-flash</code> gana en todo lo que importa: sin fallos, robusto en las 13 tareas en ambas repeticiones, y el más rápido. Es el default del perfil desde hoy. <code>glm-5.3-flash</code> usa menos tokens de entrada, pero falla 3 de 26 y tarda más del doble. <code>kimi-k2.7-code</code> no se pudo medir: Go solo acepta <code>temperature = 1</code> para ese modelo y el bench fija 0,2. Otro gotcha de Go: <code>glm-5.3-flash</code> rechaza el parámetro <code>seed</code>; braze lo reintenta sin él desde el commit <code>c4d7f99</code>.</p></div>
-      <p>La comparación pareada (McNemar) no alcanza significancia con n = 26, así que la diferencia deepseek vs qwen es direccional; la de latencia sí es grande y estable.</p>
-    </section>
-
-    <section id="reportar">
-      <h2><span class="n">07</span>Qué reportar cuando algo falle</h2>
-      <ul>
-        <li>El comando exacto y el directorio.</li>
-        <li>El <code>session id</code> que braze imprimió. El rollout completo está en <code>~/.local/share/braze/sessions/&lt;id&gt;.jsonl</code>; basta la ruta.</li>
-        <li>Si es raro, la misma sesión con trazas: <code>RUST_LOG=braze=info,braze_engine=info braze chat …</code> (van a stderr).</li>
-        <li>Qué esperabas que pasara. Sobre todo si una skill hizo algo distinto que en Claude Code.</li>
-      </ul>
-    </section>
-
-    <section id="limites">
-      <h2><span class="n">08</span>Límites conocidos hoy</h2>
-      <ul>
-        <li>Sin subagente genérico ni LSP.</li>
-        <li>Las skills están escritas para Claude; un modelo de Go puede seguirlas peor. Ese es el riesgo real del plan, no la ingeniería.</li>
-        <li><code>web_search</code> depende del HTML de DuckDuckGo: si cambia, falla con un error claro en vez de inventar resultados.</li>
-        <li>El discovery de skills salta <code>.trash/</code> y prefiere el <code>SKILL.md</code> más superficial ante duplicados; si una skill "no aparece", revisa que su <code>SKILL.md</code> tenga <code>name:</code> y <code>description:</code>.</li>
-        <li>Compactación: se dispara a 40 eventos tácticos; el resumen es extractivo salvo que configures <code>enable_lead_summary</code>.</li>
-      </ul>
+      <p>Límites conocidos hoy: sin subagente genérico ni LSP; las skills están escritas para Claude; <code>web_search</code> depende del HTML de DuckDuckGo; sin terminal todo lo que pregunte se deniega.</p>
     </section>
   </main>
 
-  <footer>Misma guía en Markdown: <code>docs/guia-perfil-operador-2026-09-28.md</code>. Commits del perfil operador: <code>173194a</code> policy engine · <code>2545eaf</code> hooks · <code>7d980d7</code> skills · <code>b11e905</code> web · <code>2d2fde6</code> siempre.</footer>
+  <footer>Guía de referencia en Markdown: <code>docs/guia-perfil-operador-2026-09-28.md</code>. Commits del perfil operador: <code>173194a</code> policy · <code>2545eaf</code> hooks · <code>7d980d7</code> skills · <code>b11e905</code> web · <code>2d2fde6</code> siempre · <code>c4d7f99</code> seed · <code>55f2fc5</code> modelo en el prompt, scrubber, siempre acotado.</footer>
 </div>
 </body>
 </html>
