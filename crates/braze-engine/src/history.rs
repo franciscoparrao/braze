@@ -139,8 +139,9 @@ pub fn build_messages_with_full_observations(
 /// never bring the estimate back under budget, re-triggering forever.
 pub(crate) fn render_durable_events(durable_events: &[AgentEvent]) -> Vec<Message> {
     let tool_names = tool_names_by_id(durable_events);
+    let ordered = tool_results_follow_their_calls(durable_events);
     let mut messages = Vec::with_capacity(durable_events.len());
-    push_grouped(&mut messages, durable_events, |event| {
+    push_grouped(&mut messages, ordered.iter().copied(), |event| {
         event_to_block_cleared(event, &tool_names, NEVER_CLEAR_TOOLS)
     });
     messages
@@ -209,7 +210,8 @@ fn build_messages_with_never_clear(
     }
 
     let tool_names = tool_names_by_id(&durable.durable_events);
-    push_grouped(&mut messages, &durable.durable_events, |event| {
+    let ordered_durable = tool_results_follow_their_calls(&durable.durable_events);
+    push_grouped(&mut messages, ordered_durable.iter().copied(), |event| {
         event_to_block_cleared(event, &tool_names, never_clear)
     });
 
@@ -235,13 +237,18 @@ pub(crate) fn render_tactical_events(
     full_observations_byte_budget: usize,
 ) -> Vec<Message> {
     let mut messages = Vec::with_capacity(tactical.len());
+    // Reordenar ANTES de calcular los índices de observaciones completas y
+    // de recorrer: ambos dependen del orden, y deben verlo ya normalizado
+    // (tool results pegados a su llamada) — ver
+    // `tool_results_follow_their_calls`.
+    let ordered = tool_results_follow_their_calls(tactical);
     let full_indices = tactical_full_observation_indices(
-        tactical,
+        &ordered,
         full_observations,
         full_observations_byte_budget,
     );
     let mut observations_seen = 0usize;
-    push_grouped(&mut messages, tactical, |event| {
+    push_grouped(&mut messages, ordered.iter().copied(), |event| {
         if let AgentEvent::ToolCallCompleted { id, result } = event {
             let idx = observations_seen;
             observations_seen += 1;
@@ -272,13 +279,13 @@ pub(crate) fn render_tactical_events(
 /// its own size, so one oversized dump can never zero out the "at least
 /// the current turn's own output stays visible" guarantee.
 fn tactical_full_observation_indices(
-    tactical: &[AgentEvent],
+    tactical: &[&AgentEvent],
     full_observations: usize,
     full_observations_byte_budget: usize,
 ) -> std::collections::HashSet<usize> {
     let observation_lens: Vec<usize> = tactical
         .iter()
-        .filter_map(|event| match event {
+        .filter_map(|&event| match event {
             AgentEvent::ToolCallCompleted { result, .. } => Some(result.content.len()),
             _ => None,
         })
@@ -348,6 +355,95 @@ fn collapsed_observation_content(content: &str, full_observations: usize) -> Str
         return content.to_string();
     }
     collapsed
+}
+
+/// Reordena los eventos para que cada run de `AssistantToolCall`
+/// consecutivos vaya seguido INMEDIATAMENTE por todos sus
+/// `ToolCallCompleted`, adelantándolos desde donde el despacho en
+/// background los haya grabado. No-op sobre un log ya ordenado (el caso
+/// común: si los resultados ya siguen a sus llamadas, quedan en su lugar y
+/// el orden de salida es idéntico al de entrada).
+///
+/// El bug que arregla (2026-09-29, ejercicio 11 del tutorial de
+/// perfeccionamiento; repro sesión 8224e2f5): con despacho en background y
+/// llamadas idénticas servidas de caché, el rollout puede intercalar el
+/// `AssistantToolCall` de una ronda posterior entre el
+/// `AssistantToolCall` de una anterior y algunos de sus resultados.
+/// `push_grouped` agrupa consecutivos pero no reordena, así que el request
+/// OpenAI-compatible quedaba con un mensaje `assistant` metido entre unas
+/// `tool_calls` y sus `tool` results → los proveedores estrictos
+/// (OpenCode Go) responden 400 y la sesión queda irreanudable. La API de
+/// Anthropic lo toleraba, por eso no se veía con el proveedor principal.
+///
+/// Un `ToolCallCompleted` cuyo `AssistantToolCall` no está en este slice
+/// (partido durable/táctico) se emite en su lugar original, sin cambiar el
+/// comportamiento previo para ese caso (que ya existía y Anthropic acepta).
+fn tool_results_follow_their_calls(events: &[AgentEvent]) -> Vec<&AgentEvent> {
+    // id de la llamada -> índice de su primer ToolCallCompleted.
+    let mut result_idx: HashMap<&str, usize> = HashMap::new();
+    for (i, event) in events.iter().enumerate() {
+        if let AgentEvent::ToolCallCompleted { id, .. } = event {
+            result_idx.entry(id.as_str()).or_insert(i);
+        }
+    }
+    let mut out: Vec<&AgentEvent> = Vec::with_capacity(events.len());
+    let mut emitted = vec![false; events.len()];
+    let mut i = 0;
+    while i < events.len() {
+        if emitted[i] {
+            i += 1;
+            continue;
+        }
+        if !matches!(events[i], AgentEvent::AssistantToolCall { .. }) {
+            out.push(&events[i]);
+            emitted[i] = true;
+            i += 1;
+            continue;
+        }
+        // Run maximal de AssistantToolCall de la ronda. Los eventos de
+        // metadata que no renderizan a un bloque (`ToolCallStarted`,
+        // `Usage`, notas…) son TRANSPARENTES: no cortan el run y se
+        // mantienen en su lugar (push_grouped los ignora igual). Un evento
+        // que sí renderiza y no es una llamada (texto, un resultado) cierra
+        // la ronda.
+        let mut run_ids: Vec<&str> = Vec::new();
+        let mut j = i;
+        while j < events.len() {
+            if emitted[j] {
+                j += 1;
+                continue;
+            }
+            match &events[j] {
+                AgentEvent::AssistantToolCall { id, .. } => {
+                    out.push(&events[j]);
+                    emitted[j] = true;
+                    run_ids.push(id.as_str());
+                    j += 1;
+                }
+                AgentEvent::ToolCallCompleted { .. } => break,
+                other if event_to_block(other).is_none() => {
+                    out.push(&events[j]);
+                    emitted[j] = true;
+                    j += 1;
+                }
+                _ => break,
+            }
+        }
+        // Sus resultados, en el orden en que se emitieron las llamadas,
+        // adelantados desde donde estén. Una llamada sin resultado (aún
+        // pendiente / huérfana) simplemente no aporta nada acá — el manejo
+        // de huérfanos vive en otro lado (synthesize_orphan_repairs).
+        for id in run_ids {
+            if let Some(&ri) = result_idx.get(id)
+                && !emitted[ri]
+            {
+                out.push(&events[ri]);
+                emitted[ri] = true;
+            }
+        }
+        i = j;
+    }
+    out
 }
 
 /// Appends every event's rendered block to `messages`, grouping
@@ -585,6 +681,102 @@ mod tests {
 
     fn empty_durable() -> DurableState {
         DurableState::default()
+    }
+
+    fn atc(id: &str) -> AgentEvent {
+        AgentEvent::AssistantToolCall {
+            id: id.to_string(),
+            name: "read_file".to_string(),
+            arguments: serde_json::json!({}),
+        }
+    }
+
+    fn tcc(id: &str) -> AgentEvent {
+        AgentEvent::ToolCallCompleted {
+            id: id.to_string(),
+            result: ToolResult {
+                tool_call_id: id.to_string(),
+                content: format!("result-{id}"),
+                is_error: false,
+            },
+        }
+    }
+
+    /// Bug del ejercicio 11 (repro sesión 8224e2f5): un `AssistantToolCall`
+    /// de una ronda posterior grabado entre otro `AssistantToolCall` y
+    /// algunos de sus resultados. Tras reordenar, cada ronda de tool_calls
+    /// va seguida INMEDIATAMENTE por todos sus resultados, así que
+    /// `build_messages` nunca deja un mensaje assistant entre unas
+    /// tool_calls y sus tool results (lo que Go rechaza con 400).
+    #[test]
+    fn interleaved_background_results_are_regrouped_under_their_calls() {
+        // assistant[A,B,C] · res(C) · assistant[D] · res(B) · res(A) · res(D)
+        let tactical = vec![
+            atc("A"),
+            atc("B"),
+            atc("C"),
+            tcc("C"),
+            atc("D"),
+            tcc("B"),
+            tcc("A"),
+            tcc("D"),
+        ];
+        let messages = build_messages_with_full_observations(
+            &empty_durable(),
+            &tactical,
+            TACTICAL_FULL_OBSERVATIONS,
+            MAX_FULL_OBSERVATIONS_TOTAL_CHARS,
+        );
+        // Esperado: assistant(A,B,C) · user(res A,B,C) · assistant(D) · user(res D)
+        assert_eq!(messages.len(), 4, "{messages:#?}");
+        // Cada mensaje assistant con ToolUse va seguido de un user con
+        // exactamente los ToolResult de esas llamadas, y de nada más entre
+        // medio.
+        for (i, m) in messages.iter().enumerate() {
+            let uses: Vec<&str> = m
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::ToolUse { id, .. } => Some(id.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if uses.is_empty() {
+                continue;
+            }
+            assert_eq!(m.role, Role::Assistant);
+            let next = &messages[i + 1];
+            assert_eq!(next.role, Role::User);
+            let results: Vec<&str> = next
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::ToolResult { tool_use_id, .. } => Some(tool_use_id.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let mut want = uses.clone();
+            want.sort_unstable();
+            let mut got = results.clone();
+            got.sort_unstable();
+            assert_eq!(got, want, "los resultados de {uses:?} deben seguir a su llamada");
+        }
+    }
+
+    /// Un log ya ordenado no cambia: el reordenamiento es un no-op cuando
+    /// cada resultado ya sigue a su llamada.
+    #[test]
+    fn well_ordered_events_are_left_untouched() {
+        let events = vec![
+            AgentEvent::UserMessage { text: "hola".into() },
+            atc("A"),
+            tcc("A"),
+            AgentEvent::AssistantText { text: "listo".into() },
+        ];
+        let ordered = tool_results_follow_their_calls(&events);
+        let ptrs: Vec<*const AgentEvent> = ordered.iter().map(|e| *e as *const _).collect();
+        let orig: Vec<*const AgentEvent> = events.iter().map(|e| e as *const _).collect();
+        assert_eq!(ptrs, orig, "orden idéntico y sin clonar");
     }
 
     #[test]
