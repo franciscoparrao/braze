@@ -113,6 +113,32 @@ Efecto colateral anotado: cada corrida de `tex-review` escribió su
 auditoría a `~/vault/journals/_audits/` (dos archivos de prueba, fechas
 desactualizadas en el nombre — bug de la skill). Candidatos a borrar.
 
+## Sobre-exploración y el cortafuegos de tokens (2026-09-30)
+
+Tras subir el tope de rondas a 40, una corrida del ej. 2 (resumen de repo,
+tarea simple) usó 19 rondas / 274 k tokens, contra 4 y 8 de otras dos
+corridas del mismo ejercicio. Diagnóstico sobre el rollout: NO fue loop
+—17 glob con patrones distintos, lecturas casi todas distintas, 0
+reintentos por llamada repetida, 0 avisos de convergencia— sino
+exploración genuina pero excesiva. Y como 19 < 20, esa corrida habría
+convergido igual con el tope viejo: subir a 40 no la causó. Es varianza
+del modelo en tareas de mucha lectura.
+
+Las cifras no separan la sobre-exploración del trabajo profundo legítimo:
+la review del ej. 6 que queremos permitir gastó ~620 k tokens de turno
+(input+output acumulados); la sobre-exploración del ej. 2, ~280 k. Un
+techo bajo cortaría ambos. Por eso `max_turn_total_tokens` sirve como
+CORTAFUEGOS de turno desbocado, no como cura de la sobre-exploración.
+
+Decisión: `max_turn_total_tokens = 800000` en el perfil (default None).
+Garantiza que ningún turno se dispara sin límite —al cruzarlo, el engine
+cierra con un `summary_fallback` en vez de seguir re-enviando historia—
+sin degradar las skills profundas. La sobre-exploración en sí queda en
+observación: es varianza de modelo; un modelo mejor o un nudge de prompt
+para tareas de solo lectura la bajarían, pero eso arriesga explorar de
+menos y se mediría antes. NO se bajó el tope de rondas (castigaría las
+skills profundas recién habilitadas).
+
 ## BUG: sesión irreanudable por orden de mensajes (ej. 11)
 
 En una tarea con muchas lecturas, deepseek repitió llamadas idénticas a
