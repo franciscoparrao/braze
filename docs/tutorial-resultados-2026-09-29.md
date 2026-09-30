@@ -90,6 +90,29 @@ dos son las palancas del siguiente sprint.
   desactualizada en el nombre (bug de la skill, no de braze).
 - **Ej. 11**: **bug real encontrado.** Ver abajo.
 
+## Decisión: tope de rondas (2026-09-30)
+
+Comparación del ej. 6 (`/tex-review --quick`) con `max_turn_iterations`
+20 vs 40, mismo tex, deepseek-v4.1-flash, max_tokens 16384:
+
+| tope | rondas | tokens in | convergió | resultado |
+|---|---|---|---|---|
+| 20 | 21 | 293 k | por `summary_fallback` | "sin hallazgos críticos verificados" |
+| 40 | 37 | 571 k | vía normal (fallback=0) | **2 críticos [VERIFICADOS]** (contraste headline no sobrevive el análisis cluster-aware; multiplicidad + p one-sided), con recálculo en Python |
+
+Las rondas extra NO fueron desperdicio: `read_file` con offsets distintos
+(cero relecturas repetidas), 28 `shell_exec` de recálculo, y una review
+materialmente más profunda. Con 20, el fallback cerró antes de que el
+modelo llegara a los críticos. **Decisión: `max_turn_iterations = 40` en
+el perfil.** Es una mejora estricta para skills profundas y casi gratis en
+tareas cortas (el tope solo muerde en turnos genuinamente largos; los
+demás convergen en pocas rondas igual). Costo en plan fijo de Go:
+irrelevante; en wall-clock: ~2×, aceptable para una review.
+
+Efecto colateral anotado: cada corrida de `tex-review` escribió su
+auditoría a `~/vault/journals/_audits/` (dos archivos de prueba, fechas
+desactualizadas en el nombre — bug de la skill). Candidatos a borrar.
+
 ## BUG: sesión irreanudable por orden de mensajes (ej. 11)
 
 En una tarea con muchas lecturas, deepseek repitió llamadas idénticas a
