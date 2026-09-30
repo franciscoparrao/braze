@@ -258,6 +258,13 @@ pub fn default_system_prompt(
          command, edit something), call the tool for it in the same turn. \
          Do not just describe or restate the plan — an action you only \
          narrate never actually happens.\n\
+         - To read, search, or list files, use the dedicated tools \
+         (read_file, grep, glob) — never shell_exec. Reserve shell_exec for \
+         what those cannot do (running a build, tests, or a git command). A \
+         shell command like `cat`, `ls`, `find`, or a `bash -lc '...'` \
+         pipeline to inspect files is slower, more likely to be denied, and \
+         wastes a round; the dedicated tool is always the better choice when \
+         it applies.\n\
          - Relative paths are resolved against the working directory above.\n\
          - Old tool results may appear collapsed to one line to save space — \
          re-run the tool if you need their full content.{family_hint}{references_section}{environment_section}{global_instructions_section}{agents_md_section}{project_memory_section}",
@@ -368,6 +375,19 @@ mod tests {
         let prompt =
             default_system_prompt(Path::new("/home/user/project"), None, &[], None, None, None, None);
         assert!(prompt.contains("call the tool for it in the same turn"));
+    }
+
+    /// Perfil operador (2026-09-30, ejercicios 2 y 11): el modelo recurría
+    /// a `bash -lc`/`find` para leer y buscar; la regla lo desvía a las
+    /// tools directas (read_file/grep/glob) y explica por qué (permisos,
+    /// rondas).
+    #[test]
+    fn default_system_prompt_steers_reads_away_from_shell_to_dedicated_tools() {
+        let prompt =
+            default_system_prompt(Path::new("/home/user/project"), None, &[], None, None, None, None);
+        assert!(prompt.contains("use the dedicated tools"));
+        assert!(prompt.contains("never shell_exec"));
+        assert!(prompt.contains("Reserve shell_exec"));
     }
 
     // --- D1 (docs/AUDITORIA-2026-07-v3.md): family-specific tool-call hint ---
