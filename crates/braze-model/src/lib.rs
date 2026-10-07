@@ -37,6 +37,7 @@ mod ollama;
 mod ollama_wire;
 mod openrouter;
 mod openrouter_wire;
+mod quirks;
 mod retry;
 // Mismo patrón que `harmony`: puro, testeable sin compilar llama.cpp.
 #[cfg(any(feature = "local", test))]

@@ -133,13 +133,45 @@ impl OpenRouterBackend {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// El `seed` efectivo para el próximo request: el configurado, salvo
-    /// que el proveedor ya lo haya rechazado.
-    fn effective_seed(&self) -> Option<u64> {
-        if self.seed_disabled_by_provider() {
+    /// Rarezas del modelo según `crate::quirks`, solo para el proveedor
+    /// `"zen"` (OpenCode Zen/Go, donde se observaron). Otros gateways usan
+    /// el default permisivo + el fallback de `seed` en vivo.
+    fn quirks(&self) -> crate::quirks::ModelQuirks {
+        if self.provider_label == "zen" {
+            crate::quirks::quirks_for(&self.model)
+        } else {
+            crate::quirks::ModelQuirks::default()
+        }
+    }
+
+    /// El `seed` efectivo: el configurado, salvo que la tabla de rarezas o
+    /// un rechazo en vivo lo hayan deshabilitado para este modelo.
+    fn effective_seed(&self, quirks: &crate::quirks::ModelQuirks) -> Option<u64> {
+        if !quirks.seed_supported || self.seed_disabled_by_provider() {
             None
         } else {
             self.seed
+        }
+    }
+
+    /// La `temperature` efectiva: la configurada, salvo que la tabla de
+    /// rarezas la bloquee a un valor exacto (p.ej. kimi-k2 = 1,0) — en cuyo
+    /// caso se sobreescribe, para que un modelo con temperatura fija sea
+    /// usable en vez de dar 400.
+    fn effective_temperature(&self, quirks: &crate::quirks::ModelQuirks) -> Option<f32> {
+        match quirks.temperature {
+            crate::quirks::TemperaturePolicy::Free => self.temperature,
+            crate::quirks::TemperaturePolicy::Locked(value) => {
+                if self.temperature.is_some_and(|t| (t - value).abs() > f32::EPSILON) {
+                    tracing::debug!(
+                        model = %self.model,
+                        configured = ?self.temperature,
+                        forced = value,
+                        "temperature bloqueada por rareza del modelo; se sobreescribe"
+                    );
+                }
+                Some(value)
+            }
         }
     }
 
@@ -243,11 +275,13 @@ impl ModelBackend for OpenRouterBackend {
         req: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>, ModelError>
     {
-        let seed = self.effective_seed();
+        let quirks = self.quirks();
+        let seed = self.effective_seed(&quirks);
+        let temperature = self.effective_temperature(&quirks);
         let mut body = build_request(
             &req,
             &self.model,
-            self.temperature,
+            temperature,
             seed,
             self.prompt_caching_enabled,
         );
@@ -286,7 +320,7 @@ impl ModelBackend for OpenRouterBackend {
             body = build_request(
                 &req,
                 &self.model,
-                self.temperature,
+                temperature,
                 None,
                 self.prompt_caching_enabled,
             );
@@ -606,9 +640,12 @@ mod tests {
             (200, "text/event-stream", sse_body.as_bytes().to_vec()),
         ])
         .await;
+        // Modelo FUERA de la tabla de rarezas: así el seed sí viaja en el
+        // primer request y se ejercita el fallback EN VIVO (glm ya se
+        // acondiciona de antemano por `quirks`, no por este camino).
         let backend = OpenRouterBackend::with_base_url(
             "test-key".to_string(),
-            "glm-5.3-flash".to_string(),
+            "mystery-model-v9".to_string(),
             format!("http://{addr}"),
         )
         .with_provider_label("zen")
@@ -636,6 +673,39 @@ mod tests {
             .with_max_retries(0);
         assert!(matches!(backend.complete(sample_request()).await, Err(ModelError::Request(_))));
         assert!(!backend.seed_disabled_by_provider());
+    }
+
+    /// Capa de rarezas por modelo (recomendación 2 de arXiv 2609.00006):
+    /// bajo el proveedor `zen`, glm omite `seed` de antemano y kimi-k2
+    /// fuerza `temperature = 1,0`; un modelo fuera de la tabla, o el mismo
+    /// modelo bajo otro proveedor, conserva lo configurado.
+    #[test]
+    fn model_quirks_condition_seed_and_temperature_up_front_under_zen() {
+        let zen = |model: &str| {
+            OpenRouterBackend::with_base_url("k".into(), model.into(), "u".into())
+                .with_provider_label("zen")
+                .with_seed(7)
+                .with_temperature(0.2)
+        };
+        // glm: seed omitido de antemano (sin esperar el 400), temp libre.
+        let glm = zen("glm-5.3-flash");
+        let q = glm.quirks();
+        assert_eq!(glm.effective_seed(&q), None);
+        assert_eq!(glm.effective_temperature(&q), Some(0.2));
+        // kimi-k2: temperatura forzada a 1,0, seed intacto.
+        let kimi = zen("kimi-k2.7-code");
+        let q = kimi.quirks();
+        assert_eq!(kimi.effective_temperature(&q), Some(1.0));
+        assert_eq!(kimi.effective_seed(&q), Some(7));
+        // deepseek (fuera de tabla): todo intacto.
+        let ds = zen("deepseek-v4.1-flash");
+        let q = ds.quirks();
+        assert_eq!((ds.effective_seed(&q), ds.effective_temperature(&q)), (Some(7), Some(0.2)));
+        // Mismo glm pero bajo OpenRouter: sin rareza (default permisivo).
+        let or = OpenRouterBackend::with_base_url("k".into(), "glm-5.3-flash".into(), "u".into())
+            .with_seed(7);
+        let q = or.quirks();
+        assert_eq!(or.effective_seed(&q), Some(7));
     }
 
     #[test]
