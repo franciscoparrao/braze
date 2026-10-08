@@ -62,9 +62,9 @@ fn summary_for(name: &str) -> &'static str {
              page (with a note on how many lines remain); use offset/limit to read the rest."
         }
         "write_file" => {
-            "Create or overwrite a file with the given content. Also the preferred way to \
-             modify a file when you are not certain of its exact current text: write the \
-             complete updated content."
+            "Create or overwrite a file with the given content (or, with append: true, add \
+             it at the end). Also the preferred way to modify a file when you are not \
+             certain of its exact current text: write the complete updated content."
         }
         "edit_file" => {
             "Replace one unambiguous occurrence of old_string with new_string in a file. \
@@ -118,6 +118,10 @@ pub fn schema_for(name: &str) -> Option<ToolSchema> {
                 "allow_shrink": {
                     "type": "boolean",
                     "description": "Required (true) to overwrite an existing file with content much smaller than its current size — such writes are refused otherwise, before touching disk. Only set it when you intend to discard most of the file."
+                },
+                "append": {
+                    "type": "boolean",
+                    "description": "Set true to add content at the end of the file (created if missing) instead of replacing it. Use it to build a long file piece by piece without re-sending what is already there."
                 }
             },
             "required": ["path", "content"],

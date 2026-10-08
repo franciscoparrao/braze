@@ -1,0 +1,10 @@
+{
+  "default_backend": "ollama",
+  "ollama_base_url": "http://192.168.1.8:11434",
+  "ollama_model": "gpt-oss:20b",
+  "ollama_num_ctx": 32768,
+  "max_tokens": 6144,
+  "tactical_compaction_threshold": 400,
+  "tactical_full_observations": 30,
+  "max_turn_iterations": 80
+}

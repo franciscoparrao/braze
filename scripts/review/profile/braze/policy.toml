@@ -1,0 +1,19 @@
+# Perfil de revisión confidencial (scripts/review/): el manuscrito no sale
+# de la red local. Sin shell y sin red; leer y escribir dentro del workdir
+# siguen las reglas base (reversible = permitido).
+version = 1
+default = "inherit"
+
+[[rule]]
+id = "review-no-shell"
+action = "shell"
+match = ["*"]
+verdict = "deny"
+reason = "revisión confidencial: sin shell"
+
+[[rule]]
+id = "review-no-network"
+action = "fetch"
+match = ["*"]
+verdict = "deny"
+reason = "revisión confidencial: sin red"

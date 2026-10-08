@@ -106,6 +106,16 @@ fn is_settled_durable(event: &AgentEvent) -> bool {
 const DIGEST_MAX_USER_REQUESTS: usize = 8;
 const DIGEST_MAX_TOOL_CALLS: usize = 15;
 const DIGEST_MAX_TOOL_ERRORS: usize = 8;
+/// Cap on the "Files you wrote" line — distinct paths, most recent kept.
+const DIGEST_MAX_WRITTEN_FILES: usize = 10;
+
+/// Tools whose successful completion leaves durable progress on disk,
+/// named in the digest so the model re-reads it after a compaction
+/// instead of redoing the work (calibración del revisor local
+/// 2026-10-08: gpt-oss:20b leyó el paper entero, la compactación lo
+/// borró y el digest solo decía `read_file(main.tex)` — sin archivo
+/// propio que releer, alucinó la reseña).
+const WRITE_TOOLS: [&str; 2] = ["write_file", "edit_file"];
 /// Most recent `CompactionOccurred` digests kept verbatim in
 /// `DurableState.summary` — N-25 (docs/AUDITORIA-2026-07-v2.md):
 /// `split` re-derives the summary from the *entire* raw event log on
@@ -314,6 +324,9 @@ impl ContextCompactor for SimpleContextCompactor {
         let mut last_plan = None;
         let mut tool_names_by_id: std::collections::HashMap<&str, &str> =
             std::collections::HashMap::new();
+        let mut write_paths_by_id: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        let mut written_files: Vec<&str> = Vec::new();
 
         for event in tactical {
             match event {
@@ -330,6 +343,18 @@ impl ContextCompactor for SimpleContextCompactor {
                 } => {
                     tool_names_by_id.insert(id.as_str(), name.as_str());
                     tool_calls.push(format!("{name}({})", summarize_tool_arguments(arguments)));
+                    if WRITE_TOOLS.contains(&name.as_str())
+                        && let Some(path) = arguments.get("path").and_then(|v| v.as_str())
+                    {
+                        write_paths_by_id.insert(id.as_str(), path);
+                    }
+                }
+                AgentEvent::ToolCallCompleted { id, result }
+                    if !result.is_error && write_paths_by_id.contains_key(id.as_str()) =>
+                {
+                    let path = write_paths_by_id[id.as_str()];
+                    written_files.retain(|p| *p != path);
+                    written_files.push(path);
                 }
                 AgentEvent::ToolCallCompleted { id, result } if result.is_error => {
                     let name = tool_names_by_id
@@ -431,10 +456,24 @@ impl ContextCompactor for SimpleContextCompactor {
             out.push('\n');
         }
 
+        if !written_files.is_empty() {
+            let tail = tail_capped(&written_files, DIGEST_MAX_WRITTEN_FILES);
+            out.push_str("- Files you wrote (your saved progress): ");
+            out.push_str(&tail.join(", "));
+            out.push('\n');
+        }
+
         if let Some(reply) = last_assistant_reply {
             out.push_str(&format!("- Last assistant reply: \"{reply}\"\n"));
         }
 
+        if !written_files.is_empty() {
+            out.push_str(
+                "The content you read before this point is no longer in context; \
+                 what you saved is. Read the files you wrote to recover your \
+                 progress, then continue from where they end. ",
+            );
+        }
         out.push_str(
             "Continue the task using this context. Do not repeat a tool call \
              you already made with the same arguments unless its result changed.",
@@ -824,6 +863,54 @@ mod tests {
 
         assert!(summary.contains("Tools used:"));
         assert!(summary.contains("read_file(Cargo.toml)"));
+    }
+
+    /// Calibración del revisor local (2026-10-08): tras compactar, el
+    /// modelo debe saber qué archivos escribió — es su progreso durable.
+    /// Solo cuentan las escrituras que terminaron bien, sin duplicados y
+    /// en orden de la más reciente al final.
+    #[test]
+    fn compact_tactical_names_the_files_the_model_wrote() {
+        let compactor = SimpleContextCompactor::default();
+        let write = |id: &str, name: &str, path: &str| AgentEvent::AssistantToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments: serde_json::json!({"path": path, "content": "x"}),
+        };
+        let failed = |id: &str| AgentEvent::ToolCallCompleted {
+            id: id.to_string(),
+            result: ToolResult {
+                tool_call_id: id.to_string(),
+                content: "refused".to_string(),
+                is_error: true,
+            },
+        };
+        let events = vec![
+            write("w1", "write_file", "notes.md"),
+            tool_completed("w1"),
+            write("w2", "write_file", "broken.md"),
+            failed("w2"),
+            write("w3", "edit_file", "draft.md"),
+            tool_completed("w3"),
+            write("w4", "write_file", "notes.md"),
+            tool_completed("w4"),
+            tool_call("r1", "read_file"),
+            tool_completed("r1"),
+        ];
+
+        let summary = compactor.compact_tactical(&events).unwrap();
+
+        assert!(
+            summary.contains("- Files you wrote (your saved progress): draft.md, notes.md\n"),
+            "{summary}"
+        );
+        assert!(summary.contains("Read the files you wrote"));
+
+        let without_writes = compactor
+            .compact_tactical(&[tool_call("r1", "read_file"), tool_completed("r1")])
+            .unwrap();
+        assert!(!without_writes.contains("Files you wrote"));
+        assert!(!without_writes.contains("Read the files you wrote"));
     }
 
     #[test]

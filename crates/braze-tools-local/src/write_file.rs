@@ -19,6 +19,13 @@ pub struct WriteFileArgs {
     /// needs no extra field.
     #[serde(default)]
     pub allow_shrink: bool,
+    /// Add `content` at the end of the file (creating it if missing)
+    /// instead of replacing it. Lets a model build a long artifact — notes
+    /// per section of a document it is reading, a review written criterion
+    /// by criterion — without re-sending everything it already wrote, and
+    /// without the shrink guard (an append never discards anything).
+    #[serde(default)]
+    pub append: bool,
 }
 
 /// An overwrite counts as a destructive shrink when the previous file was
@@ -49,12 +56,16 @@ pub async fn write_file(args: WriteFileArgs, gate: bool) -> Result<String, Strin
     // `crate::syntactic_gate`.
     if gate && crate::syntactic_gate::is_rust(&path) {
         let original = tokio::fs::read_to_string(&path).await.ok();
-        crate::syntactic_gate::check_rust_edit(
-            &path,
-            original.as_deref(),
-            &args.content,
-            "content",
-        )?;
+        // An append is judged by the file it produces, not the fragment.
+        let resulting = match (&original, args.append) {
+            (Some(original), true) => format!("{original}{}", args.content),
+            _ => args.content.clone(),
+        };
+        crate::syntactic_gate::check_rust_edit(&path, original.as_deref(), &resulting, "content")?;
+    }
+
+    if args.append {
+        return append_to_file(&path, &args.content).await;
     }
 
     // Read the previous size *before* writing — this is the only point
@@ -98,6 +109,15 @@ pub async fn write_file(args: WriteFileArgs, gate: bool) -> Result<String, Strin
     // construcción: el PermissionGuard ya aprobó ESTA ruta (los padres
     // son prefijos de una ruta permitida dentro del allowlist), y es la
     // semántica de la tool Write de los harnesses de referencia.
+    create_parent_dirs(&path).await?;
+    tokio::fs::write(&path, args.content.as_bytes())
+        .await
+        .map_err(|err| format!("failed to write '{}': {err}", path.display()))?;
+
+    Ok(format!("wrote {len} bytes to {}", path.display()))
+}
+
+async fn create_parent_dirs(path: &std::path::Path) -> Result<(), String> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -108,11 +128,37 @@ pub async fn write_file(args: WriteFileArgs, gate: bool) -> Result<String, Strin
             )
         })?;
     }
-    tokio::fs::write(&path, args.content.as_bytes())
-        .await
-        .map_err(|err| format!("failed to write '{}': {err}", path.display()))?;
+    Ok(())
+}
 
-    Ok(format!("wrote {len} bytes to {}", path.display()))
+/// `write_file` with `append: true`: creates the file (and its parents)
+/// if missing, otherwise adds `content` at its end. The summary reports
+/// the resulting size so the model can tell its progress was kept.
+async fn append_to_file(path: &std::path::Path, content: &str) -> Result<String, String> {
+    use tokio::io::AsyncWriteExt;
+
+    create_parent_dirs(path).await?;
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+        .map_err(|err| format!("failed to open '{}' for append: {err}", path.display()))?;
+    file.write_all(content.as_bytes())
+        .await
+        .map_err(|err| format!("failed to append to '{}': {err}", path.display()))?;
+    file.flush()
+        .await
+        .map_err(|err| format!("failed to append to '{}': {err}", path.display()))?;
+    let total = tokio::fs::metadata(path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+    Ok(format!(
+        "appended {} bytes to {} (now {total} bytes)",
+        content.len(),
+        path.display()
+    ))
 }
 
 #[cfg(test)]
@@ -137,6 +183,7 @@ mod tests {
                 path: file_path.to_string_lossy().into_owned(),
                 content: "pub fn hola() {}\n".to_string(),
                 allow_shrink: false,
+                append: false,
             },
             false,
         )
@@ -164,6 +211,7 @@ mod tests {
                 path: file_path.to_string_lossy().into_owned(),
                 content: "payload".to_string(),
                 allow_shrink: false,
+                append: false,
             },
             false,
         )
@@ -194,6 +242,7 @@ mod tests {
                 path: target.to_string_lossy().into_owned(),
                 content: "payload".to_string(),
                 allow_shrink: false,
+                append: false,
             },
             false,
         )
@@ -223,6 +272,7 @@ mod tests {
                 path: file_path.to_string_lossy().into_owned(),
                 content: "short".to_string(),
                 allow_shrink: false,
+                append: false,
             },
             false,
         )
@@ -257,6 +307,7 @@ mod tests {
                 path: file_path.to_string_lossy().into_owned(),
                 content: "short".to_string(),
                 allow_shrink: true,
+                append: false,
             },
             false,
         )
@@ -288,6 +339,7 @@ mod tests {
                 path: file_path.to_string_lossy().into_owned(),
                 content: "updated content".to_string(),
                 allow_shrink: false,
+                append: false,
             },
             false,
         )
@@ -309,12 +361,82 @@ mod tests {
                 path: file_path.to_string_lossy().into_owned(),
                 content: "hello".to_string(),
                 allow_shrink: false,
+                append: false,
             },
             false,
         )
         .await;
 
         assert!(result.is_ok(), "got: {result:?}");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    fn append_args(path: &std::path::Path, content: &str) -> WriteFileArgs {
+        WriteFileArgs {
+            path: path.to_string_lossy().into_owned(),
+            content: content.to_string(),
+            allow_shrink: false,
+            append: true,
+        }
+    }
+
+    /// `append: true` crea el archivo (y sus padres) si falta y después
+    /// agrega al final, sin tocar lo anterior.
+    #[tokio::test]
+    async fn append_creates_then_extends_without_discarding() {
+        let dir = unique_temp_dir("write-file-append");
+        let file_path = dir.join("notas").join("review-notes.md");
+
+        let first = write_file(append_args(&file_path, "## L1-150\n- a\n"), false).await;
+        assert!(first.is_ok(), "got: {first:?}");
+        let second = write_file(append_args(&file_path, "## L151-300\n- b\n"), false).await;
+        let summary = second.expect("second append");
+        assert!(summary.contains("appended 16 bytes"), "{summary}");
+        assert!(summary.contains("now 30 bytes"), "{summary}");
+
+        let content = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(content, "## L1-150\n- a\n## L151-300\n- b\n");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Un append chico sobre un archivo grande NO es un shrink: nunca
+    /// descarta nada, así que el guard no debe rechazarlo.
+    #[tokio::test]
+    async fn small_append_to_a_large_file_is_not_refused_as_a_shrink() {
+        let dir = unique_temp_dir("write-file-append-large");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let file_path = dir.join("big.md");
+        let big = "x".repeat(SHRINK_PREFLIGHT_THRESHOLD_BYTES * 4);
+        tokio::fs::write(&file_path, &big).await.unwrap();
+
+        let result = write_file(append_args(&file_path, "y"), false).await;
+
+        assert!(result.is_ok(), "got: {result:?}");
+        let content = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(content.len(), big.len() + 1);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// El gate sintáctico juzga el archivo resultante: agregar una función
+    /// completa a un `.rs` sano pasa; agregar media función se rechaza
+    /// sin escribir.
+    #[tokio::test]
+    async fn rust_append_is_gated_on_the_resulting_file() {
+        let dir = unique_temp_dir("write-file-append-rs");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let file_path = dir.join("lib.rs");
+        tokio::fs::write(&file_path, "pub fn a() {}\n").await.unwrap();
+
+        let ok = write_file(append_args(&file_path, "pub fn b() {}\n"), true).await;
+        assert!(ok.is_ok(), "got: {ok:?}");
+
+        let broken = write_file(append_args(&file_path, "pub fn c() {\n"), true).await;
+        assert!(broken.is_err(), "got: {broken:?}");
+        let content = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(content, "pub fn a() {}\npub fn b() {}\n");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
