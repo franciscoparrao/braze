@@ -31,7 +31,21 @@ const READ_TIMEOUT: Duration = Duration::from_secs(600);
 /// TLS backend fails to initialize, exactly like `reqwest::Client::new()`
 /// already does — this seam does not add a new fallible path.
 pub(crate) fn build_client() -> reqwest::Client {
-    build_client_with_timeouts(CONNECT_TIMEOUT, READ_TIMEOUT)
+    build_client_with_timeouts(CONNECT_TIMEOUT, read_timeout_from_env(|k| std::env::var(k)))
+}
+
+/// `BRAZE_HTTP_READ_TIMEOUT_SECS` overrides [`READ_TIMEOUT`] when set to a
+/// positive integer. Ollama sends nothing while it processes the prompt,
+/// so a 27B model on CPU (prefill ~20-40 tok/s) with a 13k-token prompt
+/// stays silent past 600s — calibración del revisor, 2026-10-09. Invalid
+/// or zero values keep the default rather than disabling the bound.
+fn read_timeout_from_env<E>(var: impl Fn(&str) -> Result<String, E>) -> Duration {
+    var("BRAZE_HTTP_READ_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(READ_TIMEOUT)
 }
 
 /// Parameterized on the actual durations so a test can verify the
@@ -51,6 +65,16 @@ pub(crate) fn build_client_with_timeouts(connect: Duration, read: Duration) -> r
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_timeout_env_override_accepts_only_positive_integers() {
+        let with = |v: &'static str| move |_: &str| Ok::<_, ()>(v.to_string());
+        assert_eq!(read_timeout_from_env(with("3600")), Duration::from_secs(3600));
+        assert_eq!(read_timeout_from_env(with(" 1800 ")), Duration::from_secs(1800));
+        assert_eq!(read_timeout_from_env(with("0")), READ_TIMEOUT);
+        assert_eq!(read_timeout_from_env(with("abc")), READ_TIMEOUT);
+        assert_eq!(read_timeout_from_env(|_: &str| Err::<String, ()>(())), READ_TIMEOUT);
+    }
 
     /// Regression test for N-20 (docs/AUDITORIA-2026-07-v2.md): a
     /// connection that never sends a single byte after being accepted

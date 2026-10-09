@@ -52,7 +52,18 @@ const TOOL_PARSE_500_RETRIES: u32 = 2;
 /// mismo criterio, pero solo si ningún evento salió aún al consumidor
 /// (`produced_output == false`) — ver `complete`.
 fn is_tool_parse_stream_error(err: &ModelError) -> bool {
-    matches!(err, ModelError::StreamError(msg) if msg.contains("error parsing tool call"))
+    matches!(err, ModelError::StreamError(msg) if is_server_tool_parse_failure(msg))
+}
+
+/// Los dos textos con que Ollama reporta que SU parser server-side no
+/// pudo leer la tool call que el modelo emitió: `error parsing tool
+/// call` (canal harmony de gpt-oss, incidentes roam #1/#17) y `XML syntax
+/// error` (el formato `<function=…><parameter=…>` de qwen3.5 — sweep
+/// 2026-10-09: 5 corridas del control `qwen3.5:9b` murieron así, sin
+/// re-muestreo, y abrieron el circuit breaker). Misma clase: fallo
+/// por-muestra, re-muestrear es barato y casi siempre repara.
+fn is_server_tool_parse_failure(message: &str) -> bool {
+    message.contains("error parsing tool call") || message.contains("XML syntax error")
 }
 
 fn transport_retry_backoff(attempt: u32) -> std::time::Duration {
@@ -380,7 +391,7 @@ impl ModelBackend for OllamaBackend {
                     if response.status().as_u16() == 500 {
                         let status = response.status();
                         let body = response.text().await.unwrap_or_default();
-                        if body.contains("error parsing tool call")
+                        if is_server_tool_parse_failure(&body)
                             && attempt < 1 + TOOL_PARSE_500_RETRIES
                         {
                             tracing::warn!(
@@ -516,9 +527,20 @@ async fn drive_stream(
                     // surfaced to the caller, not swallowed.
                     if let Some(message) = ctx.state.stream_error.take() {
                         ctx.finished = true;
+                        // Una línea `{"error": …}` la escribió el server:
+                        // está arriba y respondiendo. Solo un runner caído
+                        // dice algo de su salud; un fallo por-muestra
+                        // (parseo de la tool call) no debe abrir el
+                        // breaker (sweep 2026-10-09: 5 `XML syntax error`
+                        // seguidos lo abrieron y costaron 3 corridas más).
+                        let runner_down = message.contains("model runner has crashed");
                         let err = ModelError::StreamError(message);
                         if let Some(guard) = ctx.breaker.take() {
-                            guard.observe_err(&err);
+                            if runner_down {
+                                guard.observe_err(&err);
+                            } else {
+                                guard.observe_reachable();
+                            }
                         }
                         return Some((Err(err), ctx));
                     }
@@ -1050,6 +1072,44 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, Err(ModelError::StreamError(_)))),
             "the early tool-parse error must have been resampled away, got {events:?}"
+        );
+    }
+
+    /// Sweep 2026-10-09: qwen3.5 en Ollama 0.32.1 reporta el fallo de su
+    /// parser server-side como `XML syntax error … element <function>
+    /// closed by </parameter>`. Es la misma clase que #17 y se re-muestrea
+    /// igual (antes moría la corrida).
+    #[tokio::test]
+    async fn a_mid_stream_qwen_xml_parse_error_before_output_is_resampled() {
+        let bad = "{\"error\":\"XML syntax error on line 3: element <function> closed by </parameter>\"}\n";
+        let good = concat!(
+            "{\"model\":\"qwen3.5:9b\",\"message\":{\"role\":\"assistant\",\"content\":\"recovered\"},\"done\":false}\n",
+            "{\"model\":\"qwen3.5:9b\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true}\n",
+        );
+        let addr = crate::test_support::spawn_sequenced_http_server(vec![
+            (200, "application/x-ndjson", bad.as_bytes().to_vec()),
+            (200, "application/x-ndjson", good.as_bytes().to_vec()),
+        ])
+        .await;
+
+        let backend =
+            OllamaBackend::with_base_url("qwen3.5:9b".to_string(), format!("http://{addr}"));
+        let events: Vec<_> = backend
+            .complete(sample_request())
+            .await
+            .expect("request should succeed")
+            .collect()
+            .await;
+
+        assert!(
+            !events.iter().any(|e| matches!(e, Err(ModelError::StreamError(_)))),
+            "the XML parse error must have been resampled away, got {events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Ok(CompletionEvent::TextDelta(t)) if t == "recovered")),
+            "the resampled round's output must reach the caller, got {events:?}"
         );
     }
 

@@ -560,6 +560,25 @@ impl Engine {
                 // Surface it as an error instead of silently keeping (and
                 // showing the user) a possibly mid-sentence answer.
                 if truncated {
+                    // Calibración del revisor (2026-10-08): tres bloques se
+                    // truncaron y no quedó nada para diagnosticar si el
+                    // presupuesto se fue en texto visible o en razonamiento.
+                    // El texto no se persiste (N-24), pero sí deja rastro en
+                    // el log: cuánto llegó a verse, cabeza y cola.
+                    let visible_chars = text_buffer.chars().count();
+                    let head: String = text_buffer.chars().take(300).collect();
+                    let tail: String = text_buffer
+                        .chars()
+                        .skip(visible_chars.saturating_sub(300).max(300))
+                        .collect();
+                    tracing::warn!(
+                        round,
+                        round_output_tokens,
+                        visible_chars,
+                        head = %head,
+                        tail = %tail,
+                        "final response truncated by the token budget; discarded"
+                    );
                     return Err(EngineError::TruncatedFinalResponse);
                 }
                 // Bajo (docs/AUDITORIA-2026-07-v2.md, "una completion

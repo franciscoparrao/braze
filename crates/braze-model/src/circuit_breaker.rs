@@ -428,6 +428,17 @@ impl Guard {
         }
     }
 
+    /// The destination answered, but with an error that is about this
+    /// one sample, not about its health (e.g. Ollama's server-side tool
+    /// call parser rejecting what the model emitted, reported as an
+    /// in-stream `{"error": …}` line). Records `Neutral`: proves
+    /// reachability, neither trips nor resets the count.
+    pub(crate) fn observe_reachable(mut self) {
+        if let Some(breaker) = self.breaker.take() {
+            breaker.record(Outcome::Neutral, &self.key);
+        }
+    }
+
     /// The call failed — at send time, at status-check time, or
     /// mid-stream. [`classify`] decides whether it counts.
     pub(crate) fn observe_err(mut self, err: &ModelError) {
@@ -769,6 +780,18 @@ mod tests {
     /// (`"{provider} HTTP {status}: {message}"`, status displayed as
     /// `400 Bad Request`): deterministic 4xx are Neutral, 5xx and
     /// status-less send failures count, mid-stream errors count.
+    /// Sweep 2026-10-09: errores por-muestra reportados por el server (el
+    /// parser de tool calls de Ollama) no deben abrir el breaker, por
+    /// muchos que lleguen seguidos.
+    #[test]
+    fn reachable_observations_never_open_the_breaker() {
+        let key = "test:observe-reachable-never-trips";
+        for _ in 0..20 {
+            acquire(key).expect("breaker must stay closed").observe_reachable();
+        }
+        assert!(acquire(key).is_ok());
+    }
+
     #[test]
     fn classify_reads_the_http_status_produced_by_http_error_to_model_error() {
         // The real-world case that motivated K-1c: gemma3:1b on Ollama.
