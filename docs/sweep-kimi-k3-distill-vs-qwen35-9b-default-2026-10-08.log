@@ -1,0 +1,369 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 300s por intento.
+-> ollama:qwen3.5:9b :: read_file_basic (rep 1/3)
+-> ollama:qwen3.5:9b :: read_file_basic (rep 2/3)
+-> ollama:qwen3.5:9b :: read_file_basic (rep 3/3)
+-> ollama:qwen3.5:9b :: grep_basic (rep 1/3)
+[2m2026-10-09T02:17:50.312979Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: grep_basic (rep 2/3)
+[2m2026-10-09T02:18:14.489490Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: grep_basic (rep 3/3)
+[2m2026-10-09T02:18:35.793820Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: glob_basic (rep 1/3)
+-> ollama:qwen3.5:9b :: glob_basic (rep 2/3)
+-> ollama:qwen3.5:9b :: glob_basic (rep 3/3)
+-> ollama:qwen3.5:9b :: write_file_basic (rep 1/3)
+-> ollama:qwen3.5:9b :: write_file_basic (rep 2/3)
+-> ollama:qwen3.5:9b :: write_file_basic (rep 3/3)
+-> ollama:qwen3.5:9b :: edit_file_basic (rep 1/3)
+[2m2026-10-09T02:20:43.715821Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: edit_file_basic (rep 2/3)
+[2m2026-10-09T02:21:06.315434Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: edit_file_basic (rep 3/3)
+[2m2026-10-09T02:21:32.124007Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: shell_exec_basic (rep 1/3)
+-> ollama:qwen3.5:9b :: shell_exec_basic (rep 2/3)
+-> ollama:qwen3.5:9b :: shell_exec_basic (rep 3/3)
+-> ollama:qwen3.5:9b :: no_tool_qa (rep 1/3)
+-> ollama:qwen3.5:9b :: no_tool_qa (rep 2/3)
+-> ollama:qwen3.5:9b :: no_tool_qa (rep 3/3)
+-> ollama:qwen3.5:9b :: multi_step_read_count_write (rep 1/3)
+[2m2026-10-09T02:22:53.826220Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m10 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: multi_step_read_count_write (rep 2/3)
+[2m2026-10-09T02:23:16.468094Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: multi_step_read_count_write (rep 3/3)
+[2m2026-10-09T02:23:40.262286Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_wrong_filename (rep 1/3)
+[2m2026-10-09T02:24:09.912761Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_wrong_filename (rep 2/3)
+[2m2026-10-09T02:24:39.315345Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:24:50.350126Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_wrong_filename (rep 3/3)
+[2m2026-10-09T02:25:15.550960Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:25:24.615687Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:25:38.875496Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m19 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: distractor_selection_among_files (rep 1/3)
+[2m2026-10-09T02:26:08.397628Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:26:21.709102Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: distractor_selection_among_files (rep 2/3)
+-> ollama:qwen3.5:9b :: distractor_selection_among_files (rep 3/3)
+[2m2026-10-09T02:27:24.929457Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:27:38.388295Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: edit_file_function_body (rep 1/3)
+[2m2026-10-09T02:28:08.027248Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: edit_file_function_body (rep 2/3)
+[2m2026-10-09T02:28:39.612927Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: edit_file_function_body (rep 3/3)
+[2m2026-10-09T02:29:03.348229Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: no_tool_capital_question (rep 1/3)
+-> ollama:qwen3.5:9b :: no_tool_capital_question (rep 2/3)
+-> ollama:qwen3.5:9b :: no_tool_capital_question (rep 3/3)
+-> ollama:qwen3.5:9b :: no_tool_subtraction (rep 1/3)
+-> ollama:qwen3.5:9b :: no_tool_subtraction (rep 2/3)
+-> ollama:qwen3.5:9b :: no_tool_subtraction (rep 3/3)
+-> ollama:qwen3.5:9b :: multi_step_sum_two_files (rep 1/3)
+[2m2026-10-09T02:30:09.943966Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m8 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: multi_step_sum_two_files (rep 2/3)
+[2m2026-10-09T02:30:36.371575Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m8 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: multi_step_sum_two_files (rep 3/3)
+[2m2026-10-09T02:31:07.958266Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m8 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: multi_step_multiply_and_write (rep 1/3)
+[2m2026-10-09T02:31:33.049022Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: multi_step_multiply_and_write (rep 2/3)
+[2m2026-10-09T02:32:00.232997Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: multi_step_multiply_and_write (rep 3/3)
+[2m2026-10-09T02:32:26.226083Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:32:53.158107Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:33:14.082462Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m19 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:33:31.495124Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_wrong_config_extension (rep 1/3)
+[2m2026-10-09T02:34:08.005627Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:34:19.523813Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:34:28.497385Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m19 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:34:36.097818Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mglob [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-09T02:34:36.099535Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:34:46.453456Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-09T02:34:46.454609Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_wrong_config_extension (rep 2/3)
+[2m2026-10-09T02:35:19.244686Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_wrong_config_extension (rep 3/3)
+[2m2026-10-09T02:35:50.626152Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_edit_wrong_filename (rep 1/3)
+[2m2026-10-09T02:36:28.939952Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:36:37.273384Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_edit_wrong_filename (rep 2/3)
+[2m2026-10-09T02:37:16.976503Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:37:25.403153Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: error_recovery_edit_wrong_filename (rep 3/3)
+[2m2026-10-09T02:38:01.128383Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:38:09.373527Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:38:18.530695Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m19 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: distractor_selection_log_with_error (rep 1/3)
+[2m2026-10-09T02:38:53.848855Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:39:02.736040Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: distractor_selection_log_with_error (rep 2/3)
+-> ollama:qwen3.5:9b :: distractor_selection_log_with_error (rep 3/3)
+[2m2026-10-09T02:39:46.968780Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:39:56.693665Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: distractor_selection_debug_config (rep 1/3)
+[2m2026-10-09T02:40:28.838701Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: distractor_selection_debug_config (rep 2/3)
+[2m2026-10-09T02:40:58.965849Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:qwen3.5:9b :: distractor_selection_debug_config (rep 3/3)
+[2m2026-10-09T02:41:24.881602Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:41:36.095955Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: read_file_basic (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: read_file_basic (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: read_file_basic (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: grep_basic (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: grep_basic (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: grep_basic (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: glob_basic (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: glob_basic (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: glob_basic (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: write_file_basic (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: write_file_basic (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: write_file_basic (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: edit_file_basic (rep 1/3)
+[2m2026-10-09T02:44:37.535660Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: edit_file_basic (rep 2/3)
+[2m2026-10-09T02:44:59.278276Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: edit_file_basic (rep 3/3)
+[2m2026-10-09T02:45:20.241147Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: shell_exec_basic (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: shell_exec_basic (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: shell_exec_basic (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_qa (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_qa (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_qa (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_read_count_write (rep 1/3)
+[2m2026-10-09T02:46:31.402695Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_read_count_write (rep 2/3)
+[2m2026-10-09T02:46:50.530751Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_read_count_write (rep 3/3)
+[2m2026-10-09T02:47:10.048757Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_wrong_filename (rep 1/3)
+[2m2026-10-09T02:47:28.548056Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_wrong_filename (rep 2/3)
+[2m2026-10-09T02:47:50.620117Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:47:56.113304Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_wrong_filename (rep 3/3)
+[2m2026-10-09T02:48:14.779423Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_among_files (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_among_files (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_among_files (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: edit_file_function_body (rep 1/3)
+[2m2026-10-09T02:49:24.190801Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: edit_file_function_body (rep 2/3)
+[2m2026-10-09T02:49:50.222181Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: edit_file_function_body (rep 3/3)
+[2m2026-10-09T02:50:17.337166Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:50:23.318622Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:50:43.748835Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:50:49.400333Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_capital_question (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_capital_question (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_capital_question (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_subtraction (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_subtraction (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: no_tool_subtraction (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_sum_two_files (rep 1/3)
+[2m2026-10-09T02:51:55.363249Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m8 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_sum_two_files (rep 2/3)
+[2m2026-10-09T02:52:16.652252Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m8 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_sum_two_files (rep 3/3)
+[2m2026-10-09T02:52:34.904031Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m8 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_multiply_and_write (rep 1/3)
+[2m2026-10-09T02:52:55.358946Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_multiply_and_write (rep 2/3)
+[2m2026-10-09T02:53:16.482611Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: multi_step_multiply_and_write (rep 3/3)
+[2m2026-10-09T02:53:37.745212Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_wrong_config_extension (rep 1/3)
+[2m2026-10-09T02:53:58.229816Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_wrong_config_extension (rep 2/3)
+[2m2026-10-09T02:54:21.835900Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:54:43.373161Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:55:15.629254Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m19 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:55:28.531656Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_wrong_config_extension (rep 3/3)
+[2m2026-10-09T02:55:55.192298Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:56:03.716177Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m14 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_edit_wrong_filename (rep 1/3)
+[2m2026-10-09T02:56:21.886035Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m8 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:56:27.385339Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m13 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:56:35.699460Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m18 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:56:47.579506Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_edit_wrong_filename (rep 2/3)
+[2m2026-10-09T02:57:18.770344Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m9 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:57:34.673216Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m15 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:57:45.003000Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:57:51.342575Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-09T02:57:51.343827Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:58:00.066912Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: error_recovery_edit_wrong_filename (rep 3/3)
+[2m2026-10-09T02:58:22.066536Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m8 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:58:27.472725Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m15 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:58:32.220865Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:58:42.209846Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+[2m2026-10-09T02:59:25.012419Z[0m [33m WARN[0m [2mbraze_engine::engine::context[0m[2m:[0m context compaction triggered [3mtactical_len[0m[2m=[0m20 [3mtactical_compaction_threshold[0m[2m=[0m40 [3mover_event_count_threshold[0m[2m=[0mfalse [3mover_token_budget[0m[2m=[0mtrue
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_log_with_error (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_log_with_error (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_log_with_error (rep 3/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_debug_config (rep 1/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_debug_config (rep 2/3)
+-> ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M :: distractor_selection_debug_config (rep 3/3)
+
+== Resultados por tarea ==
+[PASS] read_file_basic          ollama:qwen3.5:9b     24264ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2995 tokens_out=112
+[PASS] read_file_basic          ollama:qwen3.5:9b    (rep 2)  12072ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2995 tokens_out=113
+[PASS] read_file_basic          ollama:qwen3.5:9b    (rep 3)  12019ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2995 tokens_out=112
+[PASS] grep_basic               ollama:qwen3.5:9b     21495ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4734 tokens_out=202
+[PASS] grep_basic               ollama:qwen3.5:9b    (rep 2)  24151ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4734 tokens_out=234
+[PASS] grep_basic               ollama:qwen3.5:9b    (rep 3)  22354ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4734 tokens_out=214
+[PASS] glob_basic               ollama:qwen3.5:9b     18895ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3031 tokens_out=194
+[PASS] glob_basic               ollama:qwen3.5:9b    (rep 2)  18880ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3032 tokens_out=195
+[PASS] glob_basic               ollama:qwen3.5:9b    (rep 3)  20956ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3043 tokens_out=217
+[PASS] write_file_basic         ollama:qwen3.5:9b     13351ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3040 tokens_out=126
+[PASS] write_file_basic         ollama:qwen3.5:9b    (rep 2)  18885ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3043 tokens_out=126
+[PASS] write_file_basic         ollama:qwen3.5:9b    (rep 3)  13093ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3043 tokens_out=121
+[PASS] edit_file_basic          ollama:qwen3.5:9b     22642ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4737 tokens_out=215
+[PASS] edit_file_basic          ollama:qwen3.5:9b    (rep 2)  25712ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4737 tokens_out=252
+[PASS] edit_file_basic          ollama:qwen3.5:9b    (rep 3)  23350ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4737 tokens_out=223
+[PASS] shell_exec_basic         ollama:qwen3.5:9b     13318ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3013 tokens_out=125
+[PASS] shell_exec_basic         ollama:qwen3.5:9b    (rep 2)  12907ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3013 tokens_out=120
+[PASS] shell_exec_basic         ollama:qwen3.5:9b    (rep 3)  12415ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3013 tokens_out=115
+[PASS] no_tool_qa               ollama:qwen3.5:9b      6569ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1463 tokens_out=62
+[PASS] no_tool_qa               ollama:qwen3.5:9b    (rep 2)   6578ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1463 tokens_out=62
+[PASS] no_tool_qa               ollama:qwen3.5:9b    (rep 3)   5937ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1463 tokens_out=54
+[PASS] multi_step_read_count_write ollama:qwen3.5:9b     22036ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4829 tokens_out=201
+[PASS] multi_step_read_count_write ollama:qwen3.5:9b    (rep 2)  24513ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4779 tokens_out=231
+[PASS] multi_step_read_count_write ollama:qwen3.5:9b    (rep 3)  29783ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4779 tokens_out=296
+[FAIL] error_recovery_wrong_filename ollama:qwen3.5:9b     28236ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4815 tokens_out=278 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen3.5:9b    (rep 2)  38287ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6814 tokens_out=373 [AssertionText]
+[FAIL] error_recovery_wrong_filename ollama:qwen3.5:9b    (rep 3)  48663ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=8908 tokens_out=465 [AssertionText]
+[PASS] distractor_selection_among_files ollama:qwen3.5:9b     59516ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7018 tokens_out=615
+[FAIL] distractor_selection_among_files ollama:qwen3.5:9b    (rep 2)  16856ms  rounds=1 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1477 tokens_out=102 [ModelBackendError] (error: model backend error: model backend's completion stream failed: XML syntax error on line 3: element <function> closed by </parameter>)
+[PASS] distractor_selection_among_files ollama:qwen3.5:9b    (rep 3)  44776ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6970 tokens_out=447
+[PASS] edit_file_function_body  ollama:qwen3.5:9b     29896ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4822 tokens_out=298
+[PASS] edit_file_function_body  ollama:qwen3.5:9b    (rep 2)  26377ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4810 tokens_out=256
+[PASS] edit_file_function_body  ollama:qwen3.5:9b    (rep 3)  28222ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4810 tokens_out=279
+[PASS] no_tool_capital_question ollama:qwen3.5:9b      6868ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=65
+[PASS] no_tool_capital_question ollama:qwen3.5:9b    (rep 2)   6958ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=66
+[PASS] no_tool_capital_question ollama:qwen3.5:9b    (rep 3)   8057ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=79
+[PASS] no_tool_subtraction      ollama:qwen3.5:9b      6434ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=59
+[PASS] no_tool_subtraction      ollama:qwen3.5:9b    (rep 2)   7293ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=71
+[PASS] no_tool_subtraction      ollama:qwen3.5:9b    (rep 3)   7062ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=67
+[FAIL] multi_step_sum_two_files ollama:qwen3.5:9b     26535ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3168 tokens_out=275 [AssertionFiles]
+[FAIL] multi_step_sum_two_files ollama:qwen3.5:9b    (rep 2)  27931ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3168 tokens_out=290 [AssertionFiles]
+[FAIL] multi_step_sum_two_files ollama:qwen3.5:9b    (rep 3)  24271ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3168 tokens_out=247 [AssertionFiles]
+[PASS] multi_step_multiply_and_write ollama:qwen3.5:9b     26943ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4780 tokens_out=266
+[PASS] multi_step_multiply_and_write ollama:qwen3.5:9b    (rep 2)  26858ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4780 tokens_out=263
+[PASS] multi_step_multiply_and_write ollama:qwen3.5:9b    (rep 3)  99050ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=10651 tokens_out=1041
+[PASS] error_recovery_wrong_config_extension ollama:qwen3.5:9b     73343ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=12966 tokens_out=702
+[PASS] error_recovery_wrong_config_extension ollama:qwen3.5:9b    (rep 2)  29511ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4804 tokens_out=292
+[PASS] error_recovery_wrong_config_extension ollama:qwen3.5:9b    (rep 3)  34397ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4804 tokens_out=353
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen3.5:9b     47230ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6850 tokens_out=477 [AssertionFiles]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen3.5:9b    (rep 2)  48327ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6850 tokens_out=489 [AssertionFiles]
+[FAIL] error_recovery_edit_wrong_filename ollama:qwen3.5:9b    (rep 3)  53809ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=8949 tokens_out=524 [AssertionFiles]
+[PASS] distractor_selection_log_with_error ollama:qwen3.5:9b     37028ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6928 tokens_out=355
+[FAIL] distractor_selection_log_with_error ollama:qwen3.5:9b    (rep 2)  16219ms  rounds=1 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=1474 tokens_out=106 [ModelBackendError] (error: model backend error: model backend's completion stream failed: XML syntax error on line 3: element <function> closed by </parameter>)
+[PASS] distractor_selection_log_with_error ollama:qwen3.5:9b    (rep 3)  39060ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6890 tokens_out=380
+[PASS] distractor_selection_debug_config ollama:qwen3.5:9b     30108ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4898 tokens_out=301
+[PASS] distractor_selection_debug_config ollama:qwen3.5:9b    (rep 2)  30164ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4898 tokens_out=301
+[PASS] distractor_selection_debug_config ollama:qwen3.5:9b    (rep 3)  44550ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6878 tokens_out=447
+[PASS] read_file_basic          ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  18745ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2999 tokens_out=105
+[PASS] read_file_basic          ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  12759ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2999 tokens_out=123
+[PASS] read_file_basic          ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  10519ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2999 tokens_out=95
+[PASS] grep_basic               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  11600ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3010 tokens_out=108
+[PASS] grep_basic               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  11505ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3010 tokens_out=104
+[PASS] grep_basic               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  11332ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3010 tokens_out=104
+[PASS] glob_basic               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  10413ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3037 tokens_out=94
+[PASS] glob_basic               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  10238ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3037 tokens_out=91
+[PASS] glob_basic               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  10635ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3037 tokens_out=91
+[PASS] write_file_basic         ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  13505ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3044 tokens_out=128
+[PASS] write_file_basic         ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  12140ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3044 tokens_out=112
+[PASS] write_file_basic         ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  11978ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3044 tokens_out=109
+[PASS] edit_file_basic          ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  20024ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4740 tokens_out=188
+[PASS] edit_file_basic          ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  21452ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4740 tokens_out=203
+[PASS] edit_file_basic          ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  21249ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4740 tokens_out=204
+[PASS] shell_exec_basic         ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  12569ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3014 tokens_out=105
+[PASS] shell_exec_basic         ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  11784ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3014 tokens_out=102
+[PASS] shell_exec_basic         ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  11582ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3014 tokens_out=104
+[PASS] no_tool_qa               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M   4633ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1463 tokens_out=29
+[PASS] no_tool_qa               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)   5837ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1463 tokens_out=46
+[PASS] no_tool_qa               ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)   4787ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1463 tokens_out=33
+[PASS] multi_step_read_count_write ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  19074ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4782 tokens_out=176
+[PASS] multi_step_read_count_write ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  19284ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4782 tokens_out=177
+[PASS] multi_step_read_count_write ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  19332ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4782 tokens_out=176
+[FAIL] error_recovery_wrong_filename ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  18826ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4773 tokens_out=177 [AssertionText]
+[PASS] error_recovery_wrong_filename ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  27703ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6610 tokens_out=261
+[FAIL] error_recovery_wrong_filename ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  19386ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4773 tokens_out=183 [AssertionText]
+[PASS] distractor_selection_among_files ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  15298ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3113 tokens_out=149
+[PASS] distractor_selection_among_files ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  15150ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3113 tokens_out=147
+[PASS] distractor_selection_among_files ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  15118ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3113 tokens_out=147
+[PASS] edit_file_function_body  ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  26196ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4825 tokens_out=265
+[PASS] edit_file_function_body  ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  27199ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4813 tokens_out=281
+[FAIL] edit_file_function_body  ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  67750ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=10764 tokens_out=705 [AssertionFiles]
+[PASS] no_tool_capital_question ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M   6794ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=57
+[PASS] no_tool_capital_question ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)   7054ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=60
+[PASS] no_tool_capital_question ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)   6986ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=59
+[PASS] no_tool_subtraction      ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M   5427ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=40
+[PASS] no_tool_subtraction      ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)   5418ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=41
+[PASS] no_tool_subtraction      ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)   5443ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1465 tokens_out=40
+[FAIL] multi_step_sum_two_files ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  16678ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3170 tokens_out=162 [AssertionFiles]
+[FAIL] multi_step_sum_two_files ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  20859ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3170 tokens_out=213 [AssertionFiles]
+[FAIL] multi_step_sum_two_files ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  18371ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3170 tokens_out=183 [AssertionFiles]
+[PASS] multi_step_multiply_and_write ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  20930ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4783 tokens_out=202
+[PASS] multi_step_multiply_and_write ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  21200ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4787 tokens_out=206
+[PASS] multi_step_multiply_and_write ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  20470ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4787 tokens_out=196
+[PASS] error_recovery_wrong_config_extension ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  22916ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4814 tokens_out=223
+[PASS] error_recovery_wrong_config_extension ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  91642ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=11037 tokens_out=983
+[PASS] error_recovery_wrong_config_extension ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  32793ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6667 tokens_out=324
+[FAIL] error_recovery_edit_wrong_filename ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  53536ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=9010 tokens_out=540 [AssertionFiles]
+[FAIL] error_recovery_edit_wrong_filename ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  67260ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=2  denied=0  tokens_in=13977 tokens_out=637 [AssertionFiles]
+[PASS] error_recovery_edit_wrong_filename ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  80257ms  rounds=6 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=11522 tokens_out=833
+[PASS] distractor_selection_log_with_error ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  12726ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3094 tokens_out=117
+[PASS] distractor_selection_log_with_error ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  11998ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3082 tokens_out=108
+[PASS] distractor_selection_log_with_error ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  11858ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3082 tokens_out=108
+[PASS] distractor_selection_debug_config ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M  10129ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3045 tokens_out=85
+[PASS] distractor_selection_debug_config ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 2)  10629ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3045 tokens_out=91
+[PASS] distractor_selection_debug_config ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M (rep 3)  10376ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3045 tokens_out=88
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+ollama:qwen3.5:9b          46/57 [69,89]%    46/57      2.7        26404      24264           4379              255                 0              0          0            0         0         0        53         0    $0.0000
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M   49/57 [75,93]%    49/57      2.5        19673      13505           4074              188                 0              2          0            0         1         0        43         0    $0.0000
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+ollama:qwen3.5:9b        k=2 77.2%  k=3 73.7%
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M k=2 80.7%  k=3 78.9%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+ollama:qwen3.5:9b            14/19      2/19          3/19      0.737      0.807        0.842       0.09
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M     15/19      3/19          1/19      0.789      0.860        0.947       0.08
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación pareada vs control 'ollama:qwen3.5:9b' (McNemar exacto + Holm) ==
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M pares=57   solo-control=1   solo-brazo=4   p=0.3750 p_holm=0.3750
+(* p_holm < 0.05; solo los pares discordantes llevan información — 'solo-brazo' > 'solo-control' favorece al brazo)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+ollama:qwen3.5:9b        single_tool              21/21      2.4      19774      20956         183         0         0         9         0    $0.0000
+ollama:qwen3.5:9b        no_tool                    9/9      1.0       6862       6868          65         0         0         0         0    $0.0000
+ollama:qwen3.5:9b        multi_step                 6/9      3.0      34213      26858         346         0         0        12         0    $0.0000
+ollama:qwen3.5:9b        error_recovery             3/9      4.2      44645      47230         439         0         0        20         0    $0.0000
+ollama:qwen3.5:9b        distractor_selection       7/9      3.1      35364      37028         339         0         0        12         0    $0.0000
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M single_tool              20/21      2.4      17389      12140         163         0         0         9         0    $0.0000
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M no_tool                    9/9      1.0       5820       5443          45         0         0         0         0    $0.0000
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M multi_step                 6/9      2.7      19578      19332         188         0         0         9         0    $0.0000
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M error_recovery             5/9      4.6      46035      32793         462         1         0        25         0    $0.0000
+ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M distractor_selection       9/9      2.0      12587      11998         116         0         0         0         0    $0.0000
+
+[salud del banco] 2 ítem(s) con discriminación bajo 0.10 — REVISAR antes de interpretar este sweep:
+   edit_file_function_body                r_pbis=-0.447
+   error_recovery_edit_wrong_filename     r_pbis=-0.316
+   Un ítem así puede estar midiendo infraestructura y no capacidad (caso read_file_basic / transporte Ollama 0.30.7, julio 2026).
+
+Resultados JSON escritos en docs/sweep-kimi-k3-distill-vs-qwen35-9b-default-2026-10-08.json
