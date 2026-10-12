@@ -82,6 +82,10 @@ class Passages:
         self.avg = sum(sum(c.values()) for c in self.tf) / max(n, 1)
 
     def select(self, query, budget):
+        return self.render(self.choose(query, budget))
+
+    def choose(self, query, budget):
+        """Índices de línea de las mejores ventanas hasta `budget` caracteres."""
         q = Counter(terms(query))
         scores = []
         for k, c in enumerate(self.tf):
@@ -97,6 +101,9 @@ class Passages:
             new = [i for i in range(a, b) if i not in chosen and i not in self.skip]
             chosen.update(new)
             used += sum(len(self.lines[i]) + 8 for i in new)
+        return chosen
+
+    def render(self, chosen):
         out, prev = [], None
         for i in sorted(chosen):
             if prev is not None and i != prev + 1:
@@ -136,6 +143,141 @@ def check_evidence(evidence, lines, window=3):
     return "unanchored"
 
 
+VERDICT_RE = re.compile(r"^\s*\**V(\d+)\**\s*:\**\s*\**(PRESENTE|AUSENTE|NO APLICA|SECCI[ÓO]N|RESPONDIDA|ACEPTADA)\**[ \t]*(.*)$", re.M | re.I)
+
+
+BATCH = 6
+SECTION_RE = re.compile(r"^SECCI[ÓO]N\s+(\d+(?:\.\d+)*)", re.I)
+TOC_LINE_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)\.?\s+(\S.*?)\s*\.{8,}\s*\d+\s*$")
+
+
+def toc(lines):
+    """El índice de secciones numeradas del documento, compacto ("5.1.5 Construcción de zanjas")."""
+    return [f"{m.group(1)} {m.group(2)}" for m in map(TOC_LINE_RE.match, lines) if m]
+
+
+def section_text(lines, num, max_lines=80, max_chars=5000):
+    """Las líneas de la sección `num` en el cuerpo (no en el índice), numeradas,
+    hasta el próximo encabezado numerado o los topes."""
+    head = re.compile(rf"^\s*{re.escape(num)}\.?\s+\S")
+    any_head = re.compile(r"^\s*\d+(?:\.\d+)+\.?\s+[A-ZÁÉÍÓÚÑ]")
+    for i, ln in enumerate(lines):
+        if head.match(ln) and not TOC_LINE_RE.match(ln):
+            out, used = [f"L{i + 1}| {ln}"], len(ln)
+            for k in range(i + 1, min(i + max_lines, len(lines))):
+                if any_head.match(lines[k]) or used > max_chars:
+                    break
+                out.append(f"L{k + 1}| {lines[k]}")
+                used += len(lines[k]) + 8
+            return "\n".join(out)
+    return ""
+
+
+def parse_verdicts(text, n):
+    """{k: (veredicto, resto)} para V1..Vn; None si falta alguna."""
+    # El prompt de defensa usa RESPONDIDA/ACEPTADA; se normaliza a PRESENTE/AUSENTE.
+    alias = {"RESPONDIDA": "PRESENTE", "ACEPTADA": "AUSENTE"}
+    got = {int(m.group(1)): (alias.get(v, v), m.group(3).strip())
+           for m in VERDICT_RE.finditer(text) for v in [m.group(2).upper().replace("Ó", "O")]}
+    return got if all(k in got for k in range(1, n + 1)) else None
+
+
+def verify(args, out, lines, items, results, passages, extra):
+    """Segunda etapa: re-busca en el documento completo lo que cada observación
+    da por ausente (o cita mal) y le pide al modelo un veredicto por observación.
+
+    Una ausencia del primer paso solo prueba que el pasaje no se recuperó: en
+    Purranque la mitad de las observaciones falsas de una muestra eran de ese
+    tipo. Aquí la consulta es la observación misma, no el ítem, así que los
+    pasajes son otros. Se descarta una observación si el verificador la marca
+    PRESENTE con una cita anclada, o NO APLICA; una PRESENTE sin ancla se
+    conserva (no hay prueba).
+    """
+    tpl = Path(args.verify_prompt or HERE / "checklist-defense-prompt.md").read_text(encoding="utf-8")
+    state = out / "verify-state.json"           # checkpoint: solo ítems verificados
+    done = json.loads(state.read_text()) if state.exists() else {}
+    by_id = {it["id"]: it for it in items}
+    limit = {x.strip() for x in args.verify_ids.split(",") if x.strip()}
+    todo = [iid for iid, r in results.items()
+            if any(p["check"] != "anchored" for p in r["observations"]) and (not limit or iid in limit)]
+    for k, iid in enumerate(todo, 1):
+        if iid in done:
+            continue
+        item, r = by_id[iid], results[iid]
+
+        def ask(js, passages_txt, index, tag=""):
+            obs_txt = "\n".join(f"V{n}: {r['observations'][j]['obs']}" for n, j in enumerate(js, 1))
+            prompt = fill(tpl, CONTEXT=args.context, N=len(lines), TITLE=item["title"], TEXT=item["text"],
+                          OBSERVATIONS=obs_txt, PASSAGES=passages_txt,
+                          TOC=f"El índice del documento (solo títulos):\n\n{index}\n\n" if index else "",
+                          SECTION_OPTION=("- SECCION <número>: el índice muestra una sección que probablemente lo "
+                                          "entrega, pero su texto no está en los pasajes.\n") if index else "",
+                          SECTION_EXAMPLE="\nV4: SECCION 5.1.5" if index else "")
+            for attempt in range(2):
+                text = run_braze(args.braze, out, f"verify{iid}{tag}-{attempt}", prompt, extra=extra)
+                got = parse_verdicts(text, len(js))
+                if got is not None:
+                    return got
+            return None
+
+        targets = [j for j, p in enumerate(r["observations"]) if p["check"] != "anchored"]
+        index = "\n".join(toc(lines))
+        verdicts = {}
+        # Lotes chicos: con 12-15 observaciones por llamada el modelo responde
+        # AUSENTE en serie sin mirar.
+        for b in range(0, len(targets), BATCH):
+            group = targets[b:b + BATCH]
+            share = max(2500, args.budget // len(group))
+            chosen = set()
+            for j in group:
+                chosen |= passages.choose(r["observations"][j]["obs"], share)
+            got = ask(group, passages.render(chosen), index, tag=f"-b{b // BATCH}")
+            if got is None:
+                continue
+            want = {}
+            for n, j in enumerate(group, 1):
+                v, rest = got[n]
+                m = SECTION_RE.match(f"{v} {rest}")
+                if m:
+                    want.setdefault(m.group(1), []).append(j)
+                verdicts[j] = got[n]
+            # Segunda ronda: lo que el índice ubica en una sección no recuperada.
+            for num, js in want.items():
+                sec = section_text(lines, num)
+                again = ask(js, sec, "", tag=f"-b{b // BATCH}s{num}") if sec else None
+                for n2, j in enumerate(js, 1):
+                    verdicts[j] = (again or {}).get(n2, ("AUSENTE", f"sección {num} no resolvió"))
+        obs = [dict(p) for p in r["observations"]]
+        for j in targets:
+            v, rest = verdicts.get(j, ("SIN VEREDICTO", ""))
+            v = "AUSENTE" if v == "SECCION" else v
+            anchored = v == "PRESENTE" and check_evidence(rest, lines) == "anchored"
+            obs[j]["verify"] = {"verdict": v, "detail": rest, "anchored": anchored}
+            obs[j]["keep"] = not (anchored or v == "NO APLICA")
+        for p in obs:
+            p.setdefault("keep", True)
+        done[iid] = {"title": r["title"], "observations": obs}
+        state.write_text(json.dumps(done, ensure_ascii=False, indent=1))
+        dropped = sum(not p["keep"] for p in obs)
+        log(f"verificado {iid} ({k}/{len(todo)}): {dropped}/{len(targets)} descartadas"
+            + ("" if len(verdicts) == len(targets) else f" — {len(targets) - len(verdicts)} sin veredicto, se conservan"))
+    # Salida: los ítems sin verificar (sin ausencias, o fuera de --verify-ids) pasan enteros.
+    done = {iid: done.get(iid) or {"title": r["title"], "observations": [dict(p, keep=True) for p in r["observations"]]}
+            for iid, r in results.items()}
+    (out / "observations.verified.json").write_text(json.dumps(done, ensure_ascii=False, indent=1))
+    kept = [p for r in done.values() for p in r["observations"] if p["keep"]]
+    md = [f"# Observaciones verificadas ({len(kept)})\n"]
+    for iid, r in done.items():
+        ks = [p for p in r["observations"] if p["keep"]]
+        if ks:
+            md.append(f"## {iid}. {r['title']}\n")
+            md.extend(f"- [{p['check']}] {p['obs']}\n  - {p['evidence']}" for p in ks)
+            md.append("")
+    (out / "observations.verified.md").write_text("\n".join(md) + "\n")
+    total = sum(len(r["observations"]) for r in done.values())
+    log(f"verificación: {len(kept)}/{total} observaciones conservadas")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("document")
@@ -148,6 +290,13 @@ def main():
                     help="modo con grep/read_file (lento; ver Passages). Por defecto, recuperación sin tools")
     ap.add_argument("--budget", type=int, default=14000,
                     help="caracteres de pasajes por ítem en el modo sin tools (default 14000)")
+    ap.add_argument("--verify", action="store_true",
+                    help="segunda etapa: verificar en el documento completo las ausencias y citas sin ancla "
+                         "(observations.verified.json); sin --tools")
+    ap.add_argument("--verify-prompt", default="",
+                    help="plantilla del verificador (default checklist-defense-prompt.md; "
+                         "alternativa checklist-verify-prompt.md)")
+    ap.add_argument("--verify-ids", default="", help="con --verify, limitar a estos ítems (prueba)")
     ap.add_argument("--prompt", default="")
     ap.add_argument("--model", default="")
     ap.add_argument("--ollama-url", default="")
@@ -205,6 +354,8 @@ def main():
         md.append("")
     (out / "observations.md").write_text(f"# Observaciones ({total})\n\n" + "\n".join(md) + "\n")
     log(f"total: {total} observaciones en {len(results)} ítems")
+    if args.verify:
+        verify(args, out, lines, items, results, passages or Passages(lines), extra)
 
 
 if __name__ == "__main__":
