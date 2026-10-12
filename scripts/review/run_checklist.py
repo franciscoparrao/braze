@@ -29,6 +29,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import unicodedata
 from collections import Counter
 from pathlib import Path
@@ -213,11 +214,13 @@ def verify(args, out, lines, items, results, passages, extra):
                           SECTION_OPTION=("- SECCION <número>: el índice muestra una sección que probablemente lo "
                                           "entrega, pero su texto no está en los pasajes.\n") if index else "",
                           SECTION_EXAMPLE="\nV4: SECCION 5.1.5" if index else "")
-            for attempt in range(2):
+            for attempt in range(3):
                 text = run_braze(args.braze, out, f"verify{iid}{tag}-{attempt}", prompt, extra=extra)
                 got = parse_verdicts(text, len(js))
                 if got is not None:
                     return got
+                if not text:                  # error de transporte (WiFi, Ollama reiniciando)
+                    time.sleep(60)
             return None
 
         targets = [j for j, p in enumerate(r["observations"]) if p["check"] != "anchored"]
@@ -256,11 +259,15 @@ def verify(args, out, lines, items, results, passages, extra):
             obs[j]["keep"] = not (anchored or v == "NO APLICA")
         for p in obs:
             p.setdefault("keep", True)
+        if len(verdicts) < len(targets):
+            # Sin checkpoint: una corrida posterior lo reintenta (un corte de red
+            # a mitad de la corrida dejó 59 ítems sin veredicto en segundos).
+            log(f"verificado {iid} ({k}/{len(todo)}): {len(targets) - len(verdicts)} sin veredicto, queda pendiente")
+            continue
         done[iid] = {"title": r["title"], "observations": obs}
         state.write_text(json.dumps(done, ensure_ascii=False, indent=1))
         dropped = sum(not p["keep"] for p in obs)
-        log(f"verificado {iid} ({k}/{len(todo)}): {dropped}/{len(targets)} descartadas"
-            + ("" if len(verdicts) == len(targets) else f" — {len(targets) - len(verdicts)} sin veredicto, se conservan"))
+        log(f"verificado {iid} ({k}/{len(todo)}): {dropped}/{len(targets)} descartadas")
     # Salida: los ítems sin verificar (sin ausencias, o fuera de --verify-ids) pasan enteros.
     done = {iid: done.get(iid) or {"title": r["title"], "observations": [dict(p, keep=True) for p in r["observations"]]}
             for iid, r in results.items()}
