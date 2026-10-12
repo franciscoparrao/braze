@@ -174,6 +174,15 @@ def section_text(lines, num, max_lines=80, max_chars=5000):
     return ""
 
 
+def substantive(evidence, min_words=8):
+    """Una defensa citando un título ("Compatibilidad con los instrumentos de
+    planificación territorial.") no prueba que el contenido esté: se exige una
+    frase de al menos `min_words` palabras o con una cifra (fila de tabla)."""
+    m = re.search(r"`([^`]+)`", evidence)
+    quote = m.group(1) if m else ""
+    return len(quote.split()) >= min_words or bool(re.search(r"\d", quote))
+
+
 def parse_verdicts(text, n):
     """{k: (veredicto, resto)} para V1..Vn; None si falta alguna."""
     # El prompt de defensa usa RESPONDIDA/ACEPTADA; se normaliza a PRESENTE/AUSENTE.
@@ -254,7 +263,7 @@ def verify(args, out, lines, items, results, passages, extra):
         for j in targets:
             v, rest = verdicts.get(j, ("SIN VEREDICTO", ""))
             v = "AUSENTE" if v == "SECCION" else v
-            anchored = v == "PRESENTE" and check_evidence(rest, lines) == "anchored"
+            anchored = v == "PRESENTE" and check_evidence(rest, lines) == "anchored" and substantive(rest)
             obs[j]["verify"] = {"verdict": v, "detail": rest, "anchored": anchored}
             obs[j]["keep"] = not (anchored or v == "NO APLICA")
         for p in obs:
