@@ -174,6 +174,9 @@ def main():
     for k, item in enumerate(items, 1):
         if only and item["id"] not in only:
             continue
+        # Reanudar: un ítem ya respondido con formato no se repite (--only lo fuerza).
+        if not only and results.get(item["id"], {}).get("status", "NONE") != "NONE":
+            continue
         prompt = fill(tpl, CONTEXT=args.context, N=len(lines), TITLE=item["title"], TEXT=item["text"],
                       PASSAGES=passages.select(item["title"].split(" > ")[-1] + " " + item["text"],
                                                args.budget) if passages else "")
