@@ -60,6 +60,24 @@ def terms(text):
     return [t for t in re.findall(r"[a-z0-9]{4,}", fold(text)) if t not in STOP]
 
 
+TABLE_RE = re.compile(r"^\s*Tabla\s+\d+(?:\s*[-‐‑–.]\s*\d+)+\s*[:.]?\s*(\S.*)$", re.I)
+SOURCE_RE = re.compile(r"^\s*Fuente\s*:", re.I)
+# Compartir solo la fase ("Fase de construcción") no hace pertinente una tabla.
+TABLE_GENERIC = {"fase", "construccion", "operacion", "cierre", "proyecto", "parque", "fotovoltaico",
+                 "acciones", "actividades", "instalacion", "instalaciones", "obras", "partes",
+                 "generacion", "resumen", "tabla"}
+# El título de la pauta y el de la tabla nombran lo mismo con otra palabra.
+TABLE_SYNONYMS = {"transporte": {"viajes", "vehiculos"}, "mano": {"trabajadores"},
+                  "residuos": {"respel"}, "peligrosos": {"respel"}}
+
+
+PHASES = {"construccion", "operacion", "cierre"}
+
+
+def table_title(item):
+    return item["title"]
+
+
 class Passages:
     """Ventanas de líneas del documento, recuperadas por BM25 contra el ítem.
 
@@ -81,12 +99,60 @@ class Passages:
         n = len(self.wins)
         self.idf = {t: math.log(1 + (n - d + 0.5) / (d + 0.5)) for t, d in df.items()}
         self.avg = sum(sum(c.values()) for c in self.tf) / max(n, 1)
+        self.tables = self.find_tables(lines)
 
-    def select(self, query, budget):
-        return self.render(self.choose(query, budget))
+    def find_tables(self, lines, span=60):
+        """(términos del título, primera línea, última línea) de cada tabla del cuerpo.
 
-    def choose(self, query, budget):
-        """Índices de línea de las mejores ventanas hasta `budget` caracteres."""
+        Las tablas pierden contra la prosa en BM25 (celdas con cifras y pocas
+        palabras), y el revisor terminaba pidiendo lo que una tabla lejana ya
+        trae (Pita: "no se indica la frecuencia de viajes" con la Tabla 1-18
+        "Número de viajes fase de construcción" en el capítulo). La tabla va
+        del título hasta su "Fuente:", el próximo título o `span` líneas."""
+        heads = [i for i, ln in enumerate(lines) if TABLE_RE.match(ln)
+                 and not any(re.search(r"\.{8,}", x) for x in lines[i:i + 2])]
+        out = []
+        for k, a in enumerate(heads):
+            stop = min(heads[k + 1] if k + 1 < len(heads) else len(lines), a + span)
+            b = next((i for i in range(a + 1, stop) if SOURCE_RE.match(lines[i])), stop - 1)
+            out.append((set(terms(TABLE_RE.match(lines[a]).group(1))), a, b))
+        return out
+
+    def select(self, query, budget, title=""):
+        return self.render(self.choose(query, budget, title))
+
+    def tables_for(self, title, budget, top=2):
+        """Líneas de las (≤`top`) tablas cuyo título comparte ≥2 términos con
+        los dos últimos niveles del título del ítem o la fase, al menos uno no
+        genérico y del último nivel ("c. Ruido" no se lleva la tabla de
+        emisiones atmosféricas), hasta `budget` caracteres."""
+        phase = set(terms(title)) & PHASES
+        last = set(terms(title.split(" > ")[-1]))
+        last |= {x for t in last for x in TABLE_SYNONYMS.get(t, ())}
+        if re.search(r"\botras\b", title.split(" > ")[-1], re.I):   # "e. Otras emisiones" no es la atmosférica
+            last.discard("emisiones")
+        q = set(terms(" ".join(title.split(" > ")[-2:]))) | phase
+        q |= {x for t in q for x in TABLE_SYNONYMS.get(t, ())}
+        ranked = sorted(((sum(self.idf.get(t, 1.0) for t in tt & q), a, b)
+                         for tt, a, b in self.tables
+                         if len(tt & q) >= 2 and tt & last - TABLE_GENERIC
+                         and not (phase and tt & PHASES and not tt & phase)), reverse=True)
+        chosen, used = set(), 0
+        for _, a, b in ranked[:top]:
+            for i in range(a, b + 1):          # una tabla larga entra truncada
+                if i in self.skip or i in chosen:
+                    continue
+                cost = len(self.lines[i]) + 8
+                if used + cost > budget:
+                    break
+                chosen.add(i)
+                used += cost
+        return chosen, used
+
+    def choose(self, query, budget, title=""):
+        """Índices de línea de las mejores ventanas hasta `budget` caracteres;
+        con `title`, primero las tablas cuyo título coincide con el ítem."""
+        chosen, used = self.tables_for(title, budget * 35 // 100) if title else (set(), 0)
         q = Counter(terms(query))
         scores = []
         for k, c in enumerate(self.tf):
@@ -94,7 +160,6 @@ class Passages:
             s = sum(self.idf.get(t, 0) * c[t] * 2.2 / (c[t] + 1.2 * (0.25 + 0.75 * dl / self.avg))
                     for t in q if t in c)
             scores.append((s, k))
-        chosen, used = set(), 0
         for s, k in sorted(scores, reverse=True):
             if s <= 0 or used >= budget:
                 break
@@ -242,7 +307,7 @@ def verify(args, out, lines, items, results, passages, extra):
             share = max(2500, args.budget // len(group))
             chosen = set()
             for j in group:
-                chosen |= passages.choose(r["observations"][j]["obs"], share)
+                chosen |= passages.choose(r["observations"][j]["obs"], share, table_title(item))
             got = ask(group, passages.render(chosen), index, tag=f"-b{b // BATCH}")
             if got is None:
                 continue
@@ -344,7 +409,7 @@ def main():
             continue
         prompt = fill(tpl, CONTEXT=args.context, N=len(lines), TITLE=item["title"], TEXT=item["text"],
                       PASSAGES=passages.select(item["title"].split(" > ")[-1] + " " + item["text"],
-                                               args.budget) if passages else "")
+                                               args.budget, table_title(item)) if passages else "")
         # Como en el verificador: un reintento si la respuesta sale sin formato
         # (args de una tool call como texto, razonamiento filtrado).
         for attempt in range(2):
