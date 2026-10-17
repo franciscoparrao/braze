@@ -129,3 +129,43 @@ largas de sc-compaction lo llevan a ese techo. En agosto el mismo sweep
 completó 80 corridas: esas sesiones no existían. **No se relanza hasta
 liberar memoria en Nitro**; el instrumento no se toca (`num_ctx`, KV cache
 sin cuantizar).
+
+## Intento 3 y resultado (2026-10-17)
+
+Relanzado el 2026-10-17 a las 01:00 con Nitro sin carga ajena (sin Chrome ni
+sesiones de Claude; 12 GB disponibles). Comando idéntico al pre-registrado salvo el
+lugar: corre EN Nitro dentro de tmux (regla del 2026-10-10), con base URL
+`localhost` y el checkout de Nitro en `5084d4a`, el último commit que toca crates.
+Terminó a las 09:11 con 160/160 corridas y sin OOM; el runner llegó a 7,1 GB de RSS.
+Datos: `docs/sweep-sc-retention-ornith-r2-2026-10-17.{json,log}`.
+Instrumento verificado: `suite_fingerprint` 500646b2f85c5b3b (coincide) y digest
+`a75697c1…` (coincide).
+
+**Primario (80 pares nuevos):**
+
+| | tratado (sc-route) | control (no-sc-route) |
+|---|---|---|
+| aprobadas | 5/80 | 8/80 |
+| discordantes | 4 a favor | 7 en contra |
+| McNemar exacto | p = 0,5488 | |
+| input tokens tratado/control | 1,177 | |
+| corridas cortadas por error de backend (truncación) | 4 (5 %) | 11 (14 %) |
+
+Las truncaciones quedan bajo el 25 % en ambos brazos, así que no hay degradación de
+instrumento.
+
+**Secundario (pool de 15 reps, 120 pares, con el caveat de harness distinto entre
+pasadas):** tratado 10, control 8; discordantes 9 contra 7; p = 0,80.
+
+**Decisión, según el criterio fijado:** p ≥ 0,05 y discordantes a favor = 36 % (≤ 60 %)
+→ **RECHAZAR y publicar el matiz.** Los 5/0 de agosto fueron azar del muestreo: con
+el doble de pares la dirección se invierte (4 contra 7). Además, en esta pasada el
+brazo tratado consumió un 18 % más de input tokens (en agosto había consumido un 5 %
+menos). La ventaja de costo tampoco se sostuvo.
+
+Matiz que se publica: con ornith:9b en esta suite el piso es muy bajo (5-10 % de
+aprobación) y el reporte de salud del banco marca 4/8 ítems con discriminación
+negativa o casi nula. La suite casi no discrimina en este régimen, así que el
+rechazo dice "no hay evidencia de efecto en ornith:9b con sc-compaction", no "la
+ruta durable no sirve". La ruta queda en el código como brazo de ablación
+documentado (mismo trato que edit-fence y stencil), y no se adopta para ornith.
