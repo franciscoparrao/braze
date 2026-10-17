@@ -101,10 +101,50 @@ y la curva no cambian.
 - Los del v2 siguen vigentes: un régimen, circularidad parcial y procedencia de motor
   ausente en los sweeps históricos.
 
+
+## Robustez (2026-10-17, `scripts/paper3_v3_robustness.py` → `docs/paper3-v3-robustness.json`)
+
+Se varían el estimador de δ, la elección de H0 y el número de pares usados para
+estimar δ. El IC95 de la diferencia sale de un bootstrap por sweep (cluster = archivo,
+2.000 remuestras, 24 sweeps).
+
+| δ | H0 | FAR δ fijo | FAR por-config | diferencia [IC95] |
+|---|---|---|---|---|
+| max | primero | 6,9 % | 0,8 % | +6,1 [+2,2, +11,3] |
+| max | al azar (200 sorteos) | 7,3 % | 0,7 % | +6,6 [+5,2, +8,1] |
+| max | el menos ruidoso | 17,8 % | 0,9 % | +16,9 [+11,7, +22,7] |
+| max | el más ruidoso | 0,0 % | 0,5 % | −0,5 [−0,9, −0,2] |
+| 2sd | primero / al azar | 6,8 / 7,5 % | 0,7 / 0,8 % | +6,1 / +6,8 (IC excluye 0) |
+| mean | primero | 14,1 % | 18,2 % | −4,1 [−8,9, +0,8] |
+| mean | al azar | 17,9 % | 17,8 % | +0,1 [−1,1, +1,1] |
+
+Igualar el número de pares no cambia nada (±0,3 pp). Lo que se sostiene y lo que no:
+
+- **Se sostiene con estimadores de cola** (máximo, 2·sd), que son los que usa RRSI ("the
+  spread"). Re-derivar δ por configuración baja la FAR de ~7 % a <1 %, con un IC que
+  excluye el cero. Elegir H0 al azar da lo mismo que tomar el primer brazo, así que el
+  resultado no depende de esa elección.
+- **El δ fijo solo controla la FAR si H0 resulta ser la configuración más ruidosa.** En
+  ese caso es conservador (0,0 %), y el costo es potencia: rechaza mejoras reales
+  menores que el ruido de H0. Si H0 es la más tranquila, la FAR sube a 17,8 %. Un δ fijo
+  apuesta a cuál es el ruido del incumbente, y esa apuesta no se puede verificar sin
+  medirlo.
+- **Con un estimador central (media de |Δ|) ninguna regla controla la FAR**: ~18 % en
+  ambas. La re-derivación no rescata un umbral mal elegido. Esto es la curva del v2 vista
+  desde otro lado: el **nivel** del umbral manda, y la re-derivación ayuda solo cuando
+  ese nivel es una cola de la distribución nula.
+
+Consecuencia para la tesis: la contribución 2 queda como "con un umbral de cola, una
+calibración única sobre H0 acepta ~7 % de cambios nulos (hasta 18 % si H0 es la
+configuración más quieta); re-derivarlo por configuración lo baja a <1 %". Además se
+reporta el caso adverso (H0 más ruidosa) y su precio en potencia, que falta medir con
+efectos sintéticos inyectados.
+
 ## Qué falta, en orden
 
-1. Robustez del resultado nuevo: estimadores alternativos de δ, H0 aleatorio y
-   bootstrap por sweep para el IC de la diferencia 7,3 vs 0,8.
+1. ~~Robustez~~ HECHA (sección de arriba). Falta la potencia: inyectar efectos
+   sintéticos de tamaño conocido y medir la tasa de rechazo de mejoras reales con
+   δ fijo vs por configuración.
 2. Leer PACE y HarnessBank completos (hoy solo vía subagente).
 3. Reescribir la introducción y el Related Work con los cuatro gates como antecedentes
    directos. Agregar al bib los cuatro gates y además Noise Floor Audit (2608.22331),
