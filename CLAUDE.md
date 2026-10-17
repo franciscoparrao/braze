@@ -379,10 +379,14 @@ hecho; lo abierto está listado acá.)
   desde R y DEGRADA el caption de la fig. 1 (pierde "each computed from
   that task's measured ... under the none arm"). Usar `pdflatex` directo
   (no `make`), o revertir `paper2/figs/` tras `make`.
-- **SC-retention**: sweeps gpt-oss + ornith LANZADOS 2026-08-16
-  (comandos del apéndice del pre-registro); al cerrar: análisis según
-  criterios (adoptar / adoptar-condicional / rechazar-y-publicar-matiz
-  vs CompInt) y decisión de la palanca.
+- **SC-retention: CERRADA, RECHAZADA** (2026-10-17, `0487590`). La
+  réplica pre-registrada en ornith:9b (80 pares, seeds 100-109) dio
+  tratado 5/80 vs control 8/80, McNemar p=0,55, discordantes 4 vs 7, y
+  +18 % de input tokens. Los 5/0 de agosto fueron azar. Matiz: la suite
+  casi no discrimina en ese régimen (piso de 5-10 %, 4/8 ítems con
+  r_pbis ≤ 0). La ruta queda como brazo de ablación. Contraste citable:
+  en frontera el pinning verbatim baja las violaciones a 0 % (Governance
+  Decay, arXiv 2606.22528).
 - **v9 Paquete 4 resto**: Landlock write-only. **El par Viewer/Editor
   está COMPLETO** — corregido 2026-09-02: el mensaje de `393748e` dice
   "el Viewer ya existía (`explore`, read-only); esto es el Editor", así
