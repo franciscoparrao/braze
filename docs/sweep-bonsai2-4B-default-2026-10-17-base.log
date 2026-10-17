@@ -1,0 +1,156 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 300s por intento.
+-> ollama:qwen3.5:4b :: read_file_basic (rep 1/3)
+-> ollama:qwen3.5:4b :: read_file_basic (rep 2/3)
+[2m2026-10-17T12:58:20.272235Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m no provider advertises this tool; not dispatching [3mtool[0m[2m=[0manswer
+-> ollama:qwen3.5:4b :: read_file_basic (rep 3/3)
+-> ollama:qwen3.5:4b :: grep_basic (rep 1/3)
+-> ollama:qwen3.5:4b :: grep_basic (rep 2/3)
+-> ollama:qwen3.5:4b :: grep_basic (rep 3/3)
+-> ollama:qwen3.5:4b :: glob_basic (rep 1/3)
+-> ollama:qwen3.5:4b :: glob_basic (rep 2/3)
+-> ollama:qwen3.5:4b :: glob_basic (rep 3/3)
+-> ollama:qwen3.5:4b :: write_file_basic (rep 1/3)
+-> ollama:qwen3.5:4b :: write_file_basic (rep 2/3)
+[2m2026-10-17T13:00:00.680857Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-17T13:00:11.412226Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> ollama:qwen3.5:4b :: write_file_basic (rep 3/3)
+-> ollama:qwen3.5:4b :: edit_file_basic (rep 1/3)
+-> ollama:qwen3.5:4b :: edit_file_basic (rep 2/3)
+-> ollama:qwen3.5:4b :: edit_file_basic (rep 3/3)
+[2m2026-10-17T13:01:06.138722Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-17T13:01:08.814766Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-17T13:01:11.474900Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-17T13:01:14.227452Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-17T13:01:17.107242Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-17T13:01:20.151080Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-17T13:01:23.729650Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> ollama:qwen3.5:4b :: shell_exec_basic (rep 1/3)
+-> ollama:qwen3.5:4b :: shell_exec_basic (rep 2/3)
+-> ollama:qwen3.5:4b :: shell_exec_basic (rep 3/3)
+-> ollama:qwen3.5:4b :: no_tool_qa (rep 1/3)
+-> ollama:qwen3.5:4b :: no_tool_qa (rep 2/3)
+-> ollama:qwen3.5:4b :: no_tool_qa (rep 3/3)
+-> ollama:qwen3.5:4b :: multi_step_read_count_write (rep 1/3)
+-> ollama:qwen3.5:4b :: multi_step_read_count_write (rep 2/3)
+-> ollama:qwen3.5:4b :: multi_step_read_count_write (rep 3/3)
+-> ollama:qwen3.5:4b :: error_recovery_wrong_filename (rep 1/3)
+-> ollama:qwen3.5:4b :: error_recovery_wrong_filename (rep 2/3)
+[2m2026-10-17T13:03:01.796179Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0m"wc -l /tmp/braze-bench-sandbox-1347375-error_recovery_wrong_filename-25/informe_final_v2.txt" is not of type "array"
+-> ollama:qwen3.5:4b :: error_recovery_wrong_filename (rep 3/3)
+[2m2026-10-17T13:03:42.719461Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0m"wc -l /tmp/braze-bench-sandbox-1347375-error_recovery_wrong_filename-26/informe_final_v2.txt" is not of type "array"
+-> ollama:qwen3.5:4b :: distractor_selection_among_files (rep 1/3)
+-> ollama:qwen3.5:4b :: distractor_selection_among_files (rep 2/3)
+-> ollama:qwen3.5:4b :: distractor_selection_among_files (rep 3/3)
+-> ollama:qwen3.5:4b :: edit_file_function_body (rep 1/3)
+-> ollama:qwen3.5:4b :: edit_file_function_body (rep 2/3)
+-> ollama:qwen3.5:4b :: edit_file_function_body (rep 3/3)
+-> ollama:qwen3.5:4b :: no_tool_capital_question (rep 1/3)
+-> ollama:qwen3.5:4b :: no_tool_capital_question (rep 2/3)
+-> ollama:qwen3.5:4b :: no_tool_capital_question (rep 3/3)
+-> ollama:qwen3.5:4b :: no_tool_subtraction (rep 1/3)
+-> ollama:qwen3.5:4b :: no_tool_subtraction (rep 2/3)
+-> ollama:qwen3.5:4b :: no_tool_subtraction (rep 3/3)
+-> ollama:qwen3.5:4b :: multi_step_sum_two_files (rep 1/3)
+-> ollama:qwen3.5:4b :: multi_step_sum_two_files (rep 2/3)
+-> ollama:qwen3.5:4b :: multi_step_sum_two_files (rep 3/3)
+-> ollama:qwen3.5:4b :: multi_step_multiply_and_write (rep 1/3)
+[2m2026-10-17T13:06:25.620726Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0mshell_exec [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0m"cat /tmp/braze-bench-sandbox-1347375-multi_step_multiply_and_write-42/total_final.txt" is not of type "array"
+-> ollama:qwen3.5:4b :: multi_step_multiply_and_write (rep 2/3)
+[2m2026-10-17T13:06:46.030295Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m no provider advertises this tool; not dispatching [3mtool[0m[2m=[0manswer
+-> ollama:qwen3.5:4b :: multi_step_multiply_and_write (rep 3/3)
+[2m2026-10-17T13:07:00.975147Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m no provider advertises this tool; not dispatching [3mtool[0m[2m=[0manswer
+-> ollama:qwen3.5:4b :: error_recovery_wrong_config_extension (rep 1/3)
+[2m2026-10-17T13:07:15.705396Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mfalse
+[2m2026-10-17T13:07:21.490608Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m no provider advertises this tool; not dispatching [3mtool[0m[2m=[0manswer
+-> ollama:qwen3.5:4b :: error_recovery_wrong_config_extension (rep 2/3)
+-> ollama:qwen3.5:4b :: error_recovery_wrong_config_extension (rep 3/3)
+-> ollama:qwen3.5:4b :: error_recovery_edit_wrong_filename (rep 1/3)
+-> ollama:qwen3.5:4b :: error_recovery_edit_wrong_filename (rep 2/3)
+-> ollama:qwen3.5:4b :: error_recovery_edit_wrong_filename (rep 3/3)
+-> ollama:qwen3.5:4b :: distractor_selection_log_with_error (rep 1/3)
+-> ollama:qwen3.5:4b :: distractor_selection_log_with_error (rep 2/3)
+-> ollama:qwen3.5:4b :: distractor_selection_log_with_error (rep 3/3)
+-> ollama:qwen3.5:4b :: distractor_selection_debug_config (rep 1/3)
+-> ollama:qwen3.5:4b :: distractor_selection_debug_config (rep 2/3)
+-> ollama:qwen3.5:4b :: distractor_selection_debug_config (rep 3/3)
+
+== Resultados por tarea ==
+[PASS] read_file_basic          ollama:qwen3.5:4b     10974ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3440 tokens_out=176
+[PASS] read_file_basic          ollama:qwen3.5:4b    (rep 2)   9711ms  rounds=3 tool_calls=2  schema_fail=1  exec_fail=0  denied=0  tokens_in=5261 tokens_out=244
+[PASS] read_file_basic          ollama:qwen3.5:4b    (rep 3)   8446ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5261 tokens_out=197
+[PASS] grep_basic               ollama:qwen3.5:4b      7681ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3480 tokens_out=205
+[PASS] grep_basic               ollama:qwen3.5:4b    (rep 2)   8513ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3480 tokens_out=237
+[PASS] grep_basic               ollama:qwen3.5:4b    (rep 3)   7679ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3480 tokens_out=206
+[PASS] glob_basic               ollama:qwen3.5:4b     14034ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=1  denied=1  tokens_in=5535 tokens_out=393
+[PASS] glob_basic               ollama:qwen3.5:4b    (rep 2)   7821ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3463 tokens_out=212
+[PASS] glob_basic               ollama:qwen3.5:4b    (rep 3)   6850ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3452 tokens_out=177
+[PASS] write_file_basic         ollama:qwen3.5:4b     24487ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=11947 tokens_out=630
+[PASS] write_file_basic         ollama:qwen3.5:4b    (rep 2)  26418ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=14380 tokens_out=644
+[PASS] write_file_basic         ollama:qwen3.5:4b    (rep 3)   6498ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3485 tokens_out=161
+[PASS] edit_file_basic          ollama:qwen3.5:4b     19696ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=9737 tokens_out=511
+[PASS] edit_file_basic          ollama:qwen3.5:4b    (rep 2)  11493ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5369 tokens_out=305
+[PASS] edit_file_basic          ollama:qwen3.5:4b    (rep 3)  33748ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=24202 tokens_out=694
+[PASS] shell_exec_basic         ollama:qwen3.5:4b      8181ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3565 tokens_out=219
+[PASS] shell_exec_basic         ollama:qwen3.5:4b    (rep 2)   6743ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3565 tokens_out=170
+[PASS] shell_exec_basic         ollama:qwen3.5:4b    (rep 3)   8498ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3565 tokens_out=234
+[PASS] no_tool_qa               ollama:qwen3.5:4b      2879ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1672 tokens_out=68
+[PASS] no_tool_qa               ollama:qwen3.5:4b    (rep 2)   2920ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1672 tokens_out=70
+[PASS] no_tool_qa               ollama:qwen3.5:4b    (rep 3)   2935ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1672 tokens_out=71
+[PASS] multi_step_read_count_write ollama:qwen3.5:4b     10601ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5361 tokens_out=272
+[FAIL] multi_step_read_count_write ollama:qwen3.5:4b    (rep 2)  18948ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3464 tokens_out=174 [ModelBackendError] (error: model backend error: model backend's completion stream failed: XML syntax error on line 2: element <function> closed by </parameter>)
+[PASS] multi_step_read_count_write ollama:qwen3.5:4b    (rep 3)  13104ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7404 tokens_out=320
+[PASS] error_recovery_wrong_filename ollama:qwen3.5:4b      8829ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5370 tokens_out=208
+[FAIL] error_recovery_wrong_filename ollama:qwen3.5:4b    (rep 2)  43597ms  rounds=11 tool_calls=10  schema_fail=1  exec_fail=0  denied=0  tokens_in=26667 tokens_out=992 [AssertionText]
+[PASS] error_recovery_wrong_filename ollama:qwen3.5:4b    (rep 3)  20192ms  rounds=5 tool_calls=4  schema_fail=1  exec_fail=0  denied=0  tokens_in=10247 tokens_out=510
+[PASS] distractor_selection_among_files ollama:qwen3.5:4b      8133ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3544 tokens_out=223
+[PASS] distractor_selection_among_files ollama:qwen3.5:4b    (rep 2)  10921ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5588 tokens_out=280
+[PASS] distractor_selection_among_files ollama:qwen3.5:4b    (rep 3)  10159ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5576 tokens_out=253
+[PASS] edit_file_function_body  ollama:qwen3.5:4b     14445ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7525 tokens_out=368
+[PASS] edit_file_function_body  ollama:qwen3.5:4b    (rep 2)  13962ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7549 tokens_out=349
+[PASS] edit_file_function_body  ollama:qwen3.5:4b    (rep 3)  14353ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7525 tokens_out=365
+[PASS] no_tool_capital_question ollama:qwen3.5:4b      3061ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1674 tokens_out=76
+[PASS] no_tool_capital_question ollama:qwen3.5:4b    (rep 2)   2717ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1674 tokens_out=63
+[PASS] no_tool_capital_question ollama:qwen3.5:4b    (rep 3)   3281ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1674 tokens_out=84
+[PASS] no_tool_subtraction      ollama:qwen3.5:4b      2834ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1674 tokens_out=68
+[PASS] no_tool_subtraction      ollama:qwen3.5:4b    (rep 2)   3181ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1674 tokens_out=80
+[PASS] no_tool_subtraction      ollama:qwen3.5:4b    (rep 3)   2962ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1674 tokens_out=72
+[PASS] multi_step_sum_two_files ollama:qwen3.5:4b     12571ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=5524 tokens_out=342
+[PASS] multi_step_sum_two_files ollama:qwen3.5:4b    (rep 2)  12187ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=5524 tokens_out=327
+[FAIL] multi_step_sum_two_files ollama:qwen3.5:4b    (rep 3)  22036ms  rounds=2 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=3549 tokens_out=259 [ModelBackendError] (error: model backend error: model backend's completion stream failed: XML syntax error on line 3: element <function> closed by </parameter>)
+[PASS] multi_step_multiply_and_write ollama:qwen3.5:4b     24615ms  rounds=7 tool_calls=6  schema_fail=1  exec_fail=0  denied=0  tokens_in=14510 tokens_out=580
+[PASS] multi_step_multiply_and_write ollama:qwen3.5:4b    (rep 2)  14775ms  rounds=4 tool_calls=3  schema_fail=1  exec_fail=0  denied=0  tokens_in=7367 tokens_out=381
+[PASS] multi_step_multiply_and_write ollama:qwen3.5:4b    (rep 3)  13994ms  rounds=4 tool_calls=3  schema_fail=1  exec_fail=0  denied=0  tokens_in=7368 tokens_out=355
+[PASS] error_recovery_wrong_config_extension ollama:qwen3.5:4b     19251ms  rounds=6 tool_calls=5  schema_fail=2  exec_fail=1  denied=1  tokens_in=12162 tokens_out=434
+[PASS] error_recovery_wrong_config_extension ollama:qwen3.5:4b    (rep 2)  20820ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=3  denied=3  tokens_in=12442 tokens_out=477
+[PASS] error_recovery_wrong_config_extension ollama:qwen3.5:4b    (rep 3)  26464ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=5  denied=2  tokens_in=17538 tokens_out=564
+[PASS] error_recovery_edit_wrong_filename ollama:qwen3.5:4b     24515ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12150 tokens_out=615
+[PASS] error_recovery_edit_wrong_filename ollama:qwen3.5:4b    (rep 2)  24304ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12001 tokens_out=618
+[PASS] error_recovery_edit_wrong_filename ollama:qwen3.5:4b    (rep 3)  23945ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12094 tokens_out=605
+[PASS] distractor_selection_log_with_error ollama:qwen3.5:4b     11423ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5562 tokens_out=291
+[PASS] distractor_selection_log_with_error ollama:qwen3.5:4b    (rep 2)   7542ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3533 tokens_out=199
+[PASS] distractor_selection_log_with_error ollama:qwen3.5:4b    (rep 3)   7521ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3521 tokens_out=198
+[PASS] distractor_selection_debug_config ollama:qwen3.5:4b      6952ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3494 tokens_out=174
+[PASS] distractor_selection_debug_config ollama:qwen3.5:4b    (rep 2)  17541ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=9827 tokens_out=416
+[PASS] distractor_selection_debug_config ollama:qwen3.5:4b    (rep 3)   7197ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3494 tokens_out=185
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+ollama:qwen3.5:4b          54/57 [86,98]%    54/57      3.4        12967      10921           6653              309                 8             11          7            0         0         0         0         0    $0.0000
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+ollama:qwen3.5:4b        k=2 89.5%  k=3 84.2%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+ollama:qwen3.5:4b            16/19      3/19          0/19      0.842      0.947        1.000       0.11
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+ollama:qwen3.5:4b        single_tool              21/21      3.5      12868       9711         319         0         0         0         0    $0.0000
+ollama:qwen3.5:4b        no_tool                    9/9      1.0       2974       2935          72         0         0         0         0    $0.0000
+ollama:qwen3.5:4b        multi_step                 7/9      3.6      15870      13994         334         0         0         0         0    $0.0000
+ollama:qwen3.5:4b        error_recovery             8/9      6.3      23546      23945         558         0         0         0         0    $0.0000
+ollama:qwen3.5:4b        distractor_selection       9/9      2.7       9710       8133         247         0         0         0         0    $0.0000
+
+Resultados JSON escritos en /home/franciscoparrao/sweeps/sweep-bonsai2-4B-default-2026-10-17-base.json

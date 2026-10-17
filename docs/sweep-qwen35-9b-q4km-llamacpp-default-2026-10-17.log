@@ -1,0 +1,150 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 300s por intento.
+-> zen:qwen35-9b-q4km-llamacpp :: read_file_basic (rep 1/3)
+[2m2026-10-17T13:42:31.552151Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m13 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: read_file_basic (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: read_file_basic (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: grep_basic (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: grep_basic (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: grep_basic (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: glob_basic (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: glob_basic (rep 2/3)
+[2m2026-10-17T13:43:42.404965Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m22 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: glob_basic (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: write_file_basic (rep 1/3)
+[2m2026-10-17T13:44:09.590772Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m26 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: write_file_basic (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: write_file_basic (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: edit_file_basic (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: edit_file_basic (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: edit_file_basic (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: shell_exec_basic (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: shell_exec_basic (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: shell_exec_basic (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_qa (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_qa (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_qa (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_read_count_write (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_read_count_write (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_read_count_write (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_wrong_filename (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_wrong_filename (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_wrong_filename (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_among_files (rep 1/3)
+[2m2026-10-17T13:48:18.313553Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m22 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_among_files (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_among_files (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: edit_file_function_body (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: edit_file_function_body (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: edit_file_function_body (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_capital_question (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_capital_question (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_capital_question (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_subtraction (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_subtraction (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: no_tool_subtraction (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_sum_two_files (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_sum_two_files (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_sum_two_files (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_multiply_and_write (rep 1/3)
+[2m2026-10-17T13:51:52.038040Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m2 [3mround_output_tokens[0m[2m=[0m46 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_multiply_and_write (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: multi_step_multiply_and_write (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_wrong_config_extension (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_wrong_config_extension (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_wrong_config_extension (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_edit_wrong_filename (rep 1/3)
+[2m2026-10-17T13:53:51.731662Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m2 [3mround_output_tokens[0m[2m=[0m28 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_edit_wrong_filename (rep 2/3)
+[2m2026-10-17T13:54:23.964058Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m3 [3mround_output_tokens[0m[2m=[0m27 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: error_recovery_edit_wrong_filename (rep 3/3)
+[2m2026-10-17T13:54:50.921546Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m2 [3mround_output_tokens[0m[2m=[0m28 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_log_with_error (rep 1/3)
+[2m2026-10-17T13:55:08.546052Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m16 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_log_with_error (rep 2/3)
+[2m2026-10-17T13:55:21.173389Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m16 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_log_with_error (rep 3/3)
+[2m2026-10-17T13:55:34.090856Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m16 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_debug_config (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_debug_config (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: distractor_selection_debug_config (rep 3/3)
+
+== Resultados por tarea ==
+[PASS] read_file_basic          zen:qwen35-9b-q4km-llamacpp  12743ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=5283 tokens_out=115
+[PASS] read_file_basic          zen:qwen35-9b-q4km-llamacpp (rep 2)   8318ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3459 tokens_out=91
+[PASS] read_file_basic          zen:qwen35-9b-q4km-llamacpp (rep 3)   8315ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3459 tokens_out=88
+[PASS] grep_basic               zen:qwen35-9b-q4km-llamacpp  10953ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3468 tokens_out=122
+[PASS] grep_basic               zen:qwen35-9b-q4km-llamacpp (rep 2)  11032ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3468 tokens_out=124
+[PASS] grep_basic               zen:qwen35-9b-q4km-llamacpp (rep 3)  11084ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3468 tokens_out=124
+[PASS] glob_basic               zen:qwen35-9b-q4km-llamacpp   9987ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3495 tokens_out=110
+[PASS] glob_basic               zen:qwen35-9b-q4km-llamacpp (rep 2)  13875ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=5357 tokens_out=157
+[PASS] glob_basic               zen:qwen35-9b-q4km-llamacpp (rep 3)  10938ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3495 tokens_out=121
+[PASS] write_file_basic         zen:qwen35-9b-q4km-llamacpp  14904ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=5369 tokens_out=158
+[PASS] write_file_basic         zen:qwen35-9b-q4km-llamacpp (rep 2)  11968ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3507 tokens_out=132
+[PASS] write_file_basic         zen:qwen35-9b-q4km-llamacpp (rep 3)  12087ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3507 tokens_out=132
+[PASS] edit_file_basic          zen:qwen35-9b-q4km-llamacpp  17637ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5312 tokens_out=186 [RouteMiss]
+[PASS] edit_file_basic          zen:qwen35-9b-q4km-llamacpp (rep 2)  16848ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5312 tokens_out=186 [RouteMiss]
+[PASS] edit_file_basic          zen:qwen35-9b-q4km-llamacpp (rep 3)  16330ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5312 tokens_out=186 [RouteMiss]
+[PASS] shell_exec_basic         zen:qwen35-9b-q4km-llamacpp  10886ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3475 tokens_out=121
+[PASS] shell_exec_basic         zen:qwen35-9b-q4km-llamacpp (rep 2)  10923ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3475 tokens_out=122
+[PASS] shell_exec_basic         zen:qwen35-9b-q4km-llamacpp (rep 3)  10957ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3475 tokens_out=122
+[PASS] no_tool_qa               zen:qwen35-9b-q4km-llamacpp   6341ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1710 tokens_out=65
+[PASS] no_tool_qa               zen:qwen35-9b-q4km-llamacpp (rep 2)   6267ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1710 tokens_out=65
+[PASS] no_tool_qa               zen:qwen35-9b-q4km-llamacpp (rep 3)   6612ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1710 tokens_out=69
+[PASS] multi_step_read_count_write zen:qwen35-9b-q4km-llamacpp  17710ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5382 tokens_out=208
+[PASS] multi_step_read_count_write zen:qwen35-9b-q4km-llamacpp (rep 2)  18083ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5382 tokens_out=205
+[PASS] multi_step_read_count_write zen:qwen35-9b-q4km-llamacpp (rep 3)  18414ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5382 tokens_out=207
+[PASS] error_recovery_wrong_filename zen:qwen35-9b-q4km-llamacpp  16504ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5384 tokens_out=189
+[PASS] error_recovery_wrong_filename zen:qwen35-9b-q4km-llamacpp (rep 2)  17921ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5384 tokens_out=190
+[PASS] error_recovery_wrong_filename zen:qwen35-9b-q4km-llamacpp (rep 3)  18321ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5384 tokens_out=201
+[PASS] distractor_selection_among_files zen:qwen35-9b-q4km-llamacpp  15397ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=5447 tokens_out=169
+[PASS] distractor_selection_among_files zen:qwen35-9b-q4km-llamacpp (rep 2)  11301ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3552 tokens_out=126
+[PASS] distractor_selection_among_files zen:qwen35-9b-q4km-llamacpp (rep 3)  19699ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5591 tokens_out=233
+[PASS] edit_file_function_body  zen:qwen35-9b-q4km-llamacpp  19917ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5410 tokens_out=239
+[PASS] edit_file_function_body  zen:qwen35-9b-q4km-llamacpp (rep 2)  19891ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5410 tokens_out=237
+[PASS] edit_file_function_body  zen:qwen35-9b-q4km-llamacpp (rep 3)  18240ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5410 tokens_out=216
+[PASS] no_tool_capital_question zen:qwen35-9b-q4km-llamacpp   5643ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1712 tokens_out=54
+[PASS] no_tool_capital_question zen:qwen35-9b-q4km-llamacpp (rep 2)   5279ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1712 tokens_out=52
+[PASS] no_tool_capital_question zen:qwen35-9b-q4km-llamacpp (rep 3)   5365ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1712 tokens_out=52
+[PASS] no_tool_subtraction      zen:qwen35-9b-q4km-llamacpp   7084ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1712 tokens_out=76
+[PASS] no_tool_subtraction      zen:qwen35-9b-q4km-llamacpp (rep 2)   6724ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1712 tokens_out=71
+[PASS] no_tool_subtraction      zen:qwen35-9b-q4km-llamacpp (rep 3)   6861ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1712 tokens_out=72
+[PASS] multi_step_sum_two_files zen:qwen35-9b-q4km-llamacpp  21414ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=5483 tokens_out=253
+[PASS] multi_step_sum_two_files zen:qwen35-9b-q4km-llamacpp (rep 2)  22019ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=5483 tokens_out=265
+[PASS] multi_step_sum_two_files zen:qwen35-9b-q4km-llamacpp (rep 3)  21181ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=5483 tokens_out=253
+[PASS] multi_step_multiply_and_write zen:qwen35-9b-q4km-llamacpp  28792ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7321 tokens_out=341
+[PASS] multi_step_multiply_and_write zen:qwen35-9b-q4km-llamacpp (rep 2)  21129ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5386 tokens_out=254
+[PASS] multi_step_multiply_and_write zen:qwen35-9b-q4km-llamacpp (rep 3)  18360ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5386 tokens_out=217
+[PASS] error_recovery_wrong_config_extension zen:qwen35-9b-q4km-llamacpp  16083ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5357 tokens_out=182
+[PASS] error_recovery_wrong_config_extension zen:qwen35-9b-q4km-llamacpp (rep 2)  16700ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5357 tokens_out=194
+[PASS] error_recovery_wrong_config_extension zen:qwen35-9b-q4km-llamacpp (rep 3)  15836ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5357 tokens_out=181
+[PASS] error_recovery_edit_wrong_filename zen:qwen35-9b-q4km-llamacpp  28190ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7452 tokens_out=324
+[PASS] error_recovery_edit_wrong_filename zen:qwen35-9b-q4km-llamacpp (rep 2)  30952ms  rounds=5 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=9369 tokens_out=360
+[PASS] error_recovery_edit_wrong_filename zen:qwen35-9b-q4km-llamacpp (rep 3)  29131ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7452 tokens_out=338
+[PASS] distractor_selection_log_with_error zen:qwen35-9b-q4km-llamacpp  13012ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=5426 tokens_out=140
+[PASS] distractor_selection_log_with_error zen:qwen35-9b-q4km-llamacpp (rep 2)  12920ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=5426 tokens_out=140
+[PASS] distractor_selection_log_with_error zen:qwen35-9b-q4km-llamacpp (rep 3)  13013ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=5426 tokens_out=139
+[PASS] distractor_selection_debug_config zen:qwen35-9b-q4km-llamacpp  17520ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5518 tokens_out=204
+[PASS] distractor_selection_debug_config zen:qwen35-9b-q4km-llamacpp (rep 2)  10654ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3503 tokens_out=116
+[PASS] distractor_selection_debug_config zen:qwen35-9b-q4km-llamacpp (rep 3)  11397ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3514 tokens_out=127
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+zen:qwen35-9b-q4km-llamacpp  57/57 [94,100]%    54/57      2.5        14661      13875           4490              165                 0              0          0            0         0         0         0         0          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+zen:qwen35-9b-q4km-llamacpp k=2 100.0%  k=3 100.0%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+zen:qwen35-9b-q4km-llamacpp     19/19      0/19          0/19      1.000      1.000        1.000       0.00
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+zen:qwen35-9b-q4km-llamacpp single_tool              21/21      2.4      13230      11968         147         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp no_tool                    9/9      1.0       6242       6341          64         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp multi_step                 9/9      3.1      20789      21129         245         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp error_recovery             9/9      3.4      21071      17921         240         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp distractor_selection       9/9      2.7      13879      13012         155         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/sweeps/sweep-qwen35-9b-q4km-llamacpp-default-2026-10-17.json

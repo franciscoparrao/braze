@@ -1,0 +1,142 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 300s por intento.
+-> zen:bonsai2-4B :: read_file_basic (rep 1/3)
+-> zen:bonsai2-4B :: read_file_basic (rep 2/3)
+-> zen:bonsai2-4B :: read_file_basic (rep 3/3)
+-> zen:bonsai2-4B :: grep_basic (rep 1/3)
+-> zen:bonsai2-4B :: grep_basic (rep 2/3)
+-> zen:bonsai2-4B :: grep_basic (rep 3/3)
+-> zen:bonsai2-4B :: glob_basic (rep 1/3)
+-> zen:bonsai2-4B :: glob_basic (rep 2/3)
+-> zen:bonsai2-4B :: glob_basic (rep 3/3)
+-> zen:bonsai2-4B :: write_file_basic (rep 1/3)
+-> zen:bonsai2-4B :: write_file_basic (rep 2/3)
+-> zen:bonsai2-4B :: write_file_basic (rep 3/3)
+-> zen:bonsai2-4B :: edit_file_basic (rep 1/3)
+-> zen:bonsai2-4B :: edit_file_basic (rep 2/3)
+-> zen:bonsai2-4B :: edit_file_basic (rep 3/3)
+-> zen:bonsai2-4B :: shell_exec_basic (rep 1/3)
+-> zen:bonsai2-4B :: shell_exec_basic (rep 2/3)
+-> zen:bonsai2-4B :: shell_exec_basic (rep 3/3)
+-> zen:bonsai2-4B :: no_tool_qa (rep 1/3)
+-> zen:bonsai2-4B :: no_tool_qa (rep 2/3)
+-> zen:bonsai2-4B :: no_tool_qa (rep 3/3)
+-> zen:bonsai2-4B :: multi_step_read_count_write (rep 1/3)
+-> zen:bonsai2-4B :: multi_step_read_count_write (rep 2/3)
+-> zen:bonsai2-4B :: multi_step_read_count_write (rep 3/3)
+-> zen:bonsai2-4B :: error_recovery_wrong_filename (rep 1/3)
+-> zen:bonsai2-4B :: error_recovery_wrong_filename (rep 2/3)
+-> zen:bonsai2-4B :: error_recovery_wrong_filename (rep 3/3)
+-> zen:bonsai2-4B :: distractor_selection_among_files (rep 1/3)
+-> zen:bonsai2-4B :: distractor_selection_among_files (rep 2/3)
+-> zen:bonsai2-4B :: distractor_selection_among_files (rep 3/3)
+[2m2026-10-17T13:11:45.558614Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m2 [3mround_output_tokens[0m[2m=[0m20 [3mattempt[0m[2m=[0m1
+-> zen:bonsai2-4B :: edit_file_function_body (rep 1/3)
+-> zen:bonsai2-4B :: edit_file_function_body (rep 2/3)
+-> zen:bonsai2-4B :: edit_file_function_body (rep 3/3)
+-> zen:bonsai2-4B :: no_tool_capital_question (rep 1/3)
+-> zen:bonsai2-4B :: no_tool_capital_question (rep 2/3)
+-> zen:bonsai2-4B :: no_tool_capital_question (rep 3/3)
+-> zen:bonsai2-4B :: no_tool_subtraction (rep 1/3)
+-> zen:bonsai2-4B :: no_tool_subtraction (rep 2/3)
+-> zen:bonsai2-4B :: no_tool_subtraction (rep 3/3)
+-> zen:bonsai2-4B :: multi_step_sum_two_files (rep 1/3)
+-> zen:bonsai2-4B :: multi_step_sum_two_files (rep 2/3)
+-> zen:bonsai2-4B :: multi_step_sum_two_files (rep 3/3)
+-> zen:bonsai2-4B :: multi_step_multiply_and_write (rep 1/3)
+[2m2026-10-17T13:12:17.208230Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m2 [3mround_output_tokens[0m[2m=[0m16 [3mattempt[0m[2m=[0m1
+-> zen:bonsai2-4B :: multi_step_multiply_and_write (rep 2/3)
+-> zen:bonsai2-4B :: multi_step_multiply_and_write (rep 3/3)
+-> zen:bonsai2-4B :: error_recovery_wrong_config_extension (rep 1/3)
+-> zen:bonsai2-4B :: error_recovery_wrong_config_extension (rep 2/3)
+-> zen:bonsai2-4B :: error_recovery_wrong_config_extension (rep 3/3)
+-> zen:bonsai2-4B :: error_recovery_edit_wrong_filename (rep 1/3)
+-> zen:bonsai2-4B :: error_recovery_edit_wrong_filename (rep 2/3)
+-> zen:bonsai2-4B :: error_recovery_edit_wrong_filename (rep 3/3)
+-> zen:bonsai2-4B :: distractor_selection_log_with_error (rep 1/3)
+-> zen:bonsai2-4B :: distractor_selection_log_with_error (rep 2/3)
+-> zen:bonsai2-4B :: distractor_selection_log_with_error (rep 3/3)
+-> zen:bonsai2-4B :: distractor_selection_debug_config (rep 1/3)
+-> zen:bonsai2-4B :: distractor_selection_debug_config (rep 2/3)
+-> zen:bonsai2-4B :: distractor_selection_debug_config (rep 3/3)
+[2m2026-10-17T13:13:23.567013Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m2 [3mround_output_tokens[0m[2m=[0m13 [3mattempt[0m[2m=[0m1
+
+== Resultados por tarea ==
+[PASS] read_file_basic          zen:bonsai2-4B         2483ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3367 tokens_out=91
+[PASS] read_file_basic          zen:bonsai2-4B       (rep 2)   1749ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3367 tokens_out=93
+[PASS] read_file_basic          zen:bonsai2-4B       (rep 3)   1790ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3367 tokens_out=96
+[PASS] grep_basic               zen:bonsai2-4B         2021ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3376 tokens_out=113
+[PASS] grep_basic               zen:bonsai2-4B       (rep 2)   1965ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3376 tokens_out=109
+[PASS] grep_basic               zen:bonsai2-4B       (rep 3)   2093ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3376 tokens_out=117
+[PASS] glob_basic               zen:bonsai2-4B         2419ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3403 tokens_out=142
+[PASS] glob_basic               zen:bonsai2-4B       (rep 2)   1849ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3403 tokens_out=99
+[PASS] glob_basic               zen:bonsai2-4B       (rep 3)   2348ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3403 tokens_out=136
+[PASS] write_file_basic         zen:bonsai2-4B         2050ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3412 tokens_out=114
+[PASS] write_file_basic         zen:bonsai2-4B       (rep 2)   1878ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3415 tokens_out=101
+[PASS] write_file_basic         zen:bonsai2-4B       (rep 3)   1881ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3415 tokens_out=101
+[PASS] edit_file_basic          zen:bonsai2-4B         3750ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5183 tokens_out=235
+[PASS] edit_file_basic          zen:bonsai2-4B       (rep 2)   3529ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5183 tokens_out=218
+[PASS] edit_file_basic          zen:bonsai2-4B       (rep 3)   3493ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5183 tokens_out=216
+[PASS] shell_exec_basic         zen:bonsai2-4B         2023ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3383 tokens_out=109
+[PASS] shell_exec_basic         zen:bonsai2-4B       (rep 2)   3479ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3517 tokens_out=214
+[PASS] shell_exec_basic         zen:bonsai2-4B       (rep 3)   2747ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3517 tokens_out=159
+[PASS] no_tool_qa               zen:bonsai2-4B         1247ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1664 tokens_out=62
+[PASS] no_tool_qa               zen:bonsai2-4B       (rep 2)   1347ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1664 tokens_out=72
+[PASS] no_tool_qa               zen:bonsai2-4B       (rep 3)   1366ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1664 tokens_out=73
+[PASS] multi_step_read_count_write zen:bonsai2-4B         3279ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5244 tokens_out=199
+[PASS] multi_step_read_count_write zen:bonsai2-4B       (rep 2)   3329ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5244 tokens_out=203
+[PASS] multi_step_read_count_write zen:bonsai2-4B       (rep 3)   3406ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5244 tokens_out=208
+[PASS] error_recovery_wrong_filename zen:bonsai2-4B         3163ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5246 tokens_out=189
+[PASS] error_recovery_wrong_filename zen:bonsai2-4B       (rep 2)   3173ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5246 tokens_out=191
+[PASS] error_recovery_wrong_filename zen:bonsai2-4B       (rep 3)   3022ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5246 tokens_out=179
+[PASS] distractor_selection_among_files zen:bonsai2-4B         4021ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5410 tokens_out=251
+[PASS] distractor_selection_among_files zen:bonsai2-4B       (rep 2)   3850ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5410 tokens_out=239
+[PASS] distractor_selection_among_files zen:bonsai2-4B       (rep 3)   5135ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7381 tokens_out=288
+[PASS] edit_file_function_body  zen:bonsai2-4B         4095ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5260 tokens_out=259
+[PASS] edit_file_function_body  zen:bonsai2-4B       (rep 2)   4097ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5258 tokens_out=259
+[PASS] edit_file_function_body  zen:bonsai2-4B       (rep 3)   4096ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5260 tokens_out=259
+[PASS] no_tool_capital_question zen:bonsai2-4B         1139ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1666 tokens_out=54
+[PASS] no_tool_capital_question zen:bonsai2-4B       (rep 2)   1062ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1666 tokens_out=50
+[PASS] no_tool_capital_question zen:bonsai2-4B       (rep 3)   1105ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1666 tokens_out=54
+[PASS] no_tool_subtraction      zen:bonsai2-4B         1273ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1666 tokens_out=66
+[PASS] no_tool_subtraction      zen:bonsai2-4B       (rep 2)   1103ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1666 tokens_out=53
+[PASS] no_tool_subtraction      zen:bonsai2-4B       (rep 3)   1105ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1666 tokens_out=53
+[FAIL] multi_step_sum_two_files zen:bonsai2-4B         2739ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3471 tokens_out=164 [AssertionFiles]
+[FAIL] multi_step_sum_two_files zen:bonsai2-4B       (rep 2)   2687ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3471 tokens_out=160 [AssertionFiles]
+[FAIL] multi_step_sum_two_files zen:bonsai2-4B       (rep 3)   2494ms  rounds=2 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=3471 tokens_out=146 [AssertionFiles]
+[PASS] multi_step_multiply_and_write zen:bonsai2-4B         5104ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7137 tokens_out=294
+[PASS] multi_step_multiply_and_write zen:bonsai2-4B       (rep 2)   3445ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5248 tokens_out=210
+[PASS] multi_step_multiply_and_write zen:bonsai2-4B       (rep 3)   3499ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5248 tokens_out=215
+[PASS] error_recovery_wrong_config_extension zen:bonsai2-4B         2992ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5219 tokens_out=178
+[PASS] error_recovery_wrong_config_extension zen:bonsai2-4B       (rep 2)   2960ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5221 tokens_out=176
+[PASS] error_recovery_wrong_config_extension zen:bonsai2-4B       (rep 3)   2950ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5219 tokens_out=175
+[PASS] error_recovery_edit_wrong_filename zen:bonsai2-4B        10122ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=1  denied=1  tokens_in=18090 tokens_out=546
+[PASS] error_recovery_edit_wrong_filename zen:bonsai2-4B       (rep 2)  11938ms  rounds=6 tool_calls=9  schema_fail=0  exec_fail=1  denied=1  tokens_in=13303 tokens_out=723
+[PASS] error_recovery_edit_wrong_filename zen:bonsai2-4B       (rep 3)   9502ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=15379 tokens_out=546
+[PASS] distractor_selection_log_with_error zen:bonsai2-4B         3616ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5424 tokens_out=217
+[PASS] distractor_selection_log_with_error zen:bonsai2-4B       (rep 2)   2511ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3460 tokens_out=145
+[PASS] distractor_selection_log_with_error zen:bonsai2-4B       (rep 3)   2512ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3460 tokens_out=145
+[PASS] distractor_selection_debug_config zen:bonsai2-4B         2222ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3422 tokens_out=127
+[PASS] distractor_selection_debug_config zen:bonsai2-4B       (rep 2)   2884ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3422 tokens_out=176
+[PASS] distractor_selection_debug_config zen:bonsai2-4B       (rep 3)   4236ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7273 tokens_out=224
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+zen:bonsai2-4B             54/57 [86,98]%    54/57      2.6         3112       2747           4632              181                 0              2          2            0         0         0         0         0          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+zen:bonsai2-4B           k=2 94.7%  k=3 94.7%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+zen:bonsai2-4B               18/19      0/19          1/19      0.947      0.947        0.947       0.00
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+zen:bonsai2-4B           single_tool              21/21      2.3       2659       2348         154         0         0         0         0          -
+zen:bonsai2-4B           no_tool                    9/9      1.0       1194       1139          60         0         0         0         0          -
+zen:bonsai2-4B           multi_step                 6/9      2.8       3331       3329         200         0         0         0         0          -
+zen:bonsai2-4B           error_recovery             9/9      4.6       5536       3163         323         0         0         0         0          -
+zen:bonsai2-4B           distractor_selection       9/9      2.8       3443       3616         201         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/sweeps/sweep-bonsai2-4B-default-2026-10-17-ternary.json
