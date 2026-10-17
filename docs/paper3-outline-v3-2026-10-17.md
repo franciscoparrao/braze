@@ -134,17 +134,37 @@ Igualar el número de pares no cambia nada (±0,3 pp). Lo que se sostiene y lo q
   desde otro lado: el **nivel** del umbral manda, y la re-derivación ayuda solo cuando
   ese nivel es una cola de la distribución nula.
 
+
+### Potencia (`scripts/paper3_v3_power.py` → `docs/paper3-v3-power.json`)
+
+A cada par nulo de los incumbentes se le suma una mejora real e (fracción de la suite):
+Δ' = Δ + e. Se usa el estimador máximo con leave-one-pair-out. La tabla da el
+porcentaje de mejoras aceptadas por cada regla.
+
+| e | H0 primero: fijo / por-config | H0 al azar: fijo / por-config |
+|---|---|---|
+| 0 (FAR) | 7 % / 1 % | 7 % / 1 % |
+| 0,03 | 20 % / 38 % | 33 % / 38 % |
+| 0,05 | 22 % / 39 % | 34 % / 39 % |
+| 0,10 | 38 % / 64 % | 56 % / 62 % |
+| 0,15 | 60 % / 83 % | 76 % / 81 % |
+| 0,20 | 73 % / 89 % | 87 % / 87 % |
+
+**No es un trade-off: la re-derivación domina en los dos ejes.** Tiene menos falsas
+aceptaciones y potencia igual o mayor en todos los tamaños de efecto. La razón es que un δ
+fijo queda mal dimensionado en ambas direcciones: demasiado estrecho para los
+incumbentes más ruidosos que H0 (de ahí las aceptaciones falsas) y demasiado ancho para
+los más tranquilos (de ahí las mejoras perdidas). El costo de la re-derivación no es
+potencia sino corridas: hay que repetir cada incumbente al menos 3 veces.
+
 Consecuencia para la tesis: la contribución 2 queda como "con un umbral de cola, una
 calibración única sobre H0 acepta ~7 % de cambios nulos (hasta 18 % si H0 es la
 configuración más quieta); re-derivarlo por configuración lo baja a <1 %". Además se
-reporta el caso adverso (H0 más ruidosa) y su precio en potencia, que falta medir con
-efectos sintéticos inyectados.
+reporta el caso adverso (H0 más ruidosa) y su precio en potencia, medido abajo.
 
 ## Qué falta, en orden
 
-1. ~~Robustez~~ HECHA (sección de arriba). Falta la potencia: inyectar efectos
-   sintéticos de tamaño conocido y medir la tasa de rechazo de mejoras reales con
-   δ fijo vs por configuración.
+1. ~~Robustez y potencia~~ HECHAS (secciones de arriba).
 2. Leer PACE y HarnessBank completos (hoy solo vía subagente).
 3. Reescribir la introducción y el Related Work con los cuatro gates como antecedentes
    directos. Agregar al bib los cuatro gates y además Noise Floor Audit (2608.22331),
