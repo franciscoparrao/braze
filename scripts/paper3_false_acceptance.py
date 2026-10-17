@@ -23,6 +23,7 @@ import argparse
 import json
 import pathlib
 import random
+import re
 from collections import defaultdict
 from itertools import combinations
 
@@ -33,6 +34,10 @@ except ImportError:  # el gate de braze necesita scipy; el resto no
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SEED = 20260825  # fijo: el muestreo de pares debe ser reproducible
+# Sweeps declarados inválidos o contaminados por infraestructura (OOM, timeouts,
+# breaker): sus "fallos" no son ruido del modelo. La v1 (25-ago) los incluía —
+# 14 grupos, 162 comparaciones; corregido el 2026-10-17.
+EXCLUDE = re.compile(r"INVALID|contaminat|abort|smoke", re.I)
 
 
 # ---------------------------------------------------------------- carga
@@ -69,6 +74,8 @@ def collect_replicate_groups():
     files = sorted(REPO.glob("docs/**/*.json"))
     used = 0
     for p in files:
+        if EXCLUDE.search(p.name):
+            continue
         runs = load_runs(p)
         if not runs:
             continue

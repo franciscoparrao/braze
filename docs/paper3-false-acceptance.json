@@ -1,114 +1,62 @@
 {
  "seed": 20260825,
- "files_scanned": 105,
- "files_with_runs": 85,
- "groups_with_replicates": 140,
- "null_trials": 1602,
+ "files_scanned": 133,
+ "files_with_runs": 88,
+ "groups_with_replicates": 150,
+ "null_trials": 1554,
  "false_acceptance_rate": {
-  "meta_harness": 0.24406991260923847,
-  "autodesign": 0.14357053682896379,
-  "hcl_delta1": 0.14357053682896379,
-  "hcl_delta3": 0.00749063670411985,
-  "braze_mcnemar": 0.0
+  "meta_harness": 0.2625482625482625,
+  "autodesign": 0.15186615186615188,
+  "hcl_delta1": 0.15186615186615188,
+  "hcl_delta3": 0.010296010296010296,
+  "braze_mcnemar": 0.001287001287001287
  },
  "raw_accepts": {
-  "meta_harness": 391,
-  "autodesign": 230,
-  "hcl_delta1": 230,
-  "hcl_delta3": 12,
-  "braze_mcnemar": 0
+  "meta_harness": 408,
+  "autodesign": 236,
+  "hcl_delta1": 236,
+  "hcl_delta3": 16,
+  "braze_mcnemar": 2
  },
  "per_group": [
   {
-   "file": "INVALID-sweep-gptoss-discriminating-2026-08-11-infra-timeout.json",
-   "backend": "ollama:gpt-oss:20b",
-   "tasks": 23,
+   "file": "ab-k2horizon7b-discriminating-2026-09-10.json",
+   "backend": "zen:k2-horizon-7b",
+   "tasks": 34,
    "reps": 3,
    "trials": 6,
-   "accepts": {}
-  },
-  {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
-   "backend": "ollama:gemma4:e4b",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {}
-  },
-  {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
-   "backend": "ollama:llama3.2:1b",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
    "accepts": {
-    "meta_harness": 3
+    "meta_harness": 2
    }
   },
   {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
-   "backend": "ollama:llama3.2:1b+lead:ollama:gemma4:e4b",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {}
-  },
-  {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
-   "backend": "ollama:qwen2.5:3b",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
+   "file": "ab-serving-armA-local-2026-09-13.json",
+   "backend": "local:/home/franciscoparrao/models/gpt-oss-20b-MXFP4.gguf",
+   "tasks": 34,
+   "reps": 3,
+   "trials": 6,
    "accepts": {
-    "meta_harness": 4
+    "meta_harness": 2
    }
   },
   {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-nitro-oom.json",
-   "backend": "ollama:qwen3.5-coder",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {}
-  },
-  {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
-   "backend": "ollama:gemma4:e4b",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
+   "file": "ab-serving-armB-zen-2026-09-13.json",
+   "backend": "zen:gpt-oss",
+   "tasks": 16,
+   "reps": 3,
+   "trials": 6,
    "accepts": {
-    "meta_harness": 4
-   }
-  },
-  {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
-   "backend": "ollama:llama3.2:1b",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {
-    "meta_harness": 5
-   }
-  },
-  {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
-   "backend": "ollama:llama3.2:1b+lead:ollama:gemma4:e4b",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {
-    "meta_harness": 4,
+    "meta_harness": 2,
     "autodesign": 1,
     "hcl_delta1": 1
    }
   },
   {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
-   "backend": "ollama:qwen2.5:3b",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
+   "file": "ab-spark-vs-gptoss-armA-spark-2026-09-06.json",
+   "backend": "zen:spark-x2.5-4b",
+   "tasks": 34,
+   "reps": 3,
+   "trials": 6,
    "accepts": {
     "meta_harness": 3,
     "autodesign": 2,
@@ -116,12 +64,17 @@
    }
   },
   {
-   "file": "sweep-bfcl-anchor-2026-07-18.contaminated-v2.json",
-   "backend": "ollama:qwen3.5-coder",
-   "tasks": 60,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {}
+   "file": "ab-spark-vs-gptoss-armB-gptoss-2026-09-06.json",
+   "backend": "zen:gpt-oss-20b",
+   "tasks": 34,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2,
+    "hcl_delta3": 2
+   }
   },
   {
    "file": "sweep-bfcl-anchor-2026-07-18.json",
@@ -130,7 +83,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 4,
     "autodesign": 4,
     "hcl_delta1": 4
    }
@@ -142,9 +95,10 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 4,
+    "autodesign": 2,
+    "hcl_delta1": 2,
+    "hcl_delta3": 1
    }
   },
   {
@@ -166,9 +120,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -179,10 +133,18 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 5,
-    "autodesign": 3,
-    "hcl_delta1": 3,
-    "hcl_delta3": 2
+    "autodesign": 1,
+    "hcl_delta1": 1,
+    "hcl_delta3": 1
    }
+  },
+  {
+   "file": "sweep-bonsai8b-default-2026-09-19.json",
+   "backend": "zen:bonsai",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
   },
   {
    "file": "sweep-braze-composite-power-2026-07-13.json",
@@ -191,10 +153,9 @@
    "reps": 10,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 3,
-    "hcl_delta1": 3,
-    "hcl_delta3": 1
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -204,7 +165,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 6,
     "autodesign": 1,
     "hcl_delta1": 1
    }
@@ -216,7 +177,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 1
+    "meta_harness": 4
    }
   },
   {
@@ -238,9 +199,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -250,7 +211,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3
+    "meta_harness": 5
    }
   },
   {
@@ -261,8 +222,9 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 5,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "autodesign": 4,
+    "hcl_delta1": 4,
+    "hcl_delta3": 1
    }
   },
   {
@@ -284,7 +246,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6
+    "meta_harness": 4
    }
   },
   {
@@ -294,7 +256,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
+    "meta_harness": 4,
     "autodesign": 3,
     "hcl_delta1": 3
    }
@@ -306,7 +268,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5
+    "meta_harness": 6
    }
   },
   {
@@ -328,7 +290,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
+    "meta_harness": 2,
     "autodesign": 1,
     "hcl_delta1": 1
    }
@@ -352,7 +314,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2
+    "meta_harness": 3
    }
   },
   {
@@ -370,9 +332,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -434,9 +396,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -554,9 +516,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -569,7 +531,8 @@
     "meta_harness": 6,
     "autodesign": 5,
     "hcl_delta1": 5,
-    "hcl_delta3": 2
+    "hcl_delta3": 2,
+    "braze_mcnemar": 2
    }
   },
   {
@@ -591,7 +554,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2
+    "meta_harness": 3
    }
   },
   {
@@ -609,7 +572,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 6,
     "autodesign": 4,
     "hcl_delta1": 4
    }
@@ -653,9 +616,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 3,
-    "hcl_delta1": 3,
+    "meta_harness": 6,
+    "autodesign": 4,
+    "hcl_delta1": 4,
     "hcl_delta3": 1
    }
   },
@@ -666,7 +629,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2,
+    "meta_harness": 4,
     "autodesign": 1,
     "hcl_delta1": 1
    }
@@ -678,9 +641,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 1,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "meta_harness": 2
    }
   },
   {
@@ -690,7 +651,7 @@
    "reps": 10,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
+    "meta_harness": 5,
     "autodesign": 3,
     "hcl_delta1": 3
    }
@@ -703,8 +664,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 3,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -724,7 +685,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2
+    "meta_harness": 4
    }
   },
   {
@@ -734,6 +695,37 @@
    "reps": 5,
    "trials": 12,
    "accepts": {}
+  },
+  {
+   "file": "sweep-go-fast-core-2026-09-28.json",
+   "backend": "zen:deepseek-v4.1-flash",
+   "tasks": 13,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-go-fast-core-2026-09-28.json",
+   "backend": "zen:glm-5.3-flash",
+   "tasks": 13,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {
+    "meta_harness": 1,
+    "autodesign": 1,
+    "hcl_delta1": 1,
+    "hcl_delta3": 1
+   }
+  },
+  {
+   "file": "sweep-go-fast-core-2026-09-28.json",
+   "backend": "zen:qwen3.8-flash",
+   "tasks": 13,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {
+    "meta_harness": 1
+   }
   },
   {
    "file": "sweep-gptoss-discriminating-2026-08-11-v2.json",
@@ -746,6 +738,66 @@
     "autodesign": 2,
     "hcl_delta1": 2,
     "hcl_delta3": 1
+   }
+  },
+  {
+   "file": "sweep-gradient-discriminating-ollama-qwen2.5-3b-2026-08-30.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 34,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-gradient-discriminating-ollama-qwen2.5-3b-2026-08-30.json",
+   "backend": "ollama:qwen2.5:3b+ablate:no-rescue",
+   "tasks": 34,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {
+    "meta_harness": 1,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-gradient-discriminating-ollama-qwen2.5-3b-2026-08-30.json",
+   "backend": "ollama:qwen2.5:3b+lead:ollama:ornith:9b",
+   "tasks": 34,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-gradient-discriminating-ollama-qwen2.5-7b-2026-08-30.json",
+   "backend": "ollama:qwen2.5:7b",
+   "tasks": 34,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {
+    "meta_harness": 1
+   }
+  },
+  {
+   "file": "sweep-gradient-discriminating-ollama-qwen2.5-7b-2026-08-30.json",
+   "backend": "ollama:qwen2.5:7b+ablate:no-rescue",
+   "tasks": 34,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {
+    "meta_harness": 1
+   }
+  },
+  {
+   "file": "sweep-gradient-discriminating-ollama-qwen2.5-7b-2026-08-30.json",
+   "backend": "ollama:qwen2.5:7b+lead:ollama:ornith:9b",
+   "tasks": 34,
+   "reps": 2,
+   "trials": 2,
+   "accepts": {
+    "meta_harness": 1,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -763,7 +815,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 1
+    "meta_harness": 3
    }
   },
   {
@@ -807,9 +859,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 4,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -830,6 +882,30 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-kimi-k3-distill-vs-qwen35-9b-default-2026-10-08.json",
+   "backend": "ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-kimi-k3-distill-vs-qwen35-9b-default-2026-10-08.json",
+   "backend": "ollama:qwen3.5:9b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
     "autodesign": 2,
     "hcl_delta1": 2
    }
@@ -853,9 +929,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -866,8 +942,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 4,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -877,9 +953,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 5,
+    "autodesign": 5,
+    "hcl_delta1": 5
    }
   },
   {
@@ -889,7 +965,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
+    "meta_harness": 3,
     "autodesign": 2,
     "hcl_delta1": 2
    }
@@ -901,9 +977,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -913,9 +989,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 5,
-    "hcl_delta1": 5
+    "meta_harness": 4,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -945,7 +1021,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2
+    "meta_harness": 1
    }
   },
   {
@@ -980,8 +1056,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 6,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "autodesign": 6,
+    "hcl_delta1": 6
    }
   },
   {
@@ -991,10 +1067,18 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
+    "meta_harness": 5,
     "autodesign": 3,
     "hcl_delta1": 3
    }
+  },
+  {
+   "file": "sweep-noise-floor-default-2026-09-12.json",
+   "backend": "ollama:gpt-oss:20b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {}
   },
   {
    "file": "sweep-nuevos-locales-2026-08-12.json",
@@ -1011,7 +1095,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 6,
     "autodesign": 3,
     "hcl_delta1": 3
    }
@@ -1031,9 +1115,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -1051,9 +1135,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "meta_harness": 2
    }
   },
   {
@@ -1075,7 +1157,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3
+    "meta_harness": 4
    }
   },
   {
@@ -1085,9 +1167,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -1097,9 +1179,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 5,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1109,9 +1191,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 5,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1121,7 +1203,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
+    "meta_harness": 5,
     "autodesign": 2,
     "hcl_delta1": 2
    }
@@ -1134,9 +1216,9 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 6,
-    "autodesign": 5,
-    "hcl_delta1": 5,
-    "hcl_delta3": 1
+    "autodesign": 6,
+    "hcl_delta1": 6,
+    "hcl_delta3": 2
    }
   },
   {
@@ -1156,9 +1238,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "meta_harness": 3
    }
   },
   {
@@ -1192,7 +1272,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
+    "meta_harness": 5,
     "autodesign": 1,
     "hcl_delta1": 1
    }
@@ -1233,6 +1313,18 @@
    }
   },
   {
+   "file": "sweep-qwen35-9b-vs-ornith-discriminating-2026-10-07.json",
+   "backend": "ollama:ornith:9b",
+   "tasks": 34,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
    "file": "sweep-rank-12b-v3.json",
    "backend": "local:/home/franciscoparrao/models/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
    "tasks": 19,
@@ -1255,9 +1347,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1267,13 +1359,13 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 3,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
-   "file": "sweep-rerun-block2-coder-planner-2026-07-19.contaminated-breaker-probe.json",
+   "file": "sweep-rerun-block2-coder-planner-2026-07-19.json",
    "backend": "ollama:qwen3.5-coder",
    "tasks": 19,
    "reps": 5,
@@ -1285,34 +1377,6 @@
    }
   },
   {
-   "file": "sweep-rerun-block2-coder-planner-2026-07-19.contaminated-breaker-probe.json",
-   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b",
-   "tasks": 19,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {}
-  },
-  {
-   "file": "sweep-rerun-block2-coder-planner-2026-07-19.contaminated-breaker-probe.json",
-   "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b+ablate:task-list",
-   "tasks": 19,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {}
-  },
-  {
-   "file": "sweep-rerun-block2-coder-planner-2026-07-19.json",
-   "backend": "ollama:qwen3.5-coder",
-   "tasks": 19,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
-   }
-  },
-  {
    "file": "sweep-rerun-block2-coder-planner-2026-07-19.json",
    "backend": "ollama:qwen3.5-coder+plan:ollama:gemma4:e4b",
    "tasks": 19,
@@ -1320,8 +1384,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 4,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1334,6 +1398,42 @@
     "meta_harness": 5,
     "autodesign": 4,
     "hcl_delta1": 4
+   }
+  },
+  {
+   "file": "sweep-saluki27b-kimi-qwen35-default-2026-10-09.json",
+   "backend": "ollama:hf.co/mradermacher/Qwen3.5-9B-Kimi-k3-Distilled-GGUF:Q4_K_M",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-saluki27b-kimi-qwen35-default-2026-10-09.json",
+   "backend": "ollama:qwen3.5:9b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-saluki27b-kimi-qwen35-default-2026-10-09.json",
+   "backend": "ollama:underdog-saluki:27b-iq2",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1375,9 +1475,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 4,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1387,9 +1487,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 5,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1400,8 +1500,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1411,33 +1511,33 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2,
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-si2-lead-ab-h3-2026-07-09.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 3,
     "autodesign": 1,
     "hcl_delta1": 1
    }
   },
   {
    "file": "sweep-si2-lead-ab-h3-2026-07-09.json",
-   "backend": "ollama:qwen2.5:3b",
-   "tasks": 19,
-   "reps": 5,
-   "trials": 12,
-   "accepts": {
-    "meta_harness": 5,
-    "autodesign": 3,
-    "hcl_delta1": 3
-   }
-  },
-  {
-   "file": "sweep-si2-lead-ab-h3-2026-07-09.json",
    "backend": "ollama:qwen2.5:3b+lead:ollama:gemma4:e4b",
    "tasks": 19,
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 4,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1447,9 +1547,29 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-spark-x25-default-r3-2026-09-06.json",
+   "backend": "zen:spark-x2.5-4b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-spark-x25-discriminating-r3-2026-09-06.json",
+   "backend": "zen:spark-x2.5-4b",
+   "tasks": 34,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
     "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
