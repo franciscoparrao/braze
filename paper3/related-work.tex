@@ -1,0 +1,111 @@
+% Paper 3 — Related Work (borrador 2026-10-17).
+% Fuentes: docs/paper3-outline-v3-2026-10-17.md. Toda afirmación sobre trabajos ajenos se
+% verificó contra su texto (HTML/PDF) o su abstract en arXiv en esta sesión o en las notas de
+% lectura de agosto; las claves nuevas están en paper3/refs-related-2026-10-17.bib, las de
+% agosto en docs/paper3-refs-verificadas-2026-08-28.bib y paper2/refs.bib.
+
+\section{Related Work}\label{sec:related}
+
+\paragraph{Automatic harness optimization and its acceptance rules.}
+A line of work that began in early 2026 treats the agent harness, rather than
+the model weights, as the object of optimization. Meta-Harness searches over
+harness code with a proposer agent and keeps the candidate with the best score
+on its search set \citep{lee2026metaharness}. AutoDesign formalizes the same
+loop for long-horizon design tasks and accepts a candidate when its training
+objective improves and its development objective does not degrade
+\citep{luo2026autodesign}. Harness Continual Learning frames the harness as a
+continually updated learning state and commits an update when it gains at
+least $\delta$ on the current tasks while retaining an anchor set
+\citep{kang2026hcl}. HarnessOpt-Bench separates search from evaluation with a
+held-out partition that stays inaccessible throughout the search, and names
+the optimizer's ability to ``separate real improvement from noise'' among the
+capabilities it measures \citep{ursekar2026harnessopt}. All four decide what to
+commit by comparing point estimates against a margin, and none of them derives
+that margin from the run-to-run noise of the configuration being evaluated. The
+false-acceptance rates in Section~\ref{sec:results} apply these decision rules,
+not the systems that use them: we re-implement each rule on pairs of runs of an
+identical configuration, where any accepted change is a false positive.
+
+\paragraph{Statistical gates for self-evolving agents (concurrent work).}
+Between June and September 2026, four systems replaced the point-estimate rule
+with a statistical test. PACE accepts a prompt edit through a paired
+testing-by-betting e-process over discordant instances, committing once the
+wealth exceeds $1/\alpha$ with $\alpha$ fixed by the user; its guarantee is
+explicitly per decision rather than per run, and its false commits are labelled
+by a fresh audit pool rather than by ground truth \citep{zayxshawn2026pace}.
+Its experiments are, notably, on small models (Qwen2.5 at 0.5--3B) and
+arithmetic or multiple-choice tasks. HarnessBank gates offspring harnesses with
+a paired $z$-test on per-task differences, $z \geq 1.96$, where the standard
+deviation is computed across tasks within a single evaluation; it reports that
+single-run crediting produces phantom progress in 62--76\% of post-convergence
+rounds with neutral candidates \citep{luo2026harnessbank}. SAGE applies a
+one-sided paired test to skill edits and states that the significance level
+``should match the task noise'', but tunes it on held-out data without
+measuring that noise, and lists ``an adaptive threshold that tightens or
+loosens $\alpha$ from an online estimate of task noise'' as future work
+\citep{wang2026sage}. RRSI comes closest to our proposal: before evolution it
+repeatedly evaluates the unchanged base harness and sets its noise tolerance
+$\delta$ to the spread of those evaluations (0.017, 0.004 and 0.020 on its
+three domains), then keeps $\delta$ fixed for the whole run, runs no sweep over
+it, and does not report a false-acceptance rate \citep{xia2026rrsi}.
+
+These gates establish that statistics belong in the accept step, and RRSI
+establishes that the threshold can be calibrated against measured noise. What
+none of them does is re-derive the threshold for each incumbent, or report how
+the false-acceptance rate moves with the threshold. That is the gap this paper
+fills. Our data show that the noise of a configuration is not a property of the
+suite: within a single sweep, the share of tasks that flip between identical
+runs differs across configurations by a median of 11.6 points (up to 26.3,
+from 0\% to 26.3\% on one suite), and one incumbent in three is noisier than
+its base. A tolerance measured once on the base therefore accepts
+null changes at a rate its calibration does not control (about 7\%, and up to
+18\% when the base happens to be the quietest configuration). Re-deriving it
+per configuration lowers that rate below 1\% and matches or raises power at
+every effect size we injected (Section~\ref{sec:results}).
+
+\paragraph{Run-to-run noise in agent evaluation.}
+A parallel literature measures the noise that these gates must contend with.
+Recuris re-ran an unchanged package three days later, obtained an interval of
+$[-6.98, +7.27]$, and concluded that differences of a few points should be
+treated as run-to-run variation regardless of their interval
+\citep{yu2026recuris}; it uses the floor as a qualitative caveat in one domain
+rather than as the threshold of a rule. \citet{zhang2026stopcomparing}
+decompose benchmark variance into model, harness and interaction terms; the
+decomposition is exact for the cell means but omits the residual between runs
+of the same cell, which their own two-run design estimates and does not report.
+\citet{parupudi2026neutral} show that leaderboard orderings are manufactured
+by configuration-fragile items under deterministic decoding, a source
+orthogonal to ours (configuration rather than repetition) in a domain they
+explicitly exclude from agentic tasks. More recently, the Noise Floor Audit
+finds reruns nearly deterministic at temperature 0 on BFCL (0.7--2.7\% of items
+ever flip) and semantics-preserving prompt perturbations 11 to 58 times noisier
+\citep{chen2026noisefloor}; \citet{wiedmann2026systems} attribute about 54\% of
+outcome variance on four scientific tasks to repeating the same configuration;
+and \citet{hardy2026reliability} find model-scaffold rankings highly reliable
+but model rankings much less so (0.148--0.841) across 22 benchmarks. On
+SWE-bench Verified, exact McNemar tests separate none of the 29 adjacent pairs
+in the top thirty, while scaffolds move a single model by up to 29.8 points
+\citep{liu2026converged}. These studies measure the noise; our contribution is
+to show what happens to an acceptance rule when that measurement is taken once
+and reused.
+
+\paragraph{Overfitting in harness evolution.}
+Two benchmarks question the gains of harness evolution itself. HarnessDev
+finds that evolution-stage revisions bring gains that ``are unstable and
+transfer only partially to held-out tasks'' \citep{wu2026harnessdev}, and
+\citet{wang2026rethinking} find that, on Terminal-Bench 2.1 and under matched
+budgets, automatic harness evolution does not beat simple test-time scaling,
+with long-horizon games as the exception. Both point to the accept step as a
+place where noise enters the search. A gate whose false-acceptance rate is
+uncontrolled commits candidates that will not replicate, and the instability
+these benchmarks report is the aggregate symptom of that per-decision error.
+
+\paragraph{Scope.}
+Our regime differs from most of the work above: small local models (3--20B)
+with large capability gaps, Rust coding suites graded by \texttt{cargo check},
+and a single inference node. PACE is the exception in model scale. The
+frontier systems that RRSI, HarnessBank and SAGE evolve may well show less
+heterogeneous noise across configurations, and we do not claim that their
+published improvements are false. We claim that, in a noisy regime, a threshold
+calibrated once is a bet on the noise of configurations not yet measured, and
+we quantify what that bet costs.

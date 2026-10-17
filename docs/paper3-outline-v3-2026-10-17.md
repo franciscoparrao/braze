@@ -56,7 +56,8 @@ configuración no hay efecto, así que todo Δ>0 aceptado es un falso positivo.
 |---|---|
 | sweeps con H0 + incumbentes | 25 |
 | brazos incumbentes / pares nulos | 89 / 1.724 |
-| tasa de volteo por brazo (mismo config) | mediana 6,3 %; p10 0 %; p90 17,6 %; máx 33,3 % |
+| tasa de volteo por brazo (mismo config) | mediana 6,3 %; p10 0 %; p90 17,6 %; máx 33,3 % (todas las suites) |
+| rango de volteo entre brazos de un mismo sweep | mediana 11,6 pp; máx 26,3 pp (0 % a 26,3 %, curva multiescala) |
 | incumbentes más ruidosos que su H0 | 29/89 (33 %) |
 | **FAR con δ fijo de H0 (estilo RRSI)** | **7,3 %** |
 | **FAR con δ re-derivado por configuración (leave-one-pair-out)** | **0,8 %** |
