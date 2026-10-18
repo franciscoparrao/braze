@@ -76,9 +76,7 @@ $\hat\delta$ comes from:
   evaluation (leave-one-pair-out), so that the threshold never sees the
   comparison it decides.
 \end{itemize}
-The estimator of $\hat\delta$ is the same on both sides. The primary analysis uses
-the largest $|\Delta|$ among the available pairs, which is the ``spread of
-repeated evaluations'' of \citet{xia2026rrsi}. Robustness analyses replace it with
+The estimator of $\hat\delta$ is the same on both sides. \citet{xia2026rrsi} define the tolerance as the ``spread of repeated evaluations'' without fixing the statistic, and on one of their domains read it off the first percentile of a half-split null. Our primary analysis operationalizes the spread as the largest $|\Delta|$ among the available pairs. Robustness analyses replace it with
 twice the standard deviation of $\Delta$ (another tail estimator) and with the
 mean of $|\Delta|$ (a central one). The false-acceptance rate (FAR) of a rule is
 the fraction of null pairs of incumbents that it commits; the 90 incumbents

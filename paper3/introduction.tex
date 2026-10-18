@@ -15,11 +15,7 @@ evaluations are stochastic, that decision is a statistical test whether or not
 it is written as one, and its error rate determines whether the loop climbs or
 drifts.
 
-Two recent observations make the question pressing. First, harness evolution
-does not reliably beat simpler baselines: its gains are unstable across runs and
-transfer only partially to held-out tasks \citep{wu2026harnessdev}, and under
-matched budgets it fails to beat test-time scaling on Terminal-Bench
-\citep{wang2026rethinking}. Second, the noise is large where these loops are
+Two recent observations make the question pressing. First, the gains of harness evolution are fragile: they are unstable and transfer only partially to held-out tasks \citep{wu2026harnessdev}, and on Terminal-Bench 2.1, under matched budgets, evolution does not beat simple test-time scaling, with long-horizon games as the exception \citep{wang2026rethinking}. Second, the noise is large where these loops are
 cheapest to run. On our own archive of agent sweeps with small local models,
 the median configuration flips 5.7\% of its tasks between two runs of the
 \emph{same} setup, and one configuration in ten flips more than 17\%. A gate

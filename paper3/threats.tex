@@ -16,8 +16,7 @@ term that we do not model.
 \paragraph{One regime.}
 All sweeps come from one harness, one inference node and, for the most part,
 small local models with large capability gaps. Heterogeneous noise may be a
-feature of this regime: hosted tool-calling endpoints evaluated at temperature 0
-can be nearly deterministic between reruns \citep{chen2026noisefloor}, and if
+feature of this regime: the three hosted tool-calling endpoints audited by \citet{chen2026noisefloor} were nearly deterministic between reruns at temperature 0, and if
 every configuration of an evolution is that quiet, a single calibration costs
 little. Within our range (1B to 27B) the median noise falls with model size but
 its tail does not (Section~\ref{sec:discussion}); we have no data on frontier

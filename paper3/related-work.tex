@@ -37,16 +37,13 @@ Its experiments are, notably, on small models (Qwen2.5 at 0.5--3B) and
 arithmetic or multiple-choice tasks. HarnessBank gates offspring harnesses with
 a paired $z$-test on per-task differences, $z \geq 1.96$, where the standard
 deviation is computed across tasks within a single evaluation; it reports that
-single-run crediting produces phantom progress in 62--76\% of post-convergence
-rounds with neutral candidates \citep{luo2026harnessbank}. SAGE applies a
+crediting a candidate from a single run, or from the mean of three, produces phantom progress in 62--76\% of post-convergence rounds with neutral candidates \citep{luo2026harnessbank}. SAGE applies a
 one-sided paired test to skill edits and states that the significance level
 ``should match the task noise'', but tunes it on held-out data without
 measuring that noise, and lists ``an adaptive threshold that tightens or
 loosens $\alpha$ from an online estimate of task noise'' as future work
 \citep{wang2026sage}. RRSI comes closest to our proposal: before evolution it
-repeatedly evaluates the unchanged base harness and sets its noise tolerance
-$\delta$ to the spread of those evaluations (0.017, 0.004 and 0.020 on its
-three domains), then keeps $\delta$ fixed for the whole run, runs no sweep over
+repeatedly evaluates the unchanged base harness and sets its noise tolerance $\delta$ from the spread of those evaluations (0.017, 0.004 and 0.020 on its three domains; on one of them, as the first percentile of a half-split null), then keeps $\delta$ fixed for the whole run, runs no sweep over
 it, and does not report a false-acceptance rate \citep{xia2026rrsi}.
 
 These gates establish that statistics belong in the accept step, and RRSI
@@ -76,16 +73,12 @@ of the same cell, which their own two-run design estimates and does not report.
 \citet{parupudi2026neutral} show that leaderboard orderings are manufactured
 by configuration-fragile items under deterministic decoding, a source
 orthogonal to ours (configuration rather than repetition) in a domain they
-explicitly exclude from agentic tasks. More recently, the Noise Floor Audit
-finds reruns nearly deterministic at temperature 0 on BFCL (0.7--2.7\% of items
-ever flip) and semantics-preserving prompt perturbations 11 to 58 times noisier
-\citep{chen2026noisefloor}; \citet{wiedmann2026systems} attribute about 54\% of
+explicitly exclude from agentic tasks. More recently, the Noise Floor Audit finds reruns of three hosted tool-calling endpoints nearly deterministic at temperature 0 on the multiple and parallel categories of BFCL (0.7--2.7\% of items ever flip), while semantics-preserving prompt perturbations produce paired standard deviations 11 to 58 times larger \citep{chen2026noisefloor}; \citet{wiedmann2026systems} attribute about 54\% of
 outcome variance on four scientific tasks to repeating the same configuration;
 and \citet{hardy2026reliability} find model-scaffold rankings highly reliable
 but model rankings much less so (0.148--0.841) across 22 benchmarks. On
 SWE-bench Verified, exact McNemar tests separate none of the 29 adjacent pairs
-in the top thirty, while scaffolds move a single model by up to 29.8 points
-\citep{liu2026converged}. These studies measure the noise; our contribution is
+in the top thirty, while the score of a single model varies by up to 29.8 points across scaffolds \citep{liu2026converged}. These studies measure the noise; our contribution is
 to show what happens to an acceptance rule when that measurement is taken once
 and reused.
 
