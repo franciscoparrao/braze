@@ -1,0 +1,98 @@
+% Paper 3 — preprint (borrador 2026-10-18). Compilar desde paper3/:
+%   pdflatex main && bibtex main && pdflatex main && pdflatex main
+% Figuras: Rscript paper3/R/fig1_threshold.R (desde la raíz del repo).
+% Números: docs/paper3-*.json sobre docs/paper3-archive-manifest.txt.
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage[authoryear,round]{natbib}
+\usepackage{xcolor}
+\usepackage[colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue]{hyperref}
+
+\title{A Threshold Calibrated Once: Configuration-Dependent Noise and False
+Acceptances in Agent Harness Optimization}
+\author{Francisco Parra\\[2pt]
+\small Departamento de Ingenier\'ia Inform\'atica, Universidad de Santiago de Chile\\
+\small \texttt{francisco.parra.o@usach.cl}}
+\date{Preprint draft, October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Systems that optimize an agent's harness while keeping the model fixed must
+decide, at every step, whether a candidate beats the incumbent. Recent gates
+make that decision with a statistical test, and the most careful of them
+calibrate their threshold against noise measured on repeated runs of the base
+harness, then keep it fixed. We ask whether a single calibration is enough. Using
+the archive of a single agentic coding harness (140 sweeps, 32 backend
+specifications, mostly small local models, 14{,}790 runs in groups that repeat an
+identical configuration), we treat every pair of runs of the same configuration
+as a null comparison, so that every change a gate accepts on it is a false
+acceptance. We find that noise is a property of the configuration, not of the
+suite: within one sweep, the share of tasks that flip between identical runs
+differs across configurations by a median of 11.1 percentage points, and one
+incumbent in three is noisier than its base. A tolerance calibrated once on the
+base accepts 6.9\% of null changes (17.8\% when the base is the quietest
+configuration); re-deriving it from each configuration's own repetitions lowers
+this to 0.8\% and matches or raises power at every effect size we inject, because
+a fixed tolerance is too narrow for noisier incumbents and too wide for quieter
+ones. The decision rules of published optimizers accept between 1.1\% and 26.3\%
+of null changes, and the margin alone moves a rule by more than an order of
+magnitude. We recommend that gates re-derive their threshold per incumbent with a
+tail estimator and report the false-acceptance rate of the threshold they use.
+\end{abstract}
+
+\input{introduction}
+\input{related-work}
+\input{methods}
+\input{results}
+\input{discussion}
+\input{threats}
+
+\section{Conclusion}\label{sec:conclusion}
+Statistical gates have made the accept step of harness optimization a test, and
+the strongest of them calibrate the test against measured noise. In our archive
+that calibration is not a property of the benchmark: the noise of identical runs
+changes with the configuration, so a threshold measured on the base is
+miscalibrated for the incumbents it will judge, accepting null changes from
+noisier ones and rejecting real improvements from quieter ones. Re-deriving the
+threshold for each incumbent, from its own repetitions and with a tail
+estimator, removes most false acceptances without costing power; its price is
+repeated runs, which an evolution can accumulate over rounds. A gate should
+report its noise estimate, the threshold it produced, and the false-acceptance
+rate of that threshold on its own null comparisons.
+
+\section*{Declarations}
+\sloppy
+
+\paragraph{Competing interests.} The author declares no competing interests.
+
+\paragraph{Data and code availability.} All per-run records, the frozen archive
+manifest (\texttt{docs/\allowbreak paper3-archive-\allowbreak manifest.txt}, one SHA-256 digest per
+file), the analysis scripts (\texttt{scripts/paper3\_*.py}) and the figure
+script are in the project repository
+(\url{https://github.com/franciscoparrao/braze}). The scripts verify every digest
+of the manifest and abort if a file changed.
+
+\paragraph{Funding.} \textcolor{red}{[TODO: confirmar si aplica el proyecto
+062619MC\_POSTDOC (DICYT, USACH), como en el Paper 2.]}
+
+\paragraph{Use of generative AI.} During the preparation of this work the author
+used Claude (Anthropic) as a research and writing assistant: searching and
+summarizing related literature, drafting and editing manuscript text from the
+author's study design and results, running the analyses specified by the author,
+and generating the figure. All decision criteria and interpretations are the
+author's; the author reviewed and verified all generated content and takes full
+responsibility for the manuscript.
+
+\bibliographystyle{plainnat}
+\bibliography{refs-related-2026-10-17,../docs/paper3-refs-verificadas-2026-08-28,../paper2/refs}
+
+\end{document}
