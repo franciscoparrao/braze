@@ -66,12 +66,34 @@ def load_runs(path: pathlib.Path):
     return out
 
 
+MANIFEST = REPO / "docs" / "paper3-archive-manifest.txt"
+
+
+def archive_files():
+    """Archivos del archivo congelado (manifest con sha256). Un archivo que cambió
+    desde el congelamiento aborta: los números del paper no se recalculan en silencio
+    sobre otro corpus. Sin manifest, todos los JSON de docs/ (modo exploratorio)."""
+    import hashlib
+    if not MANIFEST.exists():
+        return sorted(REPO.glob("docs/**/*.json"))
+    files = []
+    for line in MANIFEST.read_text().splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        digest, rel = line.split(None, 1)
+        p = REPO / rel
+        if hashlib.sha256(p.read_bytes()).hexdigest() != digest:
+            raise SystemExit(f"el archivo {rel} cambió desde el congelamiento del manifest")
+        files.append(p)
+    return files
+
+
 def collect_replicate_groups():
     """Agrupa corridas por (archivo, backend) y devuelve solo los grupos
     con ≥2 repeticiones por tarea: ahí viven las réplicas de config
     idéntica."""
     groups = defaultdict(lambda: defaultdict(dict))  # (file,backend) -> task -> rep -> passed
-    files = sorted(REPO.glob("docs/**/*.json"))
+    files = archive_files()
     used = 0
     for p in files:
         if EXCLUDE.search(p.name):

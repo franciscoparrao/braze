@@ -1,0 +1,107 @@
+% Paper 3 — Methods (borrador 2026-10-17). Scripts: scripts/paper3_false_acceptance.py,
+% paper3_per_config_threshold.py, paper3_v3_robustness.py, paper3_v3_power.py.
+% Corpus: docs/paper3-archive-manifest.txt (sha256 por archivo; el script aborta si cambia).
+
+\section{Method}\label{sec:method}
+
+\subsection{The archive}\label{sec:archive}
+All data come from the sweep archive of a single agentic coding harness, written
+in Rust and evaluated with its own benchmark runner. A sweep runs one or more
+\emph{arms} (a model backend plus a harness configuration) over a task suite,
+repeating every task $k$ times with fixed seeds. Most sweeps use the project's
+two coding suites (a 19-task default suite and a 34-task discriminating suite, 55
+of the 62 sweeps that contribute groups): small agentic chores such as reading,
+editing and creating files, recovering from tool errors and choosing among
+distractor files, graded pass/fail by compilation (\texttt{cargo check}) and
+content assertions. The remaining sweeps use a constraint-retention suite under
+context compaction, a function-calling anchor derived from BFCL, a verification
+suite and a short core suite. The archive was frozen on
+2026-10-17 as a manifest of 140 JSON files with their SHA-256 digests; the
+analysis scripts verify every digest and abort on any mismatch, so the numbers
+in this paper cannot be silently recomputed on a different corpus.
+
+Sweeps that the project itself had marked as invalid or contaminated by
+infrastructure failures (out-of-memory kills, transport timeouts, an open
+circuit breaker) are excluded by name. Their failures are not model noise, and
+an earlier version of our analysis that included them overstated the noise by
+162 comparisons. Of the remaining files, 95 contain per-run results. We keep the
+158 \emph{groups} (file $\times$ arm) that repeat each of at least eight tasks
+at least twice: 9 groups with 2 repetitions, 32 with 3, 112 with 5 and 5 with
+10, for 14{,}790 runs and 32 distinct backend specifications. Most are small
+models served locally on one node with a 6\,GB GPU (from 1B to 27B total
+parameters, through Ollama, llama.cpp in-process or a local OpenAI-compatible
+server); three are hosted models reached through an OpenAI-compatible API.
+
+\subsection{Null comparisons}\label{sec:null}
+Within a group, two repetitions $a$ and $b$ are two runs of the same
+configuration on the same tasks. We treat $b$ as a ``candidate'' and $a$ as the
+``incumbent'' and ask whether a decision rule would commit $b$. Since nothing
+distinguishes them except sampling, every commit is a false acceptance. We use
+both orders of each pair, because noise has no preferred direction, and pair
+outcomes by task. For a pair, $\Delta = (P_b - P_a)/n$, where $P$ counts passed
+tasks among the $n$ tasks present in both repetitions.
+
+\subsection{Decision rules from published optimizers}\label{sec:rules}
+For the threshold curve we re-implement the \emph{decision rule} of each system
+as described in its paper, not the system: we criticize rules, not
+implementations (Section~\ref{sec:threats}).
+\begin{itemize}
+  \item \textbf{Best score} (Meta-Harness, \citealp{lee2026metaharness}):
+  commit if $P_b > P_a$.
+  \item \textbf{Train up, dev not down} (AutoDesign,
+  \citealp{luo2026autodesign}): split tasks deterministically in halves and
+  commit if $b$ improves on the first and does not regress on the second.
+  \item \textbf{Margin plus anchor} (HCL, \citealp{kang2026hcl}): commit if $b$
+  gains at least $\delta \in \{1, 3\}$ tasks on one half and does not regress on
+  the other (the anchor set).
+  \item \textbf{Paired exact test}: commit if the exact McNemar test on the
+  discordant tasks rejects at $\alpha = 0.05$ in favor of $b$.
+\end{itemize}
+We draw up to six pairs per group (seed fixed), giving 1{,}614 null comparisons.
+
+\subsection{Fixed versus re-derived tolerance}\label{sec:fixed}
+To study calibration we need sweeps with several configurations on the same
+suite. We keep the 26 sweeps that contain at least two arms with three or more
+repetitions; they hold 149 arms. In each sweep one arm plays the base harness
+$H_0$ and the others play incumbents reached later in an evolution.
+
+Both rules commit when $\Delta > \hat\delta$ and differ only in where
+$\hat\delta$ comes from:
+\begin{itemize}
+  \item \textbf{Fixed} (the RRSI procedure, \citealp{xia2026rrsi}):
+  $\hat\delta$ is estimated once from the repeated runs of $H_0$ and applied to
+  every incumbent of the sweep.
+  \item \textbf{Re-derived per configuration}: $\hat\delta$ is estimated from the
+  repeated runs of the incumbent being tested, leaving out the pair under
+  evaluation (leave-one-pair-out), so that the threshold never sees the
+  comparison it decides.
+\end{itemize}
+The estimator of $\hat\delta$ is the same on both sides. The primary analysis uses
+the largest $|\Delta|$ among the available pairs, which is the ``spread of
+repeated evaluations'' of \citet{xia2026rrsi}. Robustness analyses replace it with
+twice the standard deviation of $\Delta$ (another tail estimator) and with the
+mean of $|\Delta|$ (a central one). The false-acceptance rate (FAR) of a rule is
+the fraction of null pairs of incumbents that it commits; the 90 incumbents
+contribute 1{,}814 such pairs.
+
+\paragraph{Choice of $H_0$.} The primary analysis takes the first arm of each
+sweep as $H_0$. Because that choice is arbitrary, we repeat the analysis with
+$H_0$ drawn at random (200 draws), with the quietest arm, and with the noisiest
+arm, where noise is the mean $|\Delta|$ of the arm's pairs.
+
+\paragraph{Number of pairs.} With three repetitions, the leave-one-pair-out
+estimate for an incumbent rests on two pairs, while $H_0$ may contribute more.
+To rule out that the per-configuration rule wins merely by using fewer pairs,
+a variant subsamples the pairs of $H_0$ to the same number.
+
+\paragraph{Uncertainty.} Confidence intervals come from a cluster bootstrap that
+resamples whole sweeps (2{,}000 resamples), because pairs within a sweep share a
+suite and a node state.
+
+\subsection{Power}\label{sec:power-method}
+A rule that never commits has zero false acceptances, so FAR alone cannot rank
+rules. To measure power, we add a true improvement $e$ (as a fraction of the
+suite) to every null pair of the incumbents, $\Delta' = \Delta + e$, and count the
+fraction that each rule commits, for $e \in \{0.03, 0.05, 0.10, 0.15, 0.20\}$.
+This preserves the empirical noise of each configuration and shifts only its
+mean, which is the alternative a harness change is meant to produce.

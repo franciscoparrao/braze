@@ -1,30 +1,30 @@
 {
- "sweeps_with_h0_and_incumbents": 25,
- "arms": 141,
- "incumbent_arms": 89,
+ "sweeps_with_h0_and_incumbents": 26,
+ "arms": 149,
+ "incumbent_arms": 90,
  "flip_rate": {
   "min": 0.0,
-  "median": 0.0632,
+  "median": 0.0567,
   "max": 0.3333,
   "p10": 0.0,
   "p90": 0.1765
  },
  "incumbents_noisier_than_h0": 29,
- "far_fixed_h0": 0.07250580046403712,
- "far_per_config_lopo": 0.008120649651972157,
- "null_pairs_incumbents": 1724,
+ "far_fixed_h0": 0.0689084895259096,
+ "far_per_config_lopo": 0.007717750826901874,
+ "null_pairs_incumbents": 1814,
  "curve_pooled_delta_vs_far": [
   {
    "delta": 0.0,
-   "far": 0.2644
+   "far": 0.2637
   },
   {
    "delta": 0.01,
-   "far": 0.2644
+   "far": 0.2637
   },
   {
    "delta": 0.02,
-   "far": 0.2569
+   "far": 0.2568
   },
   {
    "delta": 0.03,
@@ -32,111 +32,111 @@
   },
   {
    "delta": 0.04,
-   "far": 0.2528
+   "far": 0.2529
   },
   {
    "delta": 0.05,
-   "far": 0.2506
+   "far": 0.2509
   },
   {
    "delta": 0.06,
-   "far": 0.0814
+   "far": 0.0937
   },
   {
    "delta": 0.07,
-   "far": 0.0795
+   "far": 0.092
   },
   {
    "delta": 0.08,
-   "far": 0.0795
+   "far": 0.092
   },
   {
    "delta": 0.09,
-   "far": 0.0776
+   "far": 0.0902
   },
   {
    "delta": 0.1,
-   "far": 0.0776
+   "far": 0.0902
   },
   {
    "delta": 0.11,
-   "far": 0.0259
+   "far": 0.042
   },
   {
    "delta": 0.12,
-   "far": 0.024
+   "far": 0.0402
   },
   {
    "delta": 0.13,
-   "far": 0.021
+   "far": 0.0205
   },
   {
    "delta": 0.14,
-   "far": 0.021
+   "far": 0.0205
   },
   {
    "delta": 0.15,
-   "far": 0.0199
+   "far": 0.0194
   },
   {
    "delta": 0.16,
-   "far": 0.0086
+   "far": 0.009
   },
   {
    "delta": 0.17,
-   "far": 0.0079
+   "far": 0.0083
   },
   {
    "delta": 0.18,
-   "far": 0.0079
+   "far": 0.0083
   },
   {
    "delta": 0.19,
-   "far": 0.0079
+   "far": 0.0083
   },
   {
    "delta": 0.2,
-   "far": 0.0071
+   "far": 0.0076
   },
   {
    "delta": 0.21,
-   "far": 0.0068
+   "far": 0.0073
   },
   {
    "delta": 0.22,
-   "far": 0.0041
+   "far": 0.0049
   },
   {
    "delta": 0.23,
-   "far": 0.0041
+   "far": 0.0049
   },
   {
    "delta": 0.24,
-   "far": 0.0041
+   "far": 0.0049
   },
   {
    "delta": 0.25,
-   "far": 0.0023
+   "far": 0.0021
   },
   {
    "delta": 0.26,
-   "far": 0.0023
+   "far": 0.0021
   },
   {
    "delta": 0.27,
-   "far": 0.0015
+   "far": 0.0014
   },
   {
    "delta": 0.28,
-   "far": 0.0015
+   "far": 0.0014
   },
   {
    "delta": 0.29,
-   "far": 0.0015
+   "far": 0.0014
   },
   {
    "delta": 0.3,
-   "far": 0.0015
+   "far": 0.0014
   }
  ],
  "per_arm": [
@@ -251,6 +251,46 @@
    "null_pairs": 20,
    "accepts_fixed_h0": 7,
    "accepts_per_config": 0
+  },
+  {
+   "file": "sweep-bonsai2-4B-default-2026-10-17-base.json",
+   "backend": "ollama:qwen3.5:4b",
+   "is_h0": true,
+   "tasks": 19,
+   "reps": 3,
+   "flip_rate": 0.1053,
+   "delta_own": 0.1053,
+   "delta_h0": 0.1053
+  },
+  {
+   "file": "sweep-bonsai2-4B-default-2026-10-17-ternary.json",
+   "backend": "zen:bonsai2-4B",
+   "is_h0": true,
+   "tasks": 19,
+   "reps": 3,
+   "flip_rate": 0.0,
+   "delta_own": 0.0,
+   "delta_h0": 0.0
+  },
+  {
+   "file": "sweep-bonsai2-9B-default-2026-10-17-base.json",
+   "backend": "ollama:qwen3.5:9b",
+   "is_h0": true,
+   "tasks": 18,
+   "reps": 3,
+   "flip_rate": 0.0,
+   "delta_own": 0.0,
+   "delta_h0": 0.0
+  },
+  {
+   "file": "sweep-bonsai2-9B-default-2026-10-17-ternary.json",
+   "backend": "zen:bonsai2-9B",
+   "is_h0": true,
+   "tasks": 19,
+   "reps": 3,
+   "flip_rate": 0.0,
+   "delta_own": 0.0,
+   "delta_h0": 0.0
   },
   {
    "file": "sweep-bonsai8b-default-2026-09-19.json",
@@ -1174,6 +1214,16 @@
    "accepts_per_config": 0
   },
   {
+   "file": "sweep-lfm25-24b-a2b-q40-default-2026-10-17.json",
+   "backend": "zen:lfm25-24b-a2b-q40",
+   "is_h0": true,
+   "tasks": 19,
+   "reps": 3,
+   "flip_rate": 0.0,
+   "delta_own": 0.0,
+   "delta_h0": 0.0
+  },
+  {
    "file": "sweep-matriz-4brazos-2026-07-10.json",
    "backend": "ollama:qwen2.5:3b",
    "is_h0": true,
@@ -1482,6 +1532,16 @@
    "delta_h0": 0.1176
   },
   {
+   "file": "sweep-qwen35-9b-q4km-llamacpp-default-2026-10-17.json",
+   "backend": "zen:qwen35-9b-q4km-llamacpp",
+   "is_h0": true,
+   "tasks": 19,
+   "reps": 3,
+   "flip_rate": 0.0,
+   "delta_own": 0.0,
+   "delta_h0": 0.0
+  },
+  {
    "file": "sweep-qwen35-9b-vs-ornith-discriminating-2026-10-07.json",
    "backend": "ollama:ornith:9b",
    "is_h0": true,
@@ -1660,6 +1720,29 @@
    "delta_h0": 0.0,
    "null_pairs": 20,
    "accepts_fixed_h0": 8,
+   "accepts_per_config": 0
+  },
+  {
+   "file": "sweep-sc-retention-ornith-r2-2026-10-17.json",
+   "backend": "ollama:ornith:9b+ablate:no-sc-route;tactical-window=8;tactical-thresho",
+   "is_h0": true,
+   "tasks": 8,
+   "reps": 10,
+   "flip_rate": 0.1722,
+   "delta_own": 0.25,
+   "delta_h0": 0.25
+  },
+  {
+   "file": "sweep-sc-retention-ornith-r2-2026-10-17.json",
+   "backend": "ollama:ornith:9b+ablate:tactical-window=8;tactical-threshold=10",
+   "is_h0": false,
+   "tasks": 8,
+   "reps": 10,
+   "flip_rate": 0.1083,
+   "delta_own": 0.125,
+   "delta_h0": 0.25,
+   "null_pairs": 90,
+   "accepts_fixed_h0": 0,
    "accepts_per_config": 0
   },
   {

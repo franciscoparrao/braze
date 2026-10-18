@@ -1,0 +1,85 @@
+% Paper 3 — Introduction (borrador 2026-10-17). Números: docs/paper3-outline-v3-2026-10-17.md
+% (bloque "Números congelados") y los JSON docs/paper3-*.json generados sobre
+% docs/paper3-archive-manifest.txt.
+
+\section{Introduction}\label{sec:intro}
+
+The harness around a language model (its prompts, tools, context policy and
+control loop) has become an object of optimization in its own right. Since early
+2026, systems such as Meta-Harness, AutoDesign and Harness Continual Learning
+let a proposer agent rewrite the harness while the model stays fixed, and keep a
+rewrite when it scores better than the incumbent
+\citep{lee2026metaharness,luo2026autodesign,kang2026hcl}. Every such loop ends
+in the same decision: commit the candidate or discard it. Because agent
+evaluations are stochastic, that decision is a statistical test whether or not
+it is written as one, and its error rate determines whether the loop climbs or
+drifts.
+
+Two recent observations make the question pressing. First, harness evolution
+does not reliably beat simpler baselines: its gains are unstable across runs and
+transfer only partially to held-out tasks \citep{wu2026harnessdev}, and under
+matched budgets it fails to beat test-time scaling on Terminal-Bench
+\citep{wang2026rethinking}. Second, the noise is large where these loops are
+cheapest to run. On our own archive of agent sweeps with small local models,
+the median configuration flips 5.7\% of its tasks between two runs of the
+\emph{same} setup, and one configuration in ten flips more than 17\%. A gate
+that commits on a point estimate is answering a coin toss on a sizeable fraction
+of its decisions.
+
+The field has started to respond. Between June and September 2026, four gates
+replaced the point estimate with a statistical test: an anytime-valid
+e-process \citep{zayxshawn2026pace}, a paired $z$-test
+\citep{luo2026harnessbank}, a one-sided paired test on discordant items
+\citep{wang2026sage}, and a noise tolerance set from repeated evaluations of the
+base harness \citep{xia2026rrsi}. The last one is the natural reference point
+for this paper, because it calibrates the threshold against measured noise.
+It measures that noise once, on the base harness, and keeps the tolerance fixed
+for the rest of the evolution.
+
+This paper asks what that single calibration costs. The answer depends on a fact
+that, to our knowledge, has not been measured: whether the run-to-run noise of
+an agent configuration is a property of the benchmark or of the configuration.
+If it is a property of the benchmark, one measurement on the base suffices. If
+it changes with the configuration, a tolerance measured on the base is a bet on
+the noise of incumbents that have not been measured yet.
+
+We answer it with an archive of 140 sweeps that a single project produced over
+four months (32 backend specifications, mostly small models served locally,
+agentic coding suites graded by compilation and assertions, and 14{,}790 runs in
+groups that repeat an identical configuration). Because every pair of runs of an identical configuration is a
+null comparison, any change a gate accepts on such a pair is a false acceptance,
+and we can count those acceptances without simulating effects. We make four
+contributions:
+
+\begin{enumerate}
+  \item \textbf{Noise is a property of the configuration.} Within a single sweep
+  on a single suite, the flip rate of identical runs differs across
+  configurations by a median of 11.1 percentage points (up to 26.3), and 29 of
+  90 incumbents are noisier than the base of their sweep
+  (Section~\ref{sec:res-heterogeneity}).
+  \item \textbf{A threshold calibrated once does not control false acceptances.}
+  With the tolerance set to the spread of the base's repeated runs, as in
+  \citet{xia2026rrsi}, the gate accepts 6.9\% of null changes across 1{,}814
+  null pairs; re-deriving the tolerance from each configuration's own repeated
+  runs lowers this to 0.8\%. The single calibration fails worst when the base
+  happens to be quiet (17.8\%) and is safe only when the base happens to be the
+  noisiest configuration in the sweep (Section~\ref{sec:res-fixed}).
+  \item \textbf{Re-deriving the threshold is not a trade-off.} Injecting real
+  improvements of known size, the per-configuration rule matches or exceeds the
+  power of the fixed rule at every effect size, because a fixed tolerance is
+  too narrow for noisier incumbents and too wide for quieter ones. Its cost is
+  runs, not power: each incumbent must be repeated (Section~\ref{sec:res-power}).
+  \item \textbf{The threshold curve.} Across 1{,}614 null comparisons, the
+  decision rules of published optimizers accept between 1.1\% and 26.3\% of null
+  changes, and the same rule moves by more than an order of magnitude when only
+  its margin changes. No gate we are aware of reports this curve
+  (Section~\ref{sec:res-curve}).
+\end{enumerate}
+
+The scope of these claims is deliberate. Our regime is mostly small local models with
+large capability gaps, where noise is high and heterogeneous; the frontier models
+that most self-evolving systems optimize may show less heterogeneity, and we do
+not claim that their published improvements are false. What we claim is
+narrower: wherever the noise of configurations differs, a threshold calibrated
+once is miscalibrated for most of the decisions it makes, and the error is
+measurable from data that any repeated-run protocol already produces.

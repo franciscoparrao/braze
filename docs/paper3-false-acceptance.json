@@ -1,22 +1,22 @@
 {
  "seed": 20260825,
- "files_scanned": 133,
- "files_with_runs": 88,
- "groups_with_replicates": 150,
- "null_trials": 1554,
+ "files_scanned": 140,
+ "files_with_runs": 95,
+ "groups_with_replicates": 158,
+ "null_trials": 1614,
  "false_acceptance_rate": {
-  "meta_harness": 0.2625482625482625,
-  "autodesign": 0.15186615186615188,
-  "hcl_delta1": 0.15186615186615188,
-  "hcl_delta3": 0.010296010296010296,
-  "braze_mcnemar": 0.001287001287001287
+  "meta_harness": 0.26332094175960347,
+  "autodesign": 0.15551425030978935,
+  "hcl_delta1": 0.15551425030978935,
+  "hcl_delta3": 0.010532837670384139,
+  "braze_mcnemar": 0.0006195786864931846
  },
  "raw_accepts": {
-  "meta_harness": 408,
-  "autodesign": 236,
-  "hcl_delta1": 236,
-  "hcl_delta3": 16,
-  "braze_mcnemar": 2
+  "meta_harness": 425,
+  "autodesign": 251,
+  "hcl_delta1": 251,
+  "hcl_delta3": 17,
+  "braze_mcnemar": 1
  },
  "per_group": [
   {
@@ -139,6 +139,42 @@
    }
   },
   {
+   "file": "sweep-bonsai2-4B-default-2026-10-17-base.json",
+   "backend": "ollama:qwen3.5:4b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
+   }
+  },
+  {
+   "file": "sweep-bonsai2-4B-default-2026-10-17-ternary.json",
+   "backend": "zen:bonsai2-4B",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-bonsai2-9B-default-2026-10-17-base.json",
+   "backend": "ollama:qwen3.5:9b",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
+  },
+  {
+   "file": "sweep-bonsai2-9B-default-2026-10-17-ternary.json",
+   "backend": "zen:bonsai2-9B",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
+  },
+  {
    "file": "sweep-bonsai8b-default-2026-09-19.json",
    "backend": "zen:bonsai",
    "tasks": 19,
@@ -153,9 +189,10 @@
    "reps": 10,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4,
+    "hcl_delta3": 2
    }
   },
   {
@@ -166,8 +203,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 6,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -177,7 +214,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4
+    "meta_harness": 3
    }
   },
   {
@@ -187,9 +224,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 5,
-    "hcl_delta1": 5
+    "meta_harness": 6,
+    "autodesign": 6,
+    "hcl_delta1": 6
    }
   },
   {
@@ -222,9 +259,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 5,
-    "autodesign": 4,
-    "hcl_delta1": 4,
-    "hcl_delta3": 1
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -256,7 +292,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
+    "meta_harness": 5,
     "autodesign": 3,
     "hcl_delta1": 3
    }
@@ -268,7 +304,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6
+    "meta_harness": 4
    }
   },
   {
@@ -278,9 +314,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -291,8 +327,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 2,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -302,9 +338,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 5,
+    "autodesign": 5,
+    "hcl_delta1": 5
    }
   },
   {
@@ -333,8 +369,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 5,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -344,7 +380,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2
+    "meta_harness": 3
    }
   },
   {
@@ -354,7 +390,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4
+    "meta_harness": 5
    }
   },
   {
@@ -365,8 +401,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 5,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -396,9 +432,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 5,
+    "autodesign": 5,
+    "hcl_delta1": 5
    }
   },
   {
@@ -504,7 +540,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 6,
     "autodesign": 4,
     "hcl_delta1": 4
    }
@@ -516,9 +552,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -528,11 +564,11 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 5,
-    "hcl_delta1": 5,
-    "hcl_delta3": 2,
-    "braze_mcnemar": 2
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4,
+    "hcl_delta3": 3,
+    "braze_mcnemar": 1
    }
   },
   {
@@ -542,7 +578,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 4,
     "autodesign": 2,
     "hcl_delta1": 2
    }
@@ -572,9 +608,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 4,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -604,9 +640,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 2,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -629,7 +665,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
+    "meta_harness": 3,
     "autodesign": 1,
     "hcl_delta1": 1
    }
@@ -641,7 +677,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2
+    "meta_harness": 3,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -651,7 +689,7 @@
    "reps": 10,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 4,
     "autodesign": 3,
     "hcl_delta1": 3
    }
@@ -663,7 +701,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
+    "meta_harness": 5,
     "autodesign": 3,
     "hcl_delta1": 3
    }
@@ -847,9 +885,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 5,
+    "autodesign": 5,
+    "hcl_delta1": 5
    }
   },
   {
@@ -871,7 +909,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3
+    "meta_harness": 4
    }
   },
   {
@@ -882,8 +920,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -929,9 +967,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -941,9 +979,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -953,9 +991,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 5,
-    "hcl_delta1": 5
+    "meta_harness": 4,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -965,9 +1003,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 5,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -977,9 +1015,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -989,9 +1027,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 6,
+    "autodesign": 5,
+    "hcl_delta1": 5
    }
   },
   {
@@ -1021,8 +1059,16 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 1
+    "meta_harness": 3
    }
+  },
+  {
+   "file": "sweep-lfm25-24b-a2b-q40-default-2026-10-17.json",
+   "backend": "zen:lfm25-24b-a2b-q40",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
   },
   {
    "file": "sweep-matriz-4brazos-2026-07-10.json",
@@ -1043,9 +1089,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1055,9 +1101,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 6,
-    "hcl_delta1": 6
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -1067,9 +1113,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 3,
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1095,9 +1141,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 6,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -1115,7 +1161,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 4,
     "autodesign": 3,
     "hcl_delta1": 3
    }
@@ -1135,7 +1181,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1145,9 +1193,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
-    "autodesign": 3,
-    "hcl_delta1": 3
+    "meta_harness": 1,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1157,7 +1205,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4
+    "meta_harness": 3
    }
   },
   {
@@ -1179,9 +1227,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 4,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -1192,8 +1240,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 5,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1203,7 +1251,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 5,
+    "meta_harness": 6,
     "autodesign": 2,
     "hcl_delta1": 2
    }
@@ -1216,9 +1264,9 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 6,
-    "autodesign": 6,
-    "hcl_delta1": 6,
-    "hcl_delta3": 2
+    "autodesign": 5,
+    "hcl_delta1": 5,
+    "hcl_delta3": 1
    }
   },
   {
@@ -1228,7 +1276,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4
+    "meta_harness": 3
    }
   },
   {
@@ -1238,7 +1286,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1248,9 +1298,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 1,
+    "autodesign": 1,
+    "hcl_delta1": 1
    }
   },
   {
@@ -1260,9 +1310,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 5,
+    "autodesign": 5,
+    "hcl_delta1": 5
    }
   },
   {
@@ -1313,6 +1363,14 @@
    }
   },
   {
+   "file": "sweep-qwen35-9b-q4km-llamacpp-default-2026-10-17.json",
+   "backend": "zen:qwen35-9b-q4km-llamacpp",
+   "tasks": 19,
+   "reps": 3,
+   "trials": 6,
+   "accepts": {}
+  },
+  {
    "file": "sweep-qwen35-9b-vs-ornith-discriminating-2026-10-07.json",
    "backend": "ollama:ornith:9b",
    "tasks": 34,
@@ -1347,7 +1405,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
+    "meta_harness": 5,
     "autodesign": 1,
     "hcl_delta1": 1
    }
@@ -1359,7 +1417,7 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 3,
+    "meta_harness": 2,
     "autodesign": 1,
     "hcl_delta1": 1
    }
@@ -1371,9 +1429,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "meta_harness": 5,
+    "autodesign": 5,
+    "hcl_delta1": 5
    }
   },
   {
@@ -1383,9 +1441,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "meta_harness": 5,
+    "autodesign": 4,
+    "hcl_delta1": 4
    }
   },
   {
@@ -1396,8 +1454,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 5,
-    "autodesign": 4,
-    "hcl_delta1": 4
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1476,20 +1534,44 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 4,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
-   "file": "sweep-si2-lead-ab-2026-07-09.json",
-   "backend": "ollama:qwen2.5:3b",
-   "tasks": 19,
-   "reps": 5,
+   "file": "sweep-sc-retention-ornith-r2-2026-10-17.json",
+   "backend": "ollama:ornith:9b+ablate:no-sc-route;tactical-window=8;tactical-thresho",
+   "tasks": 8,
+   "reps": 10,
    "trials": 12,
    "accepts": {
     "meta_harness": 5,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "autodesign": 3,
+    "hcl_delta1": 3
+   }
+  },
+  {
+   "file": "sweep-sc-retention-ornith-r2-2026-10-17.json",
+   "backend": "ollama:ornith:9b+ablate:tactical-window=8;tactical-threshold=10",
+   "tasks": 8,
+   "reps": 10,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 4,
+    "autodesign": 1,
+    "hcl_delta1": 1
+   }
+  },
+  {
+   "file": "sweep-si2-lead-ab-2026-07-09.json",
+   "backend": "ollama:qwen2.5:3b",
+   "tasks": 19,
+   "reps": 5,
+   "trials": 12,
+   "accepts": {
+    "meta_harness": 6,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -1500,8 +1582,8 @@
    "trials": 12,
    "accepts": {
     "meta_harness": 3,
-    "autodesign": 1,
-    "hcl_delta1": 1
+    "autodesign": 2,
+    "hcl_delta1": 2
    }
   },
   {
@@ -1535,9 +1617,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 4,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {
@@ -1547,9 +1629,9 @@
    "reps": 5,
    "trials": 12,
    "accepts": {
-    "meta_harness": 2,
-    "autodesign": 2,
-    "hcl_delta1": 2
+    "meta_harness": 3,
+    "autodesign": 3,
+    "hcl_delta1": 3
    }
   },
   {

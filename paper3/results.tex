@@ -1,0 +1,130 @@
+% Paper 3 — Results (borrador 2026-10-17). Fuente de cada número:
+%   docs/paper3-false-acceptance.json        (curva de reglas publicadas)
+%   docs/paper3-per-config-threshold.json    (heterogeneidad, FAR fijo vs re-derivado, curva δ)
+%   docs/paper3-v3-robustness.json           (estimador, H0, pares, bootstrap)
+%   docs/paper3-v3-power.json                (potencia)
+% Todos sobre docs/paper3-archive-manifest.txt.
+
+\section{Results}\label{sec:results}
+
+\subsection{Noise is a property of the configuration}\label{sec:res-heterogeneity}
+Across the 149 arms of the 26 calibration sweeps, the share of tasks that flip
+between two runs of the same configuration has a median of 5.7\%, a 90th
+percentile of 17.6\% and a maximum of 33.3\%; 36 arms (one in four) never flip. Part of
+this spread is between suites, but most of it survives inside a single sweep,
+where suite, node and harness version are shared: there, the flip rates of
+different configurations differ by a median of 11.1 percentage points, and by
+26.3 points in the widest sweep (from 0\% to 26.3\% on the same suite). Against the
+tolerance of its own sweep's base, 29 of the 90 incumbents (32\%) are noisier than
+the base.
+
+\subsection{A tolerance calibrated once}\label{sec:res-fixed}
+Table~\ref{tab:fixed} reports the false-acceptance rate of the two rules.
+With the primary estimator and the first arm as base, the fixed tolerance commits
+6.9\% of null changes and the re-derived tolerance 0.8\%. The difference is
+concentrated where the base gives a misleading picture of the noise. In 14
+incumbents whose base never flipped across its repetitions, the fixed tolerance
+is zero and the rule commits any positive $\Delta$: 25.7\% of their null pairs,
+against 0.4\% with the re-derived tolerance. In the other 76 incumbents the rates
+are 3.5\% and 0.8\%.
+
+\begin{table}[t]
+\centering
+\caption{False-acceptance rate on null pairs of incumbents (1{,}814 pairs, 90
+incumbents, 26 sweeps). The 95\% intervals of the difference come from a cluster
+bootstrap over sweeps.}\label{tab:fixed}
+\begin{tabular}{llrrr}
+\toprule
+$\hat\delta$ estimator & base $H_0$ & fixed & re-derived & difference [95\% CI] \\
+\midrule
+max $|\Delta|$ & first arm & 6.9\% & 0.8\% & $+6.1$ [$+2.2$, $+11.3$] \\
+max $|\Delta|$ & random (200 draws) & 7.3\% & 0.7\% & $+6.6$ [$+5.2$, $+8.1$] \\
+max $|\Delta|$ & quietest arm & 17.8\% & 0.9\% & $+16.9$ [$+11.7$, $+22.7$] \\
+max $|\Delta|$ & noisiest arm & 0.0\% & 0.5\% & $-0.5$ [$-0.9$, $-0.2$] \\
+$2\,\mathrm{sd}(\Delta)$ & random & 7.5\% & 0.8\% & $+6.8$ [$+5.4$, $+8.1$] \\
+mean $|\Delta|$ & random & 17.9\% & 17.8\% & $+0.1$ [$-1.1$, $+1.1$] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three robustness checks bear on this result. First, drawing the base at random
+gives the same answer as taking the first arm (7.3\% against 0.7\%), so the
+result does not depend on which configuration happens to be first. Second,
+subsampling the base's pairs to the number available to the incumbent changes no
+rate by more than 0.3 points, so the per-configuration rule does not win by using
+fewer pairs. Third, replacing the maximum with twice the standard deviation,
+another tail estimator, reproduces the result. The rows for the quietest and
+noisiest bases bracket the bet that a single calibration makes: it is safe only
+when the base turns out to be the noisiest configuration of the evolution, and
+in that case the fixed rule is conservative and pays in power
+(Section~\ref{sec:res-power}). When the base is the quietest, the fixed rule
+commits 17.8\% of null changes.
+
+The last row of Table~\ref{tab:fixed} shows the limit of re-derivation. With a
+central estimator (the mean of $|\Delta|$), both rules commit about 18\% of null
+changes. Re-deriving a threshold does not rescue a threshold set at the wrong
+level: it helps only when the threshold is a tail of the null distribution.
+
+\subsection{Power}\label{sec:res-power}
+Table~\ref{tab:power} adds true improvements of known size to the null pairs.
+With the base drawn at random, the re-derived rule commits more real improvements
+than the fixed rule at every effect size up to 15\% of the suite, and the two tie
+at 20\%; with the first arm as base the gap is wider (at a 10\% improvement, 64\%
+against 38\%). The per-configuration rule therefore dominates on both axes:
+fewer false acceptances and equal or greater power. The reason is that a single
+tolerance is miscalibrated in both directions at once: too narrow for incumbents
+noisier than the base, which produces the false acceptances, and too wide for
+incumbents quieter than the base, which loses real improvements.
+
+\begin{table}[t]
+\centering
+\caption{Share of committed changes when a true improvement $e$ (fraction of the
+suite) is added to every null pair of the incumbents. $e = 0$ is the
+false-acceptance rate.}\label{tab:power}
+\begin{tabular}{rrrrr}
+\toprule
+ & \multicolumn{2}{c}{$H_0$ = first arm} & \multicolumn{2}{c}{$H_0$ random} \\
+$e$ & fixed & re-derived & fixed & re-derived \\
+\midrule
+0.00 & 7\% & 1\% & 7\% & 1\% \\
+0.03 & 20\% & 38\% & 33\% & 38\% \\
+0.05 & 22\% & 39\% & 34\% & 39\% \\
+0.10 & 38\% & 64\% & 56\% & 62\% \\
+0.15 & 60\% & 83\% & 76\% & 81\% \\
+0.20 & 73\% & 89\% & 87\% & 87\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The cost of re-derivation is runs. The per-configuration rule needs at least
+three repetitions of every incumbent, where a fixed tolerance needs them only for
+the base. For an evolution of $T$ rounds with $k$ repetitions, that adds $(k-1)T$
+evaluations of the suite.
+
+\subsection{The threshold curve}\label{sec:res-curve}
+The decision rules of published optimizers span two orders of magnitude on the
+1{,}614 null comparisons of the full archive (Figure~\ref{fig:curve}). Committing
+the best score accepts 26.3\% of null changes; requiring a training gain without
+a development regression, or a one-task margin with an anchor set, accepts
+15.6\%; raising the margin to three tasks accepts 1.1\%; the exact paired test
+accepts 0.1\%. The margin, not the presence of a rule, does the work: the same
+margin-plus-anchor rule falls fourteen-fold when its margin moves from one task to
+three. On the pooled null pairs of the incumbents, a tolerance of 5\% of the suite
+accepts 25.1\% of null changes, 10\% accepts 9.0\%, 15\% accepts 1.9\% and 20\%
+accepts 0.8\%.
+
+% Figura pendiente: curva δ → FAR (docs/paper3-per-config-threshold.json,
+% campo curve_pooled_delta_vs_far) con las cinco reglas superpuestas como puntos.
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\linewidth}{\centering\vspace{3em}Figure pending: threshold
+$\delta$ versus false-acceptance rate, with the five decision rules as
+points.\vspace{3em}}}
+\caption{Threshold curve on null comparisons.}\label{fig:curve}
+\end{figure}
+
+These rates are a property of this regime and archive. They are not estimates
+of the false-acceptance rate of the systems that introduced the rules, which run
+other models on other benchmarks. They do show that the margin alone moves a gate
+across two orders of magnitude of error, and that no published gate reports where
+on this curve it operates.

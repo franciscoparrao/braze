@@ -47,6 +47,15 @@ SLM locales, igual que el caveat de régimen del v2.
 
 ## Resultado nuevo (medido hoy, datos en mano)
 
+> **Números congelados (2026-10-17, tarde):** los análisis ahora leen un archivo fijo,
+> `docs/paper3-archive-manifest.txt` (140 JSON con sha256; si alguno cambia, el script
+> aborta). Sobre ese corpus: 26 sweeps, 90 incumbentes, 1.814 pares nulos; volteo
+> mediano 5,7 %; rango intra-sweep mediano 11,1 pp; 29/90 incumbentes más ruidosos que
+> H0; FAR 6,9 % (δ fijo) vs 0,8 % (por config); δ_H0=0: 14 brazos, 25,7 % vs 0,4 %;
+> δ_H0>0: 76 brazos, 3,5 % vs 0,8 %. Experimento central: 1.614 comparaciones nulas;
+> Meta-Harness 26,3 %, AutoDesign/HCL δ=1 15,6 %, HCL δ=3 1,1 %, McNemar 0,1 %. La tabla
+> de abajo es la corrida exploratoria previa al congelamiento.
+
 `scripts/paper3_per_config_threshold.py` → `docs/paper3-per-config-threshold.json`.
 En cada sweep, el primer brazo con ≥3 réplicas hace de H0 y los demás brazos (misma
 suite, otra configuración) hacen de incumbentes. Con réplicas de una misma
