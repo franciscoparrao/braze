@@ -63,15 +63,16 @@ def numbered(lines, start, end):
     return "\n".join(f"L{i}| {lines[i - 1]}" for i in range(start, end + 1))
 
 
-def run_braze(braze, workdir, label, prompt, max_tokens=None):
-    """Una corrida one-shot; devuelve el texto final (o "")."""
+def run_braze(braze, workdir, label, prompt, max_tokens=None, extra=()):
+    """Una corrida one-shot; devuelve el texto final (o ""). `extra` son
+    flags de `braze run` (p.ej. el modelo juez: --model/--ollama-url)."""
     env = dict(os.environ, XDG_CONFIG_HOME=str(HERE / "profile"))
     if max_tokens:
         env["BRAZE_MAX_TOKENS"] = str(max_tokens)
     env.setdefault("RUST_LOG", "braze_engine=warn")
     with open(workdir / f"{label}.log", "w") as err:
         proc = subprocess.run(
-            [braze, "run", "--output-format", "json", prompt],
+            [braze, "run", "--output-format", "json", *extra, prompt],
             cwd=workdir, env=env, stdout=subprocess.PIPE, stderr=err, text=True,
         )
     (workdir / f"{label}.json").write_text(proc.stdout)
@@ -152,7 +153,8 @@ def verify(args, out, lines, review):
         # (args de una tool call como texto, o razonamiento filtrado sin
         # respuesta). Un reintento; si sigue sin veredicto, el issue se queda.
         for attempt in range(2):
-            text = run_braze(args.braze, out, f"verify{k:02d}-{attempt}", prompt)
+            text = run_braze(args.braze, out, f"verify{k:02d}-{attempt}", prompt,
+                             extra=args.judge)
             m = VERDICT_RE.search(text)
             if m:
                 break
@@ -186,8 +188,20 @@ def main():
     ap.add_argument("--from-review", action="store_true",
                     help="saltar map/reduce/repair y verificar OUTDIR/review.md existente")
     ap.add_argument("--no-verify", action="store_true")
+    ap.add_argument("--from-notes", action="store_true",
+                    help="saltar el map y sintetizar desde OUTDIR/notes.md existente")
+    ap.add_argument("--judge-model", default="",
+                    help="modelo Ollama para reduce/repair/verify (default: el del perfil)")
+    ap.add_argument("--judge-url", default="",
+                    help="servidor Ollama del juez (default: el del perfil)")
     args = ap.parse_args()
     only = {int(x) for x in args.only.split(",") if x.strip()}
+    # El juicio (síntesis y verificación) es el techo medido en la
+    # calibración 2026-10-09; el map (extracción anclada) no. Se puede
+    # poner un modelo más capaz y lento solo en esas etapas.
+    args.judge = tuple(
+        (["--model", args.judge_model] if args.judge_model else [])
+        + (["--ollama-url", args.judge_url] if args.judge_url else []))
 
     out = Path(args.outdir)
     out.mkdir(parents=True, exist_ok=True)
@@ -228,7 +242,10 @@ def main():
                     break
             return best, best_report
 
-        for i, (a, b) in enumerate(chunks, 1):
+        if args.from_notes:
+            notes_parts.append((out / "notes.md").read_text(encoding="utf-8").strip())
+            log("map: reusado notes.md completo (--from-notes)")
+        for i, (a, b) in ([] if args.from_notes else enumerate(chunks, 1)):
             if only and i not in only:
                 kept = [p for start, parts in sorted(previous_notes.items())
                         if a <= start <= b for p in parts]
@@ -256,7 +273,8 @@ def main():
 
         # --- reduce ------------------------------------------------------------
         prompt = fill(reduce_tpl, JOURNAL=args.journal, N=n, CRITERIA=criteria, NOTES=notes)
-        review = from_heading(run_braze(args.braze, out, "reduce", prompt), r"^## Summary")
+        review = from_heading(run_braze(args.braze, out, "reduce", prompt, extra=args.judge),
+                              r"^## Summary")
         (out / "review.md").write_text(review + "\n")
 
         # --- repair ------------------------------------------------------------
@@ -280,7 +298,8 @@ def main():
                 "backticks copied from the cited lines or the notes; fix the anchor or the phrase, or "
                 "delete the issue if nothing supports it. Start your answer with `## Summary`."
             )
-            fixed = from_heading(run_braze(args.braze, out, f"repair{attempt + 1}", repair),
+            fixed = from_heading(run_braze(args.braze, out, f"repair{attempt + 1}", repair,
+                                           extra=args.judge),
                                  r"^## Summary")
             if fixed:
                 review = fixed
