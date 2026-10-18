@@ -1,0 +1,69 @@
+% Paper 3 — Threats to validity (borrador 2026-10-17). Base: outline v2 § Threats y v3
+% § Threats nuevos.
+
+\section{Threats to Validity}\label{sec:threats}
+
+\paragraph{We test decision rules, not systems.}
+The threshold curve applies the acceptance rules of Meta-Harness, AutoDesign
+and HCL, re-implemented from their papers, to our null comparisons. The rates we
+report are the rates of those rules in our regime, not the rates of those
+systems on their benchmarks, where models, tasks and noise differ. For the
+fixed-versus-re-derived comparison we follow the procedure that RRSI describes
+(a tolerance equal to the spread of repeated evaluations of the base, kept
+fixed), not its code, and RRSI's acceptance condition has an additional cost
+term that we do not model.
+
+\paragraph{One regime.}
+All sweeps come from one harness, one inference node and, for the most part,
+small local models with large capability gaps. Heterogeneous noise may be a
+feature of this regime: hosted tool-calling endpoints evaluated at temperature 0
+can be nearly deterministic between reruns \citep{chen2026noisefloor}, and if
+every configuration of an evolution is that quiet, a single calibration costs
+little. Within our range (1B to 27B) the median noise falls with model size but
+its tail does not (Section~\ref{sec:discussion}); we have no data on frontier
+models.
+Our claim is conditional on heterogeneity, and we report heterogeneity itself
+as the first result so that others can check whether their regime has it.
+
+\paragraph{The archive is both the source of noise and the test bed.}
+The null distributions are built from the same sweeps on which the rules are
+evaluated. We mitigate this in three ways: the per-configuration threshold never
+sees the pair it decides (leave-one-pair-out), confidence intervals resample
+whole sweeps, and we report results per configuration rather than a single
+pooled number. Selection is a related concern: the calibration analysis can use
+only sweeps with at least two arms of three or more repetitions (26 of 62), and
+those sweeps were run for other purposes (model comparisons, ablations of harness
+levers). They are not a random sample of configurations an optimizer would
+visit.
+
+\paragraph{Unrecorded configuration as noise.}
+Part of what we count as run-to-run noise may be configuration that the sweeps
+did not record. The harness began recording its inference engine and version in
+late August 2026; earlier sweeps do not, and in a controlled experiment on this
+node, changing only the KV-cache type changed the outcome of 82\% of the items.
+Node drift (driver updates, memory pressure from other processes) can also enter
+between repetitions. All of these inflate the apparent noise of some
+configurations. They would affect both rules alike within a pair, but they may
+inflate the heterogeneity across configurations that drives our main result.
+
+\paragraph{Estimators and small samples.}
+With three repetitions, every estimate of $\hat\delta$ rests on very few pairs,
+and the maximum is a high-variance estimator. We checked that a second tail
+estimator gives the same result and that equalizing the number of pairs does not
+change it, but the absolute rates are tied to $k = 3$ to $5$ repetitions. With
+more repetitions both rules would estimate the noise better, and the gap between
+them would likely shrink for incumbents whose noise resembles the base's.
+
+\paragraph{The power model.}
+We model a true improvement as a uniform shift $e$ of the paired difference.
+Real harness changes help some tasks and hurt others, and they may change the
+noise of the configuration as well as its mean. The power comparison shows the
+direction of the effect under the simplest alternative; it does not estimate the
+power of either rule against the changes an optimizer actually proposes.
+
+\paragraph{Exclusions.}
+We excluded sweeps that the project had labelled invalid or contaminated by
+infrastructure failures, by file name, before running the analyses reported
+here. An earlier exploratory version included them (162 more comparisons) and
+gave rates within a point of the ones reported. The exclusion rule and the frozen
+manifest are part of the replication package.

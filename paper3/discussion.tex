@@ -1,0 +1,67 @@
+% Paper 3 — Discussion (borrador 2026-10-17).
+
+\section{Discussion}\label{sec:discussion}
+
+\paragraph{What a gate should report.}
+A statistical gate makes two choices: the form of its test and the level of its
+threshold. The concurrent gates have converged on the first, and the paired,
+discordance-based test is now common to PACE, HarnessBank and SAGE
+\citep{zayxshawn2026pace,luo2026harnessbank,wang2026sage}. Our results say the
+second choice matters at least as much: the same rule moves across two orders of
+magnitude of false acceptances when only its margin changes, and a central
+estimate of the noise leaves about 18\% of null changes committed regardless of
+how it is derived. We therefore suggest that a gate report three quantities
+alongside its gains: the noise estimate it used and how it was obtained, the
+threshold that estimate produced, and the false-acceptance rate of that
+threshold on null comparisons of its own configurations. The last one costs
+nothing beyond the repeated runs that a noise estimate already requires, since
+every pair of repetitions is a null comparison.
+
+\paragraph{Re-derive the threshold for each incumbent.}
+Where the noise of configurations differs, a tolerance measured once on the base
+is a bet on configurations that have not been measured. Our data show the bet
+losing in both directions: it accepts null changes from incumbents noisier than
+the base and rejects real improvements from incumbents quieter than it. The
+remedy is to re-estimate the noise for the incumbent being challenged, from its
+own repetitions, with a tail estimator. That is what SAGE proposes as future
+work, ``an adaptive threshold that tightens or loosens $\alpha$ from an online
+estimate of task noise'' \citep{wang2026sage}, and our measurements are evidence
+that the extension is worth its cost. The cost is runs, not power. Since an
+incumbent is evaluated many times over an evolution, its repetitions can be
+accumulated across rounds rather than paid at once, so the online version that
+SAGE describes is the natural implementation.
+
+\paragraph{When a fixed threshold is enough.}
+A single calibration is adequate in two situations. One is when every
+configuration of the evolution is about as noisy as the base, for example with
+models that are nearly deterministic at the temperature used. The other is when
+the base happens to be the noisiest configuration the evolution visits, in which
+case the fixed threshold is conservative and pays only in power. Neither can be
+known without measuring the incumbents, which is the measurement that a fixed
+threshold is meant to avoid. A cheap check is to repeat a few incumbents and
+compare their noise with the base's; if they differ, the fixed threshold is
+already miscalibrated.
+
+\paragraph{Noise does not vanish with scale in this range.}
+Self-evolution is cheapest to run on small local models, which is why PACE and
+our archive both live there. One might expect the problem to fade as models
+grow. In our data the typical configuration does get quieter, but the tail does
+not: the median flip rate is 6.3\% for arms of models up to 4B parameters (105
+arms), 7.0\% for 7--12B (25) and 2.1\% for 20B and above (17), while the 90th
+percentile is 17\%, 21\% and 25\% respectively. Larger models in this range
+make a quiet base more likely and a noisy incumbent no less likely, which is the
+configuration in which a single calibration fails worst
+(Table~\ref{tab:fixed}). Two arms whose size we could not assign are left out. This complements the finding that harness evolution
+gains are unstable and transfer poorly \citep{wu2026harnessdev,wang2026rethinking}:
+part of that instability can come from the accept step, where some of the
+committed changes were never improvements.
+
+\paragraph{Future work.}
+Three extensions follow. First, a sequential version of the per-configuration
+rule, which accumulates an incumbent's repetitions across rounds and combines
+them with an anytime-valid test such as PACE's, would remove the up-front cost.
+Second, the frontier regime needs the same measurement: whether the noise of
+configurations is heterogeneous when the models are large and the temperature is
+low is an empirical question that our archive cannot answer. Third, the power
+analysis should be repeated with the changes that real optimizers propose, which
+alter the noise as well as the mean.
