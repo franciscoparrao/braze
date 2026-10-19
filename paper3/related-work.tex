@@ -89,14 +89,10 @@ transfer only partially to held-out tasks'' \citep{wu2026harnessdev}, and
 \citet{wang2026rethinking} find that, on Terminal-Bench 2.1 and under matched
 budgets, automatic harness evolution does not beat simple test-time scaling,
 with long-horizon games as the exception. Both point to the accept step as a
-place where noise enters the search. A gate whose false-acceptance rate is
-uncontrolled commits candidates that will not replicate, and the instability
-these benchmarks report is the aggregate symptom of that per-decision error.
+place where noise enters the search. A gate whose false-acceptance rate is uncontrolled commits candidates that will not replicate, so part of the instability these benchmarks report may come from that per-decision error; neither benchmark isolates the accept step.
 
 \paragraph{Scope.}
-Our regime differs from most of the work above: small local models (3--20B)
-with large capability gaps, Rust coding suites graded by \texttt{cargo check},
-and a single inference node. PACE is the exception in model scale. The
+Our regime differs from most of the work above: mostly small local models (1B to 27B total parameters, plus three hosted models) with large capability gaps, agentic coding suites graded by compilation and assertions, and a single inference node. PACE is the exception in model scale. The
 frontier systems that RRSI, HarnessBank and SAGE evolve may well show less
 heterogeneous noise across configurations, and we do not claim that their
 published improvements are false. We claim that, in a noisy regime, a threshold

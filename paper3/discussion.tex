@@ -41,14 +41,11 @@ compare their noise with the base's; if they differ, the fixed threshold is
 already miscalibrated.
 
 \paragraph{Noise does not vanish with scale in this range.}
-Self-evolution is cheapest to run on small local models, which is where our archive lives; PACE also evaluates small models, as a minimal testbed for the accept decision \citep{zayxshawn2026pace}. One might expect the problem to fade as models
+Our archive comes from small local models, which a single workstation can serve; PACE also evaluates small models, as a minimal testbed for the accept decision \citep{zayxshawn2026pace}. One might expect the problem to fade as models
 grow. In our data the typical configuration does get quieter, but the tail does
 not: the median flip rate is 6.3\% for arms of models up to 4B parameters (105
 arms), 7.0\% for 7--12B (25) and 2.1\% for 20B and above (17), while the 90th
-percentile is 17\%, 21\% and 25\% respectively. Larger models in this range
-make a quiet base more likely and a noisy incumbent no less likely, which is the
-configuration in which a single calibration fails worst
-(Table~\ref{tab:fixed}). Two arms whose size we could not assign are left out. This complements the findings that the gains of harness evolution are unstable \citep{wu2026harnessdev} and generalize poorly beyond the tasks they were evolved on \citep{wu2026harnessdev,wang2026rethinking}:
+percentile is 17\%, 21\% and 25\% respectively. With only 17 arms at 20B and above and no test across bands, this is descriptive; if it holds, larger models make a quiet base more likely without making a noisy incumbent less likely, which is the configuration in which a single calibration fails worst (Table~\ref{tab:fixed}). Two arms whose size we could not assign are left out. This complements the findings that the gains of harness evolution are unstable \citep{wu2026harnessdev} and generalize poorly beyond the tasks they were evolved on \citep{wu2026harnessdev,wang2026rethinking}:
 part of that instability can come from the accept step, where some of the
 committed changes were never improvements.
 

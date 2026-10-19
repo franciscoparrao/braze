@@ -58,9 +58,7 @@ tail estimator and report the false-acceptance rate of the threshold they use.
 
 \section{Conclusion}\label{sec:conclusion}
 Statistical gates have made the accept step of harness optimization a test, and
-the strongest of them calibrate the test against measured noise. In our archive
-that calibration is not a property of the benchmark: the noise of identical runs
-changes with the configuration, so a threshold measured on the base is
+the strongest of them calibrate the test against measured noise. In our archive the noise of identical runs is not a property of the benchmark: it changes with the configuration, so a threshold measured on the base is
 miscalibrated for the incumbents it will judge, accepting null changes from
 noisier ones and rejecting real improvements from quieter ones. Re-deriving the
 threshold for each incumbent, from its own repetitions and with a tail

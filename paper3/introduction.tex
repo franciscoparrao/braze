@@ -15,8 +15,7 @@ evaluations are stochastic, that decision is a statistical test whether or not
 it is written as one, and its error rate determines whether the loop climbs or
 drifts.
 
-Two recent observations make the question pressing. First, the gains of harness evolution are fragile: they are unstable and transfer only partially to held-out tasks \citep{wu2026harnessdev}, and on Terminal-Bench 2.1, under matched budgets, evolution does not beat simple test-time scaling, with long-horizon games as the exception \citep{wang2026rethinking}. Second, the noise is large where these loops are
-cheapest to run. On our own archive of agent sweeps with small local models,
+Two recent observations make the question pressing. First, the gains of harness evolution are fragile: they are unstable and transfer only partially to held-out tasks \citep{wu2026harnessdev}, and on Terminal-Bench 2.1, under matched budgets, evolution does not beat simple test-time scaling, with long-horizon games as the exception \citep{wang2026rethinking}. Second, the noise is large in the regime of small local models, which is where such loops can be run on a single workstation. On our own archive of agent sweeps,
 the median configuration flips 5.7\% of its tasks between two runs of the
 \emph{same} setup, and one configuration in ten flips more than 17\%. A gate
 that commits on a point estimate is answering a coin toss on a sizeable fraction
@@ -76,6 +75,4 @@ The scope of these claims is deliberate. Our regime is mostly small local models
 large capability gaps, where noise is high and heterogeneous; the frontier models
 that most self-evolving systems optimize may show less heterogeneity, and we do
 not claim that their published improvements are false. What we claim is
-narrower: wherever the noise of configurations differs, a threshold calibrated
-once is miscalibrated for most of the decisions it makes, and the error is
-measurable from data that any repeated-run protocol already produces.
+narrower: wherever the noise of configurations differs, a threshold calibrated once is miscalibrated for the incumbents whose noise departs from the base's (a third of them in our archive), and the error is measurable from data that any repeated-run protocol already produces.

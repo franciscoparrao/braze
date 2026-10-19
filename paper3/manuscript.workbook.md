@@ -120,9 +120,27 @@ datos o las otras secciones contradicen. Van primero.
 - spec: no (el texto se escribió sin scaffold previo).
 - reference: **sí, pegado directamente en el manuscrito** (todas las secciones, abstract
   y conclusión, redactadas por el modelo el 2026-10-17/18).
-- diagnose: 1 iteración (este log).
+- diagnose: 1 iteración (este log); correcciones de exactitud y hedges aplicadas por el modelo (§3b).
 - edición de lenguaje del modelo: además del borrador, el modelo aplicó correcciones de
   exactitud y atribución tras /verify-refs (commit 0c87c64).
 - Declaración que corresponde **hoy**: "AI-generated draft from the author's design,
   data and analyses, revised by the author" (camino B), salvo que se reconstruya
   (camino A).
+
+## 3b. Log — iter 1, correcciones aplicadas por el modelo (2026-10-19, camino B)
+El autor eligió el camino B. El modelo corrigió solo exactitud y hedges; las marcas de
+estilo y registro-IA (§3.3–3.5) quedan para el autor.
+- ERROR methods §2.1 "overstated the noise by 162": corregido. Verificado de nuevo sobre el
+  mismo corpus congelado, incluir los sweeps inválidos suma **164** comparaciones (no
+  162, que era de la v1 con otro corpus) y ninguna tasa de la curva cambia más de 0,8 pp
+  (25,5 % vs 26,3 % en best score). Methods y threats §Exclusions dicen ahora lo mismo.
+- ERROR related-work §Scope: rango y suites alineados con methods.
+- ERROR results §4.2 "never flipped" → "passed the same number of tasks in every repetition".
+- ERROR conclusión: el sujeto pasa a ser el ruido.
+- hedge intro "most of the decisions" → "the incumbents whose noise departs from the
+  base's (a third of them in our archive)".
+- hedge "cheapest to run" (intro y discussion): ahora se refiere a que se puede servir en
+  una sola workstation, sin afirmar costos.
+- hedge related-work §Overfitting: causal → "may come from"; se agrega que ningún
+  benchmark aísla el accept step.
+- hedge discussion §Noise: se declara que es descriptivo (17 brazos ≥20B, sin test).

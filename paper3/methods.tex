@@ -22,9 +22,7 @@ in this paper cannot be silently recomputed on a different corpus.
 
 Sweeps that the project itself had marked as invalid or contaminated by
 infrastructure failures (out-of-memory kills, transport timeouts, an open
-circuit breaker) are excluded by name. Their failures are not model noise, and
-an earlier version of our analysis that included them overstated the noise by
-162 comparisons. Of the remaining files, 95 contain per-run results. We keep the
+circuit breaker) are excluded by name. Their failures are not model noise. On the same frozen corpus, including them would add 164 null comparisons and change no rate of the threshold curve by more than 0.8 points (Section~\ref{sec:threats}). Of the remaining files, 95 contain per-run results. We keep the
 158 \emph{groups} (file $\times$ arm) that repeat each of at least eight tasks
 at least twice: 9 groups with 2 repetitions, 32 with 3, 112 with 5 and 5 with
 10, for 14{,}790 runs and 32 distinct backend specifications. Most are small
