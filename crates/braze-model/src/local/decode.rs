@@ -157,6 +157,8 @@ pub(super) fn generate_blocking(
         Err(e) => bail!("local: tokenización falló: {e}"),
     };
     let input_tokens = tokens.len() as u32;
+    // Clave de la ronda para el RNG por contador (`LocalSampling::keyed`).
+    let ctx_key = super::sampling::context_key(&tokens);
 
     // Guard explícito: un prompt que no cabe en el contexto debe ser un
     // error legible del backend, no un assert C++ que mata el proceso.
@@ -229,7 +231,7 @@ pub(super) fn generate_blocking(
         fed = end;
     }
 
-    let mut sampler = free_sampler(model, &sampling);
+    let mut sampler = free_sampler(model, &sampling.keyed(ctx_key, 0, 0));
     // Tokens ya generados, solo para re-sembrar DRY cuando el stencil
     // reconstruye el sampler (ver `rebuild_free_sampler`). Con greedy queda
     // vacío: no vale la pena acumular lo que nadie va a leer.
@@ -354,7 +356,7 @@ pub(super) fn generate_blocking(
                 );
                 sampler = LlamaSampler::chain_simple([
                     LlamaSampler::logit_bias(model.n_vocab(), &eog_bans),
-                    free_sampler(model, &sampling),
+                    free_sampler(model, &sampling.keyed(ctx_key, 0, eog_bans.len() as u64)),
                 ]);
                 continue;
             }
@@ -419,7 +421,7 @@ pub(super) fn generate_blocking(
                     HarmonyMarker::Message if parser.tool_call_in_progress() && !constrained => {
                         let tool = parser.pending_tool_name().unwrap_or_default();
                         let grammar = harmony_args_grammar(tool, tools);
-                        if let Some(s) = constrained_sampler(model, &grammar, &sampling) {
+                        if let Some(s) = constrained_sampler(model, &grammar, &sampling.keyed(ctx_key, u64::from(output_tokens), 0)) {
                             sampler = s;
                             constrained = true;
                             args_cursor = JsonCursor::new();
@@ -429,7 +431,7 @@ pub(super) fn generate_blocking(
                     // Cierre de mensaje con el constraint aún puesto
                     // (cierre off-spec): liberar antes de seguir.
                     HarmonyMarker::End | HarmonyMarker::Start if constrained => {
-                        sampler = rebuild_free_sampler(model, &sampling, &generated);
+                        sampler = rebuild_free_sampler(model, &sampling.keyed(ctx_key, u64::from(output_tokens), 0), &generated);
                         constrained = false;
                     }
                     _ => {}
@@ -456,7 +458,7 @@ pub(super) fn generate_blocking(
                         if constrained {
                             args_cursor.feed(&piece);
                             if args_cursor.complete() {
-                                sampler = rebuild_free_sampler(model, &sampling, &generated);
+                                sampler = rebuild_free_sampler(model, &sampling.keyed(ctx_key, u64::from(output_tokens), 0), &generated);
                                 constrained = false;
                                 tracing::info!(
                                     "stencil: args JSON completos — constraint liberado"
@@ -483,14 +485,14 @@ pub(super) fn generate_blocking(
                                 if let Some(s) = constrained_sampler(
                                     model,
                                     qwen_grammar.as_deref().unwrap_or_default(),
-                                    &sampling,
+                                    &sampling.keyed(ctx_key, u64::from(output_tokens), 0),
                                 ) {
                                     sampler = s;
                                     constrained = true;
                                     tracing::info!("stencil: envelope qwen activado");
                                 }
                             } else if constrained && tail.ends_with("</tool_call>") {
-                                sampler = rebuild_free_sampler(model, &sampling, &generated);
+                                sampler = rebuild_free_sampler(model, &sampling.keyed(ctx_key, u64::from(output_tokens), 0), &generated);
                                 constrained = false;
                                 tracing::info!("stencil: envelope cerrado — constraint liberado");
                             }

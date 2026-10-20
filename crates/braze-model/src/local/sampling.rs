@@ -53,6 +53,30 @@ pub struct LocalSampling {
 /// `LLAMA_DEFAULT_SEED` de llama.cpp: "usá una semilla aleatoria".
 pub(super) const RANDOM_SEED: u32 = 0xFFFF_FFFF;
 
+/// SplitMix64: un paso del mezclador de Steele et al. (el mismo que usa
+/// DeepInfer para su RNG por contador, `tilelang_ops/random_sampling.py`).
+fn splitmix64(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Clave de contexto para [`LocalSampling::keyed`]: FNV-1a sobre los ids de
+/// los tokens del prompt. Distinta en cada ronda (el prompt crece) y la
+/// misma para el mismo prompt, sin depender del estado del backend ni del
+/// orden en que corrieron otras tareas.
+pub(super) fn context_key(tokens: &[llama_cpp_2::token::LlamaToken]) -> u64 {
+    let mut h: u64 = 0xCBF2_9CE4_8422_2325;
+    for t in tokens {
+        for b in t.0.to_le_bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01B3);
+        }
+    }
+    h
+}
+
 impl Default for LocalSampling {
     fn default() -> Self {
         Self {
@@ -106,6 +130,38 @@ impl LocalSampling {
                 .and_then(|v| v.parse::<u32>().ok())
                 .unwrap_or(RANDOM_SEED),
         }
+    }
+
+    /// RNG por contador (2026-10-20, patrón de DeepInfer): la semilla con que
+    /// se construye cada sampler se deriva de (semilla base, contexto,
+    /// posición, sal) en vez de reusarse tal cual.
+    ///
+    /// Por qué: el sampler se reconstruye en cada ronda (`generate_blocking`)
+    /// y en cada swap del stencil, y `LlamaSampler::dist(seed)` arranca su
+    /// generador desde la semilla. Con una semilla FIJA (`--seed` del bench,
+    /// que pasa `seed + rep`, o `BRAZE_LOCAL_SEED`), todas las rondas de una
+    /// sesión reiniciaban así el mismo flujo de uniformes: rondas
+    /// correlacionadas por construcción. Con la derivación, cada ronda (otro
+    /// prompt → otro `context`) y cada swap (otra `position`) tienen su flujo,
+    /// y la corrida sigue siendo reproducible bit a bit para la misma semilla.
+    ///
+    /// No toca la semilla aleatoria por generación (`RANDOM_SEED`, el default)
+    /// ni el greedy (temperatura 0), donde la semilla no interviene.
+    #[must_use]
+    pub(super) fn keyed(&self, context: u64, position: u64, salt: u64) -> Self {
+        if self.seed == RANDOM_SEED || self.temperature <= 0.0 {
+            return *self;
+        }
+        let mut z = splitmix64(u64::from(self.seed));
+        z = splitmix64(z ^ context);
+        z = splitmix64(z ^ position);
+        z = splitmix64(z ^ salt);
+        let mut derived = (z & u64::from(u32::MAX)) as u32;
+        if derived == RANDOM_SEED {
+            // 0xFFFFFFFF es "aleatoria" para llama.cpp: nunca derivar a ella.
+            derived = 0;
+        }
+        Self { seed: derived, ..*self }
     }
 
     /// Aplica el régimen de sampling que fija un sweep **encima** de la
@@ -262,6 +318,27 @@ pub(super) fn constrained_sampler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyed_deriva_semillas_distintas_y_reproducibles() {
+        let s = LocalSampling { temperature: 0.7, seed: 42, ..LocalSampling::default() };
+        let a = s.keyed(1, 0, 0).seed;
+        assert_eq!(a, s.keyed(1, 0, 0).seed, "misma clave, misma semilla");
+        assert_ne!(a, s.keyed(2, 0, 0).seed, "otra ronda (contexto), otra semilla");
+        assert_ne!(a, s.keyed(1, 5, 0).seed, "otro swap (posición), otra semilla");
+        assert_ne!(a, s.keyed(1, 0, 1).seed, "otro reintento (sal), otra semilla");
+        assert_ne!(a, 42, "no reusa la semilla base tal cual");
+        let other = LocalSampling { seed: 43, ..s };
+        assert_ne!(a, other.keyed(1, 0, 0).seed, "otra semilla base, otra derivada");
+    }
+
+    #[test]
+    fn keyed_no_toca_la_semilla_aleatoria_ni_el_greedy() {
+        let random = LocalSampling { temperature: 0.7, ..LocalSampling::default() };
+        assert_eq!(random.keyed(9, 9, 9).seed, RANDOM_SEED);
+        let greedy = LocalSampling { seed: 42, ..LocalSampling::default() };
+        assert_eq!(greedy.keyed(9, 9, 9).seed, 42);
+    }
 
     #[test]
     fn el_default_de_sampling_es_greedy() {
