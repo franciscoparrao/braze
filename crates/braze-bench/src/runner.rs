@@ -950,6 +950,93 @@ fn select_ttc_winner(mut candidates: Vec<TaskResult>, rollouts: u32) -> TaskResu
     winner
 }
 
+/// Margen sobre el backstop por tarea antes de dar una fila por colgada en
+/// [`run_isolated`]: cubre el armado/limpieza del sandbox y la evaluación
+/// post-run (`cargo check`, con su propio techo de 120s).
+pub const HANG_GRACE: Duration = Duration::from_secs(300);
+
+/// Corre una fila en su propia tarea de tokio, con un backstop externo
+/// (2026-10-20). `run_task` ya envuelve `run_turn` en un timeout, pero
+/// `tokio::time::timeout` solo dispara cuando el futuro le devuelve el
+/// control: una llamada que bloquee el hilo dentro del turno (o después,
+/// en la evaluación) lo deja sin efecto. Así se colgó 2,8 días el sweep
+/// discriminante de Bonsai-2-9B del 2026-10-17. Desde una tarea aparte, el
+/// timeout de aquí corre en otro hilo del runtime y siempre puede
+/// disparar; la fila queda como error del harness y el sweep sigue. El
+/// hilo bloqueado no se recupera, pero el resto del sweep no espera por él.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_isolated(
+    spec: &BackendSpec,
+    config: &Config,
+    task: &TaskDef,
+    repetition: u32,
+    timeout: Duration,
+    sampling: SamplingSpec,
+    preserve_root: Option<&Path>,
+    ttc_rollouts: u32,
+    wall_clock_budget: Option<Duration>,
+) -> Result<TaskResult, BenchError> {
+    let (spec, config, task) = (spec.clone(), config.clone(), task.clone());
+    let preserve_root = preserve_root.map(Path::to_path_buf);
+    let mut handle = tokio::spawn(async move {
+        if ttc_rollouts > 1 {
+            run_task_ttc(
+                &spec,
+                &config,
+                &task,
+                repetition,
+                timeout,
+                sampling,
+                preserve_root.as_deref(),
+                ttc_rollouts,
+                wall_clock_budget,
+            )
+            .await
+        } else {
+            run_task(
+                &spec,
+                &config,
+                &task,
+                repetition,
+                timeout,
+                sampling,
+                preserve_root.as_deref(),
+                wall_clock_budget,
+            )
+            .await
+        }
+    });
+    let backstop = timeout * ttc_rollouts.max(1) + HANG_GRACE;
+    isolate(&mut handle, backstop).await
+}
+
+/// El mecanismo de [`run_isolated`], separado para poder probarlo con una
+/// tarea que bloquea su hilo de verdad.
+async fn isolate(
+    handle: &mut tokio::task::JoinHandle<Result<TaskResult, BenchError>>,
+    backstop: Duration,
+) -> Result<TaskResult, BenchError> {
+    match tokio::time::timeout(backstop, &mut *handle).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(join_err)) => Err(BenchError::Startup(format!(
+            "la tarea del runner terminó sin resultado: {join_err}"
+        ))),
+        Err(_elapsed) => {
+            handle.abort();
+            eprintln!(
+                "braze-bench: la fila no devolvió el control en {}s (backstop por tarea + {}s de margen); \
+                 se registra como error del harness y el sweep sigue",
+                backstop.as_secs(),
+                HANG_GRACE.as_secs()
+            );
+            Err(BenchError::Startup(format!(
+                "fila colgada: no devolvió el control en {}s (posible llamada bloqueante en el turno o la evaluación)",
+                backstop.as_secs()
+            )))
+        }
+    }
+}
+
 /// Ceiling for the post-run `cargo check` (v8 K-9). The sandbox projects
 /// are dependency-free single-file libs and the engine's post-edit
 /// guardrail already warmed the target dir during the turn, so a healthy
@@ -993,6 +1080,36 @@ async fn run_cargo_check_in_sandbox(dir: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2026-10-20: el backstop de `run_isolated` tiene que cortar una fila
+    /// que BLOQUEA su hilo (no solo una que no termina): ese es el caso del
+    /// sweep de Bonsai-2-9B colgado 2,8 días, donde el timeout interno de
+    /// `run_task` no podía disparar.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn isolate_cuts_a_row_that_blocks_its_thread() {
+        let mut handle = tokio::spawn(async {
+            std::thread::sleep(Duration::from_secs(5));
+            Err::<TaskResult, BenchError>(BenchError::Startup("no debería llegar".into()))
+        });
+        let started = std::time::Instant::now();
+        let out = isolate(&mut handle, Duration::from_millis(200)).await;
+        assert!(started.elapsed() < Duration::from_secs(2), "el backstop esperó al hilo bloqueado");
+        match out {
+            Err(BenchError::Startup(msg)) => assert!(msg.contains("fila colgada"), "{msg}"),
+            other => panic!("se esperaba error de fila colgada, vino {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn isolate_passes_through_a_normal_result() {
+        let mut handle = tokio::spawn(async {
+            Err::<TaskResult, BenchError>(BenchError::Startup("error propio".into()))
+        });
+        match isolate(&mut handle, Duration::from_secs(5)).await {
+            Err(BenchError::Startup(msg)) => assert_eq!(msg, "error propio"),
+            other => panic!("{other:?}"),
+        }
+    }
 
     /// v8 § 6.15 — el selector TTC: auto-consistencia sobre el artefacto.
     /// La mayoría de huella entre convergidos gana aunque el solitario

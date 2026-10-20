@@ -5,6 +5,7 @@
 
 mod backend_spec;
 mod bare_lead_baseline;
+mod checkpoint;
 mod dbv;
 mod error;
 mod external;
@@ -76,6 +77,12 @@ struct Cli {
     /// crudos (uno por tarea) como JSON en esta ruta.
     #[arg(long)]
     output: Option<PathBuf>,
+    /// Retoma un sweep cortado: carga las filas ya terminadas de
+    /// `<output>.partial.jsonl` (el checkpoint que se escribe fila a fila)
+    /// y corre solo las que faltan. Sin el flag, un checkpoint previo se
+    /// conserva renombrado y el sweep empieza de cero. Requiere --output.
+    #[arg(long, requires = "output")]
+    resume: bool,
     /// Cuántas veces correr cada (tarea, backend). Con modelos locales
     /// chicos la varianza corrida-a-corrida es alta — un pass_rate con
     /// repetitions=1 es ruido, no señal. Recomendado >=5 para comparar
@@ -242,13 +249,22 @@ async fn main() -> ExitCode {
         };
     }
 
-    match run().await {
-        Ok(()) => ExitCode::SUCCESS,
+    let code = match run().await {
+        Ok(()) => 0,
         Err(err) => {
             eprintln!("braze-bench: error: {err}");
-            ExitCode::FAILURE
+            1
         }
-    }
+    };
+    // Salida explícita (2026-10-20): al soltar el runtime, tokio espera a
+    // los hilos de trabajo, y una fila colgada que `run_isolated` dejó
+    // atrás puede tener un hilo bloqueado para siempre. Con todo ya escrito
+    // (JSON final y checkpoint), esa espera solo colgaría la salida del
+    // proceso y la cola que lo lanzó.
+    use std::io::Write as _;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    std::process::exit(code);
 }
 
 async fn run() -> Result<(), BenchError> {
@@ -397,6 +413,10 @@ async fn run() -> Result<(), BenchError> {
     }
 
     let mut results: Vec<TaskResult> = Vec::new();
+    // Checkpoint incremental (2026-10-20): un sweep colgado o un nodo
+    // reiniciado ya no se lleva todas las filas (el JSON final se escribe
+    // recién al terminar). Ver `checkpoint.rs`.
+    let mut checkpoint = checkpoint::Checkpoint::open(cli.output.as_deref(), cli.resume)?;
     // round-economics: el backstop de infraestructura tiene que quedar
     // POR ENCIMA del presupuesto experimental, si no muerde primero y
     // todas las filas del brazo salen censuradas ([Timeout] pierde el
@@ -419,6 +439,19 @@ async fn run() -> Result<(), BenchError> {
         (None, None) => runner::DEFAULT_TASK_TIMEOUT.as_secs(),
     };
     let task_timeout = Duration::from_secs(task_timeout_secs);
+    // Watchdog de último recurso (`checkpoint.rs`): si ninguna fila termina
+    // en el doble del backstop por fila más 15 min (cubre la carga del
+    // modelo de un brazo nuevo), el proceso se termina con código 4 y la
+    // cola puede relanzarlo con --resume.
+    {
+        let max_ttc = specs
+            .iter()
+            .map(|(_, spec)| spec.ablation().ttc_rollouts.unwrap_or(1).max(1))
+            .max()
+            .unwrap_or(1);
+        let per_row = task_timeout * max_ttc + runner::HANG_GRACE;
+        checkpoint::spawn_watchdog(per_row * 2 + Duration::from_secs(900));
+    }
     // El presupuesto viaja por `Config` (es donde `runner::run_task` lee
     // los knobs del engine); el flag gana sobre lo que traiga el archivo
     // de config o el entorno, como el resto de los flags del bench.
@@ -552,8 +585,14 @@ async fn run() -> Result<(), BenchError> {
                 let wall_clock_budget = config
                     .max_turn_wall_clock_secs
                     .map(std::time::Duration::from_secs);
-                let run = if ttc_rollouts > 1 {
-                    runner::run_task_ttc(
+                let resumed = checkpoint
+                    .resumed
+                    .remove(&(display_name.clone(), task.id.clone(), repetition));
+                let run = if let Some(previous) = resumed {
+                    println!("   (reanudado desde el checkpoint)");
+                    Ok(previous)
+                } else {
+                    runner::run_isolated(
                         spec,
                         &config,
                         task,
@@ -562,18 +601,6 @@ async fn run() -> Result<(), BenchError> {
                         sampling,
                         preserve_root.as_deref(),
                         ttc_rollouts,
-                        wall_clock_budget,
-                    )
-                    .await
-                } else {
-                    runner::run_task(
-                        spec,
-                        &config,
-                        task,
-                        repetition,
-                        task_timeout,
-                        sampling,
-                        preserve_root.as_deref(),
                         wall_clock_budget,
                     )
                     .await
@@ -610,6 +637,7 @@ async fn run() -> Result<(), BenchError> {
                         results.push(harness_error_result(&display_name, task, repetition, &err));
                     }
                 }
+                checkpoint.record(results.last());
                 // L-11: contabilidad del fail-fast sobre la fila recién
                 // registrada (ambas ramas del match empujan una).
                 let instant_infra_failure = results.last().is_some_and(|r| {
@@ -737,7 +765,14 @@ async fn run() -> Result<(), BenchError> {
                 } else {
                     println!("-> {} :: {}", harness.name(), task.id);
                 }
-                match external::run_external_task(&harness, task, repetition, task_timeout).await {
+                let resumed = checkpoint
+                    .resumed
+                    .remove(&(harness.name(), task.id.clone(), repetition));
+                let run = match resumed {
+                    Some(previous) => Ok(previous),
+                    None => external::run_external_task(&harness, task, repetition, task_timeout).await,
+                };
+                match run {
                     Ok(result) => results.push(result),
                     Err(err) => {
                         eprintln!(
@@ -753,6 +788,7 @@ async fn run() -> Result<(), BenchError> {
                         ));
                     }
                 }
+                checkpoint.record(results.last());
             }
         }
 
