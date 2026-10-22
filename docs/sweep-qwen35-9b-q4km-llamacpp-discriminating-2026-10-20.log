@@ -1,0 +1,243 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 900s por intento.
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_2_funciones (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_2_funciones (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_2_funciones (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_6_funciones (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_6_funciones (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_6_funciones (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_12_funciones (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_12_funciones (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_12_funciones (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_20_funciones (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_20_funciones (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_20_funciones (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_30_funciones (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_30_funciones (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_30_funciones (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_1_funciones (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_1_funciones (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_1_funciones (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_3_funciones (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_3_funciones (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_3_funciones (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_8_funciones (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_8_funciones (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_8_funciones (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_3_temprano (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_3_temprano (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_3_temprano (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_17_medio (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_17_medio (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_17_medio (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_34_tarde (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_34_tarde (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_34_tarde (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_2_usos (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_2_usos (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_2_usos (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_5_usos (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_5_usos (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_5_usos (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_10_usos (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_10_usos (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: renombrar_campo_10_usos (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_1_errores (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_1_errores (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_1_errores (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_2_errores (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_2_errores (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_2_errores (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_3_errores (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_3_errores (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_3_errores (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_4_errores (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_4_errores (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: arreglar_4_errores (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_0 (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_0 (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_0 (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_1 (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_1 (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_1 (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_2 (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_2 (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: preservar_vecino_2 (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: fix_dos_errores_una_linea (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: fix_dos_errores_una_linea (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: fix_dos_errores_una_linea (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: localizar_y_editar_archivo_largo (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: localizar_y_editar_archivo_largo (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: localizar_y_editar_archivo_largo (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: agregar_metodo_a_impl_existente (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: agregar_metodo_a_impl_existente (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: agregar_metodo_a_impl_existente (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_item_a_modulo_nuevo (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_item_a_modulo_nuevo (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_item_a_modulo_nuevo (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: cambio_coordinado_dos_archivos (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: cambio_coordinado_dos_archivos (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: cambio_coordinado_dos_archivos (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_bloque_deprecado (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_bloque_deprecado (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: borrar_bloque_deprecado (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_almacen_completo (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: mover_almacen_completo (rep 2/3)
+[2m2026-10-21T01:50:23.195953Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T01:50:58.120838Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:qwen35-9b-q4km-llamacpp :: mover_almacen_completo (rep 3/3)
+[2m2026-10-21T02:05:55.557535Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mglob [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T02:07:19.995119Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mshell_exec [3mservido_de_cache[0m[2m=[0mfalse
+-> zen:qwen35-9b-q4km-llamacpp :: tres_archivos_coordinados (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: tres_archivos_coordinados (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: tres_archivos_coordinados (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: contar_metodos_de_almacen (rep 1/3)
+[2m2026-10-21T02:15:06.084325Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m119 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: contar_metodos_de_almacen (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: contar_metodos_de_almacen (rep 3/3)
+[2m2026-10-21T02:15:57.255084Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m62 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: reportar_campo_de_item (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: reportar_campo_de_item (rep 2/3)
+[2m2026-10-21T02:16:35.496787Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m24 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: reportar_campo_de_item (rep 3/3)
+[2m2026-10-21T02:16:56.696038Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m24 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: localizar_funcion_por_valor (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: localizar_funcion_por_valor (rep 2/3)
+[2m2026-10-21T02:17:41.341098Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m round produced nothing mappable; nudging the model instead of ending the turn [3mround[0m[2m=[0m2 [3mround_output_tokens[0m[2m=[0m9 [3mattempt[0m[2m=[0m1
+-> zen:qwen35-9b-q4km-llamacpp :: localizar_funcion_por_valor (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_25_lejano (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_25_lejano (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_25_lejano (rep 3/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_39_lejano (rep 1/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_39_lejano (rep 2/3)
+-> zen:qwen35-9b-q4km-llamacpp :: editar_lote_39_lejano (rep 3/3)
+
+== Resultados por tarea ==
+[PASS] borrar_2_funciones       zen:qwen35-9b-q4km-llamacpp  49997ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=9000 tokens_out=537
+[PASS] borrar_2_funciones       zen:qwen35-9b-q4km-llamacpp (rep 2)  41618ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=8964 tokens_out=472
+[PASS] borrar_2_funciones       zen:qwen35-9b-q4km-llamacpp (rep 3)  42701ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=8961 tokens_out=482
+[PASS] borrar_6_funciones       zen:qwen35-9b-q4km-llamacpp 118667ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=14610 tokens_out=1312
+[PASS] borrar_6_funciones       zen:qwen35-9b-q4km-llamacpp (rep 2)  66225ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=10356 tokens_out=714
+[PASS] borrar_6_funciones       zen:qwen35-9b-q4km-llamacpp (rep 3) 204604ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=38037 tokens_out=2020
+[PASS] borrar_12_funciones      zen:qwen35-9b-q4km-llamacpp 282511ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=1  denied=0  tokens_in=42359 tokens_out=2855
+[PASS] borrar_12_funciones      zen:qwen35-9b-q4km-llamacpp (rep 2) 207885ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=43758 tokens_out=2054
+[PASS] borrar_12_funciones      zen:qwen35-9b-q4km-llamacpp (rep 3) 265738ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=1  denied=0  tokens_in=36953 tokens_out=2722
+[PASS] borrar_20_funciones      zen:qwen35-9b-q4km-llamacpp 118865ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=20525 tokens_out=1309
+[PASS] borrar_20_funciones      zen:qwen35-9b-q4km-llamacpp (rep 2) 154276ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15658 tokens_out=1712
+[PASS] borrar_20_funciones      zen:qwen35-9b-q4km-llamacpp (rep 3) 158191ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15565 tokens_out=1744
+[PASS] borrar_30_funciones      zen:qwen35-9b-q4km-llamacpp  95020ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=23371 tokens_out=974
+[PASS] borrar_30_funciones      zen:qwen35-9b-q4km-llamacpp (rep 2) 138356ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=30755 tokens_out=1443
+[PASS] borrar_30_funciones      zen:qwen35-9b-q4km-llamacpp (rep 3) 404317ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=40902 tokens_out=3830
+[PASS] mover_1_funciones        zen:qwen35-9b-q4km-llamacpp 201241ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=13146 tokens_out=2374
+[PASS] mover_1_funciones        zen:qwen35-9b-q4km-llamacpp (rep 2)  61703ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11274 tokens_out=702
+[PASS] mover_1_funciones        zen:qwen35-9b-q4km-llamacpp (rep 3) 116531ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11246 tokens_out=1384
+[PASS] mover_3_funciones        zen:qwen35-9b-q4km-llamacpp 102308ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11832 tokens_out=1190
+[PASS] mover_3_funciones        zen:qwen35-9b-q4km-llamacpp (rep 2)  70833ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=11587 tokens_out=805
+[PASS] mover_3_funciones        zen:qwen35-9b-q4km-llamacpp (rep 3) 111603ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=17404 tokens_out=1252
+[PASS] mover_8_funciones        zen:qwen35-9b-q4km-llamacpp 157510ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=12936 tokens_out=1863
+[PASS] mover_8_funciones        zen:qwen35-9b-q4km-llamacpp (rep 2) 108662ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=12463 tokens_out=1259
+[PASS] mover_8_funciones        zen:qwen35-9b-q4km-llamacpp (rep 3) 223255ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=25093 tokens_out=2549
+[PASS] editar_lote_3_temprano   zen:qwen35-9b-q4km-llamacpp  47002ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15263 tokens_out=473
+[PASS] editar_lote_3_temprano   zen:qwen35-9b-q4km-llamacpp (rep 2)  45108ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9431 tokens_out=485
+[PASS] editar_lote_3_temprano   zen:qwen35-9b-q4km-llamacpp (rep 3)  46878ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15263 tokens_out=472
+[PASS] editar_lote_17_medio     zen:qwen35-9b-q4km-llamacpp  38488ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9440 tokens_out=406
+[PASS] editar_lote_17_medio     zen:qwen35-9b-q4km-llamacpp (rep 2)  38138ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9440 tokens_out=399
+[PASS] editar_lote_17_medio     zen:qwen35-9b-q4km-llamacpp (rep 3)  37972ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9440 tokens_out=396
+[PASS] editar_lote_34_tarde     zen:qwen35-9b-q4km-llamacpp  50208ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15273 tokens_out=516
+[PASS] editar_lote_34_tarde     zen:qwen35-9b-q4km-llamacpp (rep 2)  59122ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15273 tokens_out=601
+[PASS] editar_lote_34_tarde     zen:qwen35-9b-q4km-llamacpp (rep 3)  55254ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15273 tokens_out=525
+[PASS] renombrar_campo_2_usos   zen:qwen35-9b-q4km-llamacpp 127207ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=22882 tokens_out=1352
+[PASS] renombrar_campo_2_usos   zen:qwen35-9b-q4km-llamacpp (rep 2) 116945ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=23235 tokens_out=1251
+[PASS] renombrar_campo_2_usos   zen:qwen35-9b-q4km-llamacpp (rep 3) 114457ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=22882 tokens_out=1260
+[PASS] renombrar_campo_5_usos   zen:qwen35-9b-q4km-llamacpp 181911ms  rounds=6 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=24291 tokens_out=1916
+[PASS] renombrar_campo_5_usos   zen:qwen35-9b-q4km-llamacpp (rep 2) 135768ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=25432 tokens_out=1470
+[PASS] renombrar_campo_5_usos   zen:qwen35-9b-q4km-llamacpp (rep 3) 188375ms  rounds=12 tool_calls=12  schema_fail=0  exec_fail=0  denied=0  tokens_in=46106 tokens_out=1871
+[PASS] renombrar_campo_10_usos  zen:qwen35-9b-q4km-llamacpp 138625ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=17996 tokens_out=1572
+[PASS] renombrar_campo_10_usos  zen:qwen35-9b-q4km-llamacpp (rep 2) 166399ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=29225 tokens_out=1773
+[PASS] renombrar_campo_10_usos  zen:qwen35-9b-q4km-llamacpp (rep 3) 168380ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=29225 tokens_out=1793
+[PASS] arreglar_1_errores       zen:qwen35-9b-q4km-llamacpp  29358ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7395 tokens_out=317
+[PASS] arreglar_1_errores       zen:qwen35-9b-q4km-llamacpp (rep 2)  29865ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7395 tokens_out=326
+[PASS] arreglar_1_errores       zen:qwen35-9b-q4km-llamacpp (rep 3)  30101ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7395 tokens_out=328
+[PASS] arreglar_2_errores       zen:qwen35-9b-q4km-llamacpp  63714ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=10733 tokens_out=735
+[PASS] arreglar_2_errores       zen:qwen35-9b-q4km-llamacpp (rep 2)  63483ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=10733 tokens_out=740
+[PASS] arreglar_2_errores       zen:qwen35-9b-q4km-llamacpp (rep 3)  65115ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=10733 tokens_out=752
+[PASS] arreglar_3_errores       zen:qwen35-9b-q4km-llamacpp  80408ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=14362 tokens_out=935
+[PASS] arreglar_3_errores       zen:qwen35-9b-q4km-llamacpp (rep 2)  85690ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=14363 tokens_out=902
+[PASS] arreglar_3_errores       zen:qwen35-9b-q4km-llamacpp (rep 3)  83684ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=14363 tokens_out=921
+[PASS] arreglar_4_errores       zen:qwen35-9b-q4km-llamacpp 128090ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=1  denied=0  tokens_in=26717 tokens_out=1319
+[PASS] arreglar_4_errores       zen:qwen35-9b-q4km-llamacpp (rep 2) 112999ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=23134 tokens_out=1217
+[PASS] arreglar_4_errores       zen:qwen35-9b-q4km-llamacpp (rep 3) 105176ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=23134 tokens_out=1157
+[PASS] preservar_vecino_0       zen:qwen35-9b-q4km-llamacpp  32772ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7444 tokens_out=362
+[PASS] preservar_vecino_0       zen:qwen35-9b-q4km-llamacpp (rep 2)  39716ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7444 tokens_out=447
+[PASS] preservar_vecino_0       zen:qwen35-9b-q4km-llamacpp (rep 3)  34628ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7444 tokens_out=385
+[PASS] preservar_vecino_1       zen:qwen35-9b-q4km-llamacpp  46224ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7509 tokens_out=536
+[PASS] preservar_vecino_1       zen:qwen35-9b-q4km-llamacpp (rep 2) 158419ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=20559 tokens_out=1833
+[PASS] preservar_vecino_1       zen:qwen35-9b-q4km-llamacpp (rep 3)  36135ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7481 tokens_out=409
+[PASS] preservar_vecino_2       zen:qwen35-9b-q4km-llamacpp  36757ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7459 tokens_out=423
+[PASS] preservar_vecino_2       zen:qwen35-9b-q4km-llamacpp (rep 2)  35686ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7459 tokens_out=401
+[PASS] preservar_vecino_2       zen:qwen35-9b-q4km-llamacpp (rep 3)  36274ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7459 tokens_out=406
+[PASS] fix_dos_errores_una_linea zen:qwen35-9b-q4km-llamacpp  53425ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=13775 tokens_out=577
+[PASS] fix_dos_errores_una_linea zen:qwen35-9b-q4km-llamacpp (rep 2)  56451ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=13775 tokens_out=618
+[PASS] fix_dos_errores_una_linea zen:qwen35-9b-q4km-llamacpp (rep 3)  54195ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=13719 tokens_out=587
+[PASS] localizar_y_editar_archivo_largo zen:qwen35-9b-q4km-llamacpp  42755ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9440 tokens_out=464
+[PASS] localizar_y_editar_archivo_largo zen:qwen35-9b-q4km-llamacpp (rep 2)  38229ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9440 tokens_out=404
+[PASS] localizar_y_editar_archivo_largo zen:qwen35-9b-q4km-llamacpp (rep 3)  39864ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9440 tokens_out=421
+[PASS] agregar_metodo_a_impl_existente zen:qwen35-9b-q4km-llamacpp  53456ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=13817 tokens_out=576
+[PASS] agregar_metodo_a_impl_existente zen:qwen35-9b-q4km-llamacpp (rep 2)  56442ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=13792 tokens_out=606
+[PASS] agregar_metodo_a_impl_existente zen:qwen35-9b-q4km-llamacpp (rep 3)  62777ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=13771 tokens_out=689
+[PASS] mover_item_a_modulo_nuevo zen:qwen35-9b-q4km-llamacpp 252237ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=20485 tokens_out=2856
+[PASS] mover_item_a_modulo_nuevo zen:qwen35-9b-q4km-llamacpp (rep 2) 159282ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=1  denied=0  tokens_in=33729 tokens_out=1649
+[PASS] mover_item_a_modulo_nuevo zen:qwen35-9b-q4km-llamacpp (rep 3) 269201ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=20485 tokens_out=2879
+[PASS] cambio_coordinado_dos_archivos zen:qwen35-9b-q4km-llamacpp  92620ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=19109 tokens_out=1035
+[PASS] cambio_coordinado_dos_archivos zen:qwen35-9b-q4km-llamacpp (rep 2)  77582ms  rounds=3 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=10025 tokens_out=876
+[PASS] cambio_coordinado_dos_archivos zen:qwen35-9b-q4km-llamacpp (rep 3)  86675ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=19121 tokens_out=959
+[PASS] borrar_bloque_deprecado  zen:qwen35-9b-q4km-llamacpp 144624ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=29708 tokens_out=1539
+[PASS] borrar_bloque_deprecado  zen:qwen35-9b-q4km-llamacpp (rep 2) 136948ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=29708 tokens_out=1450
+[PASS] borrar_bloque_deprecado  zen:qwen35-9b-q4km-llamacpp (rep 3) 138767ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=29768 tokens_out=1475
+[PASS] mover_almacen_completo   zen:qwen35-9b-q4km-llamacpp 704137ms  rounds=13 tool_calls=12  schema_fail=0  exec_fail=1  denied=0  tokens_in=81054 tokens_out=6780
+[PASS] mover_almacen_completo   zen:qwen35-9b-q4km-llamacpp (rep 2) 731076ms  rounds=20 tool_calls=19  schema_fail=0  exec_fail=1  denied=0  tokens_in=151509 tokens_out=5867
+[FAIL] mover_almacen_completo   zen:qwen35-9b-q4km-llamacpp (rep 3) 855827ms  rounds=18 tool_calls=17  schema_fail=1  exec_fail=3  denied=2  tokens_in=146604 tokens_out=7675 [AssertionCargoCheck]
+[PASS] tres_archivos_coordinados zen:qwen35-9b-q4km-llamacpp 144258ms  rounds=8 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=29192 tokens_out=1412
+[PASS] tres_archivos_coordinados zen:qwen35-9b-q4km-llamacpp (rep 2) 146132ms  rounds=10 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=34444 tokens_out=1372
+[PASS] tres_archivos_coordinados zen:qwen35-9b-q4km-llamacpp (rep 3) 122234ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=24245 tokens_out=1266
+[PASS] contar_metodos_de_almacen zen:qwen35-9b-q4km-llamacpp  35660ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=7235 tokens_out=337
+[PASS] contar_metodos_de_almacen zen:qwen35-9b-q4km-llamacpp (rep 2)  21491ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4443 tokens_out=228
+[PASS] contar_metodos_de_almacen zen:qwen35-9b-q4km-llamacpp (rep 3)  30009ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=7234 tokens_out=291
+[PASS] reportar_campo_de_item   zen:qwen35-9b-q4km-llamacpp  11213ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4431 tokens_out=91
+[PASS] reportar_campo_de_item   zen:qwen35-9b-q4km-llamacpp (rep 2)  20958ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=7216 tokens_out=177
+[PASS] reportar_campo_de_item   zen:qwen35-9b-q4km-llamacpp (rep 3)  22286ms  rounds=3 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=7216 tokens_out=177
+[PASS] localizar_funcion_por_valor zen:qwen35-9b-q4km-llamacpp  17826ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5579 tokens_out=192
+[PASS] localizar_funcion_por_valor zen:qwen35-9b-q4km-llamacpp (rep 2)  22250ms  rounds=4 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7895 tokens_out=228
+[PASS] localizar_funcion_por_valor zen:qwen35-9b-q4km-llamacpp (rep 3)  17807ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5808 tokens_out=192
+[PASS] editar_lote_25_lejano    zen:qwen35-9b-q4km-llamacpp  48339ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15922 tokens_out=483
+[PASS] editar_lote_25_lejano    zen:qwen35-9b-q4km-llamacpp (rep 2)  46879ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15922 tokens_out=465
+[PASS] editar_lote_25_lejano    zen:qwen35-9b-q4km-llamacpp (rep 3)  49110ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15922 tokens_out=494
+[PASS] editar_lote_39_lejano    zen:qwen35-9b-q4km-llamacpp  51789ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15922 tokens_out=522
+[PASS] editar_lote_39_lejano    zen:qwen35-9b-q4km-llamacpp (rep 2)  52551ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15928 tokens_out=527
+[PASS] editar_lote_39_lejano    zen:qwen35-9b-q4km-llamacpp (rep 3)  50169ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15928 tokens_out=502
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+zen:qwen35-9b-q4km-llamacpp 101/102 [95,100]%  101/102      5.1       113830      65670          19957             1175                 1             17          2            0         0         0         0         0          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+zen:qwen35-9b-q4km-llamacpp k=2 98.0%  k=3 97.1%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+zen:qwen35-9b-q4km-llamacpp     33/34      1/34          0/34      0.971      0.990        1.000       0.02
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+zen:qwen35-9b-q4km-llamacpp escalera_borrado         15/15      5.9     156598     138356        1612         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp escalera_movimiento        9/9      4.3     128183     111603        1486         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp localizacion             15/15      3.7      47800      48339         484         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp consistencia               9/9      7.2     148674     138625        1584         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp escalera_errores         12/12      4.8      73140      72762         804         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp preservacion               9/9      3.3      50735      36274         578         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp piso                       6/6      3.5      47486      48090         512         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp banda                    12/12      5.1     127551     114784        1382         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp techo                      5/6     12.5     450611     425134        4062         0         0         0         0          -
+zen:qwen35-9b-q4km-llamacpp lectura                    9/9      2.9      22167      21491         213         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/sweeps/sweep-qwen35-9b-q4km-llamacpp-discriminating-2026-10-17.json

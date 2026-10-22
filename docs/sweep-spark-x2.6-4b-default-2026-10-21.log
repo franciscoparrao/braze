@@ -1,0 +1,139 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 300s por intento.
+-> zen:spark-x2.6-4b :: read_file_basic (rep 1/3)
+-> zen:spark-x2.6-4b :: read_file_basic (rep 2/3)
+-> zen:spark-x2.6-4b :: read_file_basic (rep 3/3)
+-> zen:spark-x2.6-4b :: grep_basic (rep 1/3)
+-> zen:spark-x2.6-4b :: grep_basic (rep 2/3)
+-> zen:spark-x2.6-4b :: grep_basic (rep 3/3)
+-> zen:spark-x2.6-4b :: glob_basic (rep 1/3)
+-> zen:spark-x2.6-4b :: glob_basic (rep 2/3)
+-> zen:spark-x2.6-4b :: glob_basic (rep 3/3)
+-> zen:spark-x2.6-4b :: write_file_basic (rep 1/3)
+-> zen:spark-x2.6-4b :: write_file_basic (rep 2/3)
+-> zen:spark-x2.6-4b :: write_file_basic (rep 3/3)
+-> zen:spark-x2.6-4b :: edit_file_basic (rep 1/3)
+-> zen:spark-x2.6-4b :: edit_file_basic (rep 2/3)
+-> zen:spark-x2.6-4b :: edit_file_basic (rep 3/3)
+-> zen:spark-x2.6-4b :: shell_exec_basic (rep 1/3)
+-> zen:spark-x2.6-4b :: shell_exec_basic (rep 2/3)
+-> zen:spark-x2.6-4b :: shell_exec_basic (rep 3/3)
+-> zen:spark-x2.6-4b :: no_tool_qa (rep 1/3)
+-> zen:spark-x2.6-4b :: no_tool_qa (rep 2/3)
+-> zen:spark-x2.6-4b :: no_tool_qa (rep 3/3)
+-> zen:spark-x2.6-4b :: multi_step_read_count_write (rep 1/3)
+-> zen:spark-x2.6-4b :: multi_step_read_count_write (rep 2/3)
+-> zen:spark-x2.6-4b :: multi_step_read_count_write (rep 3/3)
+-> zen:spark-x2.6-4b :: error_recovery_wrong_filename (rep 1/3)
+-> zen:spark-x2.6-4b :: error_recovery_wrong_filename (rep 2/3)
+-> zen:spark-x2.6-4b :: error_recovery_wrong_filename (rep 3/3)
+-> zen:spark-x2.6-4b :: distractor_selection_among_files (rep 1/3)
+-> zen:spark-x2.6-4b :: distractor_selection_among_files (rep 2/3)
+-> zen:spark-x2.6-4b :: distractor_selection_among_files (rep 3/3)
+-> zen:spark-x2.6-4b :: edit_file_function_body (rep 1/3)
+-> zen:spark-x2.6-4b :: edit_file_function_body (rep 2/3)
+-> zen:spark-x2.6-4b :: edit_file_function_body (rep 3/3)
+-> zen:spark-x2.6-4b :: no_tool_capital_question (rep 1/3)
+-> zen:spark-x2.6-4b :: no_tool_capital_question (rep 2/3)
+-> zen:spark-x2.6-4b :: no_tool_capital_question (rep 3/3)
+-> zen:spark-x2.6-4b :: no_tool_subtraction (rep 1/3)
+-> zen:spark-x2.6-4b :: no_tool_subtraction (rep 2/3)
+-> zen:spark-x2.6-4b :: no_tool_subtraction (rep 3/3)
+-> zen:spark-x2.6-4b :: multi_step_sum_two_files (rep 1/3)
+-> zen:spark-x2.6-4b :: multi_step_sum_two_files (rep 2/3)
+-> zen:spark-x2.6-4b :: multi_step_sum_two_files (rep 3/3)
+-> zen:spark-x2.6-4b :: multi_step_multiply_and_write (rep 1/3)
+-> zen:spark-x2.6-4b :: multi_step_multiply_and_write (rep 2/3)
+-> zen:spark-x2.6-4b :: multi_step_multiply_and_write (rep 3/3)
+-> zen:spark-x2.6-4b :: error_recovery_wrong_config_extension (rep 1/3)
+-> zen:spark-x2.6-4b :: error_recovery_wrong_config_extension (rep 2/3)
+-> zen:spark-x2.6-4b :: error_recovery_wrong_config_extension (rep 3/3)
+-> zen:spark-x2.6-4b :: error_recovery_edit_wrong_filename (rep 1/3)
+-> zen:spark-x2.6-4b :: error_recovery_edit_wrong_filename (rep 2/3)
+-> zen:spark-x2.6-4b :: error_recovery_edit_wrong_filename (rep 3/3)
+-> zen:spark-x2.6-4b :: distractor_selection_log_with_error (rep 1/3)
+-> zen:spark-x2.6-4b :: distractor_selection_log_with_error (rep 2/3)
+-> zen:spark-x2.6-4b :: distractor_selection_log_with_error (rep 3/3)
+-> zen:spark-x2.6-4b :: distractor_selection_debug_config (rep 1/3)
+-> zen:spark-x2.6-4b :: distractor_selection_debug_config (rep 2/3)
+-> zen:spark-x2.6-4b :: distractor_selection_debug_config (rep 3/3)
+
+== Resultados por tarea ==
+[PASS] read_file_basic          zen:spark-x2.6-4b      4922ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2929 tokens_out=125
+[PASS] read_file_basic          zen:spark-x2.6-4b    (rep 2)   4442ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2929 tokens_out=127
+[PASS] read_file_basic          zen:spark-x2.6-4b    (rep 3)   4121ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2929 tokens_out=117
+[PASS] grep_basic               zen:spark-x2.6-4b      4413ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2959 tokens_out=125
+[PASS] grep_basic               zen:spark-x2.6-4b    (rep 2)   4216ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2959 tokens_out=119
+[PASS] grep_basic               zen:spark-x2.6-4b    (rep 3)   4344ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2959 tokens_out=123
+[PASS] glob_basic               zen:spark-x2.6-4b      2992ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2961 tokens_out=80
+[PASS] glob_basic               zen:spark-x2.6-4b    (rep 2)   3135ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2961 tokens_out=85
+[PASS] glob_basic               zen:spark-x2.6-4b    (rep 3)   2974ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2961 tokens_out=80
+[PASS] write_file_basic         zen:spark-x2.6-4b      3972ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2966 tokens_out=111
+[PASS] write_file_basic         zen:spark-x2.6-4b    (rep 2)   3646ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2969 tokens_out=101
+[PASS] write_file_basic         zen:spark-x2.6-4b    (rep 3)   3733ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2969 tokens_out=104
+[PASS] edit_file_basic          zen:spark-x2.6-4b      5342ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4474 tokens_out=151
+[PASS] edit_file_basic          zen:spark-x2.6-4b    (rep 2)   6085ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6042 tokens_out=171
+[PASS] edit_file_basic          zen:spark-x2.6-4b    (rep 3)   5419ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4474 tokens_out=154
+[PASS] shell_exec_basic         zen:spark-x2.6-4b      3597ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2940 tokens_out=99
+[PASS] shell_exec_basic         zen:spark-x2.6-4b    (rep 2)   3369ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2940 tokens_out=92
+[PASS] shell_exec_basic         zen:spark-x2.6-4b    (rep 3)   3382ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2940 tokens_out=92
+[PASS] no_tool_qa               zen:spark-x2.6-4b      1652ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1454 tokens_out=42
+[PASS] no_tool_qa               zen:spark-x2.6-4b    (rep 2)   1655ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1454 tokens_out=42
+[PASS] no_tool_qa               zen:spark-x2.6-4b    (rep 3)   1875ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1454 tokens_out=49
+[PASS] multi_step_read_count_write zen:spark-x2.6-4b      6355ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4567 tokens_out=182
+[PASS] multi_step_read_count_write zen:spark-x2.6-4b    (rep 2)  10386ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4567 tokens_out=310
+[PASS] multi_step_read_count_write zen:spark-x2.6-4b    (rep 3)   5665ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4567 tokens_out=161
+[PASS] error_recovery_wrong_filename zen:spark-x2.6-4b     12066ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=1  tokens_in=6460 tokens_out=355
+[PASS] error_recovery_wrong_filename zen:spark-x2.6-4b    (rep 2)  21266ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=1  tokens_in=6345 tokens_out=643
+[PASS] error_recovery_wrong_filename zen:spark-x2.6-4b    (rep 3)  17231ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=1  tokens_in=6345 tokens_out=518
+[PASS] distractor_selection_among_files zen:spark-x2.6-4b      5335ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4778 tokens_out=148
+[PASS] distractor_selection_among_files zen:spark-x2.6-4b    (rep 2)   3776ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3021 tokens_out=104
+[PASS] distractor_selection_among_files zen:spark-x2.6-4b    (rep 3)   3197ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3021 tokens_out=86
+[PASS] edit_file_function_body  zen:spark-x2.6-4b      7932ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6203 tokens_out=229
+[PASS] edit_file_function_body  zen:spark-x2.6-4b    (rep 2)  10605ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6203 tokens_out=313
+[PASS] edit_file_function_body  zen:spark-x2.6-4b    (rep 3)  13910ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6203 tokens_out=418
+[PASS] no_tool_capital_question zen:spark-x2.6-4b      2948ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1459 tokens_out=83
+[PASS] no_tool_capital_question zen:spark-x2.6-4b    (rep 2)   1404ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1459 tokens_out=34
+[PASS] no_tool_capital_question zen:spark-x2.6-4b    (rep 3)   2257ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1459 tokens_out=61
+[PASS] no_tool_subtraction      zen:spark-x2.6-4b      1283ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1456 tokens_out=30
+[PASS] no_tool_subtraction      zen:spark-x2.6-4b    (rep 2)   1757ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1456 tokens_out=45
+[PASS] no_tool_subtraction      zen:spark-x2.6-4b    (rep 3)   1285ms  rounds=1 tool_calls=0  schema_fail=0  exec_fail=0  denied=0  tokens_in=1456 tokens_out=30
+[PASS] multi_step_sum_two_files zen:spark-x2.6-4b     22540ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=2  denied=2  tokens_in=8636 tokens_out=676
+[PASS] multi_step_sum_two_files zen:spark-x2.6-4b    (rep 2)  20689ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=3  denied=3  tokens_in=10867 tokens_out=591
+[PASS] multi_step_sum_two_files zen:spark-x2.6-4b    (rep 3)  20698ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=3  denied=3  tokens_in=10867 tokens_out=591
+[PASS] multi_step_multiply_and_write zen:spark-x2.6-4b     12465ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=10088 tokens_out=359
+[PASS] multi_step_multiply_and_write zen:spark-x2.6-4b    (rep 2)  14148ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=2  denied=1  tokens_in=11869 tokens_out=400
+[PASS] multi_step_multiply_and_write zen:spark-x2.6-4b    (rep 3)  15840ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=2  denied=1  tokens_in=13703 tokens_out=444
+[PASS] error_recovery_wrong_config_extension zen:spark-x2.6-4b      5672ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4586 tokens_out=161
+[PASS] error_recovery_wrong_config_extension zen:spark-x2.6-4b    (rep 2)   6042ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4595 tokens_out=172
+[PASS] error_recovery_wrong_config_extension zen:spark-x2.6-4b    (rep 3)   6084ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4586 tokens_out=174
+[PASS] error_recovery_edit_wrong_filename zen:spark-x2.6-4b     12534ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=1  tokens_in=9803 tokens_out=362
+[PASS] error_recovery_edit_wrong_filename zen:spark-x2.6-4b    (rep 2)  11625ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=1  tokens_in=9803 tokens_out=333
+[PASS] error_recovery_edit_wrong_filename zen:spark-x2.6-4b    (rep 3)   8422ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6305 tokens_out=242
+[PASS] distractor_selection_log_with_error zen:spark-x2.6-4b      5831ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4735 tokens_out=164
+[PASS] distractor_selection_log_with_error zen:spark-x2.6-4b    (rep 2)   5622ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4735 tokens_out=158
+[PASS] distractor_selection_log_with_error zen:spark-x2.6-4b    (rep 3)   5480ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4735 tokens_out=153
+[PASS] distractor_selection_debug_config zen:spark-x2.6-4b      3294ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2971 tokens_out=90
+[PASS] distractor_selection_debug_config zen:spark-x2.6-4b    (rep 2)   3149ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2971 tokens_out=85
+[PASS] distractor_selection_debug_config zen:spark-x2.6-4b    (rep 3)   3300ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=2971 tokens_out=90
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+zen:spark-x2.6-4b         57/57 [94,100]%    57/57      2.9         6866       4922           4622              196                 0             18         15            0         0         0         0         0          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+zen:spark-x2.6-4b        k=2 100.0%  k=3 100.0%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+zen:spark-x2.6-4b            19/19      0/19          0/19      1.000      1.000        1.000       0.00
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+zen:spark-x2.6-4b        single_tool              21/21      2.5       5074       4216         144         0         0         0         0          -
+zen:spark-x2.6-4b        no_tool                    9/9      1.0       1791       1655          46         0         0         0         0          -
+zen:spark-x2.6-4b        multi_step                 9/9      5.2      14310      14148         413         0         0         0         0          -
+zen:spark-x2.6-4b        error_recovery             9/9      4.1      11216      11625         329         0         0         0         0          -
+zen:spark-x2.6-4b        distractor_selection       9/9      2.4       4332       3776         120         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/sweeps/sweep-spark-x2.6-4b-default-2026-10-17.json

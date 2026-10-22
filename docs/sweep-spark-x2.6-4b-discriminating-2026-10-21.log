@@ -1,0 +1,238 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 900s por intento.
+-> zen:spark-x2.6-4b :: borrar_2_funciones (rep 1/3)
+-> zen:spark-x2.6-4b :: borrar_2_funciones (rep 2/3)
+-> zen:spark-x2.6-4b :: borrar_2_funciones (rep 3/3)
+-> zen:spark-x2.6-4b :: borrar_6_funciones (rep 1/3)
+-> zen:spark-x2.6-4b :: borrar_6_funciones (rep 2/3)
+-> zen:spark-x2.6-4b :: borrar_6_funciones (rep 3/3)
+-> zen:spark-x2.6-4b :: borrar_12_funciones (rep 1/3)
+-> zen:spark-x2.6-4b :: borrar_12_funciones (rep 2/3)
+-> zen:spark-x2.6-4b :: borrar_12_funciones (rep 3/3)
+-> zen:spark-x2.6-4b :: borrar_20_funciones (rep 1/3)
+-> zen:spark-x2.6-4b :: borrar_20_funciones (rep 2/3)
+-> zen:spark-x2.6-4b :: borrar_20_funciones (rep 3/3)
+-> zen:spark-x2.6-4b :: borrar_30_funciones (rep 1/3)
+-> zen:spark-x2.6-4b :: borrar_30_funciones (rep 2/3)
+-> zen:spark-x2.6-4b :: borrar_30_funciones (rep 3/3)
+-> zen:spark-x2.6-4b :: mover_1_funciones (rep 1/3)
+-> zen:spark-x2.6-4b :: mover_1_funciones (rep 2/3)
+-> zen:spark-x2.6-4b :: mover_1_funciones (rep 3/3)
+-> zen:spark-x2.6-4b :: mover_3_funciones (rep 1/3)
+-> zen:spark-x2.6-4b :: mover_3_funciones (rep 2/3)
+-> zen:spark-x2.6-4b :: mover_3_funciones (rep 3/3)
+-> zen:spark-x2.6-4b :: mover_8_funciones (rep 1/3)
+-> zen:spark-x2.6-4b :: mover_8_funciones (rep 2/3)
+-> zen:spark-x2.6-4b :: mover_8_funciones (rep 3/3)
+-> zen:spark-x2.6-4b :: editar_lote_3_temprano (rep 1/3)
+-> zen:spark-x2.6-4b :: editar_lote_3_temprano (rep 2/3)
+-> zen:spark-x2.6-4b :: editar_lote_3_temprano (rep 3/3)
+-> zen:spark-x2.6-4b :: editar_lote_17_medio (rep 1/3)
+-> zen:spark-x2.6-4b :: editar_lote_17_medio (rep 2/3)
+-> zen:spark-x2.6-4b :: editar_lote_17_medio (rep 3/3)
+-> zen:spark-x2.6-4b :: editar_lote_34_tarde (rep 1/3)
+-> zen:spark-x2.6-4b :: editar_lote_34_tarde (rep 2/3)
+-> zen:spark-x2.6-4b :: editar_lote_34_tarde (rep 3/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_2_usos (rep 1/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_2_usos (rep 2/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_2_usos (rep 3/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_5_usos (rep 1/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_5_usos (rep 2/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_5_usos (rep 3/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_10_usos (rep 1/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_10_usos (rep 2/3)
+-> zen:spark-x2.6-4b :: renombrar_campo_10_usos (rep 3/3)
+-> zen:spark-x2.6-4b :: arreglar_1_errores (rep 1/3)
+-> zen:spark-x2.6-4b :: arreglar_1_errores (rep 2/3)
+-> zen:spark-x2.6-4b :: arreglar_1_errores (rep 3/3)
+-> zen:spark-x2.6-4b :: arreglar_2_errores (rep 1/3)
+-> zen:spark-x2.6-4b :: arreglar_2_errores (rep 2/3)
+[2m2026-10-21T15:41:17.281951Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:spark-x2.6-4b :: arreglar_2_errores (rep 3/3)
+-> zen:spark-x2.6-4b :: arreglar_3_errores (rep 1/3)
+-> zen:spark-x2.6-4b :: arreglar_3_errores (rep 2/3)
+-> zen:spark-x2.6-4b :: arreglar_3_errores (rep 3/3)
+-> zen:spark-x2.6-4b :: arreglar_4_errores (rep 1/3)
+-> zen:spark-x2.6-4b :: arreglar_4_errores (rep 2/3)
+-> zen:spark-x2.6-4b :: arreglar_4_errores (rep 3/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_0 (rep 1/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_0 (rep 2/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_0 (rep 3/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_1 (rep 1/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_1 (rep 2/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_1 (rep 3/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_2 (rep 1/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_2 (rep 2/3)
+-> zen:spark-x2.6-4b :: preservar_vecino_2 (rep 3/3)
+-> zen:spark-x2.6-4b :: fix_dos_errores_una_linea (rep 1/3)
+[2m2026-10-21T16:04:46.142613Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:spark-x2.6-4b :: fix_dos_errores_una_linea (rep 2/3)
+-> zen:spark-x2.6-4b :: fix_dos_errores_una_linea (rep 3/3)
+-> zen:spark-x2.6-4b :: localizar_y_editar_archivo_largo (rep 1/3)
+-> zen:spark-x2.6-4b :: localizar_y_editar_archivo_largo (rep 2/3)
+-> zen:spark-x2.6-4b :: localizar_y_editar_archivo_largo (rep 3/3)
+-> zen:spark-x2.6-4b :: agregar_metodo_a_impl_existente (rep 1/3)
+-> zen:spark-x2.6-4b :: agregar_metodo_a_impl_existente (rep 2/3)
+-> zen:spark-x2.6-4b :: agregar_metodo_a_impl_existente (rep 3/3)
+-> zen:spark-x2.6-4b :: mover_item_a_modulo_nuevo (rep 1/3)
+-> zen:spark-x2.6-4b :: mover_item_a_modulo_nuevo (rep 2/3)
+-> zen:spark-x2.6-4b :: mover_item_a_modulo_nuevo (rep 3/3)
+-> zen:spark-x2.6-4b :: cambio_coordinado_dos_archivos (rep 1/3)
+-> zen:spark-x2.6-4b :: cambio_coordinado_dos_archivos (rep 2/3)
+-> zen:spark-x2.6-4b :: cambio_coordinado_dos_archivos (rep 3/3)
+-> zen:spark-x2.6-4b :: borrar_bloque_deprecado (rep 1/3)
+-> zen:spark-x2.6-4b :: borrar_bloque_deprecado (rep 2/3)
+[2m2026-10-21T16:18:03.433850Z[0m [33m WARN[0m [2mbraze_engine::engine::round[0m[2m:[0m model output was truncated by max_tokens this round; a tool call's arguments may have been cut off mid-construction [3moutput_tokens[0m[2m=[0m4096 [3mmax_tokens[0m[2m=[0m4096
+[2m2026-10-21T16:18:03.442105Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m final response truncated by the token budget; discarded [3mround[0m[2m=[0m5 [3mround_output_tokens[0m[2m=[0m4096 [3mvisible_chars[0m[2m=[0m0 [3mhead[0m[2m=[0m [3mtail[0m[2m=[0m
+-> zen:spark-x2.6-4b :: borrar_bloque_deprecado (rep 3/3)
+-> zen:spark-x2.6-4b :: mover_almacen_completo (rep 1/3)
+-> zen:spark-x2.6-4b :: mover_almacen_completo (rep 2/3)
+-> zen:spark-x2.6-4b :: mover_almacen_completo (rep 3/3)
+-> zen:spark-x2.6-4b :: tres_archivos_coordinados (rep 1/3)
+-> zen:spark-x2.6-4b :: tres_archivos_coordinados (rep 2/3)
+-> zen:spark-x2.6-4b :: tres_archivos_coordinados (rep 3/3)
+-> zen:spark-x2.6-4b :: contar_metodos_de_almacen (rep 1/3)
+-> zen:spark-x2.6-4b :: contar_metodos_de_almacen (rep 2/3)
+-> zen:spark-x2.6-4b :: contar_metodos_de_almacen (rep 3/3)
+-> zen:spark-x2.6-4b :: reportar_campo_de_item (rep 1/3)
+-> zen:spark-x2.6-4b :: reportar_campo_de_item (rep 2/3)
+-> zen:spark-x2.6-4b :: reportar_campo_de_item (rep 3/3)
+-> zen:spark-x2.6-4b :: localizar_funcion_por_valor (rep 1/3)
+-> zen:spark-x2.6-4b :: localizar_funcion_por_valor (rep 2/3)
+-> zen:spark-x2.6-4b :: localizar_funcion_por_valor (rep 3/3)
+-> zen:spark-x2.6-4b :: editar_lote_25_lejano (rep 1/3)
+-> zen:spark-x2.6-4b :: editar_lote_25_lejano (rep 2/3)
+-> zen:spark-x2.6-4b :: editar_lote_25_lejano (rep 3/3)
+-> zen:spark-x2.6-4b :: editar_lote_39_lejano (rep 1/3)
+-> zen:spark-x2.6-4b :: editar_lote_39_lejano (rep 2/3)
+-> zen:spark-x2.6-4b :: editar_lote_39_lejano (rep 3/3)
+
+== Resultados por tarea ==
+[FAIL] borrar_2_funciones       zen:spark-x2.6-4b     49168ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=2  denied=1  tokens_in=18915 tokens_out=1364 [AssertionMaxRounds]
+[PASS] borrar_2_funciones       zen:spark-x2.6-4b    (rep 2)  23057ms  rounds=7 tool_calls=8  schema_fail=0  exec_fail=1  denied=1  tokens_in=14637 tokens_out=612
+[PASS] borrar_2_funciones       zen:spark-x2.6-4b    (rep 3)  22859ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=14941 tokens_out=614
+[PASS] borrar_6_funciones       zen:spark-x2.6-4b     31748ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=1  tokens_in=14028 tokens_out=915
+[PASS] borrar_6_funciones       zen:spark-x2.6-4b    (rep 2)  33276ms  rounds=6 tool_calls=6  schema_fail=0  exec_fail=1  denied=1  tokens_in=12439 tokens_out=931
+[PASS] borrar_6_funciones       zen:spark-x2.6-4b    (rep 3)  39401ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=1  denied=1  tokens_in=12434 tokens_out=1125
+[PASS] borrar_12_funciones      zen:spark-x2.6-4b     54222ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=18594 tokens_out=1502
+[PASS] borrar_12_funciones      zen:spark-x2.6-4b    (rep 2)  51436ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=1  denied=1  tokens_in=14024 tokens_out=1438
+[PASS] borrar_12_funciones      zen:spark-x2.6-4b    (rep 3)  66029ms  rounds=8 tool_calls=9  schema_fail=0  exec_fail=1  denied=1  tokens_in=20891 tokens_out=1818
+[PASS] borrar_20_funciones      zen:spark-x2.6-4b     88950ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=2  denied=1  tokens_in=25286 tokens_out=2488
+[PASS] borrar_20_funciones      zen:spark-x2.6-4b    (rep 2) 113769ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=2  denied=1  tokens_in=21033 tokens_out=3163
+[PASS] borrar_20_funciones      zen:spark-x2.6-4b    (rep 3)  90283ms  rounds=7 tool_calls=7  schema_fail=0  exec_fail=1  denied=1  tokens_in=25544 tokens_out=2517
+[PASS] borrar_30_funciones      zen:spark-x2.6-4b     62964ms  rounds=8 tool_calls=8  schema_fail=0  exec_fail=2  denied=1  tokens_in=26315 tokens_out=1670
+[PASS] borrar_30_funciones      zen:spark-x2.6-4b    (rep 2)  65038ms  rounds=8 tool_calls=9  schema_fail=0  exec_fail=2  denied=1  tokens_in=26799 tokens_out=1635
+[PASS] borrar_30_funciones      zen:spark-x2.6-4b    (rep 3)  76592ms  rounds=8 tool_calls=9  schema_fail=0  exec_fail=2  denied=1  tokens_in=26819 tokens_out=1971
+[PASS] mover_1_funciones        zen:spark-x2.6-4b     51054ms  rounds=8 tool_calls=9  schema_fail=0  exec_fail=1  denied=1  tokens_in=20493 tokens_out=1336
+[PASS] mover_1_funciones        zen:spark-x2.6-4b    (rep 2)  34226ms  rounds=8 tool_calls=10  schema_fail=0  exec_fail=1  denied=1  tokens_in=20719 tokens_out=863
+[PASS] mover_1_funciones        zen:spark-x2.6-4b    (rep 3)  41430ms  rounds=8 tool_calls=9  schema_fail=0  exec_fail=1  denied=1  tokens_in=20526 tokens_out=1067
+[PASS] mover_3_funciones        zen:spark-x2.6-4b     64892ms  rounds=9 tool_calls=10  schema_fail=0  exec_fail=1  denied=1  tokens_in=26613 tokens_out=1727
+[PASS] mover_3_funciones        zen:spark-x2.6-4b    (rep 2)  41198ms  rounds=6 tool_calls=6  schema_fail=0  exec_fail=1  denied=1  tokens_in=14511 tokens_out=1194
+[PASS] mover_3_funciones        zen:spark-x2.6-4b    (rep 3)  55357ms  rounds=9 tool_calls=10  schema_fail=0  exec_fail=1  denied=1  tokens_in=26561 tokens_out=1461
+[PASS] mover_8_funciones        zen:spark-x2.6-4b     92955ms  rounds=6 tool_calls=8  schema_fail=0  exec_fail=1  denied=1  tokens_in=14380 tokens_out=2677
+[PASS] mover_8_funciones        zen:spark-x2.6-4b    (rep 2) 185294ms  rounds=14 tool_calls=17  schema_fail=0  exec_fail=3  denied=2  tokens_in=62031 tokens_out=4918
+[PASS] mover_8_funciones        zen:spark-x2.6-4b    (rep 3)  68846ms  rounds=7 tool_calls=8  schema_fail=0  exec_fail=1  denied=1  tokens_in=18458 tokens_out=1903
+[PASS] editar_lote_3_temprano   zen:spark-x2.6-4b     19017ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=8953 tokens_out=511
+[PASS] editar_lote_3_temprano   zen:spark-x2.6-4b    (rep 2)  13692ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9021 tokens_out=352
+[PASS] editar_lote_3_temprano   zen:spark-x2.6-4b    (rep 3)  12108ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9021 tokens_out=304
+[PASS] editar_lote_17_medio     zen:spark-x2.6-4b     12752ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9028 tokens_out=324
+[PASS] editar_lote_17_medio     zen:spark-x2.6-4b    (rep 2)  18905ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9062 tokens_out=508
+[PASS] editar_lote_17_medio     zen:spark-x2.6-4b    (rep 3)  12367ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9028 tokens_out=312
+[PASS] editar_lote_34_tarde     zen:spark-x2.6-4b     16094ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15025 tokens_out=395
+[PASS] editar_lote_34_tarde     zen:spark-x2.6-4b    (rep 2)  16461ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=17528 tokens_out=419
+[PASS] editar_lote_34_tarde     zen:spark-x2.6-4b    (rep 3)  33296ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15025 tokens_out=910
+[PASS] renombrar_campo_2_usos   zen:spark-x2.6-4b     75985ms  rounds=10 tool_calls=13  schema_fail=0  exec_fail=1  denied=1  tokens_in=29943 tokens_out=2036
+[PASS] renombrar_campo_2_usos   zen:spark-x2.6-4b    (rep 2)  32803ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=1  denied=1  tokens_in=14639 tokens_out=889
+[PASS] renombrar_campo_2_usos   zen:spark-x2.6-4b    (rep 3)  34529ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=1  denied=1  tokens_in=14691 tokens_out=940
+[PASS] renombrar_campo_5_usos   zen:spark-x2.6-4b     54525ms  rounds=8 tool_calls=9  schema_fail=0  exec_fail=1  denied=1  tokens_in=22403 tokens_out=1434
+[FAIL] renombrar_campo_5_usos   zen:spark-x2.6-4b    (rep 2)  90672ms  rounds=13 tool_calls=15  schema_fail=0  exec_fail=1  denied=1  tokens_in=44502 tokens_out=2269 [AssertionMaxRounds]
+[PASS] renombrar_campo_5_usos   zen:spark-x2.6-4b    (rep 3)  41924ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=1  denied=1  tokens_in=15439 tokens_out=1153
+[PASS] renombrar_campo_10_usos  zen:spark-x2.6-4b     56945ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=1  denied=1  tokens_in=16635 tokens_out=1582
+[PASS] renombrar_campo_10_usos  zen:spark-x2.6-4b    (rep 2)  87655ms  rounds=10 tool_calls=12  schema_fail=0  exec_fail=1  denied=1  tokens_in=33707 tokens_out=2276
+[PASS] renombrar_campo_10_usos  zen:spark-x2.6-4b    (rep 3)  60507ms  rounds=7 tool_calls=8  schema_fail=0  exec_fail=1  denied=1  tokens_in=21424 tokens_out=1623
+[PASS] arreglar_1_errores       zen:spark-x2.6-4b     10889ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6812 tokens_out=285
+[PASS] arreglar_1_errores       zen:spark-x2.6-4b    (rep 2)  10795ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6810 tokens_out=287
+[PASS] arreglar_1_errores       zen:spark-x2.6-4b    (rep 3)  10910ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6809 tokens_out=290
+[FAIL] arreglar_2_errores       zen:spark-x2.6-4b    147089ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=13895 tokens_out=4369 [AssertionFiles]
+[PASS] arreglar_2_errores       zen:spark-x2.6-4b    (rep 2) 202143ms  rounds=10 tool_calls=12  schema_fail=0  exec_fail=2  denied=2  tokens_in=25572 tokens_out=5947
+[PASS] arreglar_2_errores       zen:spark-x2.6-4b    (rep 3)  17591ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6962 tokens_out=489
+[PASS] arreglar_3_errores       zen:spark-x2.6-4b     93986ms  rounds=6 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=19013 tokens_out=2718
+[FAIL] arreglar_3_errores       zen:spark-x2.6-4b    (rep 2) 128426ms  rounds=8 tool_calls=11  schema_fail=0  exec_fail=2  denied=0  tokens_in=26749 tokens_out=3617 [AssertionFiles]
+[FAIL] arreglar_3_errores       zen:spark-x2.6-4b    (rep 3) 211819ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=1  denied=0  tokens_in=34543 tokens_out=6110 [AssertionFiles]
+[PASS] arreglar_4_errores       zen:spark-x2.6-4b    214582ms  rounds=7 tool_calls=9  schema_fail=0  exec_fail=1  denied=1  tokens_in=17481 tokens_out=6515
+[PASS] arreglar_4_errores       zen:spark-x2.6-4b    (rep 2) 180943ms  rounds=6 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=19352 tokens_out=5294
+[FAIL] arreglar_4_errores       zen:spark-x2.6-4b    (rep 3) 169829ms  rounds=12 tool_calls=15  schema_fail=0  exec_fail=2  denied=1  tokens_in=35572 tokens_out=4845 [AssertionFiles]
+[PASS] preservar_vecino_0       zen:spark-x2.6-4b     19126ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=10433 tokens_out=528
+[PASS] preservar_vecino_0       zen:spark-x2.6-4b    (rep 2) 111407ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6845 tokens_out=3314
+[PASS] preservar_vecino_0       zen:spark-x2.6-4b    (rep 3)  13637ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=10433 tokens_out=364
+[PASS] preservar_vecino_1       zen:spark-x2.6-4b     29869ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6880 tokens_out=905
+[PASS] preservar_vecino_1       zen:spark-x2.6-4b    (rep 2)  16685ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6844 tokens_out=498
+[PASS] preservar_vecino_1       zen:spark-x2.6-4b    (rep 3)  36640ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6872 tokens_out=1113
+[PASS] preservar_vecino_2       zen:spark-x2.6-4b     20946ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6866 tokens_out=603
+[PASS] preservar_vecino_2       zen:spark-x2.6-4b    (rep 2)  16958ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6866 tokens_out=475
+[PASS] preservar_vecino_2       zen:spark-x2.6-4b    (rep 3)  21270ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6859 tokens_out=637
+[FAIL] fix_dos_errores_una_linea zen:spark-x2.6-4b    103391ms  rounds=10 tool_calls=11  schema_fail=0  exec_fail=0  denied=0  tokens_in=39881 tokens_out=2728 [AssertionFiles]
+[FAIL] fix_dos_errores_una_linea zen:spark-x2.6-4b    (rep 2)  17182ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=9293 tokens_out=449 [AssertionFiles]
+[PASS] fix_dos_errores_una_linea zen:spark-x2.6-4b    (rep 3)  39986ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=18584 tokens_out=1117
+[PASS] localizar_y_editar_archivo_largo zen:spark-x2.6-4b     12737ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7137 tokens_out=361
+[PASS] localizar_y_editar_archivo_largo zen:spark-x2.6-4b    (rep 2)  13513ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9028 tokens_out=351
+[PASS] localizar_y_editar_archivo_largo zen:spark-x2.6-4b    (rep 3)  18170ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6885 tokens_out=535
+[PASS] agregar_metodo_a_impl_existente zen:spark-x2.6-4b     15461ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9114 tokens_out=410
+[PASS] agregar_metodo_a_impl_existente zen:spark-x2.6-4b    (rep 2)  16114ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9113 tokens_out=426
+[PASS] agregar_metodo_a_impl_existente zen:spark-x2.6-4b    (rep 3)  20326ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9211 tokens_out=550
+[PASS] mover_item_a_modulo_nuevo zen:spark-x2.6-4b     57524ms  rounds=10 tool_calls=10  schema_fail=0  exec_fail=1  denied=1  tokens_in=30470 tokens_out=1443
+[PASS] mover_item_a_modulo_nuevo zen:spark-x2.6-4b    (rep 2)  51567ms  rounds=9 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=32981 tokens_out=1327
+[PASS] mover_item_a_modulo_nuevo zen:spark-x2.6-4b    (rep 3)  54327ms  rounds=10 tool_calls=11  schema_fail=0  exec_fail=0  denied=0  tokens_in=32354 tokens_out=1331
+[PASS] cambio_coordinado_dos_archivos zen:spark-x2.6-4b     33907ms  rounds=7 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=22144 tokens_out=804
+[PASS] cambio_coordinado_dos_archivos zen:spark-x2.6-4b    (rep 2)  82327ms  rounds=11 tool_calls=16  schema_fail=0  exec_fail=0  denied=0  tokens_in=34672 tokens_out=2191
+[PASS] cambio_coordinado_dos_archivos zen:spark-x2.6-4b    (rep 3)  94875ms  rounds=10 tool_calls=14  schema_fail=0  exec_fail=0  denied=0  tokens_in=41297 tokens_out=2418
+[PASS] borrar_bloque_deprecado  zen:spark-x2.6-4b     80922ms  rounds=10 tool_calls=11  schema_fail=0  exec_fail=1  denied=0  tokens_in=34143 tokens_out=2016
+[FAIL] borrar_bloque_deprecado  zen:spark-x2.6-4b    (rep 2) 151257ms  rounds=6 tool_calls=6  schema_fail=0  exec_fail=1  denied=1  tokens_in=14975 tokens_out=4405 [ModelBackendError] (error: model's final response was truncated by the token budget before it could finish)
+[PASS] borrar_bloque_deprecado  zen:spark-x2.6-4b    (rep 3) 383089ms  rounds=14 tool_calls=14  schema_fail=0  exec_fail=3  denied=1  tokens_in=83964 tokens_out=10183
+[PASS] mover_almacen_completo   zen:spark-x2.6-4b    139309ms  rounds=12 tool_calls=17  schema_fail=0  exec_fail=1  denied=1  tokens_in=48217 tokens_out=3623
+[PASS] mover_almacen_completo   zen:spark-x2.6-4b    (rep 2) 205055ms  rounds=19 tool_calls=21  schema_fail=0  exec_fail=2  denied=0  tokens_in=99797 tokens_out=4827
+[PASS] mover_almacen_completo   zen:spark-x2.6-4b    (rep 3) 206248ms  rounds=12 tool_calls=17  schema_fail=0  exec_fail=1  denied=1  tokens_in=53737 tokens_out=5424
+[PASS] tres_archivos_coordinados zen:spark-x2.6-4b    104510ms  rounds=10 tool_calls=14  schema_fail=0  exec_fail=0  denied=0  tokens_in=31919 tokens_out=2801
+[PASS] tres_archivos_coordinados zen:spark-x2.6-4b    (rep 2)  80134ms  rounds=10 tool_calls=11  schema_fail=0  exec_fail=1  denied=0  tokens_in=30787 tokens_out=2080
+[PASS] tres_archivos_coordinados zen:spark-x2.6-4b    (rep 3)  77487ms  rounds=11 tool_calls=13  schema_fail=0  exec_fail=2  denied=1  tokens_in=34934 tokens_out=2023
+[PASS] contar_metodos_de_almacen zen:spark-x2.6-4b      7565ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7116 tokens_out=191
+[FAIL] contar_metodos_de_almacen zen:spark-x2.6-4b    (rep 2)  10359ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=12696 tokens_out=260 [AssertionMaxRounds]
+[PASS] contar_metodos_de_almacen zen:spark-x2.6-4b    (rep 3)   9267ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=11036 tokens_out=237
+[PASS] reportar_campo_de_item   zen:spark-x2.6-4b      7845ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=11007 tokens_out=190
+[PASS] reportar_campo_de_item   zen:spark-x2.6-4b    (rep 2)   8247ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=1  tokens_in=10559 tokens_out=209
+[PASS] reportar_campo_de_item   zen:spark-x2.6-4b    (rep 3)   5465ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7097 tokens_out=129
+[PASS] localizar_funcion_por_valor zen:spark-x2.6-4b      5296ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4824 tokens_out=141
+[PASS] localizar_funcion_por_valor zen:spark-x2.6-4b    (rep 2)   5347ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4965 tokens_out=145
+[PASS] localizar_funcion_por_valor zen:spark-x2.6-4b    (rep 3)   5086ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4965 tokens_out=137
+[PASS] editar_lote_25_lejano    zen:spark-x2.6-4b     16938ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15754 tokens_out=422
+[PASS] editar_lote_25_lejano    zen:spark-x2.6-4b    (rep 2)  16236ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15754 tokens_out=394
+[PASS] editar_lote_25_lejano    zen:spark-x2.6-4b    (rep 3)  15906ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15720 tokens_out=384
+[PASS] editar_lote_39_lejano    zen:spark-x2.6-4b     16410ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15754 tokens_out=399
+[PASS] editar_lote_39_lejano    zen:spark-x2.6-4b    (rep 2)  73728ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=17071 tokens_out=2143
+[PASS] editar_lote_39_lejano    zen:spark-x2.6-4b    (rep 3)  38374ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=16989 tokens_out=1086
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+zen:spark-x2.6-4b         92/102 [83,95]%   92/102      6.5        60601      39694          19965             1653                 0             61         43            0         0         0         0         0          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+zen:spark-x2.6-4b        k=2 82.4%  k=3 76.5%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+zen:spark-x2.6-4b            26/34      8/34          0/34      0.765      0.902        1.000       0.15
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+zen:spark-x2.6-4b        escalera_borrado         14/15      7.1      57919      54222        1584         0         0         0         0          -
+zen:spark-x2.6-4b        escalera_movimiento        9/9      8.3      70584      55357        1905         0         0         0         0          -
+zen:spark-x2.6-4b        localizacion             15/15      3.8      22152      16410         591         0         0         0         0          -
+zen:spark-x2.6-4b        consistencia               8/9      8.0      59505      56945        1578         0         0         0         0          -
+zen:spark-x2.6-4b        escalera_errores          8/12      6.4     116584     137758        3397         0         0         0         0          -
+zen:spark-x2.6-4b        preservacion               9/9      3.9      31838      20946         937         0         0         0         0          -
+zen:spark-x2.6-4b        piso                       4/6      4.8      34163      17676         924         0         0         0         0          -
+zen:spark-x2.6-4b        banda                    11/12      8.0      86808      55926        2292         0         0         0         0          -
+zen:spark-x2.6-4b        techo                      6/6     12.3     135457     121910        3463         0         0         0         0          -
+zen:spark-x2.6-4b        lectura                    8/9      4.7       7164       7565         182         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/sweeps/sweep-spark-x2.6-4b-discriminating-2026-10-17.json

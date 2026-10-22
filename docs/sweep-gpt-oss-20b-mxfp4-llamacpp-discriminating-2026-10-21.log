@@ -1,0 +1,300 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 900s por intento.
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_2_funciones (rep 1/3)
+[2m2026-10-21T16:51:40.912319Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_2_funciones (rep 2/3)
+[2m2026-10-21T16:52:47.631382Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T16:53:03.048223Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_2_funciones (rep 3/3)
+[2m2026-10-21T16:53:55.751585Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_6_funciones (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_6_funciones (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_6_funciones (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_12_funciones (rep 1/3)
+[2m2026-10-21T16:59:47.049295Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_12_funciones (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_12_funciones (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_20_funciones (rep 1/3)
+[2m2026-10-21T17:05:49.052312Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T17:06:13.033584Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T17:10:19.367375Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_20_funciones (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_20_funciones (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_30_funciones (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_30_funciones (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_30_funciones (rep 3/3)
+[2m2026-10-21T17:30:25.348076Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T17:31:43.692929Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T17:34:13.746572Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_1_funciones (rep 1/3)
+[2m2026-10-21T17:43:23.215074Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mglob [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T17:43:30.117169Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mglob [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_1_funciones (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_1_funciones (rep 3/3)
+[2m2026-10-21T17:57:47.472698Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T18:04:43.086799Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T18:09:23.519171Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_3_funciones (rep 1/3)
+[2m2026-10-21T18:19:14.701656Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_3_funciones (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_3_funciones (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_8_funciones (rep 1/3)
+[2m2026-10-21T18:50:46.000283Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_8_funciones (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_8_funciones (rep 3/3)
+[2m2026-10-21T19:10:11.503879Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T19:10:57.571899Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_3_temprano (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_3_temprano (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_3_temprano (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_17_medio (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_17_medio (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_17_medio (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_34_tarde (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_34_tarde (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_34_tarde (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_2_usos (rep 1/3)
+[2m2026-10-21T19:37:16.758497Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_2_usos (rep 2/3)
+[2m2026-10-21T19:47:08.647209Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_2_usos (rep 3/3)
+[2m2026-10-21T20:00:12.418000Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_5_usos (rep 1/3)
+[2m2026-10-21T20:05:28.602228Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T20:06:54.147509Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T20:08:46.996176Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_5_usos (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_5_usos (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_10_usos (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_10_usos (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: renombrar_campo_10_usos (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_1_errores (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_1_errores (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_1_errores (rep 3/3)
+[2m2026-10-21T21:00:08.548803Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_2_errores (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_2_errores (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_2_errores (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_3_errores (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_3_errores (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_3_errores (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_4_errores (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_4_errores (rep 2/3)
+[2m2026-10-21T21:32:16.800092Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T21:36:30.029323Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T21:39:16.958571Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mfalse
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: arreglar_4_errores (rep 3/3)
+[2m2026-10-21T21:50:04.087909Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T21:50:17.892504Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_0 (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_0 (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_0 (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_1 (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_1 (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_1 (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_2 (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_2 (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: preservar_vecino_2 (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: fix_dos_errores_una_linea (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: fix_dos_errores_una_linea (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: fix_dos_errores_una_linea (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: localizar_y_editar_archivo_largo (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: localizar_y_editar_archivo_largo (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: localizar_y_editar_archivo_largo (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: agregar_metodo_a_impl_existente (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: agregar_metodo_a_impl_existente (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: agregar_metodo_a_impl_existente (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_item_a_modulo_nuevo (rep 1/3)
+[2m2026-10-21T23:01:18.646889Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_item_a_modulo_nuevo (rep 2/3)
+[2m2026-10-21T23:07:26.672478Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:09:38.302429Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_item_a_modulo_nuevo (rep 3/3)
+[2m2026-10-21T23:18:25.523467Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:19:33.180143Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:26:26.754472Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:28:13.092231Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: cambio_coordinado_dos_archivos (rep 1/3)
+[2m2026-10-21T23:45:15.776358Z[0m [33m WARN[0m [2mbraze_engine::engine::round[0m[2m:[0m model output was truncated by max_tokens this round; a tool call's arguments may have been cut off mid-construction [3moutput_tokens[0m[2m=[0m4096 [3mmax_tokens[0m[2m=[0m4096
+[2m2026-10-21T23:45:15.784481Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m tool call arguments failed schema validation before dispatch [3mtool[0m[2m=[0medit_file [3mattempt[0m[2m=[0m1 [3merror[0m[2m=[0m"path" is a required property
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: cambio_coordinado_dos_archivos (rep 2/3)
+[2m2026-10-21T23:48:34.557329Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:48:49.938359Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:50:35.324682Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:51:33.881208Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:52:37.546896Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:52:52.168912Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:54:07.961466Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:56:27.530919Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-21T23:59:23.297556Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: cambio_coordinado_dos_archivos (rep 3/3)
+[2m2026-10-22T00:06:01.924387Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:06:52.283406Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:09:05.899809Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:10:36.046386Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:12:06.488869Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:14:19.945860Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_bloque_deprecado (rep 1/3)
+[2m2026-10-22T00:25:52.440139Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_bloque_deprecado (rep 2/3)
+[2m2026-10-22T00:34:13.378522Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:34:54.359769Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:41:57.385014Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:44:40.566635Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: borrar_bloque_deprecado (rep 3/3)
+[2m2026-10-22T00:57:02.625981Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T00:57:17.118224Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mgrep [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_almacen_completo (rep 1/3)
+[2m2026-10-22T01:02:32.911825Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-22T01:11:02.148449Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_almacen_completo (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: mover_almacen_completo (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: tres_archivos_coordinados (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: tres_archivos_coordinados (rep 2/3)
+[2m2026-10-22T02:04:36.860056Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: tres_archivos_coordinados (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: contar_metodos_de_almacen (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: contar_metodos_de_almacen (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: contar_metodos_de_almacen (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: reportar_campo_de_item (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: reportar_campo_de_item (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: reportar_campo_de_item (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: localizar_funcion_por_valor (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: localizar_funcion_por_valor (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: localizar_funcion_por_valor (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_25_lejano (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_25_lejano (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_25_lejano (rep 3/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_39_lejano (rep 1/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_39_lejano (rep 2/3)
+-> zen:gpt-oss-20b-mxfp4-llamacpp :: editar_lote_39_lejano (rep 3/3)
+
+== Resultados por tarea ==
+[PASS] borrar_2_funciones       zen:gpt-oss-20b-mxfp4-llamacpp  58075ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=9771 tokens_out=952
+[PASS] borrar_2_funciones       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2)  74334ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=19073 tokens_out=991
+[FAIL] borrar_2_funciones       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  87963ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=22339 tokens_out=1159 [AssertionMaxRounds]
+[PASS] borrar_6_funciones       zen:gpt-oss-20b-mxfp4-llamacpp  65319ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=14224 tokens_out=964
+[FAIL] borrar_6_funciones       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 100705ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=27174 tokens_out=1078 [AssertionMaxRounds]
+[PASS] borrar_6_funciones       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  84437ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=19641 tokens_out=1130
+[PASS] borrar_12_funciones      zen:gpt-oss-20b-mxfp4-llamacpp 168250ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=39588 tokens_out=2005
+[PASS] borrar_12_funciones      zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 100518ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=21589 tokens_out=1377
+[PASS] borrar_12_funciones      zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  81308ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=19845 tokens_out=1062
+[FAIL] borrar_20_funciones      zen:gpt-oss-20b-mxfp4-llamacpp 470684ms  rounds=16 tool_calls=15  schema_fail=0  exec_fail=1  denied=0  tokens_in=112287 tokens_out=5071 [AssertionMaxRounds]
+[PASS] borrar_20_funciones      zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 123328ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=20262 tokens_out=1889
+[PASS] borrar_20_funciones      zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 131838ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=31592 tokens_out=1519
+[PASS] borrar_30_funciones      zen:gpt-oss-20b-mxfp4-llamacpp 225362ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=65564 tokens_out=1607
+[PASS] borrar_30_funciones      zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 451736ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=60209 tokens_out=1454
+[PASS] borrar_30_funciones      zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 850607ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=74401 tokens_out=2606
+[PASS] mover_1_funciones        zen:gpt-oss-20b-mxfp4-llamacpp 303354ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=21716 tokens_out=1480
+[PASS] mover_1_funciones        zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 529799ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=31102 tokens_out=3491
+[FAIL] mover_1_funciones        zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 900005ms  rounds=17 tool_calls=17  schema_fail=0  exec_fail=2  denied=0  tokens_in=73699 tokens_out=4238 [Timeout] (error: task exceeded its time budget)
+[FAIL] mover_3_funciones        zen:gpt-oss-20b-mxfp4-llamacpp 900002ms  rounds=13 tool_calls=13  schema_fail=0  exec_fail=1  denied=0  tokens_in=52356 tokens_out=5967 [Timeout] (error: task exceeded its time budget)
+[PASS] mover_3_funciones        zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 421264ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=25721 tokens_out=3371
+[PASS] mover_3_funciones        zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 552099ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=38684 tokens_out=2569
+[PASS] mover_8_funciones        zen:gpt-oss-20b-mxfp4-llamacpp 707985ms  rounds=14 tool_calls=13  schema_fail=0  exec_fail=1  denied=0  tokens_in=49193 tokens_out=3916
+[PASS] mover_8_funciones        zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 259868ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=18626 tokens_out=1721
+[FAIL] mover_8_funciones        zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 900009ms  rounds=13 tool_calls=13  schema_fail=0  exec_fail=2  denied=0  tokens_in=57263 tokens_out=5142 [Timeout] (error: task exceeded its time budget)
+[PASS] editar_lote_3_temprano   zen:gpt-oss-20b-mxfp4-llamacpp 130272ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=18724 tokens_out=497
+[PASS] editar_lote_3_temprano   zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 159627ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=28409 tokens_out=480
+[PASS] editar_lote_3_temprano   zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  87287ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=8778 tokens_out=295
+[PASS] editar_lote_17_medio     zen:gpt-oss-20b-mxfp4-llamacpp 107742ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=13467 tokens_out=415
+[PASS] editar_lote_17_medio     zen:gpt-oss-20b-mxfp4-llamacpp (rep 2)  91098ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7414 tokens_out=291
+[PASS] editar_lote_17_medio     zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  95999ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=10166 tokens_out=338
+[PASS] editar_lote_34_tarde     zen:gpt-oss-20b-mxfp4-llamacpp 103593ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=12419 tokens_out=285
+[PASS] editar_lote_34_tarde     zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 109199ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=14644 tokens_out=349
+[PASS] editar_lote_34_tarde     zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 334205ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=17688 tokens_out=371
+[PASS] renombrar_campo_2_usos   zen:gpt-oss-20b-mxfp4-llamacpp 527450ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=1  denied=0  tokens_in=28268 tokens_out=1759
+[PASS] renombrar_campo_2_usos   zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 653646ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=1  denied=0  tokens_in=37395 tokens_out=3189
+[FAIL] renombrar_campo_2_usos   zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 599044ms  rounds=16 tool_calls=15  schema_fail=0  exec_fail=0  denied=0  tokens_in=43696 tokens_out=1239 [AssertionMaxRounds]
+[FAIL] renombrar_campo_5_usos   zen:gpt-oss-20b-mxfp4-llamacpp 900002ms  rounds=16 tool_calls=16  schema_fail=0  exec_fail=2  denied=0  tokens_in=61299 tokens_out=2080 [Timeout] (error: task exceeded its time budget)
+[PASS] renombrar_campo_5_usos   zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 443038ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=1  denied=0  tokens_in=26530 tokens_out=1590
+[PASS] renombrar_campo_5_usos   zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 358418ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=23790 tokens_out=1574
+[PASS] renombrar_campo_10_usos  zen:gpt-oss-20b-mxfp4-llamacpp 301156ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=19006 tokens_out=1666
+[FAIL] renombrar_campo_10_usos  zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 900001ms  rounds=16 tool_calls=16  schema_fail=0  exec_fail=0  denied=0  tokens_in=56988 tokens_out=1562 [Timeout] (error: task exceeded its time budget)
+[PASS] renombrar_campo_10_usos  zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 208033ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=13574 tokens_out=1480
+[PASS] arreglar_1_errores       zen:gpt-oss-20b-mxfp4-llamacpp  95926ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5637 tokens_out=521
+[PASS] arreglar_1_errores       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2)  84197ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=6986 tokens_out=312
+[PASS] arreglar_1_errores       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 130843ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=11872 tokens_out=679
+[PASS] arreglar_2_errores       zen:gpt-oss-20b-mxfp4-llamacpp 130477ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12268 tokens_out=763
+[PASS] arreglar_2_errores       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 130292ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12268 tokens_out=616
+[FAIL] arreglar_2_errores       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 409494ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=1  denied=0  tokens_in=29996 tokens_out=1426 [AssertionFiles]
+[PASS] arreglar_3_errores       zen:gpt-oss-20b-mxfp4-llamacpp 142553ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12483 tokens_out=702
+[FAIL] arreglar_3_errores       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 146950ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12480 tokens_out=757 [AssertionFiles]
+[PASS] arreglar_3_errores       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 147841ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=12483 tokens_out=811
+[FAIL] arreglar_4_errores       zen:gpt-oss-20b-mxfp4-llamacpp 473879ms  rounds=8 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=19021 tokens_out=1382 [ModelBackendError] (error: model backend error: model backend's completion stream failed: The model produced output that does not match the expected peg-native format)
+[FAIL] arreglar_4_errores       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 900002ms  rounds=12 tool_calls=12  schema_fail=1  exec_fail=2  denied=0  tokens_in=34747 tokens_out=6329 [Timeout] (error: task exceeded its time budget)
+[FAIL] arreglar_4_errores       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 681901ms  rounds=16 tool_calls=15  schema_fail=0  exec_fail=1  denied=0  tokens_in=49643 tokens_out=3700 [AssertionMaxRounds]
+[PASS] preservar_vecino_0       zen:gpt-oss-20b-mxfp4-llamacpp  82453ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7044 tokens_out=417
+[PASS] preservar_vecino_0       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 150074ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6619 tokens_out=1367
+[PASS] preservar_vecino_0       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 146003ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=6619 tokens_out=1339
+[PASS] preservar_vecino_1       zen:gpt-oss-20b-mxfp4-llamacpp  91868ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=8399 tokens_out=465
+[PASS] preservar_vecino_1       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 156166ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=14524 tokens_out=1035
+[PASS] preservar_vecino_1       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  90830ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=0  tokens_in=8190 tokens_out=526
+[PASS] preservar_vecino_2       zen:gpt-oss-20b-mxfp4-llamacpp  85753ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7070 tokens_out=438
+[PASS] preservar_vecino_2       zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 124513ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=11882 tokens_out=696
+[PASS] preservar_vecino_2       zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 107397ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7061 tokens_out=701
+[PASS] fix_dos_errores_una_linea zen:gpt-oss-20b-mxfp4-llamacpp 104830ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=10972 tokens_out=393
+[PASS] fix_dos_errores_una_linea zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 116412ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=13904 tokens_out=455
+[PASS] fix_dos_errores_una_linea zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 109567ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=12429 tokens_out=400
+[PASS] localizar_y_editar_archivo_largo zen:gpt-oss-20b-mxfp4-llamacpp 140966ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=15469 tokens_out=594
+[PASS] localizar_y_editar_archivo_largo zen:gpt-oss-20b-mxfp4-llamacpp (rep 2)  89317ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7421 tokens_out=261
+[PASS] localizar_y_editar_archivo_largo zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 106672ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=10177 tokens_out=372
+[FAIL] agregar_metodo_a_impl_existente zen:gpt-oss-20b-mxfp4-llamacpp 900010ms  rounds=11 tool_calls=11  schema_fail=0  exec_fail=1  denied=0  tokens_in=45982 tokens_out=1481 [Timeout] (error: task exceeded its time budget)
+[FAIL] agregar_metodo_a_impl_existente zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 900010ms  rounds=10 tool_calls=10  schema_fail=0  exec_fail=1  denied=0  tokens_in=48247 tokens_out=1767 [Timeout] (error: task exceeded its time budget)
+[FAIL] agregar_metodo_a_impl_existente zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 452071ms  rounds=8 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=27693 tokens_out=654 [ModelBackendError] (error: model backend error: model backend's completion stream failed: The model produced output that does not match the expected peg-native format)
+[PASS] mover_item_a_modulo_nuevo zen:gpt-oss-20b-mxfp4-llamacpp 339543ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=27546 tokens_out=1649
+[PASS] mover_item_a_modulo_nuevo zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 678392ms  rounds=10 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=51346 tokens_out=2283
+[PASS] mover_item_a_modulo_nuevo zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 880224ms  rounds=12 tool_calls=11  schema_fail=0  exec_fail=1  denied=0  tokens_in=74181 tokens_out=2320
+[FAIL] cambio_coordinado_dos_archivos zen:gpt-oss-20b-mxfp4-llamacpp 900002ms  rounds=15 tool_calls=15  schema_fail=1  exec_fail=0  denied=0  tokens_in=50416 tokens_out=5438 [Timeout] (error: task exceeded its time budget)
+[FAIL] cambio_coordinado_dos_archivos zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 900011ms  rounds=15 tool_calls=15  schema_fail=0  exec_fail=1  denied=0  tokens_in=56765 tokens_out=1224 [Timeout] (error: task exceeded its time budget)
+[FAIL] cambio_coordinado_dos_archivos zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 900005ms  rounds=13 tool_calls=13  schema_fail=0  exec_fail=1  denied=0  tokens_in=48797 tokens_out=1094 [Timeout] (error: task exceeded its time budget)
+[FAIL] borrar_bloque_deprecado  zen:gpt-oss-20b-mxfp4-llamacpp 900003ms  rounds=9 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=48115 tokens_out=2751 [Timeout] (error: task exceeded its time budget)
+[FAIL] borrar_bloque_deprecado  zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 900004ms  rounds=10 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=66456 tokens_out=1052 [Timeout] (error: task exceeded its time budget)
+[PASS] borrar_bloque_deprecado  zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 803906ms  rounds=12 tool_calls=11  schema_fail=0  exec_fail=0  denied=0  tokens_in=60242 tokens_out=1518
+[FAIL] mover_almacen_completo   zen:gpt-oss-20b-mxfp4-llamacpp 900002ms  rounds=12 tool_calls=12  schema_fail=0  exec_fail=0  denied=0  tokens_in=46878 tokens_out=2115 [Timeout] (error: task exceeded its time budget)
+[PASS] mover_almacen_completo   zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 802274ms  rounds=13 tool_calls=12  schema_fail=0  exec_fail=0  denied=0  tokens_in=49142 tokens_out=2416
+[FAIL] mover_almacen_completo   zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 900006ms  rounds=11 tool_calls=11  schema_fail=0  exec_fail=2  denied=1  tokens_in=29814 tokens_out=3991 [Timeout] (error: task exceeded its time budget)
+[FAIL] tres_archivos_coordinados zen:gpt-oss-20b-mxfp4-llamacpp 900010ms  rounds=15 tool_calls=15  schema_fail=0  exec_fail=1  denied=0  tokens_in=49948 tokens_out=3130 [Timeout] (error: task exceeded its time budget)
+[FAIL] tres_archivos_coordinados zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 900003ms  rounds=13 tool_calls=13  schema_fail=0  exec_fail=3  denied=0  tokens_in=58090 tokens_out=2359 [Timeout] (error: task exceeded its time budget)
+[FAIL] tres_archivos_coordinados zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 900008ms  rounds=15 tool_calls=15  schema_fail=0  exec_fail=1  denied=0  tokens_in=48554 tokens_out=4153 [Timeout] (error: task exceeded its time budget)
+[PASS] contar_metodos_de_almacen zen:gpt-oss-20b-mxfp4-llamacpp  68224ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3313 tokens_out=114
+[PASS] contar_metodos_de_almacen zen:gpt-oss-20b-mxfp4-llamacpp (rep 2)  56760ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3313 tokens_out=99
+[PASS] contar_metodos_de_almacen zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  58652ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=3313 tokens_out=138
+[PASS] reportar_campo_de_item   zen:gpt-oss-20b-mxfp4-llamacpp  68518ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=5895 tokens_out=160
+[PASS] reportar_campo_de_item   zen:gpt-oss-20b-mxfp4-llamacpp (rep 2)  63354ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4577 tokens_out=132
+[PASS] reportar_campo_de_item   zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  61765ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=4575 tokens_out=133
+[PASS] localizar_funcion_por_valor zen:gpt-oss-20b-mxfp4-llamacpp  86605ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5492 tokens_out=148
+[PASS] localizar_funcion_por_valor zen:gpt-oss-20b-mxfp4-llamacpp (rep 2)  80115ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4198 tokens_out=150
+[PASS] localizar_funcion_por_valor zen:gpt-oss-20b-mxfp4-llamacpp (rep 3)  81531ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4204 tokens_out=145
+[PASS] editar_lote_25_lejano    zen:gpt-oss-20b-mxfp4-llamacpp 152896ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=15897 tokens_out=379
+[PASS] editar_lote_25_lejano    zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 149185ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=15895 tokens_out=421
+[PASS] editar_lote_25_lejano    zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 280341ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=25116 tokens_out=530
+[PASS] editar_lote_39_lejano    zen:gpt-oss-20b-mxfp4-llamacpp 125279ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=14649 tokens_out=317
+[PASS] editar_lote_39_lejano    zen:gpt-oss-20b-mxfp4-llamacpp (rep 2) 131333ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=14651 tokens_out=359
+[PASS] editar_lote_39_lejano    zen:gpt-oss-20b-mxfp4-llamacpp (rep 3) 195388ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=17535 tokens_out=367
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+zen:gpt-oss-20b-mxfp4-llamacpp  75/102 [64,81]%   75/102      8.0       355414     151485          27124             1457                 2             29          1            0         0         0         0         0          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+zen:gpt-oss-20b-mxfp4-llamacpp k=2 60.8%  k=3 50.0%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+zen:gpt-oss-20b-mxfp4-llamacpp     17/34     13/34          4/34      0.500      0.735        0.882       0.32
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+zen:gpt-oss-20b-mxfp4-llamacpp escalera_borrado         12/15      9.1     204964     100705        1658         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp escalera_movimiento        6/9     11.4     608265     552099        3544         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp localizacion             15/15      5.4     150230     130272         380         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp consistencia               6/9     11.1     543421     527450        1793         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp escalera_errores          7/12      7.5     289530     144752        1500         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp preservacion               9/9      4.3     115006     107397         776         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp piso                       6/6      4.8     111294     108120         412         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp banda                     4/12     11.0     787848     900002        1936         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp techo                      1/6     13.2     883717     900004        3027         0         0         0         0          -
+zen:gpt-oss-20b-mxfp4-llamacpp lectura                    9/9      2.6      69503      68224         135         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/sweeps/sweep-gpt-oss-20b-mxfp4-llamacpp-discriminating-2026-10-17.json

@@ -1,0 +1,246 @@
+Corriendo 3 repetición(es) por (tarea, backend) — timeout 900s por intento.
+-> zen:bonsai2-9B :: borrar_2_funciones (rep 1/3)
+-> zen:bonsai2-9B :: borrar_2_funciones (rep 2/3)
+-> zen:bonsai2-9B :: borrar_2_funciones (rep 3/3)
+-> zen:bonsai2-9B :: borrar_6_funciones (rep 1/3)
+-> zen:bonsai2-9B :: borrar_6_funciones (rep 2/3)
+-> zen:bonsai2-9B :: borrar_6_funciones (rep 3/3)
+-> zen:bonsai2-9B :: borrar_12_funciones (rep 1/3)
+-> zen:bonsai2-9B :: borrar_12_funciones (rep 2/3)
+-> zen:bonsai2-9B :: borrar_12_funciones (rep 3/3)
+-> zen:bonsai2-9B :: borrar_20_funciones (rep 1/3)
+-> zen:bonsai2-9B :: borrar_20_funciones (rep 2/3)
+-> zen:bonsai2-9B :: borrar_20_funciones (rep 3/3)
+-> zen:bonsai2-9B :: borrar_30_funciones (rep 1/3)
+-> zen:bonsai2-9B :: borrar_30_funciones (rep 2/3)
+-> zen:bonsai2-9B :: borrar_30_funciones (rep 3/3)
+-> zen:bonsai2-9B :: mover_1_funciones (rep 1/3)
+-> zen:bonsai2-9B :: mover_1_funciones (rep 2/3)
+-> zen:bonsai2-9B :: mover_1_funciones (rep 3/3)
+-> zen:bonsai2-9B :: mover_3_funciones (rep 1/3)
+-> zen:bonsai2-9B :: mover_3_funciones (rep 2/3)
+-> zen:bonsai2-9B :: mover_3_funciones (rep 3/3)
+-> zen:bonsai2-9B :: mover_8_funciones (rep 1/3)
+-> zen:bonsai2-9B :: mover_8_funciones (rep 2/3)
+-> zen:bonsai2-9B :: mover_8_funciones (rep 3/3)
+-> zen:bonsai2-9B :: editar_lote_3_temprano (rep 1/3)
+-> zen:bonsai2-9B :: editar_lote_3_temprano (rep 2/3)
+-> zen:bonsai2-9B :: editar_lote_3_temprano (rep 3/3)
+-> zen:bonsai2-9B :: editar_lote_17_medio (rep 1/3)
+-> zen:bonsai2-9B :: editar_lote_17_medio (rep 2/3)
+-> zen:bonsai2-9B :: editar_lote_17_medio (rep 3/3)
+-> zen:bonsai2-9B :: editar_lote_34_tarde (rep 1/3)
+-> zen:bonsai2-9B :: editar_lote_34_tarde (rep 2/3)
+-> zen:bonsai2-9B :: editar_lote_34_tarde (rep 3/3)
+-> zen:bonsai2-9B :: renombrar_campo_2_usos (rep 1/3)
+-> zen:bonsai2-9B :: renombrar_campo_2_usos (rep 2/3)
+-> zen:bonsai2-9B :: renombrar_campo_2_usos (rep 3/3)
+-> zen:bonsai2-9B :: renombrar_campo_5_usos (rep 1/3)
+-> zen:bonsai2-9B :: renombrar_campo_5_usos (rep 2/3)
+-> zen:bonsai2-9B :: renombrar_campo_5_usos (rep 3/3)
+-> zen:bonsai2-9B :: renombrar_campo_10_usos (rep 1/3)
+-> zen:bonsai2-9B :: renombrar_campo_10_usos (rep 2/3)
+[2m2026-10-20T22:12:35.111525Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m turn did not converge; attempting a final tools-free summary round instead of failing outright [3mmax_iterations[0m[2m=[0m20
+-> zen:bonsai2-9B :: renombrar_campo_10_usos (rep 3/3)
+-> zen:bonsai2-9B :: arreglar_1_errores (rep 1/3)
+-> zen:bonsai2-9B :: arreglar_1_errores (rep 2/3)
+-> zen:bonsai2-9B :: arreglar_1_errores (rep 3/3)
+-> zen:bonsai2-9B :: arreglar_2_errores (rep 1/3)
+-> zen:bonsai2-9B :: arreglar_2_errores (rep 2/3)
+-> zen:bonsai2-9B :: arreglar_2_errores (rep 3/3)
+-> zen:bonsai2-9B :: arreglar_3_errores (rep 1/3)
+-> zen:bonsai2-9B :: arreglar_3_errores (rep 2/3)
+-> zen:bonsai2-9B :: arreglar_3_errores (rep 3/3)
+-> zen:bonsai2-9B :: arreglar_4_errores (rep 1/3)
+[2m2026-10-20T22:22:23.459174Z[0m [33m WARN[0m [2mbraze_engine::engine::round[0m[2m:[0m model output was truncated by max_tokens this round; a tool call's arguments may have been cut off mid-construction [3moutput_tokens[0m[2m=[0m4096 [3mmax_tokens[0m[2m=[0m4096
+[2m2026-10-20T22:22:23.460021Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m final response truncated by the token budget; discarded [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m4096 [3mvisible_chars[0m[2m=[0m0 [3mhead[0m[2m=[0m [3mtail[0m[2m=[0m
+-> zen:bonsai2-9B :: arreglar_4_errores (rep 2/3)
+-> zen:bonsai2-9B :: arreglar_4_errores (rep 3/3)
+[2m2026-10-20T22:24:32.199421Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-20T22:26:23.965790Z[0m [33m WARN[0m [2mbraze_engine::engine::round[0m[2m:[0m model output was truncated by max_tokens this round; a tool call's arguments may have been cut off mid-construction [3moutput_tokens[0m[2m=[0m4096 [3mmax_tokens[0m[2m=[0m4096
+[2m2026-10-20T22:26:23.966154Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m final response truncated by the token budget; discarded [3mround[0m[2m=[0m8 [3mround_output_tokens[0m[2m=[0m4096 [3mvisible_chars[0m[2m=[0m0 [3mhead[0m[2m=[0m [3mtail[0m[2m=[0m
+-> zen:bonsai2-9B :: preservar_vecino_0 (rep 1/3)
+-> zen:bonsai2-9B :: preservar_vecino_0 (rep 2/3)
+-> zen:bonsai2-9B :: preservar_vecino_0 (rep 3/3)
+[2m2026-10-20T22:28:29.011791Z[0m [33m WARN[0m [2mbraze_engine::engine::round[0m[2m:[0m model output was truncated by max_tokens this round; a tool call's arguments may have been cut off mid-construction [3moutput_tokens[0m[2m=[0m4096 [3mmax_tokens[0m[2m=[0m4096
+[2m2026-10-20T22:28:29.012265Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m final response truncated by the token budget; discarded [3mround[0m[2m=[0m1 [3mround_output_tokens[0m[2m=[0m4096 [3mvisible_chars[0m[2m=[0m0 [3mhead[0m[2m=[0m [3mtail[0m[2m=[0m
+-> zen:bonsai2-9B :: preservar_vecino_1 (rep 1/3)
+-> zen:bonsai2-9B :: preservar_vecino_1 (rep 2/3)
+-> zen:bonsai2-9B :: preservar_vecino_1 (rep 3/3)
+[2m2026-10-20T22:30:02.970604Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m blocked write_file after repeated edit_file failures on the same path (hard interlock, v9 L-10) [3mpath[0m[2m=[0m"src/lib.rs"
+-> zen:bonsai2-9B :: preservar_vecino_2 (rep 1/3)
+-> zen:bonsai2-9B :: preservar_vecino_2 (rep 2/3)
+-> zen:bonsai2-9B :: preservar_vecino_2 (rep 3/3)
+-> zen:bonsai2-9B :: fix_dos_errores_una_linea (rep 1/3)
+-> zen:bonsai2-9B :: fix_dos_errores_una_linea (rep 2/3)
+-> zen:bonsai2-9B :: fix_dos_errores_una_linea (rep 3/3)
+-> zen:bonsai2-9B :: localizar_y_editar_archivo_largo (rep 1/3)
+-> zen:bonsai2-9B :: localizar_y_editar_archivo_largo (rep 2/3)
+-> zen:bonsai2-9B :: localizar_y_editar_archivo_largo (rep 3/3)
+-> zen:bonsai2-9B :: agregar_metodo_a_impl_existente (rep 1/3)
+-> zen:bonsai2-9B :: agregar_metodo_a_impl_existente (rep 2/3)
+-> zen:bonsai2-9B :: agregar_metodo_a_impl_existente (rep 3/3)
+-> zen:bonsai2-9B :: mover_item_a_modulo_nuevo (rep 1/3)
+-> zen:bonsai2-9B :: mover_item_a_modulo_nuevo (rep 2/3)
+-> zen:bonsai2-9B :: mover_item_a_modulo_nuevo (rep 3/3)
+-> zen:bonsai2-9B :: cambio_coordinado_dos_archivos (rep 1/3)
+-> zen:bonsai2-9B :: cambio_coordinado_dos_archivos (rep 2/3)
+-> zen:bonsai2-9B :: cambio_coordinado_dos_archivos (rep 3/3)
+-> zen:bonsai2-9B :: borrar_bloque_deprecado (rep 1/3)
+-> zen:bonsai2-9B :: borrar_bloque_deprecado (rep 2/3)
+-> zen:bonsai2-9B :: borrar_bloque_deprecado (rep 3/3)
+-> zen:bonsai2-9B :: mover_almacen_completo (rep 1/3)
+[2m2026-10-20T22:51:00.735186Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m turn did not converge; attempting a final tools-free summary round instead of failing outright [3mmax_iterations[0m[2m=[0m20
+-> zen:bonsai2-9B :: mover_almacen_completo (rep 2/3)
+-> zen:bonsai2-9B :: mover_almacen_completo (rep 3/3)
+-> zen:bonsai2-9B :: tres_archivos_coordinados (rep 1/3)
+[2m2026-10-20T23:01:46.527608Z[0m [33m WARN[0m [2mbraze_engine::engine::dispatch[0m[2m:[0m model repeated an identical tool call this turn; not re-dispatching [3mtool[0m[2m=[0mread_file [3mservido_de_cache[0m[2m=[0mtrue
+[2m2026-10-20T23:03:53.033800Z[0m [33m WARN[0m [2mbraze_engine::engine::turn[0m[2m:[0m turn did not converge; attempting a final tools-free summary round instead of failing outright [3mmax_iterations[0m[2m=[0m20
+-> zen:bonsai2-9B :: tres_archivos_coordinados (rep 2/3)
+-> zen:bonsai2-9B :: tres_archivos_coordinados (rep 3/3)
+-> zen:bonsai2-9B :: contar_metodos_de_almacen (rep 1/3)
+-> zen:bonsai2-9B :: contar_metodos_de_almacen (rep 2/3)
+-> zen:bonsai2-9B :: contar_metodos_de_almacen (rep 3/3)
+-> zen:bonsai2-9B :: reportar_campo_de_item (rep 1/3)
+-> zen:bonsai2-9B :: reportar_campo_de_item (rep 2/3)
+-> zen:bonsai2-9B :: reportar_campo_de_item (rep 3/3)
+-> zen:bonsai2-9B :: localizar_funcion_por_valor (rep 1/3)
+-> zen:bonsai2-9B :: localizar_funcion_por_valor (rep 2/3)
+-> zen:bonsai2-9B :: localizar_funcion_por_valor (rep 3/3)
+-> zen:bonsai2-9B :: editar_lote_25_lejano (rep 1/3)
+-> zen:bonsai2-9B :: editar_lote_25_lejano (rep 2/3)
+-> zen:bonsai2-9B :: editar_lote_25_lejano (rep 3/3)
+-> zen:bonsai2-9B :: editar_lote_39_lejano (rep 1/3)
+-> zen:bonsai2-9B :: editar_lote_39_lejano (rep 2/3)
+-> zen:bonsai2-9B :: editar_lote_39_lejano (rep 3/3)
+
+== Resultados por tarea ==
+[PASS] borrar_2_funciones       zen:bonsai2-9B        15618ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=8565 tokens_out=552
+[PASS] borrar_2_funciones       zen:bonsai2-9B       (rep 2)  14158ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=8565 tokens_out=564
+[PASS] borrar_2_funciones       zen:bonsai2-9B       (rep 3)  15051ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=10540 tokens_out=593
+[PASS] borrar_6_funciones       zen:bonsai2-9B        32259ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=15330 tokens_out=1321
+[PASS] borrar_6_funciones       zen:bonsai2-9B       (rep 2)  20639ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=11322 tokens_out=823
+[PASS] borrar_6_funciones       zen:bonsai2-9B       (rep 3)  34291ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=15330 tokens_out=1416
+[PASS] borrar_12_funciones      zen:bonsai2-9B        32491ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=12568 tokens_out=1318
+[PASS] borrar_12_funciones      zen:bonsai2-9B       (rep 2)  33748ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=16595 tokens_out=1335
+[PASS] borrar_12_funciones      zen:bonsai2-9B       (rep 3)  31477ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=12568 tokens_out=1267
+[PASS] borrar_20_funciones      zen:bonsai2-9B        35914ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=18231 tokens_out=1415
+[PASS] borrar_20_funciones      zen:bonsai2-9B       (rep 2)  35794ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=18255 tokens_out=1426
+[PASS] borrar_20_funciones      zen:bonsai2-9B       (rep 3)  47512ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=14230 tokens_out=1931
+[PASS] borrar_30_funciones      zen:bonsai2-9B        41960ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=1  denied=0  tokens_in=24723 tokens_out=1460
+[PASS] borrar_30_funciones      zen:bonsai2-9B       (rep 2) 158628ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=1  denied=0  tokens_in=45557 tokens_out=5669
+[PASS] borrar_30_funciones      zen:bonsai2-9B       (rep 3)  54527ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=1  denied=0  tokens_in=31925 tokens_out=1745
+[PASS] mover_1_funciones        zen:bonsai2-9B        54583ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=17840 tokens_out=2261
+[PASS] mover_1_funciones        zen:bonsai2-9B       (rep 2)  56964ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=17840 tokens_out=2374
+[PASS] mover_1_funciones        zen:bonsai2-9B       (rep 3)  31155ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=12466 tokens_out=1260
+[PASS] mover_3_funciones        zen:bonsai2-9B        54118ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=9515 tokens_out=2267
+[PASS] mover_3_funciones        zen:bonsai2-9B       (rep 2)  22221ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=15430 tokens_out=853
+[PASS] mover_3_funciones        zen:bonsai2-9B       (rep 3)  44763ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=16415 tokens_out=1847
+[PASS] mover_8_funciones        zen:bonsai2-9B        59650ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=24144 tokens_out=2432
+[PASS] mover_8_funciones        zen:bonsai2-9B       (rep 2)  47850ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=17483 tokens_out=1970
+[PASS] mover_8_funciones        zen:bonsai2-9B       (rep 3)  28025ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=12256 tokens_out=1121
+[PASS] editar_lote_3_temprano   zen:bonsai2-9B        14160ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9293 tokens_out=495
+[PASS] editar_lote_3_temprano   zen:bonsai2-9B       (rep 2)  13939ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9293 tokens_out=487
+[PASS] editar_lote_3_temprano   zen:bonsai2-9B       (rep 3)  14243ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9293 tokens_out=500
+[PASS] editar_lote_17_medio     zen:bonsai2-9B        13379ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9302 tokens_out=461
+[PASS] editar_lote_17_medio     zen:bonsai2-9B       (rep 2)  13534ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9302 tokens_out=469
+[PASS] editar_lote_17_medio     zen:bonsai2-9B       (rep 3)  13421ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9302 tokens_out=464
+[PASS] editar_lote_34_tarde     zen:bonsai2-9B        16796ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15089 tokens_out=556
+[PASS] editar_lote_34_tarde     zen:bonsai2-9B       (rep 2)  18262ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15089 tokens_out=626
+[PASS] editar_lote_34_tarde     zen:bonsai2-9B       (rep 3)  16769ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15089 tokens_out=558
+[PASS] renombrar_campo_2_usos   zen:bonsai2-9B        45219ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=29778 tokens_out=1480
+[PASS] renombrar_campo_2_usos   zen:bonsai2-9B       (rep 2)  37226ms  rounds=8 tool_calls=7  schema_fail=0  exec_fail=0  denied=0  tokens_in=24748 tokens_out=1279
+[PASS] renombrar_campo_2_usos   zen:bonsai2-9B       (rep 3)  49831ms  rounds=9 tool_calls=8  schema_fail=0  exec_fail=0  denied=0  tokens_in=33401 tokens_out=1554
+[PASS] renombrar_campo_5_usos   zen:bonsai2-9B        58953ms  rounds=11 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=42196 tokens_out=1735
+[FAIL] renombrar_campo_5_usos   zen:bonsai2-9B       (rep 2)  80451ms  rounds=14 tool_calls=13  schema_fail=0  exec_fail=0  denied=0  tokens_in=59997 tokens_out=2164 [AssertionMaxRounds]
+[FAIL] renombrar_campo_5_usos   zen:bonsai2-9B       (rep 3)  79340ms  rounds=14 tool_calls=13  schema_fail=0  exec_fail=0  denied=0  tokens_in=59610 tokens_out=2137 [AssertionMaxRounds]
+[PASS] renombrar_campo_10_usos  zen:bonsai2-9B        38288ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=20950 tokens_out=1487
+[FAIL] renombrar_campo_10_usos  zen:bonsai2-9B       (rep 2) 145991ms  rounds=21 tool_calls=20  schema_fail=0  exec_fail=3  denied=2  tokens_in=105355 tokens_out=3424 [MaxIterationsExhausted] (error: turn exceeded the maximum of 20 model/tool-call round trips without converging)
+[FAIL] renombrar_campo_10_usos  zen:bonsai2-9B       (rep 3) 148428ms  rounds=20 tool_calls=19  schema_fail=0  exec_fail=1  denied=1  tokens_in=104872 tokens_out=3429 [AssertionCargoCheck]
+[PASS] arreglar_1_errores       zen:bonsai2-9B        10814ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7261 tokens_out=371
+[PASS] arreglar_1_errores       zen:bonsai2-9B       (rep 2)  10887ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7257 tokens_out=382
+[PASS] arreglar_1_errores       zen:bonsai2-9B       (rep 3)  10590ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7257 tokens_out=370
+[FAIL] arreglar_2_errores       zen:bonsai2-9B        16669ms  rounds=3 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=7483 tokens_out=626 [AssertionFiles]
+[PASS] arreglar_2_errores       zen:bonsai2-9B       (rep 2)  71458ms  rounds=6 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=22836 tokens_out=2714
+[PASS] arreglar_2_errores       zen:bonsai2-9B       (rep 3)  64093ms  rounds=9 tool_calls=10  schema_fail=0  exec_fail=2  denied=2  tokens_in=33249 tokens_out=2140
+[FAIL] arreglar_3_errores       zen:bonsai2-9B        54117ms  rounds=7 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=26893 tokens_out=1814 [AssertionFiles]
+[PASS] arreglar_3_errores       zen:bonsai2-9B       (rep 2)  42541ms  rounds=5 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=17061 tokens_out=1687
+[FAIL] arreglar_3_errores       zen:bonsai2-9B       (rep 3)  54482ms  rounds=8 tool_calls=9  schema_fail=0  exec_fail=2  denied=0  tokens_in=27103 tokens_out=1861 [AssertionFiles]
+[FAIL] arreglar_4_errores       zen:bonsai2-9B        96503ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4364 tokens_out=4179 [ModelBackendError] (error: model's final response was truncated by the token budget before it could finish)
+[FAIL] arreglar_4_errores       zen:bonsai2-9B       (rep 2)  69982ms  rounds=9 tool_calls=10  schema_fail=0  exec_fail=0  denied=0  tokens_in=37166 tokens_out=2335 [AssertionFiles]
+[FAIL] arreglar_4_errores       zen:bonsai2-9B       (rep 3) 170367ms  rounds=9 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=34879 tokens_out=6799 [ModelBackendError] (error: model's final response was truncated by the token budget before it could finish)
+[PASS] preservar_vecino_0       zen:bonsai2-9B        12733ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7306 tokens_out=456
+[PASS] preservar_vecino_0       zen:bonsai2-9B       (rep 2)  14706ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7317 tokens_out=549
+[FAIL] preservar_vecino_0       zen:bonsai2-9B       (rep 3)  97484ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4385 tokens_out=4223 [ModelBackendError] (error: model's final response was truncated by the token budget before it could finish)
+[FAIL] preservar_vecino_1       zen:bonsai2-9B        36761ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=1  denied=0  tokens_in=11496 tokens_out=1464 [AssertionFiles]
+[PASS] preservar_vecino_1       zen:bonsai2-9B       (rep 2)  14926ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7371 tokens_out=554
+[FAIL] preservar_vecino_1       zen:bonsai2-9B       (rep 3)  64523ms  rounds=9 tool_calls=8  schema_fail=1  exec_fail=2  denied=0  tokens_in=34491 tokens_out=2279 [AssertionMaxRounds]
+[PASS] preservar_vecino_2       zen:bonsai2-9B        14926ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=7456 tokens_out=552
+[PASS] preservar_vecino_2       zen:bonsai2-9B       (rep 2)  42789ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=16444 tokens_out=1684
+[PASS] preservar_vecino_2       zen:bonsai2-9B       (rep 3)  26123ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=1  denied=0  tokens_in=18088 tokens_out=1002
+[PASS] fix_dos_errores_una_linea zen:bonsai2-9B        27408ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=22406 tokens_out=936
+[FAIL] fix_dos_errores_una_linea zen:bonsai2-9B       (rep 2)  57060ms  rounds=9 tool_calls=9  schema_fail=0  exec_fail=0  denied=0  tokens_in=44112 tokens_out=1632 [AssertionCargoCheck]
+[PASS] fix_dos_errores_una_linea zen:bonsai2-9B       (rep 3)  29304ms  rounds=5 tool_calls=5  schema_fail=0  exec_fail=0  denied=0  tokens_in=22406 tokens_out=1016
+[PASS] localizar_y_editar_archivo_largo zen:bonsai2-9B        14267ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9302 tokens_out=478
+[PASS] localizar_y_editar_archivo_largo zen:bonsai2-9B       (rep 2)  14104ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9302 tokens_out=474
+[PASS] localizar_y_editar_archivo_largo zen:bonsai2-9B       (rep 3)  14751ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9302 tokens_out=502
+[PASS] agregar_metodo_a_impl_existente zen:bonsai2-9B        17871ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=13764 tokens_out=616
+[PASS] agregar_metodo_a_impl_existente zen:bonsai2-9B       (rep 2)  68421ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15811 tokens_out=2755
+[PASS] agregar_metodo_a_impl_existente zen:bonsai2-9B       (rep 3)  67607ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15812 tokens_out=2721
+[PASS] mover_item_a_modulo_nuevo zen:bonsai2-9B        71309ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=22214 tokens_out=2871
+[PASS] mover_item_a_modulo_nuevo zen:bonsai2-9B       (rep 2) 110464ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=0  tokens_in=23757 tokens_out=4514
+[PASS] mover_item_a_modulo_nuevo zen:bonsai2-9B       (rep 3) 108721ms  rounds=6 tool_calls=5  schema_fail=0  exec_fail=2  denied=1  tokens_in=25889 tokens_out=4425
+[PASS] cambio_coordinado_dos_archivos zen:bonsai2-9B       124305ms  rounds=10 tool_calls=15  schema_fail=0  exec_fail=3  denied=2  tokens_in=54424 tokens_out=3620
+[PASS] cambio_coordinado_dos_archivos zen:bonsai2-9B       (rep 2)  25317ms  rounds=6 tool_calls=6  schema_fail=0  exec_fail=0  denied=0  tokens_in=18167 tokens_out=920
+[PASS] cambio_coordinado_dos_archivos zen:bonsai2-9B       (rep 3)  21996ms  rounds=3 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=9833 tokens_out=795
+[PASS] borrar_bloque_deprecado  zen:bonsai2-9B        43407ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=1  denied=0  tokens_in=24217 tokens_out=1487
+[PASS] borrar_bloque_deprecado  zen:bonsai2-9B       (rep 2)  43465ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=1  denied=0  tokens_in=24217 tokens_out=1485
+[PASS] borrar_bloque_deprecado  zen:bonsai2-9B       (rep 3)  43924ms  rounds=7 tool_calls=6  schema_fail=0  exec_fail=1  denied=0  tokens_in=24245 tokens_out=1502
+[FAIL] mover_almacen_completo   zen:bonsai2-9B       256778ms  rounds=21 tool_calls=20  schema_fail=0  exec_fail=4  denied=2  tokens_in=136440 tokens_out=6781 [MaxIterationsExhausted] (error: turn exceeded the maximum of 20 model/tool-call round trips without converging)
+[FAIL] mover_almacen_completo   zen:bonsai2-9B       (rep 2) 239261ms  rounds=20 tool_calls=19  schema_fail=0  exec_fail=2  denied=1  tokens_in=126376 tokens_out=6169 [AssertionCargoCheck]
+[FAIL] mover_almacen_completo   zen:bonsai2-9B       (rep 3) 359437ms  rounds=20 tool_calls=19  schema_fail=0  exec_fail=4  denied=2  tokens_in=159136 tokens_out=9945 [AssertionCargoCheck]
+[FAIL] tres_archivos_coordinados zen:bonsai2-9B       175040ms  rounds=21 tool_calls=31  schema_fail=0  exec_fail=5  denied=0  tokens_in=112361 tokens_out=4197 [AssertionFiles]
+[PASS] tres_archivos_coordinados zen:bonsai2-9B       (rep 2)  70685ms  rounds=10 tool_calls=11  schema_fail=0  exec_fail=0  denied=0  tokens_in=43562 tokens_out=1901
+[PASS] tres_archivos_coordinados zen:bonsai2-9B       (rep 3)  72999ms  rounds=12 tool_calls=13  schema_fail=0  exec_fail=0  denied=0  tokens_in=48719 tokens_out=1960
+[PASS] contar_metodos_de_almacen zen:bonsai2-9B        12249ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=1  denied=1  tokens_in=10204 tokens_out=412
+[PASS] contar_metodos_de_almacen zen:bonsai2-9B       (rep 2)   9059ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4376 tokens_out=301
+[PASS] contar_metodos_de_almacen zen:bonsai2-9B       (rep 3)   8003ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4376 tokens_out=256
+[PASS] reportar_campo_de_item   zen:bonsai2-9B         3995ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4339 tokens_out=89
+[PASS] reportar_campo_de_item   zen:bonsai2-9B       (rep 2)   3999ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4339 tokens_out=89
+[PASS] reportar_campo_de_item   zen:bonsai2-9B       (rep 3)   3963ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=4339 tokens_out=89
+[PASS] localizar_funcion_por_valor zen:bonsai2-9B         7049ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=5396 tokens_out=246
+[PASS] localizar_funcion_por_valor zen:bonsai2-9B       (rep 2)   6586ms  rounds=2 tool_calls=1  schema_fail=0  exec_fail=0  denied=0  tokens_in=5331 tokens_out=162
+[PASS] localizar_funcion_por_valor zen:bonsai2-9B       (rep 3)   9399ms  rounds=3 tool_calls=2  schema_fail=0  exec_fail=0  denied=0  tokens_in=9095 tokens_out=265
+[PASS] editar_lote_25_lejano    zen:bonsai2-9B        18247ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15738 tokens_out=562
+[PASS] editar_lote_25_lejano    zen:bonsai2-9B       (rep 2)  16999ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15738 tokens_out=509
+[PASS] editar_lote_25_lejano    zen:bonsai2-9B       (rep 3)  17494ms  rounds=4 tool_calls=3  schema_fail=0  exec_fail=0  denied=0  tokens_in=15738 tokens_out=527
+[PASS] editar_lote_39_lejano    zen:bonsai2-9B        18393ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=17419 tokens_out=609
+[PASS] editar_lote_39_lejano    zen:bonsai2-9B       (rep 2)  15740ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=17335 tokens_out=501
+[PASS] editar_lote_39_lejano    zen:bonsai2-9B       (rep 3)  17204ms  rounds=5 tool_calls=4  schema_fail=0  exec_fail=0  denied=0  tokens_in=17335 tokens_out=564
+
+== Comparación por backend ==
+backend                  pass_rate[95%CI]   strict avg_rounds       avg_ms  median_ms     avg_tok_in      avg_tok_out       schema_fail      exec_fail     denied  harness_err   rescues   escalat   compact   sumfall   cost_usd
+zen:bonsai2-9B            84/102 [74,89]%   84/102      6.1        49661      33120          24546             1661                 1             51         14            0         0         0         0         3          -
+
+== Confiabilidad pass^k (tau-bench: k intentos, TODOS pasan) ==
+zen:bonsai2-9B           k=2 74.5%  k=3 70.6%
+
+== Estabilidad por ítem (robusto / frágil, sobre repeticiones) ==
+backend                    robusto    frágil   robusto-mal    robusta      media    optimista     suerte
+zen:bonsai2-9B               24/34      8/34          2/34      0.706      0.824        0.941       0.14
+(robusto = pasa en TODAS las repeticiones; 'suerte' = fracción de lo acreditado por la media que no sobrevive a repetir. Un delta de A/B menor que la banda robusta→optimista no es interpretable.)
+
+== Comparación por skill ==
+backend                  skill                pass_rate avg_rounds     avg_ms  median_ms avg_tok_out   rescues   escalat   compact   sumfall   cost_usd
+zen:bonsai2-9B           escalera_borrado         15/15      5.8      40271      33748        1522         0         0         0         0          -
+zen:bonsai2-9B           escalera_movimiento        9/9      4.7      44370      47850        1821         0         0         0         0          -
+zen:bonsai2-9B           localizacion             15/15      3.8      15905      16769         526         0         0         0         0          -
+zen:bonsai2-9B           consistencia               5/9     12.4      75970      58953        2077         0         0         0         1          -
+zen:bonsai2-9B           escalera_errores          6/12      5.6      56042      54300        2106         0         0         0         0          -
+zen:bonsai2-9B           preservacion               6/9      4.2      36108      26123        1418         0         0         0         0          -
+zen:bonsai2-9B           piso                       5/6      4.7      26149      21080         840         0         0         0         0          -
+zen:bonsai2-9B           banda                    12/12      5.7      62234      55766        2309         0         0         0         0          -
+zen:bonsai2-9B           techo                      2/6     17.3     195700     207150        5159         0         0         0         2          -
+zen:bonsai2-9B           lectura                    9/9      2.6       7145       7049         212         0         0         0         0          -
+
+Resultados JSON escritos en /home/franciscoparrao/sweeps/sweep-bonsai2-9B-discriminating-2026-10-17.json
