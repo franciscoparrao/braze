@@ -48,3 +48,21 @@ No trasladable:
    para round-economics.
 3. Calibración de confianza, solo observación (M): instrumentar primero y decidir la
    palanca después, con pre-registro.
+
+## Verificación en vivo del RNG por contador (2026-10-22, commit 18ec409)
+En Nitro: `braze run --backend local` con gemma-4-E4B-it QAT (CUDA), `BRAZE_LOCAL_TEMP=0.8`,
+config vacía (`XDG_CONFIG_HOME` temporal), mismo prompt. Tres corridas: semilla 42, 42 y 7.
+- Las dos corridas con semilla 42 son **idénticas salvo el `session_id`**: 3 rondas, 4.838
+  tokens de entrada, 315 de salida, el mismo texto y las mismas tool calls (`write_file`
+  denegado sin TTY, y reintentos). La sesión multi-ronda es reproducible bit a bit.
+- La corrida con semilla 7 produce otra salida (otros nombres, 409 bytes contra 1.360).
+- Lo que no se puede ver desde afuera es que cada ronda use un flujo distinto; eso lo cubren
+  los tests unitarios de `keyed`.
+
+Gotchas del build CUDA en Nitro que aparecieron en el camino:
+1. Tras un `cargo clean -p llama-cpp-sys-2`, quedaban en `target/release{,/deps,/examples}`
+   symlinks `lib*.so` rotos. El `build.rs` de llama-cpp-sys-2 (0.1.152, línea ~1310) chequea
+   `dst.exists()`, que da falso para un symlink roto, y su `hard_link` revienta con
+   `File exists`. Arreglo: `find target/release -maxdepth 2 -xtype l -name 'lib*.so*' -delete`.
+2. El binario `braze` con `local-cuda` no tiene RUNPATH hacia las `.so` de llama.cpp:
+   correrlo con `LD_LIBRARY_PATH=target/release/build/llama-cpp-sys-2-*/out/build/bin`.
