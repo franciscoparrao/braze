@@ -288,10 +288,11 @@ const MIN_CONTEXT_BUDGET_MARGIN_TOKENS: u32 = 256;
 const PROMPT_SIDE_CHARS_PER_TOKEN: u32 = 3;
 
 /// The token budget a real `braze` invocation passes to
-/// `Engine::with_context_budget` when the active backend is Ollama (the
-/// only backend with a small, fixed context window worth budgeting for —
-/// Anthropic's/OpenRouter's underlying models are large enough that raw
-/// event count remains a fine proxy on their own). Saturates rather than
+/// `Engine::with_context_budget` whenever the context window is known:
+/// Ollama's `num_ctx`, or `Config::context_window` / a llama-server's
+/// `/props` for the other backends (2026-10-23; the name predates that
+/// generalization). Without a known window — Anthropic and the cloud
+/// gateways — raw event count remains the proxy. Saturates rather than
 /// underflows if `max_tokens` and the margin together exceed `num_ctx`.
 ///
 /// The margin reserved for the system prompt + tool definitions (neither

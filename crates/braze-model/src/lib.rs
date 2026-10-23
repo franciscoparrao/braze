@@ -27,6 +27,7 @@ mod gemma;
 mod harmony;
 mod http_client;
 mod http_error;
+mod llama_server;
 #[cfg(feature = "local")]
 mod local;
 // Compilado solo bajo `test`: en el build real lo consume `build.rs` por
@@ -57,6 +58,7 @@ pub use ollama::{
     OllamaBackend, list_ollama_models, ollama_model_digest, ollama_server_version,
     warm_up_ollama_model,
 };
+pub use llama_server::llama_server_context_window;
 pub use openrouter::OpenRouterBackend;
 
 /// Identidad del motor de inferencia in-process linkeado en este binario,

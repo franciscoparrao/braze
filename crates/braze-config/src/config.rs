@@ -382,6 +382,17 @@ pub struct Config {
     /// completions y no requiere los headers propios de OpenRouter.
     /// Configurable por si Zen mueve el endpoint o se apunta a un mirror.
     pub zen_base_url: String,
+    /// Ventana de contexto real del modelo para los backends que no son
+    /// Ollama (`BRAZE_CONTEXT_WINDOW` / `context_window`). Con valor, el
+    /// engine compacta por presupuesto de tokens igual que con
+    /// `ollama_num_ctx`; sin él, solo por número de eventos, que contra
+    /// un `llama-server -c 32768` dejó crecer el prompt hasta el HTTP 400
+    /// "exceeds the available context size" (sesión Juego de la Vida,
+    /// 2026-10-22). Con el backend `zen` y una base que no es OpenCode,
+    /// `braze-cli` intenta leerlo de `/props` de llama-server si falta.
+    /// Ollama lo ignora: ahí manda `ollama_num_ctx`.
+    #[serde(default)]
+    pub context_window: Option<u32>,
     /// Default max tokens for a model completion request.
     pub max_tokens: u32,
     /// System prompt sent with every request. `None` (the default) means
@@ -855,6 +866,7 @@ impl Default for Config {
             zen_api_key: None,
             zen_model: None,
             zen_base_url: "https://opencode.ai/zen/v1".to_string(),
+            context_window: None,
             max_tokens: 4096,
             system_prompt: None,
             session_dir: paths::default_session_dir(),
@@ -1014,6 +1026,11 @@ impl Config {
         // `ollama_num_ctx: 0` is sent straight to the real Ollama server
         // with undefined behavior, and `max_tokens: 0` means every
         // completion request asks for zero output tokens.
+        if self.context_window == Some(0) {
+            return Err(ConfigError::Invalid(
+                "context_window must be greater than 0".to_string(),
+            ));
+        }
         if self.ollama_num_ctx == 0 {
             return Err(ConfigError::Invalid(
                 "ollama_num_ctx must be greater than 0".to_string(),
@@ -1125,6 +1142,9 @@ impl Config {
         }
         if let Some(v) = overrides.zen_base_url {
             self.zen_base_url = v;
+        }
+        if let Some(v) = overrides.context_window {
+            self.context_window = Some(v);
         }
         if let Some(v) = overrides.max_tokens {
             self.max_tokens = v;
@@ -1670,6 +1690,20 @@ mod tests {
         let env = vec![("BRAZE_OLLAMA_NUM_CTX".to_string(), "4096".to_string())];
         let config = Config::load_with(None, env).unwrap();
         assert_eq!(config.ollama_num_ctx, 4096);
+    }
+
+    #[test]
+    fn context_window_defaults_to_unknown_and_is_overridable_via_env() {
+        assert_eq!(Config::load_with(None, no_env()).unwrap().context_window, None);
+        let env = vec![("BRAZE_CONTEXT_WINDOW".to_string(), "32768".to_string())];
+        assert_eq!(Config::load_with(None, env).unwrap().context_window, Some(32768));
+    }
+
+    #[test]
+    fn rejects_context_window_of_zero() {
+        let env = vec![("BRAZE_CONTEXT_WINDOW".to_string(), "0".to_string())];
+        let err = Config::load_with(None, env).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(_)));
     }
 
     // --- pricing_for (Paquete 3, docs/AUDITORIA-2026-07-v6.md) ---

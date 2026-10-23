@@ -1037,24 +1037,53 @@ async fn build_engine(
         )
     });
 
-    // Only Ollama has a small, fixed context window worth budgeting for
-    // (Anthropic's is large enough that raw event count remains a fine
-    // proxy). Computed here, before `tools`/`system_prompt` move into
-    // `Engine::new` below (hallazgo B4, docs/AUDITORIA-2026-07-v3.md): the
-    // margin needs the real system prompt length plus the size of every
-    // currently-advertised tool stub (including MCP ones), not a fixed
-    // constant that can't grow with how many tools are configured.
-    let ollama_budget = if config.default_backend == "ollama" {
-        let tool_definitions_bytes =
-            braze_tools_core::tool_stub_definition_bytes(&tools.all_stubs_lossy().await);
-        Some(braze_config::ollama_context_budget_tokens(
-            config.ollama_num_ctx,
-            config.max_tokens,
-            &system_prompt,
-            tool_definitions_bytes,
-        ))
+    // Budget de contexto (hallazgo B4, docs/AUDITORIA-2026-07-v3.md):
+    // computed here, before `tools`/`system_prompt` move into
+    // `Engine::new` below — the margin needs the real system prompt length
+    // plus the size of every currently-advertised tool stub (including MCP
+    // ones), not a fixed constant. La ventana sale de `ollama_num_ctx` para
+    // Ollama; para el resto, de `context_window`, y si falta y el backend
+    // `zen` apunta a algo que no es OpenCode (un llama-server local), de
+    // su `/props`. Sin ventana conocida no hay budget: Anthropic y los
+    // gateways sirven modelos de contexto grande y el umbral por número de
+    // eventos basta. La sesión Juego de la Vida (2026-10-22) es el caso
+    // que esto cierra: zen → llama-server `-c 32768`, sin budget, HTTP 400
+    // al pasar los 32k sin una sola compactación.
+    let context_window = if config.default_backend == "ollama" {
+        Some(config.ollama_num_ctx)
+    } else if let Some(window) = config.context_window {
+        Some(window)
+    } else if config.default_backend == "zen" && !config.zen_base_url.contains("opencode.ai") {
+        let probed = braze_model::llama_server_context_window(&config.zen_base_url).await;
+        match probed {
+            Some(n_ctx) => tracing::info!(
+                n_ctx,
+                base_url = %config.zen_base_url,
+                "context window read from llama-server /props"
+            ),
+            None => tracing::warn!(
+                base_url = %config.zen_base_url,
+                "zen points at a non-OpenCode endpoint whose context window is unknown \
+                 (no llama-server /props); set context_window / BRAZE_CONTEXT_WINDOW so \
+                 compaction can budget for it"
+            ),
+        }
+        probed
     } else {
         None
+    };
+    let context_budget = match context_window {
+        Some(window) => {
+            let tool_definitions_bytes =
+                braze_tools_core::tool_stub_definition_bytes(&tools.all_stubs_lossy().await);
+            Some(braze_config::ollama_context_budget_tokens(
+                window,
+                config.max_tokens,
+                &system_prompt,
+                tool_definitions_bytes,
+            ))
+        }
+        None => None,
     };
 
     // Short "backend:model" label for the TUI's status bar — computed
@@ -1209,7 +1238,7 @@ async fn build_engine(
         }
     }
 
-    if let Some(budget) = ollama_budget {
+    if let Some(budget) = context_budget {
         engine = engine.with_context_budget(budget);
     }
 

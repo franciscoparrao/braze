@@ -57,6 +57,9 @@ pub struct ConfigOverrides {
     /// `BRAZE_ZEN_BASE_URL`.
     #[serde(default)]
     pub zen_base_url: Option<String>,
+    /// `BRAZE_CONTEXT_WINDOW`.
+    #[serde(default)]
+    pub context_window: Option<u32>,
     #[serde(default)]
     pub openrouter_model: Option<String>,
     #[serde(default)]
@@ -324,6 +327,17 @@ impl ConfigOverrides {
                 "ZEN_API_KEY" => overrides.zen_api_key = Some(ApiKey::new(value)),
                 "ZEN_MODEL" => overrides.zen_model = Some(value.to_string()),
                 "ZEN_BASE_URL" => overrides.zen_base_url = Some(value.to_string()),
+                "CONTEXT_WINDOW" => {
+                    let parsed =
+                        value
+                            .parse::<u32>()
+                            .map_err(|e| ConfigError::InvalidEnvValue {
+                                var: key.to_string(),
+                                value: value.to_string(),
+                                reason: e.to_string(),
+                            })?;
+                    overrides.context_window = Some(parsed);
+                }
                 "MAX_TOKENS" => {
                     let parsed =
                         value

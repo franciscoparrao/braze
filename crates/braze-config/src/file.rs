@@ -55,6 +55,7 @@ const KNOWN_OVERRIDE_KEYS: &[&str] = &[
     "zen_api_key",
     "zen_model",
     "zen_base_url",
+    "context_window",
     "max_tokens",
     "system_prompt",
     "session_dir",
