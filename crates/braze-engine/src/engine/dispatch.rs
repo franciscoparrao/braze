@@ -78,7 +78,9 @@ impl Engine {
             known_tool_call_ids,
             reads_by_path,
             edit_failures_by_path,
+            round_truncated,
         } = state;
+        let round_truncated = *round_truncated;
 
         // Nota de relectura improductiva por id de llamada — ver
         // `TurnDispatchState::reads_by_path`. Se calcula al despachar
@@ -639,7 +641,14 @@ impl Engine {
                             "tool call failed schema validation"
                         );
 
-                        let repair_message = if attempt == 1 {
+                        let repair_message = if round_truncated {
+                            // La causa no es la forma de los argumentos
+                            // sino el corte por max_tokens: no se da el
+                            // schema (no hay nada que corregir en él) y
+                            // no se agota la pista — cada corte vuelve a
+                            // explicar por qué falló.
+                            truncated_tool_call_message(&call.name, &validation_err, self.max_tokens)
+                        } else if attempt == 1 {
                             format!(
                                 "Tool call '{}' failed schema validation: {validation_err}. \
                                  Expected input schema:\n{}\n\
@@ -1580,6 +1589,30 @@ impl Engine {
 /// este tope se marcan como vistos (no se reintentan) pero no se inyectan.
 const AGENTS_MD_JIT_MAX_FILES: usize = 8;
 
+/// Mensaje de reparación para una tool call que falló el schema en una
+/// ronda cortada (`stop_reason` `max_tokens`/`length`,
+/// `TurnDispatchState::round_truncated`). No se culpa solo a `max_tokens`:
+/// llama-server también reporta `length` cuando se llena el contexto, y
+/// así fue en la sesión que motivó esto (29.113 de input + 3.655 de
+/// salida = 32.768, el `-c` exacto del servidor).
+/// Dice la causa real y la salida que sí cabe: el reflejo del modelo ante
+/// "corrige los argumentos" es reenviar el mismo payload completo, que se
+/// corta en el mismo lugar.
+fn truncated_tool_call_message(
+    tool: &str,
+    validation_err: &dyn std::fmt::Display,
+    max_tokens: u32,
+) -> String {
+    format!(
+        "Tool call '{tool}' was not executed: your previous response was cut off (the \
+         {max_tokens}-token output cap or the model's context window was reached) while this \
+         call's arguments were still being written, so they arrived incomplete \
+         ({validation_err}). Resending the same payload will be cut off again. Make the call smaller: to change an existing file use edit_file with a short \
+         old_string/new_string; to create a large file, write a short first version and \
+         extend it with edit_file in later calls."
+    )
+}
+
 /// Sugerencia "¿quisiste decir X?" para una tool inexistente — incidente
 /// roam #9 (2026-07-20): gpt-oss:20b llamó tres veces en un mismo turno
 /// a `search`, que no existe, quemando tres rondas; el error listaba las
@@ -2049,6 +2082,89 @@ mod tests {
         }
 
         // `invoke` ran exactly once: only for the corrected, valid call.
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Sesión Juego de la Vida (2026-10-22): un `write_file` sin `path`
+    /// en la única ronda con `stop_reason: length`. El fallo de schema de
+    /// una ronda truncada debe decir la causa (el corte) y no volcar el
+    /// schema, que invita a reenviar el mismo payload.
+    #[tokio::test]
+    async fn a_schema_failure_in_a_truncated_round_explains_the_cutoff_instead_of_the_schema() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+                CompletionEvent::Usage {
+                    input_tokens: 100,
+                    output_tokens: 1024,
+                    stop_reason: Some("length".to_string()),
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    escalation_trigger: None,
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-2".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({ "text": "hi" }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![
+                CompletionEvent::TextDelta("done".to_string()),
+                CompletionEvent::Done,
+            ],
+        ]);
+
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(EchoToolProvider::new(Arc::clone(
+                &invocations,
+            )))]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+
+        engine
+            .run_turn(&session, "please echo hi", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load events");
+        let repair = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { id, result } if id == "call-1" => Some(result),
+                _ => None,
+            })
+            .expect("call-1 must get a repair result");
+        assert!(repair.is_error);
+        assert!(repair.content.contains("1024-token output cap or the model's context window"), "{}", repair.content);
+        assert!(repair.content.contains("edit_file"), "{}", repair.content);
+        assert!(
+            !repair.content.contains("properties"),
+            "a truncated call must not get the schema dump: {}",
+            repair.content
+        );
+        // La ronda siguiente, sin corte, despacha normal.
         assert_eq!(invocations.load(Ordering::SeqCst), 1);
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

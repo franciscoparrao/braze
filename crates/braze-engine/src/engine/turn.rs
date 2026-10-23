@@ -55,6 +55,16 @@ pub(super) struct TurnDispatchState {
     /// sobre la ruta resetea su contador (el modelo recuperó la
     /// capacidad de editar dirigido).
     pub(super) edit_failures_by_path: HashMap<String, u32>,
+    /// Si la ronda cuyas tool calls se están despachando terminó con
+    /// `stop_reason` `max_tokens`/`length` (`RoundOutcome::truncated`).
+    /// Lo fija `run_turn` antes de cada `dispatch_tool_calls`: un fallo
+    /// de schema en esa ronda casi siempre es la generación cortada a
+    /// mitad del JSON de argumentos, no un error de forma, y el mensaje
+    /// de reparación genérico ("corrige los argumentos") empuja al
+    /// modelo a reenviar el mismo payload gigante, que se vuelve a
+    /// cortar (sesión Juego de la Vida, 2026-10-22: `write_file` sin
+    /// `path` en la única ronda con `length`, 3.655 tokens de salida).
+    pub(super) round_truncated: bool,
 }
 
 /// RAII guard for [`Engine::turn_in_progress`] — see that field's doc
@@ -259,6 +269,7 @@ impl Engine {
             known_tool_call_ids: Self::existing_tool_call_ids(&existing_events),
             reads_by_path: HashMap::new(),
             edit_failures_by_path: HashMap::new(),
+            round_truncated: false,
         };
 
         // D5: whether *any* round of this specific turn has dispatched a
@@ -848,6 +859,7 @@ impl Engine {
                 .await?;
             }
 
+            dispatch_state.round_truncated = truncated;
             self.dispatch_tool_calls(
                 session,
                 &tool_calls,
