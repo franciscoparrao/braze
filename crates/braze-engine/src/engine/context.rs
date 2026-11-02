@@ -529,6 +529,30 @@ impl Engine {
         session: &SessionId,
         observer: &mut dyn TurnObserver,
     ) -> Result<Vec<Message>, EngineError> {
+        Ok(self.load_messages_with(session, observer, false).await?.0)
+    }
+
+    /// Como [`Self::load_messages`], pero compacta aunque ningún umbral
+    /// se haya cruzado. Es la respuesta de `run_turn` a un backend que
+    /// rechazó el request por desborde de contexto
+    /// ([`braze_model::ModelError::is_context_overflow`]): la estimación de
+    /// tokens del budget es aproximada y puede quedarse corta. Devuelve
+    /// también si hubo compactación; sin ella el caller no tiene nada
+    /// nuevo que reintentar.
+    pub(super) async fn load_messages_forcing_compaction(
+        &self,
+        session: &SessionId,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<(Vec<Message>, bool), EngineError> {
+        self.load_messages_with(session, observer, true).await
+    }
+
+    async fn load_messages_with(
+        &self,
+        session: &SessionId,
+        observer: &mut dyn TurnObserver,
+        force_compaction: bool,
+    ) -> Result<(Vec<Message>, bool), EngineError> {
         let events = self.load_and_repair(session, observer).await?;
 
         let (durable, tactical) = self.compactor.split(&events);
@@ -575,7 +599,7 @@ impl Engine {
         // token-budget one.
         let compaction_would_help = tactical.len() > KEEP_RAW_TAIL;
 
-        if (over_event_count_threshold || over_token_budget)
+        if (over_event_count_threshold || over_token_budget || force_compaction)
             && compaction_would_help
             // `+ablate:no-compaction` (E1): gates BOTH triggers (event
             // count and token budget) — a long turn can then genuinely
@@ -596,6 +620,7 @@ impl Engine {
                 tactical_compaction_threshold = effective_compaction_threshold,
                 over_event_count_threshold,
                 over_token_budget,
+                force_compaction,
                 "context compaction triggered"
             );
 
@@ -631,18 +656,24 @@ impl Engine {
 
             let effective_durable = merge_summary(durable, summary);
             let live_tail = &tactical[start..];
-            Ok(build_messages_with_full_observations(
-                &effective_durable,
-                live_tail,
-                effective_full_observations,
-                full_observations_budget,
+            Ok((
+                build_messages_with_full_observations(
+                    &effective_durable,
+                    live_tail,
+                    effective_full_observations,
+                    full_observations_budget,
+                ),
+                true,
             ))
         } else {
-            Ok(build_messages_with_full_observations(
-                &durable,
-                &tactical,
-                effective_full_observations,
-                full_observations_budget,
+            Ok((
+                build_messages_with_full_observations(
+                    &durable,
+                    &tactical,
+                    effective_full_observations,
+                    full_observations_budget,
+                ),
+                false,
             ))
         }
     }

@@ -34,3 +34,61 @@ pub enum ModelError {
     #[error("{0}")]
     CircuitOpen(String),
 }
+
+/// Fragmentos (en minúsculas) con que los servidores reportan un prompt
+/// más largo que la ventana de contexto del modelo. llama-server: «request
+/// (34044 tokens) exceeds the available context size (32768 tokens)»
+/// (sesión Juego de la Vida, 2026-10-22); API de OpenAI y compatibles:
+/// `context_length_exceeded` / «maximum context length»; Anthropic:
+/// «prompt is too long». Ollama no aparece porque trunca el prompt en
+/// silencio en vez de rechazarlo.
+const CONTEXT_OVERFLOW_MARKERS: &[&str] = &[
+    "exceeds the available context size",
+    "context_length_exceeded",
+    "maximum context length",
+    "prompt is too long",
+];
+
+impl ModelError {
+    /// Si el backend rechazó el request porque el prompt no cabe en la
+    /// ventana de contexto del modelo. Es la señal con que el engine
+    /// compacta a la fuerza y reintenta la ronda en vez de perder el turno.
+    pub fn is_context_overflow(&self) -> bool {
+        let text = match self {
+            ModelError::Request(t) | ModelError::StreamError(t) => t,
+            _ => return false,
+        };
+        let text = text.to_lowercase();
+        CONTEXT_OVERFLOW_MARKERS.iter().any(|m| text.contains(m))
+    }
+}
+
+#[cfg(test)]
+mod context_overflow_tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_the_overflow_messages_of_each_server_family() {
+        let llama = ModelError::Request(
+            "zen HTTP 400 Bad Request: request (34044 tokens) exceeds the available context \
+             size (32768 tokens), try increasing it"
+                .into(),
+        );
+        let openai = ModelError::Request(
+            "HTTP 400: {\"error\":{\"code\":\"context_length_exceeded\"}}".into(),
+        );
+        let anthropic = ModelError::Request("HTTP 400: prompt is too long: 210000 tokens".into());
+        assert!(llama.is_context_overflow());
+        assert!(openai.is_context_overflow());
+        assert!(anthropic.is_context_overflow());
+    }
+
+    #[test]
+    fn other_errors_are_not_overflow() {
+        assert!(!ModelError::Request("HTTP 400 Bad Request: invalid tool schema".into())
+            .is_context_overflow());
+        assert!(!ModelError::RateLimited("prompt is too long".into()).is_context_overflow());
+        assert!(!ModelError::Decode("exceeds the available context size".into())
+            .is_context_overflow());
+    }
+}

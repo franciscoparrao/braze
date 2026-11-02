@@ -302,6 +302,14 @@ impl Engine {
         // confirma que el modelo no va a salir del pozo solo.
         const MAX_EMPTY_ROUND_RETRIES: u32 = 2;
         let mut empty_round_retries: u32 = 0;
+        // Recuperación de un desborde de contexto: una vez por turno, si
+        // el backend rechaza el request porque el prompt no cabe, se
+        // compacta a la fuerza y se repite la ronda. Sin esto, el 400 de
+        // llama-server terminaba el turno y se perdía la respuesta final
+        // (sesión Juego de la Vida, 2026-10-22, ronda 40 de 40). Una sola
+        // vez: si tras compactar todavía no cabe, reintentar no cambia
+        // nada y el error se propaga como antes.
+        let mut context_overflow_retried = false;
 
         for round in 0..self.max_turn_iterations {
             // round-economics (docs/hypothesis-2026-07-28-round-economics.md):
@@ -476,10 +484,35 @@ impl Engine {
                 truncated,
                 rescue_applied,
                 fence_edits,
-            } = if self.best_of_n > 1 {
-                self.complete_with_best_of_n(&req, observer).await?
+            } = match if self.best_of_n > 1 {
+                self.complete_with_best_of_n(&req, observer).await
             } else {
-                self.complete_once(req, observer, true).await?
+                self.complete_once(req, observer, true).await
+            } {
+                Err(EngineError::Model(err))
+                    if err.is_context_overflow() && !context_overflow_retried =>
+                {
+                    context_overflow_retried = true;
+                    let (compacted, did_compact) = self
+                        .load_messages_forcing_compaction(session, observer)
+                        .await?;
+                    if !did_compact {
+                        return Err(EngineError::Model(err));
+                    }
+                    tracing::warn!(
+                        round,
+                        error = %err,
+                        "backend rejected the request for exceeding its context window; \
+                         compacted and retrying the round once"
+                    );
+                    messages = compacted;
+                    // Consume una ronda del tope a propósito: el turno no
+                    // puede alargarse más allá de `max_turn_iterations`
+                    // por esta vía. Si era la última, cae al cierre de
+                    // siempre, ahora con un historial compactado.
+                    continue;
+                }
+                other => other?,
             };
 
             // Persisted once per round (if the backend reported it) so
@@ -1763,6 +1796,158 @@ mod tests {
         let result_a = first.await.expect("first turn's task should not panic");
         assert!(result_a.is_ok(), "the first turn should still succeed");
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Modelo que rechaza sus primeras `overflows` llamadas con el 400 de
+    /// desborde de contexto de llama-server y después responde según su
+    /// guion.
+    struct OverflowingModel {
+        overflows: AtomicU32,
+        inner: ScriptedModel,
+    }
+
+    #[async_trait]
+    impl ModelBackend for OverflowingModel {
+        fn name(&self) -> &str {
+            "overflowing"
+        }
+
+        async fn complete(
+            &self,
+            req: CompletionRequest,
+        ) -> Result<
+            std::pin::Pin<Box<dyn Stream<Item = Result<CompletionEvent, ModelError>> + Send>>,
+            ModelError,
+        > {
+            let left = self.overflows.load(std::sync::atomic::Ordering::SeqCst);
+            if left > 0 {
+                self.overflows
+                    .store(left - 1, std::sync::atomic::Ordering::SeqCst);
+                return Err(ModelError::Request(
+                    "zen HTTP 400 Bad Request: request (34044 tokens) exceeds the available \
+                     context size (32768 tokens), try increasing it"
+                        .to_string(),
+                ));
+            }
+            self.inner.complete(req).await
+        }
+    }
+
+    /// Siembra una sesión con suficiente historial táctico para que
+    /// compactar tenga algo que plegar (más allá de la cola cruda).
+    async fn seed_long_history(store: &FileSessionStore, session: &SessionId) {
+        for i in 0..12 {
+            store
+                .append(
+                    session,
+                    &AgentEvent::AssistantText {
+                        text: format!("observación larga número {i}"),
+                    },
+                )
+                .await
+                .expect("seed event");
+        }
+    }
+
+    fn overflow_engine(store: FileSessionStore, overflows: u32) -> Engine {
+        Engine::new(
+            Box::new(OverflowingModel {
+                overflows: AtomicU32::new(overflows),
+                inner: ScriptedModel::new(vec![vec![
+                    CompletionEvent::TextDelta("respuesta final".to_string()),
+                    CompletionEvent::Done,
+                ]]),
+            }),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+    }
+
+    /// Sesión Juego de la Vida (2026-10-22): el 400 de desborde de
+    /// llama-server terminaba el turno. Ahora el engine compacta a la
+    /// fuerza y repite la ronda una vez.
+    #[tokio::test]
+    async fn a_context_overflow_compacts_and_retries_the_round_once() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        seed_long_history(&store, &session).await;
+        let engine = overflow_engine(store, 1);
+
+        engine
+            .run_turn(&session, "sigue", &mut NoopObserver)
+            .await
+            .expect("the turn must recover from one context overflow");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "the recovery must persist a forced compaction"
+        );
+        assert!(
+            events.iter().any(
+                |e| matches!(e, AgentEvent::AssistantText { text } if text == "respuesta final")
+            ),
+            "the retried round's answer must be persisted"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Una sola recuperación por turno: si tras compactar el backend
+    /// vuelve a rechazar, el error se propaga en vez de entrar en bucle.
+    #[tokio::test]
+    async fn a_second_context_overflow_in_the_same_turn_propagates() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        seed_long_history(&store, &session).await;
+        let engine = overflow_engine(store, 2);
+
+        let err = engine
+            .run_turn(&session, "sigue", &mut NoopObserver)
+            .await
+            .expect_err("a second overflow must not be retried");
+        assert!(
+            matches!(&err, EngineError::Model(e) if e.is_context_overflow()),
+            "got {err:?}"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Sin historial que plegar, compactar no cambia el request: el
+    /// error se propaga igual que antes del arreglo.
+    #[tokio::test]
+    async fn a_context_overflow_with_nothing_to_compact_propagates() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let engine = overflow_engine(store, 1);
+
+        let err = engine
+            .run_turn(&session, "hola", &mut NoopObserver)
+            .await
+            .expect_err("with nothing to compact the overflow must propagate");
+        assert!(
+            matches!(&err, EngineError::Model(e) if e.is_context_overflow()),
+            "got {err:?}"
+        );
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load events");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "no compaction should be persisted when it cannot help"
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
