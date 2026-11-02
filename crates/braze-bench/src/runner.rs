@@ -531,6 +531,7 @@ pub async fn run_task(
     // C′.2: la fila puede prender la task list aunque config la tenga
     // off (default) — el brazo planner→tasks del A/B pre-registrado.
     .with_task_list_enabled(config.enable_task_list || ablation.enable_task_list)
+    .with_argv_coercion_enabled(ablation.enable_argv_coercion)
     // Gate de evidencia para cerrar tareas (checkers de Recuris). Sin la
     // lista encendida no tiene efecto — ver la doc de la clave.
     .with_task_evidence_required(config.enable_task_evidence || ablation.enable_task_evidence)

@@ -905,6 +905,100 @@ pub(crate) fn coerce_arguments_to_schema(
 }
 
 
+/// Parte un comando escrito como texto en argumentos estilo argv, solo si
+/// el resultado significa lo mismo que en un shell. `None` si el texto usa
+/// algo que solo un shell interpreta: fuera de comillas, `| & ; < > ( )
+/// $ ` * ? [ ] { } ~ #`, `\` o un salto de línea; dentro de comillas
+/// dobles, `$`, `` ` `` o `\`. `shell_exec` corre sin shell, así que
+/// partir `find . | head` daría a `find` los argumentos `|` y `head`:
+/// para esos casos es mejor dejar que el error de esquema llegue al modelo.
+pub(crate) fn split_command_without_shell(text: &str) -> Option<Vec<String>> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut chars = text.trim().chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                in_token = true;
+                loop {
+                    match chars.next()? {
+                        '\'' => break,
+                        other => current.push(other),
+                    }
+                }
+            }
+            '"' => {
+                in_token = true;
+                loop {
+                    match chars.next()? {
+                        '"' => break,
+                        '$' | '`' | '\\' => return None,
+                        other => current.push(other),
+                    }
+                }
+            }
+            ' ' | '\t' => {
+                if in_token {
+                    args.push(std::mem::take(&mut current));
+                    in_token = false;
+                }
+            }
+            '|' | '&' | ';' | '<' | '>' | '(' | ')' | '$' | '`' | '*' | '?' | '[' | ']' | '{'
+            | '}' | '~' | '#' | '\\' | '\n' | '\r' => return None,
+            other => {
+                in_token = true;
+                current.push(other);
+            }
+        }
+    }
+    if in_token {
+        args.push(current);
+    }
+    (!args.is_empty()).then_some(args)
+}
+
+/// Convierte en lista de argumentos un campo que el esquema declara como
+/// arreglo de textos y que el modelo mandó como un solo texto, cuando
+/// [`split_command_without_shell`] puede partirlo sin cambiar su
+/// significado. Devuelve el nombre del campo convertido.
+///
+/// Diagnóstico que la motiva (docs/diagnostico-lfm25-schema-fail-2026-10-30.md):
+/// en el barrido discriminante de LFM2.5-24B-A2B, 164 de 173 fallos de
+/// esquema registrados son `shell_exec` con `command` como texto (`"ls
+/// -la"`), y 121 de esos comandos se parten sin shell. Palanca opcional
+/// (`Engine::with_argv_coercion_enabled`, `+ablate:argv-coerce`) hasta que
+/// su A/B pre-registrado decida.
+pub(crate) fn coerce_string_to_argv(
+    arguments: &mut serde_json::Value,
+    schema: &serde_json::Value,
+) -> Option<String> {
+    let properties = schema.get("properties")?.as_object()?;
+    let args = arguments.as_object_mut()?;
+    for (key, prop_schema) in properties {
+        let is_string_array = prop_schema.get("type").and_then(|t| t.as_str()) == Some("array")
+            && prop_schema
+                .get("items")
+                .and_then(|i| i.get("type"))
+                .and_then(|t| t.as_str())
+                == Some("string");
+        if !is_string_array {
+            continue;
+        }
+        let Some(text) = args.get(key).and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if let Some(argv) = split_command_without_shell(text) {
+            args.insert(
+                key.clone(),
+                serde_json::Value::Array(argv.into_iter().map(serde_json::Value::String).collect()),
+            );
+            return Some(key.clone());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1515,5 +1609,65 @@ mod tests {
         let (calls, remaining) = extract_pythonic_tool_calls(text);
         assert!(calls.is_empty());
         assert_eq!(remaining, text);
+    }
+    // --- split_command_without_shell / coerce_string_to_argv ---
+
+    #[test]
+    fn plain_commands_split_like_a_shell_would() {
+        assert_eq!(split_command_without_shell("ls -la").unwrap(), ["ls", "-la"]);
+        assert_eq!(
+            split_command_without_shell("  find /tmp/x  -name 'a b.rs' ").unwrap(),
+            ["find", "/tmp/x", "-name", "a b.rs"]
+        );
+        assert_eq!(
+            split_command_without_shell("grep -n \"pub struct Item\" src/lib.rs").unwrap(),
+            ["grep", "-n", "pub struct Item", "src/lib.rs"]
+        );
+        assert_eq!(split_command_without_shell("pwd").unwrap(), ["pwd"]);
+        // Comodines dentro de comillas son literales también en un shell.
+        assert_eq!(
+            split_command_without_shell("find . -name \"*.rs\"").unwrap(),
+            ["find", ".", "-name", "*.rs"]
+        );
+    }
+
+    #[test]
+    fn anything_only_a_shell_understands_is_left_alone() {
+        for text in [
+            "find . -type f | head -50",
+            "pwd && ls -la",
+            "cd /tmp/x; cargo test",
+            "ls *.rs",
+            "echo $HOME",
+            "cat a > b",
+            "echo \"$HOME\"",
+            "echo 'sin cerrar",
+            "ls\npwd",
+            "",
+            "   ",
+        ] {
+            assert!(split_command_without_shell(text).is_none(), "{text:?} must not be split");
+        }
+    }
+
+    #[test]
+    fn coerce_string_to_argv_converts_only_string_array_fields() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "command": {"type": "array", "items": {"type": "string"}},
+                "timeout": {"type": "integer"}
+            }
+        });
+        let mut args = serde_json::json!({"command": "cat Cargo.toml", "timeout": 5});
+        assert_eq!(coerce_string_to_argv(&mut args, &schema).as_deref(), Some("command"));
+        assert_eq!(args, serde_json::json!({"command": ["cat", "Cargo.toml"], "timeout": 5}));
+
+        let mut piped = serde_json::json!({"command": "ls | head"});
+        assert_eq!(coerce_string_to_argv(&mut piped, &schema), None);
+        assert_eq!(piped, serde_json::json!({"command": "ls | head"}));
+
+        let mut already = serde_json::json!({"command": ["ls"]});
+        assert_eq!(coerce_string_to_argv(&mut already, &schema), None);
     }
 }

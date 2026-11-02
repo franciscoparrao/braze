@@ -396,6 +396,9 @@ pub struct Engine {
     /// see [`Engine::with_textual_rescue_enabled`]. `true` (the default)
     /// preserves the existing behavior.
     textual_rescue_enabled: bool,
+    /// see [`Engine::with_argv_coercion_enabled`]. `false` por defecto
+    /// hasta que su A/B pre-registrado decida.
+    argv_coercion_enabled: bool,
     /// Parses whole-response JSON *envelopes* (`{"action": "tool_call" |
     /// "final_answer", ...}`) into tool calls / final text — the return
     /// channel of `OllamaBackend`'s prompt-tools/constrained modes
@@ -523,6 +526,7 @@ impl Engine {
             skills_max_body_tokens: 1200,
             skills_max_loaded_per_turn: 2,
             textual_rescue_enabled: true,
+            argv_coercion_enabled: false,
             envelope_parsing_enabled: false,
             edit_fence_enabled: false,
             planner: None,
@@ -723,6 +727,17 @@ impl Engine {
     /// shape as [`Engine::with_context_budget`].
     pub fn with_textual_rescue_enabled(mut self, enabled: bool) -> Self {
         self.textual_rescue_enabled = enabled;
+        self
+    }
+
+    /// Activa la coerción de un comando escrito como texto a lista de
+    /// argumentos cuando el esquema pide un arreglo de textos y el texto
+    /// se puede partir sin shell (`crate::rescue::coerce_string_to_argv`).
+    /// Apagada por defecto: es una palanca en evaluación
+    /// (docs/diagnostico-lfm25-schema-fail-2026-10-30.md). Chainable, misma
+    /// forma que [`Engine::with_textual_rescue_enabled`].
+    pub fn with_argv_coercion_enabled(mut self, enabled: bool) -> Self {
+        self.argv_coercion_enabled = enabled;
         self
     }
 

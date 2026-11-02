@@ -611,6 +611,18 @@ impl Engine {
                     // no-op for wire-sourced calls, whose backend already
                     // sends correctly-typed JSON.
                     coerce_arguments_to_schema(&mut call.arguments, &schema.input_schema);
+                    if self.argv_coercion_enabled
+                        && let Some(field) = crate::rescue::coerce_string_to_argv(
+                            &mut call.arguments,
+                            &schema.input_schema,
+                        )
+                    {
+                        tracing::info!(
+                            tool = %call.name,
+                            field = %field,
+                            "command string split into argv before schema validation"
+                        );
+                    }
 
                     if let Err(validation_err) =
                         jsonschema::validate(&schema.input_schema, &call.arguments)
@@ -2085,6 +2097,135 @@ mod tests {
         assert_eq!(invocations.load(Ordering::SeqCst), 1);
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Proveedor con una herramienta de esquema argv (como `shell_exec`)
+    /// que devuelve los argumentos que recibió, unidos por `|`.
+    struct ArgvToolProvider {
+        invocations: Arc<AtomicU32>,
+    }
+
+    #[async_trait]
+    impl ToolProvider for ArgvToolProvider {
+        fn provider_id(&self) -> &str {
+            "test:argv"
+        }
+
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            Ok(vec![ToolStub {
+                name: "run".to_string(),
+                summary: "runs an argv command".to_string(),
+                source: "test:argv".to_string(),
+                input_schema: None,
+            }])
+        }
+
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            Ok((name == "run").then(|| ToolSchema {
+                name: "run".to_string(),
+                description: "runs an argv command".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false
+                }),
+            }))
+        }
+
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            self.invocations.fetch_add(1, Ordering::SeqCst);
+            let argv: Vec<&str> = call.arguments["command"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: format!("argv: {}", argv.join("|")),
+                is_error: false,
+            })
+        }
+    }
+
+    async fn run_argv_turn(command: &str, coercion: bool) -> (Vec<AgentEvent>, u32) {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let model = ScriptedModel::new(vec![
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: "call-1".to_string(),
+                    name: "run".to_string(),
+                    arguments: serde_json::json!({ "command": command }),
+                },
+                CompletionEvent::Done,
+            ],
+            vec![CompletionEvent::TextDelta("listo".to_string()), CompletionEvent::Done],
+        ]);
+        let invocations = Arc::new(AtomicU32::new(0));
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(ArgvToolProvider {
+                invocations: Arc::clone(&invocations),
+            })]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+        .with_argv_coercion_enabled(coercion);
+        engine
+            .run_turn(&session, "lista los archivos", &mut NoopObserver)
+            .await
+            .expect("turn should succeed");
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load events");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        (events, invocations.load(Ordering::SeqCst))
+    }
+
+    fn call_1_result(events: &[AgentEvent]) -> ToolResult {
+        events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolCallCompleted { id, result } if id == "call-1" => {
+                    Some(result.clone())
+                }
+                _ => None,
+            })
+            .expect("call-1 must complete")
+    }
+
+    /// Diagnóstico LFM2.5 (2026-10-30): con la palanca, `"ls -la"` se
+    /// ejecuta como `["ls", "-la"]` en vez de fallar el esquema.
+    #[tokio::test]
+    async fn argv_coercion_runs_a_plain_command_string_as_argv() {
+        let (events, invocations) = run_argv_turn("ls -la", true).await;
+        let result = call_1_result(&events);
+        assert!(!result.is_error, "{}", result.content);
+        assert_eq!(result.content, "argv: ls|-la");
+        assert_eq!(invocations, 1);
+    }
+
+    /// Un comando que solo un shell entiende no se parte: el error de
+    /// esquema llega al modelo como antes.
+    #[tokio::test]
+    async fn argv_coercion_leaves_shell_syntax_to_the_schema_error() {
+        let (events, invocations) = run_argv_turn("find . | head", true).await;
+        assert!(call_1_result(&events).is_error);
+        assert_eq!(invocations, 0);
+    }
+
+    /// Apagada (el default), la conducta es la de siempre.
+    #[tokio::test]
+    async fn argv_coercion_is_off_by_default() {
+        let (events, invocations) = run_argv_turn("ls -la", false).await;
+        assert!(call_1_result(&events).is_error);
+        assert_eq!(invocations, 0);
     }
 
     /// Sesión Juego de la Vida (2026-10-22): un `write_file` sin `path`

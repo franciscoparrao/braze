@@ -854,6 +854,12 @@ pub struct AblationOverrides {
     /// SLM distractors) — the suffix still means what every suffix
     /// means: "this row diverges from the config default".
     pub enable_task_list: bool,
+    /// `+ablate:argv-coerce` — ENABLES la coerción de un comando escrito
+    /// como texto a lista de argumentos (`Engine::with_argv_coercion_enabled`).
+    /// Misma excepción documentada que `task-list`: la palanca está
+    /// apagada por defecto mientras se evalúa
+    /// (docs/diagnostico-lfm25-schema-fail-2026-10-30.md).
+    pub enable_argv_coercion: bool,
     /// `+ablate:task-evidence` — ENABLES el gate de evidencia para cerrar
     /// tareas de la lista C′.2 (checkers de Recuris, arXiv:2608.24876
     /// § 2.2.3): `task_update(id, "done")` se rechaza sin una tool call
@@ -997,7 +1003,7 @@ impl AblationOverrides {
     /// sync.
     const RECOGNIZED_KEYS: &'static str = "no-rescue, no-post-edit-check, no-syntactic-gate, strict-edit, \
          no-caching, no-prune, no-planner, no-lead, no-compaction, no-harness-notes, no-spill, no-sc-route, \
-         task-list, explore, editor, edit-fence, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
+         task-list, argv-coerce, explore, editor, edit-fence, prompt-tools, constrained-tools, project-memory, lead-summary, verify-gate=N, ttc=N, best-of-n=N, \
          tactical-window=N, tactical-threshold=N, full-observations=N, \
          tool-search-threshold=N, lead-turns=N, lead-threshold=N, lead-window=N, \
          max-iterations=N, gpu-layers=N";
@@ -1057,6 +1063,7 @@ impl AblationOverrides {
                     out.verify_gate = Some(n);
                 }
                 "task-list" => out.enable_task_list = true,
+                "argv-coerce" => out.enable_argv_coercion = true,
                 "task-evidence" => out.enable_task_evidence = true,
                 "call-time-skills" => out.enable_call_time_skills = true,
                 "task-tools-insistent" => out.enable_insistent_task_tools = true,
@@ -1172,6 +1179,9 @@ impl AblationOverrides {
         }
         if self.enable_task_list {
             parts.push("task-list".to_string());
+        }
+        if self.enable_argv_coercion {
+            parts.push("argv-coerce".to_string());
         }
         if self.enable_task_evidence {
             parts.push("task-evidence".to_string());
