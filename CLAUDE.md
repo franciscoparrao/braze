@@ -383,10 +383,10 @@ hecho; lo abierto está listado acá.)
   costo de contexto que no tarifan pese a inyectar 45-143 líneas por
   ronda), y **su propio gradiente predice nuestro régimen como el menos
   favorable**.
-  Ojo operativo al recompilar: `make` en `paper2/` regenera `figs/`
-  desde R y DEGRADA el caption de la fig. 1 (pierde "each computed from
-  that task's measured ... under the none arm"). Usar `pdflatex` directo
-  (no `make`), o revertir `paper2/figs/` tras `make`.
+  Fig. 1 (B13, 2026-11-13): `paper2/R/fig1_frontera.R` es la ÚNICA
+  fuente de la figura y de su caption (ya no hay caption editado a mano
+  que `make` pise); lee los mismos lotes que `reanalysis.py` y aborta si
+  no reproduce sus tablas. Regenerar con `make figs` es seguro.
 - **SC-retention: CERRADA, RECHAZADA** (2026-10-17, `0487590`). La
   réplica pre-registrada en ornith:9b (80 pares, seeds 100-109) dio
   tratado 5/80 vs control 8/80, McNemar p=0,55, discordantes 4 vs 7, y

@@ -93,7 +93,7 @@ Propuesta, para que la evalúes:
 12. [x] Relacionado: Memp, ACE, Agent Workflow Memory, estudios de AGENTS.md/CLAUDE.md
     (arXiv 2509.14744, 2511.12884, 2602.11988, este último pendiente de verificar),
     Ouyang et al. (no determinismo, TOSEM). Pasar todas por `/verify-refs`.
-13. Figura 1: barras de incertidumbre en 2D; agregar la réplica.
+13. [x] Figura 1: barras de incertidumbre en 2D; agregar la réplica.
 14. [x] Datos de ejecución: hash del GGUF del Estudio 2, versiones de Ollama (0.30.7 en el
     Estudio 1, 0.32.1 en la réplica), sesiones de diagnóstico o declarar que no están.
 

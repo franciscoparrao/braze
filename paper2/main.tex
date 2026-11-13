@@ -702,7 +702,9 @@ $48.5\to47.0$\,s), the signature of a cached prefix. Unaided,
 trajectory is longest; with three tasks we do not test that
 relationship.
 Figure~\ref{fig:frontier} places the
-three tasks against the amortization frontier.
+three tasks against the amortization frontier, with their uncertainty
+in both dimensions and the replication of
+Section~\ref{sec:results-ornith} alongside.
 
 Pass rate shows no consistent signal in any pair (Fisher $p=0.72$,
 $1.00$, $0.41$; Newcombe 95\% intervals on the differences $+0.10$
@@ -806,7 +808,9 @@ Counting functional correctness only, the pairs are $17\to15$,
 $12\to13$ and $11\to3$ (Fisher $p=0.70$, $1.00$, $0.019$; Holm $1.00$,
 $1.00$, $0.056$): no change in correctness survives correction. The
 per-round input difference is also larger here ($+398$ to $+582$
-tokens), pushing the per-task break-even to $1.0$--$1.8$ rounds. The
+tokens), pushing the per-task break-even to $1.0$--$1.8$ rounds; all
+three points sit on the cost side of the frontier
+(Figure~\ref{fig:frontier}). The
 holdout is unchanged (18/20 at 3.35 mean rounds): the inapplicable
 playbook does not derail the model. Six of the eight timeouts fall in
 playbook arms, so censoring at the 300\,s cap biases the measured round
