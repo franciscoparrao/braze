@@ -1,0 +1,13 @@
+TITLE
+=====
+When Procedural Memory Does Not Pay: The Amortization Frontier of Prompt-Injected Memory for Local-First Coding Agents
+
+
+ABSTRACT (structured, 297 words)
+================================
+Context: Coding agents built on small, locally hosted language models are attractive for cost, privacy, and autonomy but fail more than frontier models. An appealing fix: when the local model fails and a cloud model rescues it, distill the intervention into a reusable playbook for future tasks, amortizing the escalation. Objective: Determine whether prompt-injected procedural memory pays for itself in a local-first coding harness, and when. Method: We formalize an amortization condition — an agentic loop re-sends its context each round, so an injected section of c tokens costs c per round and pays only if it saves enough rounds — and test it in two evaluations on a 20B mixture-of-experts executor (140 and 306 runs) plus a pre-registered 140-run replication on a dense 9B executor. Confirmatory weight rests on the second study and the replication (pre-registration externally verifiable); the first is exploratory. Study 2's middle arm is a same-prompt control, byte-identical to baseline by construction. Results: Break-even is about one full round. A human-written playbook — the ceiling for any distilled variant — amortizes only on tasks the model already knows and misses break-even by 3–6× on fresh tasks; success rates show no reliable change. On the 9B executor the same playbook is harmful, so the failure mode shifts from economic to behavioral. The same-prompt control dissolved an apparently significant +13-task gain (McNemar p=0.011) into an unattributable +4 (p=0.541); the measured noise floor (~20% of cells flip under identical prompts) is an order of magnitude above one imported from an easier suite. Conclusion: We claim the condition and measurement procedure as general; the measured positions are specific to this task family, harness, and executors. Injected memory pays only if injection cost drops (retrieval on demand) or round savings rise (unlocking task classes the model fails outright).
+
+
+KEYWORDS (6; separate with semicolons)
+======================================
+agentic coding; procedural memory; small language models; negative results; pre-registration; same-prompt control

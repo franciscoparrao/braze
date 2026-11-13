@@ -346,8 +346,19 @@ hecho; lo abierto está listado acá.)
   El repo es PÚBLICO (verificado 2026-08-30). Consecuencia operativa
   vigente: **todo push publica**, incluidos los resultados negativos —
   coherente con la práctica del proyecto, pero ya no es reversible.
-- **Paper 2 — SOMETIDO a IST el 2026-09-13** (00:07; Information and
-  Software Technology, Elsevier; Research paper; autor único). Venue
+- **Paper 2 — DESK REJECT de IST** (informado por el autor el 2026-11-04;
+  sin reviews: decisión del editor por encaje/alcance, no por calidad →
+  reubicar en otra revista). **Nuevo venue: número especial PROMPT-SE de
+  EMSE (Springer, plazo 2027-03-01)**; manuscrito migrado a `svjour3`. El
+  review simulado del 2026-11-06 dio Reject → plan en
+  `paper2/revision-plan-emse-prompt-se-2026-11-06.md`, reanálisis en
+  `docs/paper2-reanalysis-2026-11-06.md` (`paper2/analysis/reanalysis.py`):
+  la diferencia del Estudio 2 la explican los timeouts y en la réplica 9B
+  el playbook alarga trayectorias, no baja la corrección. Sección B del
+  plan aplicada en `main.tex` (21 págs.); quedan B12 (literatura nueva),
+  B13 (fig. 1 con IC), tag + Zenodo + cover letter, y la sección C
+  (Estudio 2 intercalado, requiere Nitro y pre-registro). Historia: sometido el 2026-09-13 (00:07;
+  Information and Software Technology, Elsevier; Research paper; autor único). Venue
   decidido 2026-09-06 (`ad35de8`), migrado a `elsarticle` (`3611c89`);
   manuscrito **22 págs** en `paper2/`. Ciclo completo: review simulado
   IST → Tier 1-3 → **Issue 4 cerrado con dato** (sweep `default.toml`:
@@ -365,10 +376,7 @@ hecho; lo abierto está listado acá.)
   clasificaciones (Artificial intelligence, Agents, Reliability,
   Performance, Empirical research); disclosure de IA presente en el PDF
   (antes de refs); self-cite del Paper 1 = "Under review" sin nombrar
-  venue (`f1783f4`). **Pendiente del autor:** firmar/crear password en
-  Editorial Manager tras el email de confirmación; luego esperar la
-  decisión de IST (mediana ~7 días a primera decisión por el triage del
-  EIC Staron). Si llegan reviews reales → `/paper-rebuttal`.
+  venue (`f1783f4`). (El pendiente de Editorial Manager quedó sin objeto con el desk reject.)
   Nota histórica (§ Related Work, `\paragraph{Concurrent work}`,
   2026-09-02): posiciona el paper frente a WikiSkill (arXiv 2608.27454,
   Google, 28-ago) — miden ejes ortogonales (ellos accuracy, nosotros el
