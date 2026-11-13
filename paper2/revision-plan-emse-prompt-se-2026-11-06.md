@@ -90,7 +90,7 @@ Propuesta, para que la evalúes:
 10. [x] Inventario de barridos del Estudio 1 con regla de inclusión; commitear la suite
     exacta (huella `a5fccc8f`) o declarar que no se puede.
 11. [x] ΔT residual: investigado; `memory_tokens` es caracteres / 4 (ver punto 5).
-12. Relacionado: Memp, ACE, Agent Workflow Memory, estudios de AGENTS.md/CLAUDE.md
+12. [x] Relacionado: Memp, ACE, Agent Workflow Memory, estudios de AGENTS.md/CLAUDE.md
     (arXiv 2509.14744, 2511.12884, 2602.11988, este último pendiente de verificar),
     Ouyang et al. (no determinismo, TOSEM). Pasar todas por `/verify-refs`.
 13. Figura 1: barras de incertidumbre en 2D; agregar la réplica.

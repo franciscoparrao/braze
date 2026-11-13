@@ -203,8 +203,13 @@ as virtual memory, paging information between the prompt and external
 storage \citep{packer2023memgpt}. Later systems make the distillation
 step automatic: Agent Workflow Memory induces reusable workflows from
 an agent's own trajectories and injects them into subsequent tasks
-\citep{wang2024awm}, and ExpeL extracts transferable insights from
-pools of past experience \citep{zhao2024expel}. A second branch keeps
+\citep{wang2024awm}; ExpeL extracts transferable insights from
+pools of past experience \citep{zhao2024expel}; Memp distills
+trajectories into step-level instructions and script-like
+abstractions, and reports that memory built with a stronger model
+still helps a weaker one \citep{fang2026memp}; and ACE treats the
+context itself as an evolving playbook, grown through generation,
+reflection, and curation \citep{zhang2026ace}. A second branch keeps
 memory outside the prompt and retrieves it on demand, from the memory
 stream of Generative Agents \citep{park2023generativeagents} to
 production memory layers that argue for retrieval precisely on cost
@@ -216,6 +221,25 @@ costs (on every round, in a loop that re-sends its context) is
 generally not priced, and the effect of the memory's \emph{content} is
 rarely separated from the effect of perturbing the prompt at all. Both
 gaps are the subject of this paper.
+
+\paragraph{Repository context files.} In practice, the most widespread
+form of prompt-injected memory is the repository context file
+(\texttt{CLAUDE.md}, \texttt{AGENTS.md}) that a coding agent loads into
+every session. Mining studies describe these files as
+configuration-like artifacts that grow through frequent small
+additions and that favor test procedures, implementation details,
+and architecture
+\citep{chatlatanagulchai2025manifests,chatlatanagulchai2026agentreadmes}.
+A controlled evaluation on SWE-bench Lite and on repositories with
+developer-written files found that context files did not significantly
+change resolution rates, while generated files raised the average
+number of agent steps by 2.45 and 3.92 on the two benchmarks and
+inference cost by 20\% and 23\% \citep{gloaguen2026agentsmd}. That
+study priced the overhead in API dollars, for three hosted models and
+one locally served 30B coder whose cost it estimated from API prices.
+The ProjectMemory hook of Study~2 (Section~\ref{sec:method}) is
+a context file of this kind; the amortization condition states when
+the added rounds and tokens would be repaid.
 
 \paragraph{Concurrent work: evolved skills at larger scale.} While
 this paper was under preparation, \citet{tang2026wikiskill} introduced
@@ -997,7 +1021,11 @@ passes cannot produce a flip, and its trajectories did diverge (56 of
 the 190 pairs ended with different outcome fingerprints). We withdraw
 that attribution.
 
-What survives is the instrument. A same-prompt arm cannot tell noise
+What survives is the instrument. Non-determinism in LLM code
+generation is a documented threat to conclusion validity: for
+ChatGPT, identical prompts yield programs with different test
+outcomes, and a temperature of zero reduces the effect without
+removing it \citep{ouyang2025nondeterminism}. A same-prompt arm cannot tell noise
 from arm-level drift, but it detects both: any difference between it
 and the baseline is a difference no treatment caused. In a regime
 where suites sit near the capability frontier and a whole arm can run
