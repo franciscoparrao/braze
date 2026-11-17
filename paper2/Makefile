@@ -6,6 +6,7 @@
 all: figs pdf
 
 figs:
+	cd .. && python3 paper2/analysis/reanalysis.py --fig1-csv paper2/analysis/fig1-points.csv
 	cd .. && Rscript paper2/R/fig1_frontera.R
 
 pdf:

@@ -1,5 +1,6 @@
 <!--
-Borrador de carta para EMSE, número especial PROMPT-SE 2026 (2026-11-06).
+Borrador de carta para EMSE, número especial PROMPT-SE 2026 (2026-11-06;
+contribuciones alineadas con la historia de la sección B el 2026-11-13).
 Revisar con el autor antes de enviar. Pendientes marcados con [ ].
 - [ ] ID del manuscrito del Paper 1 en EMSE (Editorial Manager).
 - [ ] Confirmar que la memoria como "instruction artifact" es el encuadre que el autor quiere sostener.
@@ -24,13 +25,16 @@ of the call: the harness re-sends it to the model on every round, alongside the
 system prompt. We measure how injecting it changes correctness, reliability, and
 cost, which are the outcomes the call names. The paper contributes:
 
-- an amortization condition that prices an injected artifact by the rounds it must
-  save, since its token cost recurs on every round of the trajectory;
-- a measurement procedure built on a same-prompt control, an arm byte-identical to
-  the baseline, which in our data dissolved an apparently significant gain
-  (McNemar p = 0.011) into an unattributable one (p = 0.541);
-- a pre-registered null result and its pre-registered replication on a second
-  executor, where the same artifact becomes harmful.
+- an amortization condition, offered as a reporting convention, that splits an injected
+  artifact's net token balance into the rounds it saves and the overhead it adds on every
+  round of the trajectory;
+- a same-prompt (A/A) control arm, which in our data rose nearly as much as the treatment
+  (+9 vs. +13 of 102 cells) and exposed an arm-level artifact behind an apparently
+  significant gain (McNemar p = 0.011), with a measured lesson on why arms must be
+  interleaved;
+- a pre-registered replication on a second executor, where the same artifact lengthens
+  trajectories, adds 2.7k-6.6k net input tokens per task, and lowers the registered pass
+  rate on one task of three, reported with every departure from the registered plans.
 
 This matches three of the call's topics: empirical evaluations of prompting
 strategies for SE tasks, metrics for prompt cost and reproducibility, and replication
@@ -38,8 +42,9 @@ studies with negative or non-significant results.
 
 **Replicability.** As the call requests, the manuscript reports the injected
 artifacts and the execution settings (context and output limits, temperature, fixed
-seeds). All per-run records, hypothesis documents, and the harness are public in the
-repository and archived on Zenodo (doi:10.5281/zenodo.22547684).
+seeds). All per-run records, hypothesis documents, the harness, and a script that
+regenerates every reported statistic are public in the repository and archived on
+Zenodo (doi:10.5281/zenodo.22547684).
 
 **Related submission.** A separate manuscript by the same author is under review in
 the regular track of Empirical Software Engineering: "Not All Scaffolding Helps: A
