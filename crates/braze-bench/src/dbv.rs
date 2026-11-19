@@ -298,6 +298,9 @@ mod tests {
             local_env: std::collections::BTreeMap::new(),
             ollama_keep_alive: Some("2m".to_string()),
             grading: Some(crate::metadata::GRADING_FUNCTIONAL_DUAL.to_string()),
+            run_order: None,
+            interleave_seed: None,
+            run_log: Vec::new(),
         }
     }
 

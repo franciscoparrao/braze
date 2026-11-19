@@ -9,6 +9,7 @@ mod checkpoint;
 mod dbv;
 mod error;
 mod external;
+mod interleave;
 mod memory;
 mod metadata;
 mod metrics;
@@ -192,6 +193,17 @@ struct Cli {
     /// completo, que es lo correcto.
     #[arg(long)]
     sequential_stop: Option<usize>,
+    /// Intercala los brazos (2026-11-17): cada bloque (repetición, tarea)
+    /// corre sus brazos en una permutación aleatoria propia, sembrada con
+    /// este valor, en vez de correr un brazo entero y después el
+    /// siguiente. Con brazos en secuencia, una deriva del nodo se lee como
+    /// efecto del tratamiento (Estudio 2 del Paper 2: el brazo baseline
+    /// corrió 1,7× más lento por ronda). La semilla y el orden quedan en
+    /// la metadata (`run_order`, `interleave_seed`, `run_log`).
+    /// Incompatible con `--sequential-stop`, cuyo monitor parea contra un
+    /// primer brazo que ya terminó.
+    #[arg(long)]
+    interleave: Option<u64>,
     /// Corre un baseline de harness externo (bypassa `braze_engine::Engine`
     /// por completo, EMSE review Issue 1 —
     /// `docs/external-harness-baseline-design.md`) además de los
@@ -269,6 +281,13 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<(), BenchError> {
     let cli = Cli::parse();
+    if cli.interleave.is_some() && cli.sequential_stop.is_some() {
+        return Err(BenchError::Startup(
+            "--interleave es incompatible con --sequential-stop: el monitor secuencial parea \
+             cada brazo contra el primero, que con brazos intercalados todavía no terminó"
+                .to_string(),
+        ));
+    }
     if cli.backends.is_empty() && cli.external.is_empty() {
         return Err(BenchError::Startup(
             "se requiere al menos uno de --backends o --external".to_string(),
@@ -498,200 +517,258 @@ async fn run() -> Result<(), BenchError> {
         std::collections::HashMap::new();
     let mut sequential_notes: Vec<String> = Vec::new();
 
-    for (arm_index, (raw_spec, spec)) in specs.iter().enumerate() {
-        let display_name = spec.display_name(&config);
-        let mut monitor = cli.sequential_stop.map(|delta| {
-            sequential::SequentialStop::for_threshold(delta, tasks.len() * cli.repetitions as usize)
-        });
-        let mut arm_cut_short = false;
-        // L-11 (v9): fail-fast de brazo. El caso real (dos veces, por
-        // binarios desincronizados en Nitro, 21-jul): la carga del modelo
-        // falla INSTANTÁNEO en cada tarea y el brazo entero se quema en 57
-        // fallos silenciosos de ~200ms que el reporte después descuenta
-        // como HarnessError. Tres filas consecutivas de nivel
-        // harness/backend por debajo del umbral de instantaneidad no son
-        // flakiness: son un brazo estructuralmente roto (modelo ausente,
-        // binario viejo, breaker abierto), y seguir corriéndolo no
-        // produce ni una celda interpretable. Las filas ya corridas se
-        // conservan; las restantes NO se inventan — misma doctrina que el
-        // corte de --sequential-stop.
-        let mut consecutive_instant_failures = 0u32;
-        let mut arm_failed_fast = false;
-        // A backend that can't even build (Ollama down, no API key, ...)
-        // is skipped, not fatal — the rest of the comparison still runs.
-        let probe_sampling = backend_spec::SamplingSpec {
+    // Plan de unidades (brazo, tarea, repetición). Sin `--interleave`
+    // reproduce el orden histórico (brazo entero, después el siguiente);
+    // con `--interleave <seed>` cada bloque (repetición, tarea) corre sus
+    // brazos en una permutación propia — ver `interleave.rs` para por qué.
+    let plan = match cli.interleave {
+        Some(seed) => interleave::schedule(specs.len(), tasks.len(), cli.repetitions, seed),
+        None => interleave::arm_major(specs.len(), tasks.len(), cli.repetitions),
+    };
+    let mut last_unit_of_arm: Vec<Option<usize>> = vec![None; specs.len()];
+    for (i, &(arm, _, _)) in plan.iter().enumerate() {
+        last_unit_of_arm[arm] = Some(i);
+    }
+    let mut arms: Vec<ArmState> = specs
+        .iter()
+        .map(|(_, spec)| ArmState {
+            display_name: spec.display_name(&config),
+            monitor: cli.sequential_stop.map(|delta| {
+                sequential::SequentialStop::for_threshold(
+                    delta,
+                    tasks.len() * cli.repetitions as usize,
+                )
+            }),
+            ..ArmState::default()
+        })
+        .collect();
+    let mut run_log: Vec<metadata::RunLogEntry> = Vec::new();
+
+    for (unit_index, &(arm_index, task_index, repetition)) in plan.iter().enumerate() {
+        let (raw_spec, spec) = &specs[arm_index];
+        let task = &tasks[task_index];
+        let display_name = arms[arm_index].display_name.clone();
+
+        // Un brazo cortado (--sequential-stop termina la tarea en curso,
+        // como antes), abortado por fail-fast u omitido no corre más
+        // unidades; sus modelos se liberan en la primera unidad saltada.
+        let cut_elsewhere = arms[arm_index]
+            .cut_after_task
+            .is_some_and(|t| t != task_index);
+        if arms[arm_index].skipped || cut_elsewhere {
+            release_arm_models(&mut arms[arm_index], spec, &config, cli.no_ollama_stop).await;
+            continue;
+        }
+
+        if !arms[arm_index].started {
+            arms[arm_index].started = true;
+            // A backend that can't even build (Ollama down, no API key,
+            // ...) is skipped, not fatal — the rest of the comparison
+            // still runs.
+            let probe_sampling = backend_spec::SamplingSpec {
+                temperature: cli.temperature,
+                seed: cli.seed,
+                top_p: cli.top_p,
+                top_k: cli.top_k,
+                repeat_penalty: cli.repeat_penalty,
+            };
+            if let Err(err) = spec
+                .build_agent_model(&config, probe_sampling)
+                .and_then(|_| spec.build_planner(&config, probe_sampling).map(|_| ()))
+            {
+                eprintln!("braze-bench: omitiendo backend '{raw_spec}' ({display_name}): {err}");
+                arms[arm_index].skipped = true;
+                continue;
+            }
+            // J-6 (docs/AUDITORIA-2026-07-v7.md): load every local model
+            // this arm uses BEFORE its first task, so no arm's first task
+            // pays the cold-load time. Without this the first arm of a
+            // sweep started cold (inflated wall-time / spurious timeouts,
+            // always on the suite's first task) while later arms under
+            // `--no-ollama-stop` inherited the previous arm's resident
+            // model — a systematic between-arm bias. Best effort: on
+            // failure the first real request pays the load, which is
+            // exactly the old behavior.
+            for model in spec.ollama_models(&config) {
+                if let Err(err) =
+                    braze_model::warm_up_ollama_model(&config.ollama_base_url, &model).await
+                {
+                    eprintln!("braze-bench: warm-up de '{model}' falló (se continúa igual): {err}");
+                }
+            }
+            arms[arm_index].models_loaded = true;
+        }
+
+        if cli.repetitions > 1 {
+            println!(
+                "-> {display_name} :: {} (rep {}/{})",
+                task.id,
+                repetition + 1,
+                cli.repetitions
+            );
+        } else {
+            println!("-> {display_name} :: {}", task.id);
+        }
+        // A fixed base seed offset by `repetition` keeps sweeps
+        // reproducible across separate invocations while still giving
+        // `--repetitions` genuine variance to measure within one sweep —
+        // the same base seed on every repetition would collapse them into
+        // identical copies.
+        let sampling = backend_spec::SamplingSpec {
             temperature: cli.temperature,
-            seed: cli.seed,
+            seed: cli.seed.map(|s| s.wrapping_add(u64::from(repetition))),
             top_p: cli.top_p,
             top_k: cli.top_k,
             repeat_penalty: cli.repeat_penalty,
         };
-        if let Err(err) = spec
-            .build_agent_model(&config, probe_sampling)
-            .and_then(|_| spec.build_planner(&config, probe_sampling).map(|_| ()))
-        {
-            eprintln!("braze-bench: omitiendo backend '{raw_spec}' ({display_name}): {err}");
-            continue;
-        }
-
-        // J-6 (docs/AUDITORIA-2026-07-v7.md): load every local model this
-        // arm uses BEFORE its first task, so no arm's first task pays the
-        // cold-load time. Without this the first arm of a sweep started
-        // cold (inflated wall-time / spurious timeouts, always on the
-        // suite's first task) while later arms under `--no-ollama-stop`
-        // inherited the previous arm's resident model — a systematic
-        // between-arm bias. Best effort: on failure the first real
-        // request pays the load, which is exactly the old behavior.
-        for model in spec.ollama_models(&config) {
-            if let Err(err) =
-                braze_model::warm_up_ollama_model(&config.ollama_base_url, &model).await
-            {
-                eprintln!("braze-bench: warm-up de '{model}' falló (se continúa igual): {err}");
-            }
-        }
-
-        for task in &tasks {
-            for repetition in 0..cli.repetitions {
-                if cli.repetitions > 1 {
-                    println!(
-                        "-> {display_name} :: {} (rep {}/{})",
-                        task.id,
-                        repetition + 1,
-                        cli.repetitions
-                    );
-                } else {
-                    println!("-> {display_name} :: {}", task.id);
-                }
-                // A fixed base seed offset by `repetition` keeps sweeps
-                // reproducible across separate invocations while still
-                // giving `--repetitions` genuine variance to measure
-                // within one sweep — the same base seed on every
-                // repetition would collapse them into identical copies.
-                let sampling = backend_spec::SamplingSpec {
-                    temperature: cli.temperature,
-                    seed: cli.seed.map(|s| s.wrapping_add(u64::from(repetition))),
-                    top_p: cli.top_p,
-                    top_k: cli.top_k,
-                    repeat_penalty: cli.repeat_penalty,
-                };
-                // v8 § 6.15: con `+ablate:ttc=N` (N>1) la unidad de
-                // medición pasa a ser "N rollouts + selección" — una
-                // fila por repetición igual que siempre, con el costo
-                // agregado de los N adentro.
-                let ttc_rollouts = spec.ablation().ttc_rollouts.unwrap_or(1);
-                // round-economics: el presupuesto es de la TAREA. Con TTC
-                // se reparte entre los rollouts (`run_task_ttc`), no se
-                // le da entero a cada uno.
-                let wall_clock_budget = config
-                    .max_turn_wall_clock_secs
-                    .map(std::time::Duration::from_secs);
-                let resumed = checkpoint
-                    .resumed
-                    .remove(&(display_name.clone(), task.id.clone(), repetition));
-                let run = if let Some(previous) = resumed {
-                    println!("   (reanudado desde el checkpoint)");
-                    Ok(previous)
-                } else {
-                    runner::run_isolated(
-                        spec,
-                        &config,
-                        task,
-                        repetition,
-                        task_timeout,
-                        sampling,
-                        preserve_root.as_deref(),
-                        ttc_rollouts,
-                        wall_clock_budget,
-                    )
-                    .await
-                };
-                match run {
-                    Ok(result) => {
-                        let key = (result.task_id.clone(), result.repetition);
-                        if arm_index == 0 {
-                            baseline_cells.insert(key, result.passed);
-                        } else if let (Some(m), Some(&base_passed)) =
-                            (monitor.as_mut(), baseline_cells.get(&key))
-                            && m.observe(base_passed, result.passed).is_some()
-                        {
-                            let note = format!("[{display_name}] {}", m.summary());
-                            println!("\n{note}");
-                            sequential_notes.push(note);
-                            arm_cut_short = true;
-                        }
-                        results.push(result);
-                    }
-                    Err(err) => {
-                        // A harness-level failure (sandbox setup, reading
-                        // back the session log, ...) — not attributable to
-                        // the model at all. Still recorded as a row (with
-                        // its own failure cause) instead of silently
-                        // vanishing from the totals, which previously let
-                        // pass-rate denominators drift between backends
-                        // with no visible explanation. See
-                        // docs/AUDITORIA-2026-07.md hallazgo F5.
-                        eprintln!(
-                            "braze-bench: fallo irrecuperable corriendo '{}' contra '{display_name}': {err}",
-                            task.id
-                        );
-                        results.push(harness_error_result(&display_name, task, repetition, &err));
+        // v8 § 6.15: con `+ablate:ttc=N` (N>1) la unidad de medición pasa
+        // a ser "N rollouts + selección" — una fila por repetición igual
+        // que siempre, con el costo agregado de los N adentro.
+        let ttc_rollouts = spec.ablation().ttc_rollouts.unwrap_or(1);
+        // round-economics: el presupuesto es de la TAREA. Con TTC se
+        // reparte entre los rollouts (`run_task_ttc`), no se le da entero
+        // a cada uno.
+        let wall_clock_budget = config
+            .max_turn_wall_clock_secs
+            .map(std::time::Duration::from_secs);
+        let resumed = checkpoint
+            .resumed
+            .remove(&(display_name.clone(), task.id.clone(), repetition));
+        let was_resumed = resumed.is_some();
+        let started_at = metadata::unix_ms_now();
+        let run = if let Some(previous) = resumed {
+            println!("   (reanudado desde el checkpoint)");
+            Ok(previous)
+        } else {
+            runner::run_isolated(
+                spec,
+                &config,
+                task,
+                repetition,
+                task_timeout,
+                sampling,
+                preserve_root.as_deref(),
+                ttc_rollouts,
+                wall_clock_budget,
+            )
+            .await
+        };
+        let finished_at = metadata::unix_ms_now();
+        match run {
+            Ok(result) => {
+                let key = (result.task_id.clone(), result.repetition);
+                if arm_index == 0 {
+                    baseline_cells.insert(key, result.passed);
+                } else if let (Some(m), Some(&base_passed)) =
+                    (arms[arm_index].monitor.as_mut(), baseline_cells.get(&key))
+                    && m.observe(base_passed, result.passed).is_some()
+                {
+                    let note = format!("[{display_name}] {}", m.summary());
+                    println!("\n{note}");
+                    sequential_notes.push(note);
+                    if arms[arm_index].cut_after_task.is_none() {
+                        arms[arm_index].cut_after_task = Some(task_index);
                     }
                 }
-                checkpoint.record(results.last());
-                // L-11: contabilidad del fail-fast sobre la fila recién
-                // registrada (ambas ramas del match empujan una).
-                let instant_infra_failure = results.last().is_some_and(|r| {
-                    matches!(
-                        r.failure_cause,
-                        Some(
-                            metrics::FailureCause::HarnessError
-                                | metrics::FailureCause::ModelBackendError
-                        )
-                    ) && r.wall_time_ms < u128::from(ARM_FAIL_FAST_INSTANT_MS)
-                });
-                if instant_infra_failure {
-                    consecutive_instant_failures += 1;
-                    if consecutive_instant_failures >= ARM_FAIL_FAST_THRESHOLD {
-                        eprintln!(
-                            "\nbraze-bench: BRAZO '{display_name}' ABORTADO: \
-                             {consecutive_instant_failures} fallos consecutivos de nivel \
-                             harness/backend en <{ARM_FAIL_FAST_INSTANT_MS}ms cada uno — el \
-                             brazo está estructuralmente roto (¿modelo ausente, binario \
-                             desincronizado, breaker abierto?), no flaky. Las filas corridas \
-                             se conservan; las restantes no se corren."
-                        );
-                        arm_failed_fast = true;
-                        break;
-                    }
-                } else {
-                    consecutive_instant_failures = 0;
-                }
+                results.push(result);
             }
-            if arm_failed_fast {
-                break;
-            }
-            if arm_cut_short {
-                // El criterio pre-registrado ya está decidido para este
-                // brazo: seguir corriendo no cambia el veredicto y sí
-                // cuesta horas. Las celdas faltantes NO se inventan —
-                // simplemente no existen, y el JSON lo refleja.
-                println!(
-                    "-> {display_name}: brazo cortado por --sequential-stop tras {} filas",
-                    results.iter().filter(|r| r.backend == display_name).count()
+            Err(err) => {
+                // A harness-level failure (sandbox setup, reading back
+                // the session log, ...) — not attributable to the model
+                // at all. Still recorded as a row (with its own failure
+                // cause) instead of silently vanishing from the totals,
+                // which previously let pass-rate denominators drift
+                // between backends with no visible explanation. See
+                // docs/AUDITORIA-2026-07.md hallazgo F5.
+                eprintln!(
+                    "braze-bench: fallo irrecuperable corriendo '{}' contra '{display_name}': {err}",
+                    task.id
                 );
-                break;
+                results.push(harness_error_result(&display_name, task, repetition, &err));
             }
+        }
+        checkpoint.record(results.last());
+        // Una fila reanudada conserva las horas de su corrida original
+        // (registro paralelo al checkpoint); solo si no estaban se usan las
+        // de esta invocación.
+        let original = was_resumed
+            .then(|| {
+                checkpoint
+                    .resumed_run_log
+                    .remove(&(display_name.clone(), task.id.clone(), repetition))
+            })
+            .flatten();
+        let entry = metadata::RunLogEntry {
+            index: run_log.len() as u32,
+            backend: display_name.clone(),
+            task_id: task.id.clone(),
+            repetition,
+            started_at_unix_ms: original.as_ref().map_or(started_at, |e| e.started_at_unix_ms),
+            finished_at_unix_ms: original.as_ref().map_or(finished_at, |e| e.finished_at_unix_ms),
+            resumed: was_resumed,
+        };
+        checkpoint.record_run(&entry);
+        run_log.push(entry);
+        // L-11 (v9): fail-fast de brazo. El caso real (dos veces, por
+        // binarios desincronizados en Nitro, 21-jul): la carga del modelo
+        // falla INSTANTÁNEO en cada tarea y el brazo entero se quema en
+        // fallos silenciosos de ~200ms que el reporte después descuenta
+        // como HarnessError. Tres filas consecutivas de nivel
+        // harness/backend por debajo del umbral de instantaneidad no son
+        // flakiness: son un brazo estructuralmente roto. Las filas ya
+        // corridas se conservan; las restantes NO se inventan — misma
+        // doctrina que el corte de --sequential-stop.
+        let instant_infra_failure = results.last().is_some_and(|r| {
+            matches!(
+                r.failure_cause,
+                Some(
+                    metrics::FailureCause::HarnessError | metrics::FailureCause::ModelBackendError
+                )
+            ) && r.wall_time_ms < u128::from(ARM_FAIL_FAST_INSTANT_MS)
+        });
+        let arm = &mut arms[arm_index];
+        if instant_infra_failure {
+            arm.consecutive_instant_failures += 1;
+            if arm.consecutive_instant_failures >= ARM_FAIL_FAST_THRESHOLD {
+                eprintln!(
+                    "\nbraze-bench: BRAZO '{display_name}' ABORTADO: \
+                     {} fallos consecutivos de nivel harness/backend en \
+                     <{ARM_FAIL_FAST_INSTANT_MS}ms cada uno — el brazo está \
+                     estructuralmente roto (¿modelo ausente, binario desincronizado, \
+                     breaker abierto?), no flaky. Las filas corridas se conservan; \
+                     las restantes no se corren.",
+                    arm.consecutive_instant_failures
+                );
+                arm.skipped = true;
+            }
+        } else {
+            arm.consecutive_instant_failures = 0;
+        }
+        // El criterio pre-registrado ya está decidido para este brazo:
+        // seguir corriendo no cambia el veredicto y sí cuesta horas. Las
+        // celdas faltantes NO se inventan — simplemente no existen, y el
+        // JSON lo refleja. Se termina la tarea en curso, como siempre.
+        let last_rep_of_task = repetition + 1 == cli.repetitions;
+        if arm.cut_after_task == Some(task_index) && last_rep_of_task && !arm.announced_cut {
+            arm.announced_cut = true;
+            println!(
+                "-> {display_name}: brazo cortado por --sequential-stop tras {} filas",
+                results.iter().filter(|r| r.backend == display_name).count()
+            );
         }
 
         // Release every local model this backend row loaded (executor
         // and/or a local planner) before the next backend spec builds its
         // own — see the `no_ollama_stop` doc comment above for why this
         // isn't just tidiness.
-        if !cli.no_ollama_stop {
-            for model in spec.ollama_models(&config) {
-                stop_ollama_model(&config.ollama_base_url, &model).await;
-            }
+        if last_unit_of_arm[arm_index] == Some(unit_index) {
+            release_arm_models(&mut arms[arm_index], spec, &config, cli.no_ollama_stop).await;
         }
+    }
+    // Brazos abortados o cortados en su última unidad no pasaron por la
+    // liberación de arriba.
+    for (arm, (_, spec)) in arms.iter_mut().zip(&specs) {
+        release_arm_models(arm, spec, &config, cli.no_ollama_stop).await;
     }
 
     // External harness baseline(s) — EMSE review Issue 1
@@ -963,6 +1040,11 @@ async fn run() -> Result<(), BenchError> {
             // no el flag crudo — es lo que viajó en cada request.
             ollama_keep_alive: config.ollama_keep_alive.clone(),
             grading: Some(metadata::GRADING_FUNCTIONAL_DUAL.to_string()),
+            run_order: Some(
+                if cli.interleave.is_some() { "interleaved" } else { "arm-major" }.to_string(),
+            ),
+            interleave_seed: cli.interleave,
+            run_log: run_log.clone(),
         };
         Some(metadata)
     } else {
@@ -986,6 +1068,43 @@ async fn run() -> Result<(), BenchError> {
     }
 
     Ok(())
+}
+
+/// Estado de un brazo a lo largo del plan de unidades.
+#[derive(Default)]
+struct ArmState {
+    display_name: String,
+    monitor: Option<sequential::SequentialStop>,
+    /// Ya pasó el probe de construcción y el warm-up (o los intentó).
+    started: bool,
+    /// Tiene modelos cargados que liberar al terminar.
+    models_loaded: bool,
+    /// Omitido (no construye) o abortado por fail-fast: no corre más.
+    skipped: bool,
+    /// `--sequential-stop` decidió en esta tarea: se termina la tarea y
+    /// el brazo no corre las siguientes.
+    cut_after_task: Option<usize>,
+    announced_cut: bool,
+    consecutive_instant_failures: u32,
+}
+
+/// Libera (una vez) los modelos de Ollama que cargó un brazo.
+async fn release_arm_models(
+    arm: &mut ArmState,
+    spec: &BackendSpec,
+    config: &braze_config::Config,
+    no_ollama_stop: bool,
+) {
+    if !arm.models_loaded {
+        return;
+    }
+    arm.models_loaded = false;
+    if no_ollama_stop {
+        return;
+    }
+    for model in spec.ollama_models(config) {
+        stop_ollama_model(&config.ollama_base_url, &model).await;
+    }
 }
 
 /// Unloads `model` from the Ollama daemon at `base_url` (`ollama stop

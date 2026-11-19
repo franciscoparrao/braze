@@ -158,6 +158,48 @@ pub struct RunMetadata {
     /// como drift.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grading: Option<String>,
+    /// Orden en que corrieron las filas: `"arm-major"` (el histórico:
+    /// brazo entero, después el siguiente) o `"interleaved"`
+    /// (`--interleave`, ver `interleave.rs`). Con brazos en secuencia,
+    /// brazo y momento de corrida quedan confundidos (Estudio 2 del
+    /// Paper 2): sin este campo un JSON no dice cuál de los dos diseños
+    /// produjo sus contrastes. `None` = sweep anterior al campo, que
+    /// siempre fue arm-major.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_order: Option<String>,
+    /// Semilla del plan intercalado, cuando lo hubo: con ella y la lista
+    /// de brazos y tareas el orden exacto se reconstruye.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interleave_seed: Option<u64>,
+    /// Una entrada por fila, en orden de ejecución, con su reloj de pared
+    /// de inicio y fin. Es lo que faltó para diagnosticar la deriva del
+    /// Estudio 2 (qué corrió cuándo, y si una suspensión del nodo cayó
+    /// dentro de un brazo).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub run_log: Vec<RunLogEntry>,
+}
+
+/// Ver [`RunMetadata::run_log`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunLogEntry {
+    pub index: u32,
+    pub backend: String,
+    pub task_id: String,
+    pub repetition: u32,
+    pub started_at_unix_ms: u64,
+    pub finished_at_unix_ms: u64,
+    /// Fila recuperada de un checkpoint (`--resume`): sus horas son las de
+    /// esta invocación, no las de la corrida original.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resumed: bool,
+}
+
+/// Milisegundos desde la época UNIX según el reloj de pared.
+pub fn unix_ms_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// El identificador de la semántica de grading vigente — ver
@@ -171,8 +213,16 @@ pub const GRADING_FUNCTIONAL_DUAL: &str = "functional-primary+strict-secondary/2
 pub fn collect_local_env(
     vars: impl Iterator<Item = (String, String)>,
 ) -> std::collections::BTreeMap<String, String> {
-    vars.filter(|(k, _)| k.starts_with("BRAZE_LOCAL_") || k == "BRAZE_VERIFY_COMMAND")
-        .collect()
+    vars.filter(|(k, _)| {
+        k.starts_with("BRAZE_LOCAL_")
+            || k == "BRAZE_VERIFY_COMMAND"
+            // Ventana de contexto y tope de salida: en el LocalBackend se
+            // fijan por entorno y el Estudio 2 del Paper 2 no los dejó en
+            // la metadata (EMSE blind b1, Issue 6).
+            || k == "BRAZE_OLLAMA_NUM_CTX"
+            || k == "BRAZE_MAX_TOKENS"
+    })
+    .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -284,15 +334,19 @@ mod tests {
             ("BRAZE_LOCAL_GPU_LAYERS", "25"),
             ("BRAZE_LOCAL_KV_TYPE", "q8_0"),
             ("BRAZE_VERIFY_COMMAND", "cargo check"),
+            ("BRAZE_OLLAMA_NUM_CTX", "32768"),
+            ("BRAZE_MAX_TOKENS", "12288"),
             ("BRAZE_ANTHROPIC_API_KEY", "sk-ant-secret"),
             ("BRAZE_OLLAMA_BASE_URL", "http://192.168.1.8:11434"),
             ("PATH", "/usr/bin"),
         ];
         let got = collect_local_env(vars.iter().map(|(k, v)| (k.to_string(), v.to_string())));
-        assert_eq!(got.len(), 3, "got: {got:?}");
+        assert_eq!(got.len(), 5, "got: {got:?}");
         assert_eq!(got["BRAZE_LOCAL_GPU_LAYERS"], "25");
         assert_eq!(got["BRAZE_LOCAL_KV_TYPE"], "q8_0");
         assert_eq!(got["BRAZE_VERIFY_COMMAND"], "cargo check");
+        assert_eq!(got["BRAZE_OLLAMA_NUM_CTX"], "32768");
+        assert_eq!(got["BRAZE_MAX_TOKENS"], "12288");
         assert!(
             !got.keys().any(|k| k.contains("API_KEY")),
             "an API key must never travel into sweep metadata"

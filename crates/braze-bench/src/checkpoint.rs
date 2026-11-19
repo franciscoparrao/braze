@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::BenchError;
+use crate::metadata::RunLogEntry;
 use crate::metrics::TaskResult;
 
 /// Clave de una fila: (backend tal como lo muestra el reporte, tarea, repetición).
@@ -79,6 +80,45 @@ pub fn checkpoint_path(output: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// Ruta del registro de horas para un `--output` dado:
+/// `x.json` → `x.json.runlog.jsonl`. Va aparte del checkpoint de filas
+/// para no tocar el formato de `TaskResult`.
+pub fn run_log_path(output: &Path) -> PathBuf {
+    let mut name = output.as_os_str().to_owned();
+    name.push(".runlog.jsonl");
+    PathBuf::from(name)
+}
+
+/// Lee un registro de horas. Mismo criterio que [`load_rows`]: una última
+/// línea truncada se descarta con aviso.
+pub fn load_run_log(path: &Path) -> Result<Vec<RunLogEntry>, BenchError> {
+    let file = File::open(path)?;
+    let lines: Vec<String> = BufReader::new(file).lines().collect::<Result<_, _>>()?;
+    let mut entries = Vec::with_capacity(lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<RunLogEntry>(line) {
+            Ok(entry) => entries.push(entry),
+            Err(err) if i + 1 == lines.len() => {
+                eprintln!(
+                    "braze-bench: la última línea del registro de horas {} está incompleta ({err}); se descarta",
+                    path.display()
+                );
+            }
+            Err(err) => {
+                return Err(BenchError::Startup(format!(
+                    "registro de horas {} ilegible en la línea {}: {err}",
+                    path.display(),
+                    i + 1
+                )));
+            }
+        }
+    }
+    Ok(entries)
+}
+
 /// Lee las filas de un checkpoint. Una última línea truncada (el proceso
 /// murió escribiéndola) se descarta con aviso; cualquier otra línea
 /// ilegible es un error, porque significa que el archivo no es lo que dice.
@@ -118,6 +158,10 @@ pub struct Checkpoint {
     /// fail-fast, baseline del pareo— las ve igual que si se hubieran
     /// corrido ahora).
     pub resumed: HashMap<RowKey, TaskResult>,
+    run_log_path: Option<PathBuf>,
+    /// Horas originales de las filas reanudadas: sin esto una reanudación
+    /// borra los tiempos que el `run_log` existe para conservar.
+    pub resumed_run_log: HashMap<RowKey, RunLogEntry>,
 }
 
 impl Checkpoint {
@@ -126,10 +170,33 @@ impl Checkpoint {
     /// previo se renombra a `.prev` en vez de borrarse.
     pub fn open(output: Option<&Path>, resume: bool) -> Result<Self, BenchError> {
         let Some(output) = output else {
-            return Ok(Self { path: None, resumed: HashMap::new() });
+            return Ok(Self {
+                path: None,
+                resumed: HashMap::new(),
+                run_log_path: None,
+                resumed_run_log: HashMap::new(),
+            });
         };
         let path = checkpoint_path(output);
+        let log_path = run_log_path(output);
         let mut resumed = HashMap::new();
+        let mut resumed_run_log = HashMap::new();
+        if log_path.exists() {
+            if resume {
+                for entry in load_run_log(&log_path)? {
+                    resumed_run_log.insert(
+                        (entry.backend.clone(), entry.task_id.clone(), entry.repetition),
+                        entry,
+                    );
+                }
+                // Igual que el checkpoint: se reescribe al re-emitir.
+                std::fs::remove_file(&log_path)?;
+            } else {
+                let mut prev = log_path.as_os_str().to_owned();
+                prev.push(".prev");
+                std::fs::rename(&log_path, &prev)?;
+            }
+        }
         if path.exists() {
             if resume {
                 for row in load_rows(&path)? {
@@ -158,7 +225,33 @@ impl Checkpoint {
                 path.display()
             );
         }
-        Ok(Self { path: Some(path), resumed })
+        Ok(Self {
+            path: Some(path),
+            resumed,
+            run_log_path: Some(log_path),
+            resumed_run_log,
+        })
+    }
+
+    /// Agrega una entrada al registro de horas y la fuerza a disco. Igual
+    /// que [`Checkpoint::record`], un fallo de escritura avisa y no detiene
+    /// el sweep.
+    pub fn record_run(&mut self, entry: &RunLogEntry) {
+        let Some(path) = &self.run_log_path else {
+            return;
+        };
+        let write = || -> std::io::Result<()> {
+            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+            let line = serde_json::to_string(entry).map_err(std::io::Error::other)?;
+            writeln!(file, "{line}")?;
+            file.sync_data()
+        };
+        if let Err(err) = write() {
+            eprintln!(
+                "braze-bench: no se pudo escribir el registro de horas {}: {err}",
+                path.display()
+            );
+        }
     }
 
     /// Agrega la fila recién registrada al checkpoint y la fuerza a disco.
@@ -187,6 +280,37 @@ impl Checkpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_keeps_the_original_run_times() {
+        let dir = TmpDir::new("runlog");
+        let output = dir.path().join("sweep.json");
+        let entry = RunLogEntry {
+            index: 0,
+            backend: "b".into(),
+            task_id: "t".into(),
+            repetition: 1,
+            started_at_unix_ms: 1_000,
+            finished_at_unix_ms: 2_000,
+            resumed: false,
+        };
+        {
+            let mut cp = Checkpoint::open(Some(&output), false).unwrap();
+            cp.record_run(&entry);
+        }
+        let cp = Checkpoint::open(Some(&output), true).unwrap();
+        let got = &cp.resumed_run_log[&("b".to_string(), "t".to_string(), 1)];
+        assert_eq!(got.started_at_unix_ms, 1_000);
+        assert_eq!(got.finished_at_unix_ms, 2_000);
+        // Sin --resume, el registro previo se aparta como .prev.
+        let mut cp2 = Checkpoint::open(Some(&output), false).unwrap();
+        assert!(cp2.resumed_run_log.is_empty());
+        cp2.record_run(&entry);
+        let _ = Checkpoint::open(Some(&output), false).unwrap();
+        let mut prev = run_log_path(&output).into_os_string();
+        prev.push(".prev");
+        assert!(PathBuf::from(prev).exists());
+    }
 
     struct TmpDir(PathBuf);
     impl TmpDir {
