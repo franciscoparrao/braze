@@ -69,6 +69,7 @@ el prior original. El +13 del original debería desaparecer.
 
 ```
 cd ~/braze-study2
+source ~/.cargo/env   # cargo en el PATH: lo usan el agente y el grading (ver Enmienda 1)
 export LD_LIBRARY_PATH=$(ls -d target/release/build/llama-cpp-sys-2-*/out/build/bin)
 export BRAZE_OLLAMA_NUM_CTX=32768 BRAZE_MAX_TOKENS=12288 \
        BRAZE_LOCAL_FAMILY=harmony BRAZE_LOCAL_KV_OFFLOAD=host \
@@ -162,6 +163,31 @@ registra la colocación efectiva en el log.
   intercalar no multiplica la memoria.
 - Los mismos de la suite que en el original (`expect_max_rounds` bajos,
   colinealidad del seed con el prompt).
+
+## Enmienda 1 (2026-11-21): primer lanzamiento inválido por falla del instrumento
+
+El primer lanzamiento (2026-11-19 20:21 a 2026-11-21 02:10, 306 filas) corrió
+sin `cargo` en el PATH del proceso: el comando de lanzamiento omitió
+`source ~/.cargo/env`, que el pre-registro original sí incluía en su entorno.
+Consecuencias, verificadas en el entorno del proceso y en las filas:
+
+- El `cargo check` de grading no pudo ejecutarse: 0 de las primeras 185 filas
+  lo aprobaron, y solo aprobaron 9 filas, en tareas que no lo exigen.
+- El `cargo check` que ejecuta el propio agente también falló, así que las
+  trayectorias quedaron afectadas y las filas no se pueden recalificar.
+
+Lo que se miró de esa corrida antes de declararla inválida, a las 185 filas:
+conteos de filas por brazo, causas de falla, filas aprobadas en total, y la
+mediana de segundos por ronda por brazo (un endpoint secundario). No se miró
+ningún contraste de pass rate por brazo, y no se miran después.
+
+Decisión: la corrida se declara inválida por falla del instrumento (análogo
+a la regla de validez de infraestructura) y se repite completa, sin
+`--resume`, con el mismo plan, la misma semilla de intercalado y el comando
+corregido de arriba. Antes de relanzar se verifica que una tarea con
+`cargo check` apruebe en el mismo entorno. Los archivos de la corrida
+inválida se conservan en Nitro (`~/study2-interleaved-INVALID-no-cargo-2026-11-19/`)
+y se archivan con los resultados, marcados como inválidos.
 
 ## Resultados
 
