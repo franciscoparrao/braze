@@ -14,8 +14,8 @@ Hechos verificados para esta carta:
 
 Dear Guest Editors of the PROMPT-SE 2026 special issue,
 
-Please consider the enclosed manuscript, "When Procedural Memory Does Not Pay: The
-Amortization Frontier of Prompt-Injected Memory for Local-First Coding Agents", for
+Please consider the enclosed manuscript, "Does Prompt-Injected Memory Pay for
+Itself in Small Local Coding Agents? A Pre-Registered Study", for
 the Empirical Software Engineering special issue on Empirical Studies on Prompts and
 other Instruction Artifacts in SE.
 
