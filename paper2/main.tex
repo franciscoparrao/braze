@@ -44,46 +44,31 @@ Agents? A Pre-Registered Study}
 
 % =====================================================================
 \begin{abstract}
-% Prosa continua desde el abstract estructurado de IST (mismas oraciones,
-% sin rótulos). Oración NUEVA para PROMPT-SE: "Such a playbook is an
-% instruction artifact ..." — revisar con el autor.
-Coding agents built on small, locally hosted language models are
-attractive for cost, privacy, and autonomy but fail more than frontier
-models. An appealing fix: when the local model fails and a cloud model
-rescues it, distill the intervention into a reusable playbook for future
-tasks, amortizing the escalation. Such a playbook is an instruction
-artifact: text the harness injects into the model's context on every
-round of every future task. We ask whether this prompt-injected
-procedural memory pays for itself in a local-first coding harness, and
-when. We state an \emph{amortization condition} --- an agentic loop
-re-sends its context each round, so an injected section of $c$ tokens
-costs $c$ per round and pays only if it saves enough rounds --- and test
-it in two evaluations on a 20B mixture-of-experts executor (140 runs,
-and two 306-run sweeps) plus a pre-registered 140-run replication on a
-dense 9B executor. Confirmatory weight rests on the replication and on
-a pre-registered, interleaved re-run of the second study; the first
-study is exploratory.
-Per-task break-even ranges from $0.73$ to $1.74$ rounds across tasks and
-executors. On the 20B executor a human-written playbook saves $0.95$
-rounds on one of three tasks (95\% CI $0.25$--$1.65$, which contains
-that task's break-even) and $0.15$--$0.35$ on the other two, where it
-costs net tokens; success rates show no reliable change. On the 9B
-executor the same playbook lengthens trajectories by up to $1.75$
-rounds, adds $2.7$k--$6.6$k net input tokens per task, and lowers the
-pre-registered pass rate on one task of three ($10/20$ to $2/20$, Holm
-$p=0.041$). In the second study's first run, a \emph{same-prompt
-control} arm, identical to baseline by construction, rose nearly as
-much as the treatment ($+9$ vs.\ $+13$ of 102 cells): the arms ran in
-sequence and the baseline arm ran 1.7 times slower per round. A
-pre-registered re-run with the arms interleaved removed the artifact:
-the control no longer differed from baseline ($-6$ cells, McNemar
-$p=0.33$), and the memory had no detectable effect ($-7$ cells, Holm
-$p=0.59$). We offer the condition as a reporting convention and
-the measurement procedure as general; the measured positions are
-specific to short compile-repair tasks, this harness, and these
-executors. In this regime, injected memory would pay only if the
-injection cost dropped (retrieval on demand) or round savings rose
-(unlocking task classes the model fails outright).
+% Recortado a ~250 palabras el 2026-11-26 (antes 390): Springer suele pedir
+% 150-250 y los abstracts EMSE de la muestra del vault miden 228-288.
+Coding agents built on small, locally hosted language models fail more
+often than frontier models. A tempting fix is to inject a reusable
+playbook distilled from a stronger model's rescues. Such a playbook is
+an instruction artifact re-sent on every round, so its cost grows with
+the trajectory it is meant to shorten. We state this as an \emph{amortization condition},
+used as a reporting convention: an injected section pays only if the
+rounds it saves outweigh its per-round overhead. We test it in two
+studies on a 20B mixture-of-experts executor and a pre-registered
+replication on a dense 9B executor; confirmatory weight rests on the
+replication and on a pre-registered re-run of the second study. Per-task break-even is $0.73$--$1.74$ rounds. On the 20B
+executor a human-written playbook saves $0.95$ rounds on one of three
+tasks (95\% CI $0.25$--$1.65$, which contains its break-even) and costs
+net tokens on the other two. On the 9B executor it lengthens
+trajectories by up to $1.75$ rounds, adds $2.7$k--$6.6$k net input
+tokens per task, and lowers the pre-registered pass rate on one task
+($10/20$ to $2/20$, Holm $p=0.041$). In the second study, which injects
+the files touched in earlier sessions, a first run with the arms in
+sequence showed a significant gain that a \emph{same-prompt control}
+arm nearly matched; interleaving the arms removed this artifact, and
+the memory then had no detectable effect ($-7$ of 102 cells, Holm
+$p=0.59$). These positions are specific to short compile-repair tasks
+and these executors; there, injected memory would pay only if its cost
+dropped or it unlocked tasks the model otherwise fails.
 \keywords{agentic coding \and instruction artifacts \and procedural
 memory \and small language models \and negative results \and
 pre-registration \and same-prompt control}
