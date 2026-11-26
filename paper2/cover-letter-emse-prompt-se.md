@@ -1,6 +1,7 @@
 <!--
 Borrador de carta para EMSE, número especial PROMPT-SE 2026 (2026-11-06;
-contribuciones alineadas con la historia de la sección B el 2026-11-13).
+contribuciones alineadas con la historia de la sección B el 2026-11-13;
+Estudio 2 con la corrida intercalada el 2026-11-26).
 Revisar con el autor antes de enviar. Pendientes marcados con [ ].
 - [ ] ID del manuscrito del Paper 1 en EMSE (Editorial Manager).
 - [ ] Confirmar que la memoria como "instruction artifact" es el encuadre que el autor quiere sostener.
@@ -28,10 +29,11 @@ cost, which are the outcomes the call names. The paper contributes:
 - an amortization condition, offered as a reporting convention, that splits an injected
   artifact's net token balance into the rounds it saves and the overhead it adds on every
   round of the trajectory;
-- a same-prompt (A/A) control arm, which in our data rose nearly as much as the treatment
-  (+9 vs. +13 of 102 cells) and exposed an arm-level artifact behind an apparently
-  significant gain (McNemar p = 0.011), with a measured lesson on why arms must be
-  interleaved;
+- a same-prompt (A/A) control arm and interleaved arms, measured: with the arms in
+  sequence, the control rose nearly as much as the treatment (+9 vs. +13 of 102 cells) and
+  exposed an arm-level throughput artifact behind an apparently significant gain (McNemar
+  p = 0.011); a pre-registered re-run with the arms interleaved removed the artifact and
+  found no effect of project memory (-7 cells, Holm p = 0.59);
 - a pre-registered replication on a second executor, where the same artifact lengthens
   trajectories, adds 2.7k-6.6k net input tokens per task, and lowers the registered pass
   rate on one task of three, reported with every departure from the registered plans.

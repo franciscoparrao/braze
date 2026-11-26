@@ -99,7 +99,9 @@ Propuesta, para que la evalúes:
 
 ## C. Requiere Nitro (corridas nuevas)
 
-1. **Estudio 2 intercalado:** los tres brazos, con orden aleatorio por (tarea,
+1. [x] **Estudio 2 intercalado** (hecho 2026-11-21/26: pre-registro `15d74ca`,
+   enmienda `0fe2725`, resultados `dcbe39f`; H1 se sostiene, H2/H3 nulos; el paper
+   ya lo usa como evidencia confirmatoria): los tres brazos, con orden aleatorio por (tarea,
    repetición), registrando el rendimiento por corrida. Pre-registrar antes:
    hipótesis, análisis con timeouts como censura y regla de validez.
 2. **Control de mismo prompt en la réplica** (opcional): un brazo A/A intercalado.

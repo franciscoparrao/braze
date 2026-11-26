@@ -58,10 +58,11 @@ procedural memory pays for itself in a local-first coding harness, and
 when. We state an \emph{amortization condition} --- an agentic loop
 re-sends its context each round, so an injected section of $c$ tokens
 costs $c$ per round and pays only if it saves enough rounds --- and test
-it in two evaluations on a 20B mixture-of-experts executor (140 and 306
-runs) plus a pre-registered 140-run replication on a dense 9B executor.
-Confirmatory weight rests on the second study and the replication
-(pre-registration externally verifiable); the first is exploratory.
+it in two evaluations on a 20B mixture-of-experts executor (140 runs,
+and two 306-run sweeps) plus a pre-registered 140-run replication on a
+dense 9B executor. Confirmatory weight rests on the replication and on
+a pre-registered, interleaved re-run of the second study; the first
+study is exploratory.
 Per-task break-even ranges from $0.73$ to $1.74$ rounds across tasks and
 executors. On the 20B executor a human-written playbook saves $0.95$
 rounds on one of three tasks (95\% CI $0.25$--$1.65$, which contains
@@ -70,11 +71,14 @@ costs net tokens; success rates show no reliable change. On the 9B
 executor the same playbook lengthens trajectories by up to $1.75$
 rounds, adds $2.7$k--$6.6$k net input tokens per task, and lowers the
 pre-registered pass rate on one task of three ($10/20$ to $2/20$, Holm
-$p=0.041$). In the second study, a \emph{same-prompt control} arm,
-identical to baseline by construction, rose nearly as much as the
-treatment ($+9$ vs.\ $+13$ of 102 cells); the arms ran in sequence and
-the baseline arm ran 1.7 times slower per round, so arm and run order
-are confounded. We offer the condition as a reporting convention and
+$p=0.041$). In the second study's first run, a \emph{same-prompt
+control} arm, identical to baseline by construction, rose nearly as
+much as the treatment ($+9$ vs.\ $+13$ of 102 cells): the arms ran in
+sequence and the baseline arm ran 1.7 times slower per round. A
+pre-registered re-run with the arms interleaved removed the artifact:
+the control no longer differed from baseline ($-6$ cells, McNemar
+$p=0.33$), and the memory had no detectable effect ($-7$ cells, Holm
+$p=0.59$). We offer the condition as a reporting convention and
 the measurement procedure as general; the measured positions are
 specific to short compile-repair tasks, this harness, and these
 executors. In this regime, injected memory would pay only if the
@@ -136,14 +140,16 @@ misapplication) with a \emph{human-written} playbook, a strong a-priori conditio
 content quality, across three compile-repair tasks (140 runs). Study~2 evaluates the production form of the same
 idea, a project-memory hook that injects the files touched by previous
 sessions, in a three-arm A/B whose middle arm is a \emph{same-prompt
-control}: its prompt is byte-identical to the baseline by construction
-(306 runs). A pre-registered replication of Study~1 on a second, dense
-9B executor (140 further runs) tests whether the pattern is specific
-to one architecture. The confirmatory weight of this paper rests on
-Study~2 and this replication, whose pre-registration order is
-externally verifiable against the public repository; Study~1's pilot,
-whose order is not, we report as exploratory
-(Section~\ref{sec:method-prereg}).
+control}: its prompt is byte-identical to the baseline by construction.
+Study~2 ran twice, 306 runs each: first with the arms in sequence, and
+then, after that run exposed an artifact, with the arms interleaved
+under a new pre-registration. A pre-registered replication of Study~1
+on a second, dense 9B executor (140 further runs) tests whether the
+pattern is specific to one architecture. The confirmatory weight of
+this paper rests on the replication and on the interleaved run of
+Study~2, whose pre-registration order is verifiable against the public
+repository; Study~1's pilot, whose order is not, we report as
+exploratory (Section~\ref{sec:method-prereg}).
 
 Both studies land on the same side of the frontier, though they probe
 different points of it: Study~1 (exploratory) prices content-rich
@@ -152,16 +158,18 @@ the playbook saves $0.95$ rounds on one task, a point estimate above
 that task's break-even of $0.73$ rounds with an interval that contains
 it, and $0.15$--$0.35$ rounds on the other two, where it costs net
 input tokens. On this executor success rates show no reliable change.
-In Study~2 the treatment arm beat baseline by $+13$ of 102 (task,
-repetition) cells (McNemar $p=0.011$,
-Holm-corrected), formally meeting the pre-registered promotion
-criterion. The same-prompt control, however, rose $+9$ on an identical
-prompt, and the only contrast that isolates the memory's content was
-null ($+4$, $p=0.541$). Our reanalysis locates the source of the
-difference between arms: the baseline arm ran about 1.7 times slower
-per round and timed out on 38 of 102 runs, against 23 and 21 for the
-other arms, and among pairs in which no run timed out, no contrast
-differs. On the smaller executor of the replication the playbook
+In the first run of Study~2 the treatment arm beat baseline by $+13$
+of 102 (task, repetition) cells (McNemar $p=0.011$, Holm-corrected),
+formally meeting the pre-registered promotion criterion. The
+same-prompt control, however, rose $+9$ on an identical prompt. The
+arms had run in sequence, and the baseline arm ran about 1.7 times
+slower per round and timed out on 38 of 102 runs, against 23 and 21
+for the other arms. We re-ran the study with the arms interleaved
+under a new pre-registration. The artifact disappeared: per-round
+speed differed by under 9\% between arms, the control did not differ
+from baseline ($-6$ cells, $p=0.33$), and neither the memory against
+baseline ($-7$, Holm $p=0.59$) nor its content against the control
+($-1$, $p=1.00$) showed an effect. On the smaller executor of the replication the playbook
 lengthens trajectories by up to $1.75$ rounds, costs $2.7$k--$6.6$k
 net input tokens per task, and lowers the pre-registered pass rate on
 one task of three ($10/20$ to $2/20$, Holm $p=0.041$).
@@ -174,14 +182,18 @@ This paper contributes:
   rounds an injected section saves and the overhead it adds, with
   per-task break-evens measured on two executors
   (Sections~\ref{sec:model} and~\ref{sec:results});
-\item a pre-registered evaluation (Study~2) and a pre-registered
-  replication, reported with a reanalysis that separates functional
-  correctness from token budgets and timeouts, and that lists every
-  departure from the registered plans: the replication shows injected
-  memory lengthening trajectories and lowering success on one task,
-  and the \emph{same-prompt control} (an A/A arm) of Study~2 exposed
-  an arm-level throughput artifact that a conventional A/B would have
-  reported as a treatment effect (Section~\ref{sec:results-pm});
+\item a pre-registered replication and a pre-registered, interleaved
+  evaluation of project memory, reported with a reanalysis that
+  separates functional correctness from token budgets and timeouts,
+  and that lists every departure from the registered plans: the
+  replication shows injected memory lengthening trajectories and
+  lowering success on one task, and the interleaved run finds no
+  effect of project memory;
+\item a measured case of why a same-prompt control (an A/A arm) and
+  interleaved arms matter in LLM-agent benchmarking: with arms in
+  sequence, the control exposed an arm-level throughput artifact that
+  a conventional A/B would have reported as a treatment effect, and
+  interleaving the arms removed it (Section~\ref{sec:results-pm});
 \item the multi-session benchmark design A$\to$B$\to$H for measuring
   procedural transfer under objective oracles, contributed as a design
   with a first partial instantiation rather than a completed
@@ -331,9 +343,10 @@ publishable \citep{mendez2019openscience}; community standards make
 analogous demands on benchmark-based studies \citep{ralph2021standards},
 and the statistical treatment of randomized SE experiments is
 well-codified \citep{arcuri2011practical}. This paper follows that
-discipline in a lightweight form: Study~2 and the replication were
-registered by committing hypotheses, decision criteria, and an honest
-prior to the project repository before launch, while Study~1 is
+discipline in a lightweight form: both runs of Study~2 and the
+replication were registered by committing hypotheses, decision
+criteria, and an honest prior to the project repository before launch,
+while Study~1 is
 reported as exploratory (Section~\ref{sec:method-prereg}); Study~2's
 contrasts are paired exact tests with multiplicity correction, and
 every endpoint family of Study~1 and the replication carries
@@ -450,22 +463,27 @@ $c$-token memory costs $c \times R$ input tokens per task, not $c$.
 The executor model in both studies is \texttt{gpt-oss:20b}, a
 mixture-of-experts model (20B total, $\sim$3.6B active parameters)
 running on a dedicated LAN inference node (16\,GB RAM); no other
-workload shares the node during a sweep. Study~2's sweep was
+workload shares the node during a sweep. The first run of Study~2 was
 interrupted by a $\sim$16.7\,h suspension of the node, during which
 the monotonic clock that per-task timeouts use does not advance. Study~1 serves the model
-through an Ollama server; Study~2 uses \braze{}'s in-process
+through an Ollama server; both runs of Study~2 use \braze{}'s in-process
 \texttt{LocalBackend} (llama.cpp through the \texttt{llama-cpp-2}
 0.1.152 bindings, with the model's canonical Harmony chat template and
-the reference \texttt{gpt-oss-20b-MXFP4} GGUF weights), with context
-window 32{,}768 tokens, output cap 12{,}288 tokens, temperature 0.2,
-and a 900\,s per-task timeout. The run metadata records the sampling
-settings, seed, timeout, suite fingerprint, harness commit, model
-digest (Study~1 and the replication), server version (replication
-only), and two backend variables for Study~2; the context window and
-output cap of Study~2 were set through environment variables that the
-metadata does not record. Not recorded anywhere are the hash of the
-GGUF file, the GPU offload and thread settings, and per-run start
-times. Each benchmark run receives a hermetic sandbox (a
+the reference \texttt{gpt-oss-20b-MXFP4} GGUF weights, SHA-256
+\texttt{27cd6c43\ldots ae35901}), with context window 32{,}768 tokens,
+output cap 12{,}288 tokens, temperature 0.2, and a 900\,s per-task
+timeout. The hash was computed after the first run, on a file whose
+modification date (2026-07-21) precedes it. The run metadata records
+the sampling settings, seed, timeout, suite fingerprint, harness
+commit, model digest (Study~1 and the replication), and server version
+(replication only). For the first run of Study~2 it records only two
+backend variables: the context window and output cap were set through
+environment variables it did not capture, and neither the GPU
+placement nor per-run start times were recorded. The interleaved run
+records all four environment variables, the llama.cpp binding version,
+the run order and its seed, and the start and end time of every run;
+its log records the GPU placement (25 layers on the GPU, key--value
+cache in host memory), loaded once and shared by the three arms. Each benchmark run receives a hermetic sandbox (a
 fresh directory containing only the task's setup files) and is graded
 by scripted assertions: expected content in the resulting files
 (substring checks), per-task budgets of rounds and, in Study~1 and its
@@ -610,12 +628,16 @@ repetitions per arm at fixed seed and temperature 0.2 give $3 \times 3
 McNemar's exact test on (task, repetition) pairs, Holm-corrected
 across the two contrasts against baseline. Because repetitions of the
 same task share prompt and oracle, pair-level McNemar overstates the
-effective sample; we therefore also report, post hoc, task-level
-(cluster-aware) tests: an exact sign test and an exact Wilcoxon
-signed-rank test (zeros dropped, exact null by enumeration of signs)
-over the 34 per-task pass counts. Secondary metrics are input tokens, rounds, and wall
-time.
+effective sample; we therefore also report task-level (cluster-aware)
+tests: an exact sign test and an exact Wilcoxon signed-rank test
+(zeros dropped, exact null by enumeration of signs) over the 34
+per-task pass counts. They were added post hoc to the first run and
+registered for the second. Secondary metrics are input tokens, rounds,
+and wall time.
 
+\paragraph{First run: arms in sequence (August 2026).} The three arms
+ran one after another (baseline, then empty, then seeded), each as a
+separate invocation of the benchmark that loaded the model on its own.
 The decision criteria were pre-registered before launch:
 (1)~a \emph{plumbing gate}, evaluated first: if the empty arm
 differs from baseline by more than 2 paired discordant cells, the
@@ -630,6 +652,29 @@ negative, since the touched-file list adds little the task prompt does
 not already say, and costs tokens per round); and (5)~no iteration
 allowed: the sweep is a measurement, not a tuning loop.
 
+\paragraph{Second run: arms interleaved (November 2026).} The first
+run's arms differed in throughput, so arm and run order were
+confounded (Section~\ref{sec:results-pm}). We re-ran the same design
+under a new pre-registration with three changes. The arms run in one
+invocation that loads the model once for all three. Within each
+(repetition, task) block the three arms run in a random order, drawn
+with a recorded seed, so that any drift of the node spreads across
+arms instead of separating them; blocks run repetition by repetition.
+And the run records its environment, order, and per-run times. The
+registered hypotheses are, in order: H1, the empty arm does not differ
+from baseline (a validity check, read first: if it fails, the run
+cannot measure the lever); H2, seeded differs from baseline; H3,
+seeded differs from empty. The first run's plumbing gate of at most 2
+discordant cells is replaced by McNemar $p\geq0.05$ for H1: the first
+run had shown that many more than 2 cells can change between runs of
+an identical prompt, so the old threshold could not be met by design
+(the registration declares this as a deviation); the promotion and harm
+criteria are unchanged. The registration also fixes the validity rules
+(infrastructure failures above 10\% invalidate the run; a difference of
+more than 20\% in seconds per round between arms, or a gap of more than
+10 minutes between runs, is declared) and the analysis of timeouts as
+censoring.
+
 \subsection{Pre-registration and
 reproducibility}\label{sec:method-prereg}
 
@@ -640,16 +685,23 @@ repository before its sweep is launched. The order of registration
 and data can then be checked against the public commit history. Git
 timestamps are set by the author, so this establishes order within
 that history, not precedence certified by a third party. Two features
-of the record make later tampering detectable: every Study~2 run
-record names the registration commit (\texttt{c84e1c3}) as the harness
-commit it ran on, and the replication ran on a commit
+of the record make later tampering detectable: every run of Study~2's
+first sweep names its registration commit (\texttt{c84e1c3}) as the
+harness commit it ran on, and the replication ran on a commit
 (\texttt{2f07ce5}) that follows its registration (\texttt{b2fb8d9})
-without any change to the harness code.
+without any change to the harness code. For the interleaved run of
+Study~2 there is also third-party evidence: GitHub records the push of
+its registration (\texttt{15d74ca}) at 23:16:57 UTC on 2026-11-19,
+before the first launch at 23:21:31 UTC, and the push of its amendment
+(\texttt{0fe2725}) at 20:44:52 UTC on 2026-11-21, before the valid
+launch, whose first run started at 21:00:21 UTC and ran on that commit.
 
 We audited our own compliance, and it is asymmetric. The order is
-externally verifiable for \textbf{Study~2} (hypothesis committed
-2026-08-04, first data 2026-08-06) and for the \textbf{replication of
-Study~1} (hypothesis 2026-08-15, data 2026-08-16). For each document
+externally verifiable for both runs of \textbf{Study~2} (first run:
+hypothesis committed 2026-08-04, first data 2026-08-06; interleaved
+run: registration 2026-11-17, pushed 2026-11-19) and for the
+\textbf{replication of Study~1} (hypothesis 2026-08-15, data
+2026-08-16). For each document
 and data file, \texttt{git log --diff-filter=A --format='\%h \%ad'
 -- <path>} prints the commit that added it; \texttt{--follow} should
 not be used, because git's copy detection then reports a spurious
@@ -661,18 +713,31 @@ carry earlier internal dates and were written before the sweep, but
 external precedence cannot be established from the record, and we do
 not ask the reader to take it on trust. We therefore report the
 pilot as \emph{exploratory} and rest this paper's confirmatory claims
-on Study~2 and the replication, whose registration is verifiable.
+on the replication and the interleaved run of Study~2, whose
+registration is verifiable. The first run of Study~2 was registered
+too, but its own validity check failed (Section~\ref{sec:results-pm}),
+so we report it as the case that motivated the second run.
 Study~1's Holm correction was added in a reanalysis on 2026-08-15,
 after its data had been collected. Table~\ref{tab:deviations} lists
-every departure of the reported analyses from the two registered
-plans. The replication's hypothesis document also refers to a
+every departure of the reported analyses from the registered plans.
+The interleaved run has one amendment, committed and pushed before its
+valid launch: the first launch of that run went out without the Rust
+toolchain on the process's path, so neither the agent's nor the
+oracle's \texttt{cargo check} could run, and it was declared invalid
+for that instrument failure and repeated in full with the same plan
+and seed. Before declaring it invalid we had looked at run counts,
+failure causes, total passes and the per-arm seconds per round; no
+per-arm pass-rate contrast was read. Its records are archived and
+marked as invalid. The replication's hypothesis document also refers to a
 simulated pre-submission review stored outside the repository; that
 review motivated the replication and did not change its design.
 
 \begin{table}
-\caption{Departures from the registered plans of Study~2
-(\texttt{docs/hypothesis-2026-08-04-project-memory-ab.md}) and of the
-replication (\texttt{docs/hypothesis-2026-08-15-m1-ornith9b-replication.md}).
+\caption{Departures from the registered plans of Study~2's first run
+(\texttt{docs/hypothesis-2026-08-04-project-memory-ab.md}), its
+interleaved run (\texttt{docs/hypothesis-2026-11-17-study2-interleaved.md})
+and the replication
+(\texttt{docs/hypothesis-2026-08-15-m1-ornith9b-replication.md}).
 ``Post hoc'' marks analyses that the registered plan did not contain.}
 \label{tab:deviations}
 \small
@@ -680,7 +745,7 @@ replication (\texttt{docs/hypothesis-2026-08-15-m1-ornith9b-replication.md}).
 \toprule
 Item & Registered & Reported \\
 \midrule
-\multicolumn{3}{l}{\emph{Study 2}} \\
+\multicolumn{3}{l}{\emph{Study 2, first run (arms in sequence)}} \\
 Plumbing gate & Evaluated first; if \texttt{empty} and
 \texttt{baseline} differ by more than 2 discordant cells, investigate
 the infrastructure before reading other contrasts. & The gate fired
@@ -693,6 +758,14 @@ contrasts against baseline. & Also reported, post hoc: McNemar without
 pairs that involve a timeout; task-level sign and Wilcoxon tests. \\
 Promotion threshold & ``$\geq +3$ tasks ($\approx$9\,pp)''. & The
 difference is counted in cells: $+13$ of 102 cells ($12.7$\,pp). \\
+\midrule
+\multicolumn{3}{l}{\emph{Study 2, interleaved run}} \\
+Validity check & Registered as H1, read first: McNemar \texttt{empty}
+vs.\ \texttt{baseline}, $p\geq0.05$. & Replaces the first run's
+2-cell gate, declared in the registration. Held ($p=0.33$). \\
+First launch & Not anticipated. & Invalid: the Rust toolchain was not
+on the process's path. Repeated in full under amendment 1, pushed
+before the valid launch. \\
 \midrule
 \multicolumn{3}{l}{\emph{Replication}} \\
 Hypothesis H1 & $\Delta R$ larger on the task solved best unaided;
@@ -718,7 +791,8 @@ resolving to the latest archived version); that archive
 supplies permanence,
 not temporal precedence, which the public commit history is what
 establishes. All raw per-run JSON records ($140+140$ runs for
-Study~1 and its replication, 306 for Study~2, and an aggregate record
+Study~1 and its replication, $306+306$ for the two runs of Study~2,
+the invalid launch, and an aggregate record
 of the diagnostic sessions of Section~\ref{sec:results-pm}; the
 session transcripts themselves are not archived) are committed
 alongside the analysis documents. One script
@@ -954,40 +1028,66 @@ rounds with the playbook, not fewer, consistent with the companion
 study's finding that injected prose context can harm small executors
 \citep{parra2026scaffolding}.
 
-\subsection{Study 2: the same-prompt control removes the headline
-effect}\label{sec:results-pm}
+\subsection{Study 2: an order artifact, and a null once the arms are
+interleaved}\label{sec:results-pm}
 
 The second study evaluates the harness-integrated form of the same
 idea: a project-memory hook that injects, into the system prompt, the
 files touched in previous sessions. Because the benchmark opens a
 fresh session per repetition, the plain hook arm runs with empty
 memory and renders \emph{nothing}: its prompt is identical to the
-baseline by construction. That accident of plumbing is
-methodologically precious: the empty arm is a \textbf{same-prompt
-control}, and any paired discordance between it and the baseline
-measures, inside the same sweep, everything that is not the treatment:
-noise and any drift between arms. A third arm
+baseline by construction. That accident of plumbing makes the empty
+arm a \textbf{same-prompt control}: any paired discordance between it
+and the baseline measures, inside the same sweep, everything that is
+not the treatment, noise and any drift between arms. A third arm
 (\emph{seeded}) synthesizes the memory a previous session would have
 left, with zero experimenter-authored content; this exercises the
 production \emph{injection} path with synthetic capture --- running
 the capture path across real sessions end-to-end is outside this
-study's scope. That content is
-deliberately thin (a list of files the task prompts largely repeat,
-as the pre-registered prior already noted), so this study bounds the
-attributable effect of a realistic cheap injection; probing rich
-procedural content is Study~1's role. The two studies carry different
-evidential weight and we read them accordingly.
+study's scope. That content is deliberately thin (a list of files the
+task prompts largely repeat, as the pre-registered prior already
+noted), so this study bounds the attributable effect of a realistic
+cheap injection; probing rich procedural content is Study~1's role.
+
+\paragraph{First run: the control exposes an order artifact.}
+Table~\ref{tab:pm} reports the first run, with the arms in sequence.
+Read without the control arm, it is a publishable positive: seeded
+beats baseline by $+13$ cells ($12.7$\,pp), McNemar $p=0.011$, Holm
+$p=0.021$, meeting the pre-registered promotion criterion \emph{in its
+letter}. The control arm invalidates the premise: with a byte-identical
+prompt, the empty arm rose $+9$ on its own, and the only contrast that
+isolates the \emph{content} of the memory (seeded vs.\ empty) is null
+($+4$, $p=0.541$). At task level, the headline contrast weakens to an
+exact sign test $p=0.065$ and an exact Wilcoxon $p=0.051$
+(normal-approximation variants give $0.033$ to $0.067$).
+
+The pre-registered plumbing gate had fired first: baseline and empty
+differed in 21 paired cells against a threshold of $\leq 2$. A
+diagnostic on preserved sessions found round-1 prompts token-identical
+across arms in all 12 pairs, and at the time we read the discordance
+as noise. The reanalysis identifies a more specific source. The
+baseline arm ran at a median of 100\,s per round against 58 and 61\,s
+for the other two, and timed out at the 900\,s cap on 38 of 102 runs
+against 23 and 21. The slowdown holds among runs that did not time out
+($89.7$ against $53.8$ and $54.8$\,s per round), so it is not a
+consequence of the timeouts. The run metadata cannot identify its
+cause. A candidate, which we can neither confirm nor exclude, is GPU
+placement: each arm ran as a separate invocation that fitted the
+model's layers to the GPU memory free at load time, and this was not
+recorded. Because the arms ran in sequence, arm and run order were
+confounded, and this run cannot measure the effect of project memory
+in either direction.
 
 \begin{table}
-\caption{Study 2: \texttt{enable\_project\_memory} A/B on the
-34-task discriminating suite, 3 repetitions per arm (306 runs,
-gpt-oss:20b, LocalBackend/Harmony). The empty arm's prompt is
+\caption{Study 2, first run (arms in sequence): \texttt{enable\_project\_memory}
+A/B on the 34-task discriminating suite, 3 repetitions per arm (306
+runs, gpt-oss:20b, LocalBackend/Harmony). The empty arm's prompt is
 identical to baseline by construction; round-1 input token counts
 matched in all 12 preserved diagnostic pairs (the sessions are not
 archived). Differences are counted in (task, repetition) cells, 102 per
-arm. The per-task cap is 900\,s and the arms ran in sequence.
-``Without timeout pairs'': discordant pairs remaining after removing
-every pair in which either run timed out.}
+arm. The per-task cap is 900\,s. ``Without timeout pairs'': discordant
+pairs remaining after removing every pair in which either run timed
+out (post hoc).}
 \label{tab:pm}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lccccc}
@@ -1007,57 +1107,63 @@ $p=0.011$ (Holm $0.021$); without timeout pairs: 2 vs.\ 2, $p=1.00$} \\
 }
 \end{table}
 
-Read without the control arm, Table~\ref{tab:pm} is a publishable
-positive: seeded beats baseline by $+13$ cells ($12.7$\,pp) with a Holm-corrected
-$p=0.021$, meeting the pre-registered promotion criterion \emph{in its
-letter}. The control arm, however, invalidates the premise: with a
-byte-identical prompt, the empty arm rose $+9$ on its own, and the
-only contrast that isolates the \emph{content} of the memory
-(seeded vs.\ empty) is null ($+4$, $p=0.541$). Attributing the
-headline to the memory would have been exactly the error the control
-arm existed to prevent. The clustering structure independently makes
-the same point: repetitions of a task are not independent pairs, and
-at task level (34 per-task pass counts) the headline contrast weakens
-to an exact sign test $p=0.065$ (9 tasks against 2) and an exact
-Wilcoxon signed-rank $p=0.051$ (zeros dropped); normal-approximation
-variants of the Wilcoxon give $0.033$ to $0.067$ depending on how zero
-differences are handled. At task level the $+13$ therefore sits at
-the $0.05$ boundary: it is fragile, not refuted. Seeded vs.\ empty
-stays null under every variant (task-level $p=0.43$--$0.60$). None of
-these task-level tests was in the registered plan
-(Table~\ref{tab:deviations}). The lever was not promoted.
+\paragraph{Interleaved run: the artifact disappears and the effect is
+null.} We re-ran the design under a new pre-registration, with the
+three arms in one invocation, one shared model load, and a random arm
+order within each (repetition, task) block
+(Section~\ref{sec:method-pm}). The run is valid by every registered
+rule: 306 runs and no infrastructure failure, the same suite
+fingerprint as the first run, no gap of more than a minute between
+runs over 29.7 hours, and a median of $31.2$, $32.6$ and $33.9$\,s per
+round in the three arms, a difference of $8.7\%$ against the
+registered limit of $20\%$. Table~\ref{tab:pm-interleaved} gives the
+outcome.
 
-The pre-registered plumbing gate fired first: baseline vs.\ empty
-showed 21 paired discordant cells against a pre-registered threshold
-of $\leq 2$. The diagnostic (preserved sessions on the four most
-discordant tasks) established that round-1 prompts were token-identical
-across arms in all 12 pairs and that no trajectory observed the hook's
-on-disk state. At the time we read the 21 discordances as noise. The
-reanalysis for this paper identifies a more specific source. The arms
-ran in sequence (baseline, then empty, then seeded), and the baseline
-arm ran at a median of 100\,s per round against 58 and 61\,s for the
-other two, timing out at the 900\,s cap on 38 of 102 runs against 23
-and 21 (Table~\ref{tab:pm}). Eighteen of the 21 baseline--empty
-discordances involve a timeout. The slowdown is not a consequence of
-the timeouts: among runs that did not time out, the baseline still ran
-at a median of $89.7$\,s per round against $53.8$ and $54.8$\,s, while
-using fewer input tokens per run. Among the pairs in which no run
-timed out, the three contrasts reduce to 2 vs.\ 2, 0 vs.\ 3 and 5
-vs.\ 1 discordant pairs. That analysis is post hoc and carries almost
-no information: it conditions on timing out, an outcome the treatment
-could itself affect, and it leaves 4, 3 and 6 discordant pairs, too few
-to detect any plausible effect. Among runs that did not time out, the
-baseline passes 59/64, against 68/79 and 72/81. The difference between
-arms is therefore an arm-level difference in throughput that the
-pre-registration did not anticipate, not cell-level noise. We have not
-identified its cause, and the run metadata cannot identify it: it does
-not record GPU offload, thread count, node load, or run start times.
-The node's suspension during the sweep does not advance the clock the
-timeouts use. Because the arms ran in sequence, arm and run order are
-confounded, and Study~2 as run cannot measure the effect of project
-memory in either direction. What it does show is that the same-prompt
-control exposed the artifact: without that arm, the $+13$ would have
-been read as a treatment effect.
+\begin{table}
+\caption{Study 2, interleaved run (pre-registered 2026-11-17, amendment
+1): the same design as Table~\ref{tab:pm}, with the arms in one
+invocation and a random arm order within each (repetition, task)
+block. The harness commit is later than the first run's, so absolute
+pass rates are not comparable across the two runs; the contrasts are
+read within each run. Holm across the two contrasts against baseline.}
+\label{tab:pm-interleaved}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+Arm & Pass & Timeouts & Median s/round & Mean input tokens & Mean rounds \\
+\midrule
+baseline & 77/102 (75.5\%) & 7 & 31.2 & 25{,}149 & 8.4 \\
+empty (same-prompt control) & 71/102 (69.6\%) & 8 & 32.6 & 26{,}809 & 8.7 \\
+seeded & 70/102 (68.6\%) & 12 & 33.9 & 25{,}951 & 7.8 \\
+\midrule
+\multicolumn{6}{l}{H1, empty $-$ baseline: $-6$ (10 vs.\ 16 discordant), McNemar exact $p=0.327$ (Holm $0.592$)} \\
+\multicolumn{6}{l}{H2, seeded $-$ baseline: $-7$ (13 vs.\ 20), $p=0.296$ (Holm $0.592$)} \\
+\multicolumn{6}{l}{H3, seeded $-$ empty: $-1$ (12 vs.\ 13), $p=1.000$} \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+H1 holds: the same-prompt control does not differ from baseline, so
+the run can measure the lever. H2 and H3 are null. Seeded memory
+scores $7$ cells below baseline, in the slightly negative direction of
+the registered prior, and its content scores 1 cell below the
+control; at task level the sign tests give $p=0.815$ and $1.000$ and
+the exact Wilcoxon $p=0.175$ and $1.000$. With 33 discordant pairs, the
+smallest difference the McNemar test could detect at $\alpha=0.05$ is
+13 cells ($12.7$\,pp): a difference as large as the first run's
+apparent gain would have reached significance in either direction, and
+smaller effects remain possible. Timeouts are 7, 8 and 12 (Fisher, seeded vs.\
+baseline, $p=0.34$), and among runs that did not time out the arms
+pass $77/95$, $71/94$ and $70/90$.
+
+Two numbers carry the methodological lesson. With the arms in
+sequence, a $+13$-cell gain met every conventional bar; with the arms
+interleaved, the same design gives $-7$. And the same-prompt control
+measures the noise floor inside the sweep: 26 of 102 cells (25\%)
+differ between two arms whose prompts are identical. A threshold of
+``more than 2 cells'', which the first registration used, was never
+attainable on this suite.
 
 \subsection{Cost of the injected section}\label{sec:results-cost}
 % Fuente: hypothesis-2026-08-04 § Decisión (costo ~40 tokens ronda 1) y
@@ -1163,29 +1269,30 @@ free, constrained decoding that failed to beat the harness's own
 repair ladder \citep{parra2026scaffolding}. The present null is the highest
 conceptual stake among them because the technique is the most
 attractive. Neither the efficiency endpoints (Study~1 and its
-replication) nor the content contrast of Study~2 showed a benefit. A
+replication) nor the interleaved run of Study~2 showed a benefit. A
 null is bounded by what the design can detect, and here that bound is
 coarse: about half a round to one round per task on gpt-oss:20b, a
-drop of about $0.4$--$0.5$ in success proportion at $n=20$ per cell,
-and about $11$ cells ($10.8$\,pp) for Study~2's content contrast
-(Section~\ref{sec:method-m1}). Benefits smaller than these are not
+drop of about $0.4$--$0.5$ in success proportion at $n=20$ per cell
+(Section~\ref{sec:method-m1}), and 13 cells ($12.7$\,pp) for the
+contrasts of Study~2's interleaved run. Benefits smaller than these are not
 excluded. What
 survives is quantitative and reusable: the per-task bar a memory must
 clear ($0.73$--$1.74$ rounds across the tasks and executors measured
 here) and a measured shortfall on two of three tasks.
 
-\subsection{The same-prompt control as a transferable
-instrument}\label{sec:disc-control}
+\subsection{The same-prompt control and interleaved arms, measured}\label{sec:disc-control}
 
-Without the empty arm, Study~2 is a publishable false positive: $+13$
-cells, McNemar $p=0.011$, Holm-corrected, meeting a pre-registered
-promotion criterion. The control arm, whose prompt is identical to
-baseline by construction, rose $+9$ on its own. Our original reading attributed that
-rise to cell-level noise near the capability frontier. The reanalysis
-of Section~\ref{sec:results-pm} shows something more specific: the
-arms differed in throughput, the baseline timed out far more often,
-and once pairs involving a timeout are set aside too few discordant
-pairs remain to show any contrast.
+Without the empty arm, the first run of Study~2 is a publishable false
+positive: $+13$ cells, McNemar $p=0.011$, Holm-corrected, meeting a
+pre-registered promotion criterion. The control arm, whose prompt is
+identical to baseline by construction, rose $+9$ on its own. Our
+original reading attributed that rise to cell-level noise near the
+capability frontier. The reanalysis of Section~\ref{sec:results-pm}
+showed something more specific: the arms differed in throughput, and
+the baseline timed out far more often. The interleaved run settles
+what the first run could only suggest. With the arms in one invocation
+and in random order, per-round speed differed by under 9\%, the
+control did not differ from baseline, and the $+13$ became $-7$.
 An earlier version of this paper also reported a re-run on a saturated
 suite (0 of 190 within-task pairs flipping) as evidence that the noise
 was a property of the suite rather than of the serving stack. That
@@ -1199,20 +1306,24 @@ arm is what online experimentation calls an A/A test, a standard check
 that the experimentation infrastructure itself produces no difference
 \citep{kohavi2020trustworthy}, and running arms in an interleaved or
 randomised order to protect against drift is a basic principle of
-experimental design; Study~2 followed the first and not the second.
-What this study adds is a measured case of both principles in
-LLM-agent benchmarking. Non-determinism in LLM code
+experimental design. The first run of Study~2 followed the first
+principle and not the second; the interleaved run followed both. What
+this study adds is a measured case of what each principle prevents in
+LLM-agent benchmarking: the A/A arm flagged the artifact, and
+interleaving removed it. Non-determinism in LLM code
 generation is a documented threat to conclusion validity: for
 ChatGPT, identical prompts yield programs with different test
 outcomes, and a temperature of zero reduces the effect without
 removing it \citep{ouyang2025nondeterminism}. A same-prompt arm cannot tell noise
 from arm-level drift, but it detects both: any difference between it
-and the baseline is a difference no treatment caused. In a regime
-where suites sit near the capability frontier and a whole arm can run
-slower than another on the same node, the only floor that can be
-trusted is one measured inside the same sweep, and the arms should be
-interleaved rather than run in sequence, so that drift spreads across
-arms instead of separating them. The control is cheap (one extra
+and the baseline is a difference no treatment caused. Measured inside
+the interleaved sweep, that floor is 26 of 102 cells (25\%) differing
+between two identical prompts. In a regime where suites sit near the
+capability frontier and a whole arm can run slower than another on the
+same node, the only floor that can be trusted is one measured inside
+the same sweep, and the arms should be interleaved rather than run in
+sequence, so that drift spreads across arms instead of separating
+them. The control is cheap (one extra
 arm), demands no new tooling, and converts ``significant against
 baseline'' into the question that matters: significant against
 \emph{what}.
@@ -1281,13 +1392,14 @@ components, accepting a proposed harness update when a train score
 improves and a dev score does not regress: point estimates, no
 statistics. Study~2 is a concrete demonstration of what that
 acceptance gate would do in this regime: it would have accepted a
-$+13$-cell improvement that a same-prompt control shows to be
-unattributable to the treatment. In the small-model regime, where
+$+13$-cell improvement that a same-prompt control flagged and an
+interleaved re-run turned into $-7$. In the small-model regime, where
 suites sit near the capability frontier and a whole arm can drift
 relative to another, an automated harness optimizer needs the
 machinery used here (pre-registered criteria, paired exact tests
-with correction, and a same-prompt control arm) as its acceptance
-gate, or its optimization record fills with noise promoted to design.
+with correction, a same-prompt control arm, and interleaved arms) as
+its acceptance gate, or its optimization record fills with noise
+promoted to design.
 
 % =====================================================================
 \section{Threats to Validity}\label{sec:threats}
@@ -1341,13 +1453,20 @@ not bit-exact under fixed seeds: in Study 1, a wall-time effect that
 was significant in one sweep ($p=0.008$) did not replicate in an
 independent re-run, while the primary token effect replicated in
 direction and magnitude; no conclusion in this paper rests on a
-secondary wall-time contrast. In Study~2, our pre-registered plumbing gate fired (21 discordant
-cells against a threshold of $\leq 2$), and the reanalysis traces the
-difference to an arm-level throughput difference with more timeouts in
-the baseline arm (Section~\ref{sec:results-pm}); because the arms ran
-in sequence, run order and arm are confounded in that study, and we
-have not identified the cause. We report this rather than repair it
-post hoc; an interleaved re-run is the design correction. The
+secondary wall-time contrast. In the first run of Study~2, the
+pre-registered plumbing gate fired (21 discordant cells against a
+threshold of $\leq 2$), and the reanalysis traces the difference to an
+arm-level throughput difference with more timeouts in the baseline arm
+(Section~\ref{sec:results-pm}); because the arms ran in sequence, run
+order and arm were confounded, and the cause was not identified. We
+did not repair that run post hoc. We repeated it with interleaved arms
+under a new registration, and only the repeated run carries
+confirmatory weight. Its harness commit is later than the first run's
+(\texttt{0fe2725} against \texttt{c84e1c3}); the suite is the same, but
+absolute pass rates differ between the runs (baseline $59$ against
+$77$ of 102), so the two runs are compared through their within-run
+contrasts only. Its first launch was invalid and was repeated under a
+documented amendment (Section~\ref{sec:method-prereg}). The
 replication is conceptual rather than exact: the executor, the oracle
 and the server version changed together, so differences between the
 two executors cannot be attributed to the executor alone. All
@@ -1363,8 +1482,9 @@ success endpoints and moderate power for round endpoints
 from above, they do not show their absence. Holm correction is applied
 within endpoint families, not across them. Several analyses are post
 hoc (Table~\ref{tab:deviations}), and one of them, the task-level
-Wilcoxon test of Study~2, falls on either side of $0.05$ depending on
-how zero differences are handled.
+Wilcoxon test of Study~2's first run, falls on either side of $0.05$
+depending on how zero differences are handled; in the interleaved run,
+where these tests were registered, every variant gives $p\geq0.17$.
 
 \paragraph{Researcher bias.} One author built the harness, wrote the
 tasks, the oracle and the playbook, and ran the analyses. The
@@ -1372,9 +1492,9 @@ tasks, the oracle and the playbook, and ran the analyses. The
 sweeps before the final run (the inventory is in the reanalysis
 report); those sweeps were exploratory and are not reported as
 evidence, but the choice of the final version was not blind to them.
-The pre-registrations of Study~2 and the replication, the public raw
-records and the reanalysis script are the safeguards; an independent
-re-run on new tasks would be the stronger one.
+The pre-registrations of both runs of Study~2 and of the replication,
+the public raw records and the reanalysis script are the safeguards;
+an independent re-run on new tasks would be the stronger one.
 
 % =====================================================================
 \section{Conclusion}\label{sec:conclusion}
@@ -1386,9 +1506,11 @@ same-prompt control, it did not pay in the regime we measured. On the
 20B executor a human-written playbook saves about a round on one task
 of three, without clearing that task's break-even with confidence, and
 costs net tokens on the other two; on the 9B executor it lengthens
-trajectories on every task and lowers success on one; and an
-apparently significant effectiveness gain dissolves against a control
-arm whose prompt is identical by construction. Those positions are
+trajectories on every task and lowers success on one; and project
+memory showed no effect once its evaluation was run with interleaved
+arms, after an apparently significant gain in a sequential run
+dissolved against a control arm whose prompt is identical by
+construction. Those positions are
 measured on short compile-repair tasks of one family and two
 executors; what travels is the condition, as a way of reporting the
 trade, and the procedure for measuring it. The amortization condition of
@@ -1401,15 +1523,14 @@ line of work continues.
 
 The methodological lesson rests on standard principles of
 experimentation, the A/A test and randomised run order, and this paper
-shows what happens in LLM-agent benchmarking when the second is
-skipped. In the small-model regime, where discriminating suites sit
-near the capability frontier and noise floors are
-configuration-specific, an A/B comparison without an in-sweep
-same-prompt control is hard to interpret: ours would have promoted an
-arm-level throughput artifact as a treatment effect, one that met
-every conventional bar, including its own pre-registered criterion.
-The arms of such a comparison should also be interleaved, so that
-drift cannot separate them. Any system that optimizes harness
+measures both in LLM-agent benchmarking. In the small-model regime,
+where discriminating suites sit near the capability frontier and a
+quarter of cells can change between identical prompts, an A/B
+comparison without an in-sweep same-prompt control is hard to
+interpret: ours would have promoted an arm-level throughput artifact
+as a treatment effect, one that met every conventional bar, including
+its own pre-registered criterion. Interleaving the arms removed the
+artifact, and the same design then measured a null. Any system that optimizes harness
 memory automatically (and the meta-harness line makes that agenda
 explicit) will need this machinery as its acceptance gate.
 
@@ -1436,8 +1557,10 @@ decision to submit the article for publication.
 interests.
 
 \paragraph{Data availability.} All raw per-run benchmark records
-($140+140$ runs for Study~1 and its replication; 306 runs for
-Study~2, plus an aggregate record of the diagnostic sessions), the
+($140+140$ runs for Study~1 and its replication; $306+306$ runs for the
+two runs of Study~2 with the run order and per-run times of the
+second, the records of its invalid first launch marked as such, and an
+aggregate record of the diagnostic sessions of the first), the
 pre-registration documents with their decision criteria, the
 benchmark suite definitions, the injected playbook, and the
 reanalysis script that regenerates every reported statistic
@@ -1448,8 +1571,10 @@ repository (\url{https://github.com/franciscoparrao/braze}) under tag
 archive; la versión actual del DOI no incluye los archivos del
 reanálisis}.
 Pre-registration is verifiable against the repository's git history
-for Study~2 and the replication: each hypothesis document was committed
-before its sweep was launched (Study~1 is exploratory;
+for both runs of Study~2 and for the replication: each hypothesis
+document was committed before its sweep was launched, and the
+registration and amendment of Study~2's interleaved run were also
+pushed to GitHub before launch (Study~1 is exploratory;
 Section~\ref{sec:method-prereg}).
 
 \paragraph{Author contributions.} Single-authored work. Francisco
@@ -1534,7 +1659,13 @@ Files touched in earlier sessions:
 produced by \texttt{default\_system\_prompt} in
 \texttt{crates/braze-config/src/prompt.rs} at the harness commit
 recorded in each run's metadata (\texttt{3ec35dc} for Study~1,
-\texttt{2f07ce5} for the replication, \texttt{c84e1c3} for Study~2).
+\texttt{2f07ce5} for the replication, \texttt{c84e1c3} for the first
+run of Study~2, \texttt{0fe2725} for its interleaved run). Between the
+two runs of Study~2 the base prompt changed (among other things, a rule
+that steers file reads and searches to the direct tools instead of the
+shell); the project-memory section did not, since the code that
+renders it changed only in formatting. The base prompt is identical
+across the three arms within each run.
 
 \paragraph{Grading.} Study~1 and the replication pass a run when the
 expected file content is present (substring checks), the run uses at

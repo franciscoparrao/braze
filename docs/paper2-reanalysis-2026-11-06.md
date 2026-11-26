@@ -194,6 +194,8 @@ Nota: la variante primaria del paper es el Wilcoxon exacto condicional por enume
 | empty | 32.6 | 31.5 | 26809 | 8.74 | 353 |
 | seeded | 33.9 | 32.7 | 25951 | 7.82 | 353 |
 
+- Piso de ruido dentro del sweep: 26 de 102 celdas (25 %) difieren entre `empty` y `baseline`, cuyos prompts son idénticos.
+
 Deriva: mediana de s/ronda por tercio del sweep (orden del `run_log`) y brazo.
 
 | Tercio | baseline | empty | seeded |

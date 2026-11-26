@@ -409,6 +409,9 @@ def section_study2_interleaved_extra(data, meta):
         nt = [r for r in R if r.get("failure_cause") != "timeout"]
         spr = lambda rows: st.median(r["wall_time_ms"] / 1000 / r["rounds"] for r in rows if r["rounds"])
         print(f"| {a} | {spr(R):.1f} | {spr(nt):.1f} | {st.mean(r['input_tokens'] for r in R):.0f} | {st.mean(r['rounds'] for r in R):.2f} | {st.mean(r['wall_time_ms'] for r in R) / 1000:.0f} |")
+    keyed = {a: {(r["task_id"], r["repetition"]): r["passed"] for r in data[a]} for a in arms}
+    nd = sum(keyed["empty"][k] != keyed["baseline"][k] for k in keyed["baseline"])
+    print(f"\n- Piso de ruido dentro del sweep: {nd} de {len(keyed['baseline'])} celdas ({100 * nd / len(keyed['baseline']):.0f} %) difieren entre `empty` y `baseline`, cuyos prompts son idénticos.")
     log = meta["run_log"]
     third = len(log) / 3
     rows_by_key = {(r["backend"], r["task_id"], r["repetition"]): r for rs in data.values() for r in rs}
