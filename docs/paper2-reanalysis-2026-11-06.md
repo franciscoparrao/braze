@@ -139,6 +139,69 @@ Nota: la variante primaria del paper es el Wilcoxon exacto condicional por enume
 
 - Efecto mínimo detectable del McNemar seeded − baseline con 23 discordantes: 17 vs 6, es decir Δ = 11 celdas (10.8 pp).
 
+## Estudio 2, re-corrida intercalada (pre-registrada 2026-11-17, enmienda 1)
+
+### Validez de la corrida (criterio 1)
+
+- Metadata: commit `0fe2725`, huella de suite `3daaf2e779f06c8f`, orden `interleaved`, semilla de intercalado 20261117, 3 repeticiones, timeout 900 s, motor `llama-cpp-2 0.1.152+cuda`.
+- Entorno registrado: {'BRAZE_LOCAL_FAMILY': 'harmony', 'BRAZE_LOCAL_KV_OFFLOAD': 'host', 'BRAZE_MAX_TOKENS': '12288', 'BRAZE_OLLAMA_NUM_CTX': '32768'}.
+- Filas: 306 (baseline 102, empty 102, seeded 102); fallos de infraestructura: 0 (0.0 %, umbral 10 %).
+- Corridas con `cargo check` aprobado: 259 de 306 (control del instrumento tras la enmienda 1).
+- Mediana de segundos por ronda: baseline 31.2, empty 32.6, seeded 33.9; diferencia máxima entre brazos 8.7 % (umbral de declaración 20 %).
+- Hueco máximo entre filas consecutivas del `run_log`: 0.0 min (umbral de declaración 10 min). Duración total: 29.7 h.
+
+### Estudio 2: timeouts y rendimiento por brazo
+
+| Brazo | Pass | Timeouts (900 s) | Pass entre no-timeouts | Mediana wall (s) | Mediana s/ronda | Mediana s/ronda sin timeouts | Media tokens de entrada | Media rondas |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 77/102 | 7 | 77/95 | 268 | 31 | 30.5 | 25149 | 8.4 |
+| empty | 71/102 | 8 | 71/94 | 283 | 33 | 31.5 | 26809 | 8.7 |
+| seeded | 70/102 | 12 | 70/90 | 234 | 34 | 32.7 | 25951 | 7.8 |
+
+### Estudio 2: McNemar con y sin pares que involucran un timeout
+
+| Contraste | Discordantes (a gana / b gana) | p | Con timeout | Sin timeout: discordantes | p sin timeout |
+|---|---|---|---|---|---|
+| seeded − baseline | 13 / 20 | 0.296 | 13 | 9 / 11 | 0.824 |
+| empty − baseline | 10 / 16 | 0.327 | 7 | 6 / 13 | 0.167 |
+| seeded − empty | 12 / 13 | 1.000 | 11 | 8 / 6 | 0.791 |
+
+### Estudio 2: unidades, Holm y pruebas a nivel de tarea
+
+Unidad del McNemar: celdas (tarea, repetición), 102 por brazo (34 tareas × 3). Las diferencias de pass se cuentan en celdas.
+
+| Contraste | Δ celdas (pp) | p McNemar | Holm (2 contrastes vs baseline) | Signo exacto (tareas, ceros fuera) | Wilcoxon exacto por enumeración (ceros fuera) | Wilcoxon scipy wilcox/aprox. | Wilcoxon scipy pratt/aprox. | Wilcoxon scipy zsplit/aprox. |
+|---|---|---|---|---|---|---|---|---|
+| seeded − baseline | -7 (-6.9) | 0.296 | 0.592 | 8 vs 10, p = 0.815 | p = 0.175 (n = 18) | 0.178 | 0.406 | 0.428 |
+| empty − baseline | -6 (-5.9) | 0.327 | 0.592 | 5 vs 9, p = 0.424 | p = 0.300 (n = 14) | 0.237 | 0.263 | 0.308 |
+| seeded − empty | -1 (-1.0) | 1.000 | — | 6 vs 7, p = 1.000 | p = 1.000 (n = 13) | 0.782 | 0.782 | 0.804 |
+
+Nota: la variante primaria del paper es el Wilcoxon exacto condicional por enumeración de signos con ceros descartados; las variantes de scipy (aproximación normal) se listan porque cambian el lado del 0,05.
+
+- Efecto mínimo detectable del McNemar seeded − baseline con 33 discordantes: 23 vs 10, es decir Δ = 13 celdas (12.7 pp).
+
+### Re-corrida intercalada: timeouts, costo y deriva
+
+| Contraste | Timeouts (a vs b) | p Fisher |
+|---|---|---|
+| seeded − baseline | 12 vs 7 | 0.336 |
+| empty − baseline | 8 vs 7 | 1.000 |
+| seeded − empty | 12 vs 8 | 0.481 |
+
+| Brazo | Mediana s/ronda (todas) | Mediana s/ronda (sin timeouts) | Media tokens de entrada | Media rondas | Media wall (s) |
+|---|---|---|---|---|---|
+| baseline | 31.2 | 30.5 | 25149 | 8.43 | 341 |
+| empty | 32.6 | 31.5 | 26809 | 8.74 | 353 |
+| seeded | 33.9 | 32.7 | 25951 | 7.82 | 353 |
+
+Deriva: mediana de s/ronda por tercio del sweep (orden del `run_log`) y brazo.
+
+| Tercio | baseline | empty | seeded |
+|---|---|---|---|
+| 1 | 31.2 (n=34) | 31.8 (n=34) | 36.1 (n=34) |
+| 2 | 34.5 (n=34) | 33.8 (n=34) | 33.4 (n=34) |
+| 3 | 30.2 (n=34) | 33.4 (n=34) | 33.4 (n=34) |
+
 ### Barrido del piso de ruido (2026-09-12)
 
 - Corridas: 95, aprobadas: 95, timeouts: 0.

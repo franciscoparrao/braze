@@ -24,6 +24,29 @@ from scipy import stats
 STUDY1 = sorted(glob.glob("docs/sweep-memory-distillation-r20-moveB-batch*-2026-07-17.json"))
 REPLICATION = sorted(glob.glob("docs/sweep-m1-ornith9b-batch*-2026-08-15.json"))
 STUDY2 = {a: f"docs/pm-ab/sweep-pm-ab-{a}-2026-08-04.json" for a in ("baseline", "empty", "seeded")}
+# Re-corrida intercalada pre-registrada (docs/hypothesis-2026-11-17-study2-interleaved.md):
+# una sola invocación con los tres brazos; el brazo se lee del nombre del backend.
+STUDY2_INTERLEAVED = "docs/pm-ab/interleaved-2026-11-21/sweep-pm-ab-interleaved-2026-11-19.json"
+
+
+def study2_original():
+    return {a: json.load(open(p))["results"] for a, p in STUDY2.items()}
+
+
+def arm_of(backend):
+    if "project-memory-seeded" in backend:
+        return "seeded"
+    if "project-memory" in backend:
+        return "empty"
+    return "baseline"
+
+
+def study2_interleaved():
+    d = json.load(open(STUDY2_INTERLEAVED))
+    data = {a: [] for a in ("baseline", "empty", "seeded")}
+    for r in d["results"]:
+        data[arm_of(r["backend"])].append(r)
+    return data, d["metadata"]
 NOISE_FLOOR = "docs/sweep-noise-floor-default-2026-09-12.json"
 TASKS = [("original", "rust_borrow_fix"), ("loop", "rust_borrow_fix_loop"), ("move", "rust_move_fix")]
 
@@ -195,8 +218,8 @@ def section_tool_calls(rows):
         print(f"| {name} | {le0}/{ln0}→{le1}/{ln1} | {pf:.2f} | {st.mean(b0):.2f}→{st.mean(b1):.2f} | {pb:.3f} | {hb_:.3f} | {st.mean(t0):.2f}→{st.mean(t1):.2f} | {pt:.3f} | {ht_:.3f} |")
 
 
-def section_study2():
-    data = {a: {(r["task_id"], r["repetition"]): r for r in json.load(open(p))["results"]} for a, p in STUDY2.items()}
+def section_study2(raw):
+    data = {a: {(r["task_id"], r["repetition"]): r for r in R} for a, R in raw.items()}
     print("\n### Estudio 2: timeouts y rendimiento por brazo\n")
     print("| Brazo | Pass | Timeouts (900 s) | Pass entre no-timeouts | Mediana wall (s) | Mediana s/ronda | Mediana s/ronda sin timeouts | Media tokens de entrada | Media rondas |")
     print("|---|---|---|---|---|---|---|---|---|")
@@ -314,8 +337,8 @@ def exact_signed_rank(d):
     return min(1.0, 2 * lo), len(d)
 
 
-def section_study2_cluster():
-    data = {a: json.load(open(p))["results"] for a, p in STUDY2.items()}
+def section_study2_cluster(raw):
+    data = raw
     per_task = {a: defaultdict(int) for a in data}
     for a, R in data.items():
         for r in R:
@@ -350,6 +373,56 @@ def section_study2_cluster():
     nd = sum(A[k] != B[k] for k in A)
     k = next(k for k in range(nd // 2, nd + 1) if stats.binomtest(k, nd, 0.5).pvalue < 0.05)
     print(f"\n- Efecto mínimo detectable del McNemar seeded − baseline con {nd} discordantes: {k} vs {nd - k}, es decir Δ = {2 * k - nd} celdas ({100 * (2 * k - nd) / cells:.1f} pp).")
+
+
+def section_study2_interleaved_validity(data, meta):
+    """Criterio 1 del pre-registro: validez de la corrida, antes de leer contrastes."""
+    R = [r for rows in data.values() for r in rows]
+    log = meta["run_log"]
+    infra = sum(r.get("failure_cause") in ("harness_error", "circuit_open") for r in R)
+    gaps = [(b["started_at_unix_ms"] - a["finished_at_unix_ms"]) / 60000 for a, b in zip(log, log[1:])]
+    spr = {a: st.median(r["wall_time_ms"] / 1000 / r["rounds"] for r in rows if r["rounds"]) for a, rows in data.items()}
+    hi, lo = max(spr.values()), min(spr.values())
+    print("\n### Validez de la corrida (criterio 1)\n")
+    print(f"- Metadata: commit `{meta['braze_git_commit'][:7]}`, huella de suite `{meta['suite_fingerprint']}`, orden `{meta['run_order']}`, semilla de intercalado {meta['interleave_seed']}, {meta['repetitions']} repeticiones, timeout {meta['task_timeout_secs']} s, motor `{meta.get('engine_version')}`.")
+    print(f"- Entorno registrado: {meta['local_env']}.")
+    print(f"- Filas: {len(R)} ({', '.join(f'{a} {len(v)}' for a, v in data.items())}); fallos de infraestructura: {infra} ({100 * infra / len(R):.1f} %, umbral 10 %).")
+    print(f"- Corridas con `cargo check` aprobado: {sum(1 for r in R if r.get('expected_cargo_check_passed'))} de {len(R)} (control del instrumento tras la enmienda 1).")
+    print(f"- Mediana de segundos por ronda: " + ", ".join(f"{a} {v:.1f}" for a, v in spr.items()) + f"; diferencia máxima entre brazos {100 * (hi - lo) / lo:.1f} % (umbral de declaración 20 %).")
+    print(f"- Hueco máximo entre filas consecutivas del `run_log`: {max(gaps):.1f} min (umbral de declaración 10 min). Duración total: {(log[-1]['finished_at_unix_ms'] - log[0]['started_at_unix_ms']) / 3.6e6:.1f} h.")
+
+
+def section_study2_interleaved_extra(data, meta):
+    """Secundarias registradas: timeouts como censura, costo y deriva."""
+    print("\n### Re-corrida intercalada: timeouts, costo y deriva\n")
+    arms = list(data)
+    to = {a: sum(r.get("failure_cause") == "timeout" for r in data[a]) for a in arms}
+    n = {a: len(data[a]) for a in arms}
+    print("| Contraste | Timeouts (a vs b) | p Fisher |")
+    print("|---|---|---|")
+    for a, b in (("seeded", "baseline"), ("empty", "baseline"), ("seeded", "empty")):
+        print(f"| {a} − {b} | {to[a]} vs {to[b]} | {fisher(to[a], n[a], to[b], n[b]):.3f} |")
+    print("\n| Brazo | Mediana s/ronda (todas) | Mediana s/ronda (sin timeouts) | Media tokens de entrada | Media rondas | Media wall (s) |")
+    print("|---|---|---|---|---|---|")
+    for a in arms:
+        R = data[a]
+        nt = [r for r in R if r.get("failure_cause") != "timeout"]
+        spr = lambda rows: st.median(r["wall_time_ms"] / 1000 / r["rounds"] for r in rows if r["rounds"])
+        print(f"| {a} | {spr(R):.1f} | {spr(nt):.1f} | {st.mean(r['input_tokens'] for r in R):.0f} | {st.mean(r['rounds'] for r in R):.2f} | {st.mean(r['wall_time_ms'] for r in R) / 1000:.0f} |")
+    log = meta["run_log"]
+    third = len(log) / 3
+    rows_by_key = {(r["backend"], r["task_id"], r["repetition"]): r for rs in data.values() for r in rs}
+    print("\nDeriva: mediana de s/ronda por tercio del sweep (orden del `run_log`) y brazo.\n")
+    print("| Tercio | " + " | ".join(arms) + " |")
+    print("|---|" + "---|" * len(arms))
+    for t in range(3):
+        chunk = log[int(t * third):int((t + 1) * third)]
+        cells = []
+        for a in arms:
+            v = [rows_by_key[(e["backend"], e["task_id"], e["repetition"])] for e in chunk if arm_of(e["backend"]) == a]
+            v = [r["wall_time_ms"] / 1000 / r["rounds"] for r in v if r["rounds"]]
+            cells.append(f"{st.median(v):.1f} (n={len(v)})")
+        print(f"| {t + 1} | " + " | ".join(cells) + " |")
 
 
 def fig1_points(path, by_exec):
@@ -393,8 +466,14 @@ if __name__ == "__main__":
     section_mechanism({"gpt-oss:20b": s1, "ornith:9b": rep})
     section_power(s1, rep)
     print("\n## Estudio 2 (pre-registrado)")
-    section_study2()
-    section_study2_cluster()
+    section_study2(study2_original())
+    section_study2_cluster(study2_original())
+    print("\n## Estudio 2, re-corrida intercalada (pre-registrada 2026-11-17, enmienda 1)")
+    s2i, meta = study2_interleaved()
+    section_study2_interleaved_validity(s2i, meta)
+    section_study2(s2i)
+    section_study2_cluster(s2i)
+    section_study2_interleaved_extra(s2i, meta)
     section_noise_floor()
     print("\n## Inventario")
     section_ledger()

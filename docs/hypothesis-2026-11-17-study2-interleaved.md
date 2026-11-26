@@ -189,10 +189,48 @@ corregido de arriba. Antes de relanzar se verifica que una tarea con
 inválida se conservan en Nitro (`~/study2-interleaved-INVALID-no-cargo-2026-11-19/`)
 y se archivan con los resultados, marcados como inválidos.
 
-## Resultados
+## Resultados (2026-11-23)
 
-(pendiente)
+Corrida válida: lanzada el 2026-11-21 18:00 desde el commit `0fe2725` y
+terminada el 2026-11-22 23:40 (29,7 h). Datos en
+`docs/pm-ab/interleaved-2026-11-21/`; análisis completo, generado por
+`paper2/analysis/reanalysis.py`, en `docs/paper2-reanalysis-2026-11-06.md`
+§ "Estudio 2, re-corrida intercalada". La corrida inválida de la enmienda 1
+queda archivada en `docs/pm-ab/INVALID-no-cargo-2026-11-19/`.
+
+**Criterio 1, validez.** 306 filas (102 por brazo), 0 fallos de
+infraestructura, `cargo check` aprobado en 259. Huella de suite
+`3daaf2e779f06c8f`, la misma del original. Mediana de segundos por ronda:
+baseline 31,2, empty 32,6, seeded 33,9 (diferencia máxima 8,7 %, bajo el
+umbral de 20 %). Hueco máximo entre filas: 0,0 min. La deriva por tercio del
+sweep es chica y no separa brazos. Colocación del modelo (log): 25 capas en
+GPU, KV en host, una sola carga para los tres brazos.
+
+**Criterio 2, H1 (control de mismo prompt).** `empty − baseline`: −6 celdas
+(10 contra 16 discordantes), McNemar p = 0,327. **H1 se sostiene**: con los
+brazos intercalados el control no difiere del baseline. La corrida sirve
+para medir la palanca. Celdas discordantes entre dos brazos con el mismo
+prompt: 26 de 102 (25 %), el piso de ruido medido dentro del sweep.
+
+**Criterio 3, H2 y H3.**
+- `seeded − baseline`: −7 celdas (−6,9 pp; 13 contra 20 discordantes),
+  McNemar p = 0,296, Holm 0,592. Por tarea: signo 8 contra 10, p = 0,815;
+  Wilcoxon exacto p = 0,175.
+- `seeded − empty`: −1 celda (12 contra 13), p = 1,000.
+- **Nulo**, en la dirección levemente negativa del prior. El efecto mínimo
+  detectable con 33 discordantes es de 13 celdas (12,7 pp): un efecto de esa
+  magnitud habría sido significativo; uno menor puede existir sin que esta
+  corrida lo detecte.
+- El +13 del original no reaparece: con los brazos intercalados el signo se
+  invierte (−7).
+
+**Secundarias.** Timeouts: baseline 7, empty 8, seeded 12 (Fisher
+seeded − baseline p = 0,336). Pass entre corridas sin timeout: 77/95, 71/94,
+70/90. Tokens de entrada medios: 25.149, 26.809, 25.951.
 
 ## Decisión
 
-(pendiente)
+Según la sección "Consecuencia para el paper": H1 se sostiene, así que esta
+corrida reemplaza al Estudio 2 original como evidencia confirmatoria. El
+original queda en el paper como el caso que motivó el intercalado. La palanca
+`enable_project_memory` sigue apagada por defecto.
