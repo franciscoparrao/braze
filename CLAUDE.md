@@ -454,7 +454,87 @@ hecho; lo abierto está listado acá.)
   aplicar con Nitro ocioso; nota: `keep_alive` por-request `a30d6d6`
   ya independiza del env del servicio).
 
-## Modelos locales recomendados (Ollama)
+## Modelos locales recomendados
+
+### Ranking vigente: suite discriminante (actualizado 2026-11-24)
+
+`default.toml` ya **no rankea** a los mejores: gpt-oss:20b, Ornith 9B,
+Spark-X2.5-4B e Inkling 2 Mini la saturan. El criterio vigente es
+`discriminating.toml` (34 tareas × 3, oráculo `cargo check`). Lote comparable
+del 20-21 de octubre (mismo commit `5084d4a`, `llama-server` en Nitro por el
+backend `zen`, temp 0,2, seed 42, timeout 900 s; `docs/sweep-*-discriminating-2026-10-2*.json`,
+commit `20d66db`):
+
+| Modelo (por `llama-server`) | Pass | s/tarea |
+|---|---|---|
+| **Qwen3.5-9B Q3_K_M** | 100/102 (98 %) | 63 |
+| Qwen3.5-9B Q4_K_M | 101/102 (99 %) | 114 |
+| Spark-X2.6-4B | 92/102 (90 %) | 61 |
+| Bonsai-2-9B | 84/102 (82 %) | 50 |
+| gpt-oss-20b MXFP4 | 75/102 (74 %) | 355 |
+| LFM2.5-24B-A2B | 59/102 (58 %) | 439 |
+
+Agregados del 2026-11-24/26 (commit `0fe2725` y llama.cpp `0ce7f21`: misma
+configuración de sweep, pero no el mismo build; comparar con esa reserva):
+
+| Modelo | Servidor | Pass | s/tarea |
+|---|---|---|---|
+| Qwen3.6-35B-A3B UD-Q4_K_XL (22,9 GB, desde el SSD "Datos") | `llama-server` | 91/102 (89 %) | 330 |
+| LFM3-1.7B QAD-Q4_0 (1 GB) | Magnitude 0.3.3 | 51/102 (50 %) | 77 |
+| Inkling 2 Mini UD-Q3_K_XL | `llama-server` | 17/102 (84 timeouts: ver abajo) | 815 |
+
+En `default.toml`: Qwen3.6 54/57 (42 s/tarea), LFM3 55/57 (17 s/tarea, el más
+rápido medido), Inkling 57/57 (149 s/tarea). Lectura: Qwen3.6 rinde como
+Spark-X2.6-4B pero 5× más lento; Qwen3.5-9B sigue arriba. LFM3 sirve para
+tareas cortas (candidato para celular), no para ediciones de varios pasos.
+
+**Magnitude (motor con streaming de expertos MoE desde el SSD, 0.3.3) — NO
+viable en Nitro** (2026-11-25): Qwen 3.8 Flash Next no carga (le faltan 3,1 GB
+según Magnitude mismo); con Qwen3.6-35B-A3B genera a 5,9-6,2 tok/s contra ~20
+predichos y 14-15 de `llama-server` sobre el mismo archivo (mmap), lee del SSD
+140 GB por 600 tokens (el doble que llama-server) y cae con HTTP 503 por falta
+de memoria a la novena tarea, de forma reproducible (dos corridas). Solo gana
+en prefill (~5×). Instalado en `nitro:~/.magnitude/` (sin sudo; agregó el PATH a
+`~/.bashrc` y `~/.profile`); API en `127.0.0.1:10100/inference/v1`. Probable
+que rinda en máquinas con más RAM; en Nitro, `llama-server` es mejor.
+
+**Mejor modelo local hoy: Qwen3.5-9B por `llama-server`** (Q3_K_M: mismo pass
+rate que Q4_K_M a 1,8× la velocidad). El párrafo de más abajo que da a
+gpt-oss:20b como el mejor es de julio y se basaba en `default.toml`; en la
+discriminante gpt-oss queda en ~74 % (75 % también como baseline de la
+re-corrida del Estudio 2, 2026-11-21). Gotchas: el camino de servicio pesa
+tanto como el modelo (Ornith 9B dio 4/102 por Ollama el 7-oct); y la
+discriminante ya se satura arriba (101/102), así que no separa a Qwen3.5-9B de
+un modelo mejor.
+
+### Inkling 2 Mini (Thinking Machines, 2026-11-20) — en evaluación
+
+MoE 26,2B / 3,4B activos (5,4B efectivos: 12 de 24 capas corren 3 veces),
+arch `inkling2_loop`, Apache 2.0. **Corre solo por `llama-server` de llama.cpp
+mainline** en `nitro:~/llama.cpp-inkling` (commit `0ce7f21`), puerto 8091,
+GGUF `unsloth/Inkling-2-Mini-GGUF` **`Mainline_Support/`** UD-Q3_K_XL (13,6 GB,
+sha256 `e2d03e8c…273639`, renombrar `.gguf_file` → `.gguf`). Gotchas:
+- Ollama (0.40.17/18) lo soporta **solo en Apple silicon**; el LocalBackend
+  (`llama-cpp-2` 0.1.152) es anterior a la arquitectura.
+- Los GGUF de la raíz del repo de Unsloth son de su layout propio; mainline
+  necesita los de `Mainline_Support/` y build ≥ b12611 (#32704) — antes da
+  salida errónea sin avisar (PPL ~130 en vez de ~7,6).
+- Con 6 GB de VRAM: `--no-op-offload` obligatorio (si no, cudaMalloc de ~7 GB
+  en el búfer de cómputo). Prueba de cordura: PPL 2,90 sobre el README de llama.cpp.
+- El `braze-bench` compilado con `local-cuda` necesita `LD_LIBRARY_PATH` aun
+  con backend `zen`; `source ~/.cargo/env` en todo lanzamiento desacoplado.
+
+Resultado: `default.toml` **57/57, pass^3 = 100 %** (strict 56/57), 0
+schema_fail, 0 rescates (`docs/sweep-inkling2mini-default-2026-11-24.json`).
+**Lento**: 149 s/tarea (gpt-oss: 13 s por Ollama, 41 s por LocalBackend),
+~20 tok/s de prefill y ~10 de decode — expertos en CPU sin op offload.
+Discriminante (2026-11-24/25, `docs/sweep-inkling2mini-discriminating-2026-11-24.json`):
+**17/102, pero 84 de las 85 fallas son timeouts** de 900 s (mediana 900 s/tarea,
+23 h de sweep); entre las 18 corridas que terminaron, 17 pasaron. Mide
+velocidad, no capacidad: **inviable en Nitro** para esta suite, calidad real
+sin medir; no comparar con el lote de octubre (ahí casi nadie tocó el tope).
+Magnitude (0.3.3) no soporta la arquitectura.
+
 
 ### Bonsai 2 (ternario 1.58-bit, vía fork PrismML) — probado 2026-09-19, NO adoptado
 
@@ -483,6 +563,7 @@ OpenAI-compatible y braze le habla por el backend `zen` (`--backends zen:<m>`,
 
 ---
 
+*(Histórico, julio 2026 — superado por el ranking discriminante de arriba.)*
 **El mejor modelo local del proyecto es `gpt-oss:20b` corriendo en
 Nitro** — y desde el 2026-07-21, **la mejor forma de correrlo es el
 LocalBackend** (camino Harmony: 57/57 y pass^3=100% en `default.toml`,
