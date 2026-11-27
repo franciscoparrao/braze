@@ -439,6 +439,8 @@ impl HistoryCell for HelpCell {
             Line::from("/skills  listar las skills disponibles e insertar una mención $skill"),
             Line::from("/permissions  ver las decisiones de permisos de esta sesión"),
             Line::from("/tasks  ver las tareas que el modelo marcó completadas en esta sesión"),
+            Line::from("/clear  empezar una conversación nueva (la anterior queda guardada)"),
+            Line::from("/compact  resumir ya la parte antigua de la conversación"),
             Line::from("/quit, /exit  salir de braze"),
             Line::from(""),
             Line::from(Span::styled("Menciones", heading_style)),

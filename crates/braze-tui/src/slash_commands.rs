@@ -32,6 +32,14 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "ver las tareas que el modelo marcó completadas en esta sesión",
     },
     SlashCommand {
+        name: "clear",
+        description: "empezar una conversación nueva (la anterior queda guardada)",
+    },
+    SlashCommand {
+        name: "compact",
+        description: "resumir ya la parte antigua de la conversación para liberar contexto",
+    },
+    SlashCommand {
         name: "quit",
         description: "salir de braze",
     },

@@ -1879,6 +1879,12 @@ async fn run() -> Result<(), CliError> {
         }
         Command::Chat { .. } => {
             println!("session: {session} (usa --resume {session} para continuarla luego)");
+            println!("comandos: /clear (conversación nueva), /compact (resumir lo antiguo), exit");
+            // `/clear` cambia de sesión y reconstruye el engine (estado en
+            // memoria de la conversación, y el prompt de confirmación del
+            // chat plano, que lee la sesión una sola vez al construirse).
+            let mut session = session;
+            let mut engine = engine;
 
             // The SAME reader `TerminalQuestionPrompt` reads through (E′
             // I.5) — one buffer over stdin, so an `ask_user` answer and
@@ -1898,6 +1904,58 @@ async fn run() -> Result<(), CliError> {
                 }
                 if trimmed == "exit" || trimmed == "quit" {
                     break;
+                }
+                if trimmed == "/clear" {
+                    let previous = session;
+                    session = SessionId::new();
+                    *live_session
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = session;
+                    let rebuilt = build_engine(
+                        &config,
+                        planner_spec.clone(),
+                        lead_spec.clone(),
+                        std::sync::Arc::clone(&live_session),
+                        std::sync::Arc::clone(&store),
+                        approval_tx.clone(),
+                        false,
+                        supervised,
+                        &cwd,
+                        Some(std::sync::Arc::new(
+                            terminal_question::TerminalQuestionPrompt::new(std::sync::Arc::clone(
+                                &stdin_lines,
+                            )),
+                        )),
+                        "clear",
+                    )
+                    .await;
+                    match rebuilt {
+                        Ok((new_engine, _, _)) => {
+                            engine = new_engine;
+                            println!(
+                                "conversación nueva (session: {session}); la anterior quedó guardada: braze chat --resume {previous}"
+                            );
+                        }
+                        Err(err) => eprintln!(
+                            "braze: conversación nueva, pero no se pudo reconstruir el engine ({err}); sigue el anterior"
+                        ),
+                    }
+                    continue;
+                }
+                if trimmed == "/compact" {
+                    match engine
+                        .compact_now(&session, &mut braze_events::NoopObserver)
+                        .await
+                    {
+                        Ok(Some(tokens)) => println!(
+                            "contexto compactado: ~{tokens} tokens antiguos quedaron resumidos (lo reciente se conserva entero)"
+                        ),
+                        Ok(None) => println!(
+                            "nada que compactar todavía: la conversación es corta (o la compactación está desactivada)"
+                        ),
+                        Err(err) => eprintln!("braze: no se pudo compactar: {err}"),
+                    }
+                    continue;
                 }
 
                 let mut stdout = std::io::stdout();

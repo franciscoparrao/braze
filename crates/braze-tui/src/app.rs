@@ -268,6 +268,12 @@ struct App {
     /// turn started against the old engine mid-swap would race the
     /// replacement.
     switching_model: bool,
+    /// `backend[:modelo]` vigente si se cambió con `/model`; `None` = el
+    /// del arranque. `/clear` reconstruye el engine con este spec (la
+    /// etiqueta de estado de algunos backends no incluye el modelo).
+    current_spec: Option<String>,
+    /// `/clear` en curso: la sesión anterior, para el aviso final.
+    pending_clear: Option<SessionId>,
     /// Sending half handed to each spawned switch task; `switch_rx` is
     /// the `select!` arm that applies the outcome. A long-lived channel
     /// (unlike the per-turn `update_tx`/`update_rx` pair): at most one
@@ -364,6 +370,8 @@ impl App {
             model_candidates,
             skill_candidates,
             switching_model: false,
+            current_spec: None,
+            pending_clear: None,
             switch_tx,
             switch_rx,
             pending_approvals: VecDeque::new(),
@@ -1073,6 +1081,8 @@ impl App {
             "skills" => self.open_skills_picker(terminal),
             "permissions" => self.show_session_permissions(terminal).await,
             "tasks" => self.show_completed_tasks(terminal).await,
+            "clear" => self.start_clear(terminal),
+            "compact" => self.compact_conversation(terminal).await,
             "quit" | "exit" => {
                 self.should_quit = true;
                 Ok(())
@@ -1266,6 +1276,11 @@ impl App {
             terminal,
         )?;
 
+        self.spawn_engine_rebuild(spec);
+        Ok(())
+    }
+
+    fn spawn_engine_rebuild(&mut self, spec: String) {
         let future = (self.engine_factory)(spec.clone());
         let tx = self.switch_tx.clone();
         tokio::spawn(async move {
@@ -1273,7 +1288,76 @@ impl App {
             // — nothing left to apply the new engine to.
             let _ = tx.send((spec, future.await));
         });
+    }
+
+    /// `/clear`: conversación nueva. Cambia a una sesión nueva (la anterior
+    /// queda en disco, reanudable con `--resume`) y reconstruye el engine
+    /// con el mismo backend y modelo, porque el engine guarda en memoria
+    /// estado de la conversación (skills y herramientas activadas, lista
+    /// de tareas, `AGENTS.md` leídos) que no debe pasar a la nueva.
+    fn start_clear(&mut self, terminal: &mut Terminal<Backend>) -> Result<(), TuiError> {
+        if self.turn_running || self.switching_model {
+            return self.commit_cell(
+                &NoticeCell {
+                    message: "hay un turno o cambio de modelo en curso — inténtalo cuando termine"
+                        .to_string(),
+                    theme: self.theme,
+                },
+                terminal,
+            );
+        }
+        let previous = self.session;
+        let new_session = SessionId::new();
+        self.session = new_session;
+        *self
+            .live_session
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = new_session;
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.loaded_skill_names.clear();
+        self.pending_tool_names.clear();
+        self.pending_clear = Some(previous);
+        self.switching_model = true;
+        self.commit_cell(
+            &NoticeCell {
+                message: "⏳ empezando una conversación nueva…".to_string(),
+                theme: self.theme,
+            },
+            terminal,
+        )?;
+        let spec = self
+            .current_spec
+            .clone()
+            .unwrap_or_else(|| self.status_line.clone());
+        self.spawn_engine_rebuild(spec);
         Ok(())
+    }
+
+    /// `/compact`: resume ya la parte antigua de la conversación (la cola
+    /// reciente se conserva entera) y avisa cuánto se resumió.
+    async fn compact_conversation(
+        &mut self,
+        terminal: &mut Terminal<Backend>,
+    ) -> Result<(), TuiError> {
+        let engine = Arc::clone(&self.engine);
+        let message = match engine
+            .compact_now(&self.session, &mut braze_events::NoopObserver)
+            .await
+        {
+            Ok(Some(tokens)) => format!(
+                "✓ contexto compactado: ~{tokens} tokens antiguos quedaron resumidos (lo reciente se conserva entero)"
+            ),
+            Ok(None) => "nada que compactar todavía: la conversación es corta (o la compactación está desactivada)".to_string(),
+            Err(err) => format!("no se pudo compactar: {err}"),
+        };
+        self.commit_cell(
+            &NoticeCell {
+                message,
+                theme: self.theme,
+            },
+            terminal,
+        )
     }
 
     /// Applies a finished `/model` switch (the `switch_rx` arm of the
@@ -1289,10 +1373,38 @@ impl App {
         terminal: &mut Terminal<Backend>,
     ) -> Result<(), TuiError> {
         self.switching_model = false;
+        if let Some(previous) = self.pending_clear.take() {
+            return match result {
+                Ok((engine, status_line)) => {
+                    self.engine = Arc::new(engine);
+                    self.status_line = status_line;
+                    self.commit_cell(
+                        &NoticeCell {
+                            message: format!(
+                                "✓ conversación nueva — la anterior quedó guardada: braze chat --resume {previous}"
+                            ),
+                            theme: self.theme,
+                        },
+                        terminal,
+                    )
+                }
+                Err(message) => self.commit_cell(
+                    &NoticeCell {
+                        message: format!(
+                            "conversación nueva, pero no se pudo reconstruir el engine ({message}); \
+                             sigue el anterior, con su estado en memoria"
+                        ),
+                        theme: self.theme,
+                    },
+                    terminal,
+                ),
+            };
+        }
         match result {
             Ok((engine, status_line)) => {
                 self.engine = Arc::new(engine);
                 self.status_line = status_line;
+                self.current_spec = Some(spec.clone());
                 self.commit_cell(
                     &NoticeCell {
                         message: format!("✓ modelo cambiado a {}", self.status_line),
@@ -1786,7 +1898,14 @@ impl App {
                         self.spinner_glyph().to_string(),
                         Style::default().fg(self.theme.accent),
                     ),
-                    Span::styled(" cambiando de modelo... (Ctrl+C salir)", muted),
+                    Span::styled(
+                        if self.pending_clear.is_some() {
+                            " empezando una conversación nueva... (Ctrl+C salir)"
+                        } else {
+                            " cambiando de modelo... (Ctrl+C salir)"
+                        },
+                        muted,
+                    ),
                 ])
             } else if self.turn_running {
                 let elapsed = self

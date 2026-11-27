@@ -539,6 +539,46 @@ impl Engine {
     /// tokens del budget es aproximada y puede quedarse corta. Devuelve
     /// también si hubo compactación; sin ella el caller no tiene nada
     /// nuevo que reintentar.
+    /// `/compact` (2026-11-27): compacta la sesión ahora, sin esperar a
+    /// que se cruce un umbral. Devuelve los tokens estimados que se
+    /// resumieron, o `None` si no había nada que compactar (la cola
+    /// reciente se conserva siempre entera, ver `KEEP_RAW_TAIL`) o si la
+    /// compactación está desactivada (`+ablate:no-compaction`). El evento
+    /// `CompactionOccurred` queda en la sesión y le llega a `observer`.
+    pub async fn compact_now(
+        &self,
+        session: &SessionId,
+        observer: &mut dyn TurnObserver,
+    ) -> Result<Option<u32>, EngineError> {
+        struct Capture<'a> {
+            inner: &'a mut dyn TurnObserver,
+            dropped: Option<u32>,
+        }
+        impl TurnObserver for Capture<'_> {
+            fn on_text_delta(&mut self, delta: &str) {
+                self.inner.on_text_delta(delta);
+            }
+            fn on_event(&mut self, event: &AgentEvent) {
+                if let AgentEvent::CompactionOccurred {
+                    dropped_tokens_estimate,
+                    ..
+                } = event
+                {
+                    self.dropped = Some(*dropped_tokens_estimate);
+                }
+                self.inner.on_event(event);
+            }
+        }
+        let mut capture = Capture {
+            inner: observer,
+            dropped: None,
+        };
+        let (_messages, compacted) = self
+            .load_messages_forcing_compaction(session, &mut capture)
+            .await?;
+        Ok(if compacted { capture.dropped.or(Some(0)) } else { None })
+    }
+
     pub(super) async fn load_messages_forcing_compaction(
         &self,
         session: &SessionId,
@@ -1644,6 +1684,75 @@ mod tests {
             "no budget configured: a single large event below the count threshold must not compact"
         );
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    fn compact_now_engine(store: FileSessionStore) -> Engine {
+        Engine::new(
+            Box::new(ScriptedModel::new(vec![])),
+            ToolRegistry::new(vec![]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        )
+    }
+
+    /// `/compact`: compacta por debajo de todos los umbrales y lo informa.
+    #[tokio::test]
+    async fn compact_now_compacts_below_every_threshold_and_reports_it() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        // Pocos eventos: ningún umbral se cruzaría solo.
+        for i in 0..20 {
+            store
+                .append(
+                    &session,
+                    &AgentEvent::AssistantText {
+                        text: format!("evento {i} {}", "x".repeat(400)),
+                    },
+                )
+                .await
+                .expect("seed events");
+        }
+        let engine = compact_now_engine(store);
+        let dropped = engine
+            .compact_now(&session, &mut NoopObserver)
+            .await
+            .expect("compact_now should succeed");
+        assert!(dropped.is_some_and(|t| t > 0), "got {dropped:?}");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load events");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::CompactionOccurred { .. })),
+            "the forced compaction must be persisted"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `/compact` sobre una sesión corta: nada que compactar.
+    #[tokio::test]
+    async fn compact_now_reports_nothing_to_compact_on_a_short_session() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        store
+            .append(&session, &AgentEvent::UserMessage { text: "hola".into() })
+            .await
+            .expect("seed");
+        let engine = compact_now_engine(store);
+        assert_eq!(
+            engine
+                .compact_now(&session, &mut NoopObserver)
+                .await
+                .expect("compact_now should succeed"),
+            None
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
