@@ -12,7 +12,21 @@
 //! del proyecto (mismo nivel de confianza que la config del repo);
 //! opt-out con `disable_agents_md`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Nombres del context file por directorio, en orden de preferencia.
+/// `CLAUDE.md` es el respaldo (2026-11-27): proyectos escritos para Claude
+/// Code traen solo ese archivo, y sin el respaldo braze trabajaba en ellos
+/// sin las instrucciones del proyecto (sesiones reales en `synthpop`).
+const CONTEXT_FILE_NAMES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
+
+/// El context file de `dir`: `AGENTS.md` si existe, si no `CLAUDE.md`.
+pub fn context_file_in(dir: &Path) -> Option<PathBuf> {
+    CONTEXT_FILE_NAMES
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
 
 /// Tope de bytes del contenido inyectado — misma cifra que el tope
 /// default de output por tool result (`tool_output_max_bytes`, 8000):
@@ -38,8 +52,7 @@ pub fn find_nearest_agents_md(from: &Path, ceiling: &Path) -> Option<std::path::
     let ceiling = std::fs::canonicalize(ceiling).unwrap_or_else(|_| ceiling.to_path_buf());
     let mut dir = std::fs::canonicalize(from).unwrap_or_else(|_| from.to_path_buf());
     loop {
-        let candidate = dir.join("AGENTS.md");
-        if candidate.is_file() {
+        if let Some(candidate) = context_file_in(&dir) {
             return Some(candidate);
         }
         if dir == ceiling {
@@ -78,7 +91,13 @@ pub fn load_agents_md(cwd: &Path) -> Option<String> {
 /// perfil operador 2026-09-28: un `CLAUDE.md` de proyecto real pesa
 /// varias veces el tope default y el operador puede preferir pagarlo).
 pub fn load_agents_md_with_cap(cwd: &Path, max_bytes: usize) -> Option<String> {
-    load_instructions_file(&cwd.join("AGENTS.md"), max_bytes, "AGENTS.md")
+    let path = context_file_in(cwd)?;
+    let label = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("AGENTS.md")
+        .to_string();
+    load_instructions_file(&path, max_bytes, &label)
 }
 
 /// Lee un archivo de instrucciones (trim + cap con nota de truncado) —
@@ -148,6 +167,32 @@ mod tests {
         );
         assert!(load_instructions_file(&dir.join("nope.md"), 8_000, "global").is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Respaldo 2026-11-27: sin `AGENTS.md`, se usa `CLAUDE.md`; con
+    /// ambos, manda `AGENTS.md`.
+    #[test]
+    fn claude_md_is_the_fallback_and_agents_md_wins() {
+        let dir = temp_dir("fallback");
+        std::fs::write(dir.join("CLAUDE.md"), "reglas de claude").unwrap();
+        assert_eq!(load_agents_md(&dir).as_deref(), Some("reglas de claude"));
+        assert_eq!(context_file_in(&dir), Some(dir.join("CLAUDE.md")));
+        let capped = load_agents_md_with_cap(&dir, 5).unwrap();
+        assert!(capped.contains("[CLAUDE.md truncado"), "{capped}");
+        std::fs::write(dir.join("AGENTS.md"), "reglas de agents").unwrap();
+        assert_eq!(load_agents_md(&dir).as_deref(), Some("reglas de agents"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_nearest_context_file_walk_also_finds_claude_md() {
+        let root = temp_dir("walk-claude");
+        let sub = root.join("a/b");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(root.join("a/CLAUDE.md"), "x").unwrap();
+        let found = find_nearest_agents_md(&sub, &root).unwrap();
+        assert!(found.ends_with("a/CLAUDE.md"), "{}", found.display());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

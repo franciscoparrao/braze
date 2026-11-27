@@ -50,6 +50,7 @@ mod human_wait;
 mod policy;
 mod question;
 mod sandbox;
+mod shell_script;
 
 pub use action::{ActionDescriptor, sanitize_control_chars};
 pub use allowlist::WorkdirAllowlist;

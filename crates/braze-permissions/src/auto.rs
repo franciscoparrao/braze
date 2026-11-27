@@ -170,6 +170,42 @@ impl AutoRules {
         if command.iter().any(|arg| mentions_secret(arg)) {
             return Some(deny("secret-path", "mentions a credentials or secrets file"));
         }
+        // Patrones prohibidos en el script entero, antes de partirlo: un
+        // `curl … | sh` partido en comandos sueltos parece inocuo.
+        if matches!(name, "bash" | "sh" | "zsh" | "dash") {
+            let script = args.join(" ");
+            if pipes_download_into_shell(&script) {
+                return Some(deny("pipe-to-shell", "pipes a download into a shell"));
+            }
+            if script.split_whitespace().any(|w| PRIVILEGED.contains(&w)) {
+                return Some(deny("privileged", "escalates privileges inside a shell script"));
+            }
+        }
+        // Scripts simples (`cd <proyecto> && .venv/bin/pip install x`): se
+        // evalúa cada comando. Basta uno denegado para denegar; se aprueba
+        // solo si todos se aprueban; si no, decide el juez.
+        if let Some(commands) = crate::shell_script::shell_script_of(command)
+            .and_then(crate::shell_script::split_simple_script)
+        {
+            let mut all_approved = true;
+            for cmd in &commands {
+                if cmd.first().map(String::as_str) == Some("cd") {
+                    if cmd.len() == 2 && self.path_inside(&cmd[1]) {
+                        continue;
+                    }
+                    all_approved = false;
+                    continue;
+                }
+                match self.evaluate_shell(cmd) {
+                    Some(deny @ AutoVerdict::Deny { .. }) => return Some(deny),
+                    Some(AutoVerdict::Approve { .. }) => {}
+                    _ => all_approved = false,
+                }
+            }
+            return all_approved.then(|| {
+                approve("script-inside-workdir", "every command of the script is approved")
+            });
+        }
         // Scripts de shell: solo se inspeccionan para prohibir patrones
         // claros; lo demás lo decide el juez.
         if matches!(name, "bash" | "sh" | "zsh" | "dash") {
@@ -200,6 +236,9 @@ impl AutoRules {
             }
             return Some(approve("dev-tool-inside-workdir", "removes files inside the project"));
         }
+        if let Some(verdict) = self.evaluate_python_env(program, name, args) {
+            return Some(verdict);
+        }
         if !DEV_TOOLS.contains(&name) {
             return None;
         }
@@ -222,6 +261,51 @@ impl AutoRules {
         } else {
             None
         }
+    }
+
+    /// Entornos de Python del proyecto (2026-11-27): crear un `.venv` dentro
+    /// del proyecto e instalar en él paquetes con nombre simple se aprueba;
+    /// es reversible (borrar la carpeta) y no toca el sistema. Instalar en
+    /// el Python del sistema o del usuario, o desde URLs, rutas o índices
+    /// alternativos, lo decide el juez.
+    fn evaluate_python_env(&self, program: &str, name: &str, args: &[String]) -> Option<AutoVerdict> {
+        let program_in_project = program.contains('/') && self.path_inside(program);
+        let is_python = matches!(name, "python" | "python3") || name.starts_with("python3.");
+        // `python3 -m venv .venv`
+        if is_python && args.first().map(String::as_str) == Some("-m") && args.get(1).map(String::as_str) == Some("venv") {
+            let targets: Vec<&String> = args[2..].iter().filter(|a| !a.starts_with('-')).collect();
+            if !targets.is_empty() && targets.iter().all(|t| self.path_inside(t)) {
+                return Some(approve("project-venv", "creates a virtual environment inside the project"));
+            }
+            return None;
+        }
+        // `.venv/bin/pip install x` o `.venv/bin/python -m pip install x`
+        let install_args: &[String] = if matches!(name, "pip" | "pip3") && program_in_project {
+            args
+        } else if is_python
+            && program_in_project
+            && args.first().map(String::as_str) == Some("-m")
+            && args.get(1).map(String::as_str) == Some("pip")
+        {
+            &args[2..]
+        } else {
+            return None;
+        };
+        if install_args.first().map(String::as_str) != Some("install") {
+            return None;
+        }
+        let rest = &install_args[1..];
+        let plain_packages = !rest.is_empty()
+            && rest.iter().all(|a| {
+                matches!(a.as_str(), "-U" | "--upgrade" | "-q" | "--quiet")
+                    || (!a.starts_with('-') && is_plain_requirement(a))
+            });
+        plain_packages.then(|| {
+            approve(
+                "venv-install",
+                "installs registry packages into the project's virtual environment",
+            )
+        })
     }
 
     fn evaluate_git(&self, args: &[String]) -> Option<AutoVerdict> {
@@ -272,6 +356,22 @@ impl AutoRules {
             .filter_map(|a| path_like(a))
             .all(|p| self.path_inside(p))
     }
+}
+
+/// `pyarrow`, `pandas>=2`, `numpy==2.1.0`, `duckdb[all]`: un nombre del
+/// registro con especificador de versión opcional. Nada de URLs, rutas,
+/// `git+` ni archivos de requisitos.
+fn is_plain_requirement(arg: &str) -> bool {
+    let name_end = arg
+        .find(['<', '>', '=', '!', '~', '['])
+        .unwrap_or(arg.len());
+    let (name, spec) = arg.split_at(name_end);
+    !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && !name.starts_with('.')
+        && spec
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '<' | '>' | '=' | '!' | '~' | '.' | ',' | '*' | '[' | ']' | '-' | '_'))
 }
 
 fn approve(rule: &'static str, reason: &str) -> AutoVerdict {
@@ -539,6 +639,46 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn project_virtual_environments_are_approved() {
+        let r = rules();
+        assert!(is_approve(&r.evaluate(&sh(&["python3", "-m", "venv", ".venv"]))));
+        assert!(is_approve(&r.evaluate(&sh(&[".venv/bin/pip", "install", "pyarrow", "pandas>=2"]))));
+        assert!(is_approve(&r.evaluate(&sh(&[
+            "/home/u/proj/.venv/bin/python",
+            "-m",
+            "pip",
+            "install",
+            "-U",
+            "duckdb[all]"
+        ]))));
+        assert!(is_approve(&r.evaluate(&sh(&[
+            "bash",
+            "-lc",
+            "cd /home/u/proj && python3 -m venv .venv && .venv/bin/pip install pyarrow"
+        ]))));
+    }
+
+    #[test]
+    fn installs_outside_the_project_environment_go_to_the_judge() {
+        let r = rules();
+        assert_eq!(r.evaluate(&sh(&["pip", "install", "pyarrow"])), None);
+        assert_eq!(r.evaluate(&sh(&["python3", "-m", "pip", "install", "--user", "x"])), None);
+        assert_eq!(r.evaluate(&sh(&[".venv/bin/pip", "install", "git+https://x/y"])), None);
+        assert_eq!(r.evaluate(&sh(&[".venv/bin/pip", "install", "-r", "req.txt"])), None);
+        assert_eq!(r.evaluate(&sh(&[".venv/bin/pip", "install", "--index-url", "https://evil", "x"])), None);
+        assert_eq!(r.evaluate(&sh(&["python3", "-m", "venv", "/opt/env"])), None);
+    }
+
+    #[test]
+    fn a_script_with_a_denied_command_is_denied() {
+        assert!(is_deny(&rules().evaluate(&sh(&[
+            "bash",
+            "-lc",
+            "cd /home/u/proj && ls && rm -rf /home/u/other"
+        ]))));
     }
 
     struct FixedJudge(Result<JudgeVerdict, String>);

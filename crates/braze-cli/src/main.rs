@@ -1104,9 +1104,10 @@ async fn build_engine(
     } else {
         Some((
             braze_memory::resolve_project_root(cwd),
+            // `AGENTS.md`, o su respaldo `CLAUDE.md`: el que se inyectó.
             agents_md_snapshot
                 .as_ref()
-                .map(|_| cwd.join("AGENTS.md")),
+                .and_then(|_| braze_config::context_file_in(cwd)),
         ))
     };
     let system_prompt = config.system_prompt.clone().unwrap_or_else(|| {

@@ -142,6 +142,47 @@ impl DefaultClassifier {
         }
     }
 
+    /// `bash -c`/`bash -lc` cuyo script, partido por
+    /// [`crate::shell_script::split_simple_script`], es una cadena de
+    /// lecturas seguras: cada comando es un `cd` a una carpeta del proyecto,
+    /// una lectura que [`Self::is_safe_shell_command`] ya acepta, o un
+    /// filtro puro de tubería. Basta un comando fuera de eso para que el
+    /// script entero siga siendo irreversible.
+    fn is_safe_shell_script(&self, command: &[String]) -> bool {
+        let Some(script) = crate::shell_script::shell_script_of(command) else {
+            return false;
+        };
+        let Some(commands) = crate::shell_script::split_simple_script(script) else {
+            return false;
+        };
+        commands.iter().all(|cmd| self.is_safe_script_command(cmd))
+    }
+
+    fn is_safe_script_command(&self, cmd: &[String]) -> bool {
+        if is_git_push(cmd) || is_rm_rf(cmd) {
+            return false;
+        }
+        match cmd.first().map(String::as_str) {
+            // Un `cd` sin argumento va a `$HOME`: fuera del proyecto.
+            Some("cd") => cmd.len() == 2 && self.allowlist.is_allowed(Path::new(&cmd[1])),
+            Some("sort" | "uniq" | "cut" | "tr" | "nl" | "column") => {
+                self.all_path_like_args_allowed(cmd)
+            }
+            // `sed -n '1,80p' archivo`: solo imprimir rangos de líneas.
+            Some("sed") => {
+                cmd.get(1).map(String::as_str) == Some("-n")
+                    && cmd.get(2).is_some_and(|script| {
+                        !script.is_empty()
+                            && script.ends_with('p')
+                            && script.chars().all(|c| c.is_ascii_digit() || matches!(c, ',' | '$' | 'p'))
+                    })
+                    && cmd[3..].iter().all(|arg| self.allowlist.is_allowed(Path::new(arg)))
+            }
+            Some("command") => cmd.get(1).map(String::as_str) == Some("-v"),
+            _ => self.is_safe_shell_command(cmd),
+        }
+    }
+
     /// Every argument that doesn't look like a flag (doesn't start with
     /// `-`) is treated as a candidate path and must resolve inside the
     /// `WorkdirAllowlist`. This is deliberately conservative: a `grep`
@@ -199,7 +240,7 @@ impl ActionClassifier for DefaultClassifier {
             ActionDescriptor::ShellCommand { command } => {
                 if is_git_push(command) || is_rm_rf(command) {
                     Reversibility::Irreversible
-                } else if self.is_safe_shell_command(command) {
+                } else if self.is_safe_shell_command(command) || self.is_safe_shell_script(command) {
                     Reversibility::Reversible
                 } else {
                     // Default-deny: anything not on the explicit safe
@@ -358,6 +399,48 @@ mod tests {
 
     fn cmd(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn script(text: &str) -> ActionDescriptor {
+        ActionDescriptor::ShellCommand {
+            command: cmd(&["bash", "-lc", text]),
+        }
+    }
+
+    /// Las formas reales de las sesiones del T430 (2026-11-27): lecturas
+    /// envueltas en `cd <proyecto> && …` ya no piden confirmación.
+    #[test]
+    fn read_only_scripts_inside_the_project_are_reversible() {
+        for text in [
+            "cd /home/user/project && git log --oneline -5 && git status --short | head -20",
+            "cd /home/user/project && ls && echo '---' && ls crates/*/src 2>/dev/null | head -60",
+            "cd /home/user/project && grep -n 'pub fn read_parquet' -A60 crates/io/src/parquet_io.rs | head -90",
+            "cd /home/user/project && sed -n '1,120p' crates/io/src/parquet_io.rs",
+            "cd /home/user/project && command -v cargo rustc; ls target 2>&1 | head",
+            "grep -rn 'csv' crates/io/src | sort | uniq -c",
+        ] {
+            assert_eq!(classifier().classify(&script(text)), Reversibility::Reversible, "{text}");
+        }
+    }
+
+    #[test]
+    fn scripts_with_any_unsafe_part_stay_irreversible() {
+        for text in [
+            "cd /home/user/project && cargo build",
+            "cd /home/user/project && cat src/a.rs > copia.rs",
+            "cd /home/user/project && cat /etc/shadow",
+            "cd /tmp && ls",
+            "cd && ls",
+            "cd /home/user/project && rm -rf target",
+            "cd /home/user/project && git push",
+            "cd /home/user/project && sed -i 's/a/b/' src/a.rs",
+            "cd /home/user/project && sed -n '1w /tmp/x' src/a.rs",
+            "ls $(pwd)",
+            "cat ~/.ssh/id_rsa",
+            "python3 -c 'print(1)'",
+        ] {
+            assert_eq!(classifier().classify(&script(text)), Reversibility::Irreversible, "{text}");
+        }
     }
 
     #[test]
