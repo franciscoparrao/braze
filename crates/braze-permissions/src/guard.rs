@@ -5,6 +5,7 @@ use braze_types::PermissionKey;
 
 use crate::action::ActionDescriptor;
 use crate::allowlist::{WorkdirAllowlist, normalize_lexically};
+use crate::auto::{AutoApprover, AutoVerdict};
 use crate::classifier::{ActionClassifier, Decision, Verdict};
 use crate::confirm::ConfirmationPrompt;
 use crate::error::PermissionError;
@@ -25,6 +26,10 @@ pub enum GuardOutcome {
     Rejected,
     /// Ya estaba aprobado en esta sesión (cache de recordados).
     Remembered,
+    /// El modo automático lo aprobó sin preguntar.
+    AutoApproved,
+    /// El modo automático lo denegó sin preguntar.
+    AutoDenied,
 }
 
 impl GuardOutcome {
@@ -35,6 +40,8 @@ impl GuardOutcome {
             Self::Approved => "approved",
             Self::Rejected => "rejected",
             Self::Remembered => "remembered",
+            Self::AutoApproved => "auto_approved",
+            Self::AutoDenied => "auto_denied",
         }
     }
 }
@@ -104,6 +111,8 @@ pub struct PermissionGuard {
     remembered: Mutex<HashSet<PermissionKey>>,
     /// Auditoría de decisiones (Enclave M3); `None` = sin auditar.
     hook: Option<DecisionHook>,
+    /// Modo automático (2026-11-27): decide lo que iría al prompt.
+    auto: Option<Arc<dyn AutoApprover>>,
 }
 
 impl PermissionGuard {
@@ -118,7 +127,16 @@ impl PermissionGuard {
             prompt,
             remembered: Mutex::new(HashSet::new()),
             hook: None,
+            auto: None,
         }
+    }
+
+    /// Activa el modo automático: las acciones en `Confirm` las decide
+    /// `auto` y solo las que devuelve como [`AutoVerdict::Ask`] llegan al
+    /// prompt. Lo que la política permite o prohíbe no pasa por acá.
+    pub fn with_auto(mut self, auto: Arc<dyn AutoApprover>) -> Self {
+        self.auto = Some(auto);
+        self
     }
 
     /// Notifica cada decisión con información (política o humano) al hook.
@@ -172,6 +190,36 @@ impl PermissionGuard {
                 {
                     self.notify(action, &decision, GuardOutcome::Remembered);
                     return Ok(());
+                }
+                if let Some(auto) = &self.auto {
+                    match auto.decide(action).await {
+                        AutoVerdict::Approve { source, reason } => {
+                            if let Some(key) = derive_permission_key(action) {
+                                self.remembered.lock().unwrap().insert(key);
+                            }
+                            let auto_decision = Decision {
+                                verdict: Verdict::Allow,
+                                rule: Some(source.label()),
+                                reason: Some(reason),
+                            };
+                            self.notify(action, &auto_decision, GuardOutcome::AutoApproved);
+                            return Ok(());
+                        }
+                        AutoVerdict::Deny { source, reason } => {
+                            let auto_decision = Decision {
+                                verdict: Verdict::Deny,
+                                rule: Some(source.label()),
+                                reason: Some(reason.clone()),
+                            };
+                            self.notify(action, &auto_decision, GuardOutcome::AutoDenied);
+                            return Err(PermissionError::AutoDenied {
+                                action: action.to_string(),
+                                decided_by: source.label(),
+                                reason,
+                            });
+                        }
+                        AutoVerdict::Ask { .. } => {}
+                    }
                 }
                 // Incidente roam #3: el reloj del `tool_completion_timeout`
                 // no debe correr contra la deliberación de la persona —
@@ -452,5 +500,81 @@ mod tests {
             0,
             "a replayed/seeded key must short-circuit the prompt entirely"
         );
+    }
+
+    struct FixedAuto(AutoVerdict);
+
+    #[async_trait::async_trait]
+    impl AutoApprover for FixedAuto {
+        async fn decide(&self, _action: &ActionDescriptor) -> AutoVerdict {
+            self.0.clone()
+        }
+    }
+
+    fn auto_guard(verdict: AutoVerdict, calls: Arc<AtomicUsize>) -> PermissionGuard {
+        guard_with(true, calls).with_auto(Arc::new(FixedAuto(verdict)))
+    }
+
+    fn push() -> ActionDescriptor {
+        ActionDescriptor::ShellCommand {
+            command: vec!["git".into(), "push".into()],
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_approval_skips_the_prompt_and_is_remembered() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let guard = auto_guard(
+            AutoVerdict::Approve {
+                source: crate::auto::AutoSource::Judge,
+                reason: "asked by the user".into(),
+            },
+            Arc::clone(&calls),
+        );
+        assert!(guard.check(&push()).await.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "auto mode must not prompt");
+        let key = derive_permission_key(&push()).unwrap();
+        assert!(guard.remembered.lock().unwrap().contains(&key));
+    }
+
+    #[tokio::test]
+    async fn auto_denial_skips_the_prompt_and_explains_itself() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let guard = auto_guard(
+            AutoVerdict::Deny {
+                source: crate::auto::AutoSource::Rule("git-force-push"),
+                reason: "force-pushes".into(),
+            },
+            Arc::clone(&calls),
+        );
+        let err = guard.check(&push()).await.unwrap_err();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let text = err.to_string();
+        assert!(text.contains("auto:rule:git-force-push") && text.contains("force-pushes"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn auto_ask_falls_through_to_the_prompt() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let guard = auto_guard(AutoVerdict::Ask { reason: "unsure".into() }, Arc::clone(&calls));
+        assert!(guard.check(&push()).await.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn auto_mode_never_sees_reversible_actions() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        // Un veredicto Deny que, si se consultara, rompería la lectura.
+        let guard = auto_guard(
+            AutoVerdict::Deny {
+                source: crate::auto::AutoSource::Judge,
+                reason: "should not be asked".into(),
+            },
+            Arc::clone(&calls),
+        );
+        let read = ActionDescriptor::ReadPath {
+            path: PathBuf::from("/home/user/project/src/main.rs"),
+        };
+        assert!(guard.check(&read).await.is_ok());
     }
 }

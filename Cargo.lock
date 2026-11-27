@@ -292,6 +292,7 @@ dependencies = [
  "braze-tui",
  "braze-types",
  "clap",
+ "futures",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

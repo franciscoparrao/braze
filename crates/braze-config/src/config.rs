@@ -453,6 +453,17 @@ pub struct Config {
     /// agente sería auto-escalación). `BRAZE_POLICY_FILE` o `policy_file`
     /// en el config file.
     pub policy_file: Option<PathBuf>,
+    /// Modo de permisos (2026-11-27): `"default"` pregunta lo que el
+    /// clasificador deja en `Confirm`; `"auto"` lo decide sin preguntar
+    /// (reglas deterministas y, para lo ambiguo, un modelo juez; ver
+    /// `braze_permissions::HybridAutoApprover`). La política declarativa
+    /// manda en ambos. `BRAZE_PERMISSION_MODE` o `permission_mode`; el flag
+    /// `--auto` de `chat`/`run` lo activa para una invocación.
+    pub permission_mode: String,
+    /// Backend del juez del modo automático, `backend[:modelo]` (p.ej.
+    /// `zen:deepseek-v4.1-flash`). `None` = el mismo backend y modelo de
+    /// la sesión. `BRAZE_AUTO_JUDGE` o `auto_judge`.
+    pub auto_judge: Option<String>,
     /// Disables `Engine`'s textual tool-call rescue (B5,
     /// docs/AUDITORIA-2026-07.md) — N-15 (docs/AUDITORIA-2026-07-v2.md):
     /// the rescue is purely syntactic, so a user literally asking to see
@@ -881,6 +892,8 @@ impl Default for Config {
             best_of_n: 1,
             tui_theme: "dark".to_string(),
             policy_file: None,
+            permission_mode: "default".to_string(),
+            auto_judge: None,
             disable_textual_tool_call_rescue: false,
             enable_prompt_caching: true,
             disable_post_edit_check: false,
@@ -1175,6 +1188,12 @@ impl Config {
         }
         if let Some(v) = overrides.policy_file {
             self.policy_file = Some(v);
+        }
+        if let Some(v) = overrides.permission_mode {
+            self.permission_mode = v;
+        }
+        if let Some(v) = overrides.auto_judge {
+            self.auto_judge = Some(v);
         }
         if let Some(v) = overrides.disable_textual_tool_call_rescue {
             self.disable_textual_tool_call_rescue = v;

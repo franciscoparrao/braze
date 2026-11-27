@@ -15,6 +15,15 @@ pub enum PermissionError {
         rule: String,
         reason: String,
     },
+
+    /// Denegada por el modo automático (regla determinista o juez), sin
+    /// preguntar a nadie. No se ejecutó.
+    #[error("action blocked by auto mode (`{decided_by}`){}: {action}", reason_suffix(.reason))]
+    AutoDenied {
+        action: String,
+        decided_by: String,
+        reason: String,
+    },
 }
 
 fn reason_suffix(reason: &str) -> String {

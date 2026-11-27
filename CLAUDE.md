@@ -759,6 +759,34 @@ Forbidden por `protect-braze-config` y el modelo lo reporta sin inventar.
 Gotcha vigente: sin TTY (`braze run`) todo `Confirm` es denegar — lo que no
 esté en la política y no sea seguro para el base no corre.
 
+**Modo automático (`--auto` / `permission_mode = "auto"`, 2026-11-27)**:
+decide sin preguntar las acciones que el clasificador deja en `Confirm`
+(`crates/braze-permissions/src/auto.rs` + `crates/braze-cli/src/auto_judge.rs`).
+La política manda antes: un `allow` o `deny` de `policy.toml` no pasa por el
+modo automático. Híbrido: (1) `AutoRules` deterministas — DENIEGAN `sudo`/
+`su`/`doas`/`dd`/`mkfs`, `rm` fuera del proyecto, escribir/borrar fuera del
+proyecto (salvo `/tmp`, que va al juez), `git push --force|+ref|:ref|-d`,
+secretos (`.ssh/`, `.env`, `*.pem`, `id_rsa`, `.config/braze/`, en cualquier
+argumento) y `curl|wget … | sh`; APRUEBAN herramientas de desarrollo y
+utilidades de lectura (`cargo`, `python3 script`, `git` local, `ls`, `rm` no
+recursivo…) cuando todas sus rutas quedan dentro del proyecto o de
+`references`; (2) lo demás (push normal, `pip install`, red, MCP, `bash -c`,
+`rm -r` interno, `git reset --hard`) lo decide un modelo juez (`auto_judge`
+= `backend[:modelo]`, o el de la sesión) que ve el último `UserMessage`
+(`AutoContextHook`) y la acción, y responde JSON `{decision, reason}`; (3) si
+el juez falla o no contesta en 60 s: en chat/TUI se pregunta como siempre,
+en `braze run` se deniega. Lo aprobado se recuerda en la sesión; cada
+decisión queda como `PermissionDecided` con `[auto:rule:<nombre>]` o
+`[auto:judge]` y la razón, y lo denegado vuelve al modelo como
+`PermissionError::AutoDenied` ("no se ejecutó"). Las reglas ganan incluso
+sobre una confirmación explícita del usuario en el pedido (un force-push
+pedido se deniega igual): para permitirlo, una regla `allow` en la política.
+Verificado en vivo con `braze run --auto` y OpenCode Go deepseek-v4.1-flash
+(7 escenarios: regla aprueba `python3`, regla deniega `.ssh` / `rm` fuera /
+force-push, juez aprueba un push pedido y deniega `web_fetch` de un script
+de instalación). Sin verificar en vivo: la caída a pregunta en chat/TUI
+(reusa el prompt de siempre).
+
 **"Siempre" en el prompt de confirmación (2026-09-28)**: tercera respuesta
 `a` en el chat plano (`[y = sí / N = no / a = siempre]`) y tecla `a` en el
 overlay de la TUI (`ApprovalDecision::{Deny,Once,Always}` reemplaza al

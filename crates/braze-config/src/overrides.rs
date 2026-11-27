@@ -87,6 +87,12 @@ pub struct ConfigOverrides {
     /// Política declarativa de permisos (`BRAZE_POLICY_FILE` / `policy_file`).
     #[serde(default)]
     pub policy_file: Option<PathBuf>,
+    /// Modo de permisos: `default` | `auto` (`BRAZE_PERMISSION_MODE`).
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    /// Backend del juez del modo automático (`BRAZE_AUTO_JUDGE`).
+    #[serde(default)]
+    pub auto_judge: Option<String>,
     #[serde(default)]
     pub disable_textual_tool_call_rescue: Option<bool>,
     #[serde(default)]
@@ -390,6 +396,8 @@ impl ConfigOverrides {
                     overrides.tui_theme = Some(value.to_string());
                 }
                 "POLICY_FILE" => overrides.policy_file = Some(PathBuf::from(value)),
+                "PERMISSION_MODE" => overrides.permission_mode = Some(value.to_string()),
+                "AUTO_JUDGE" => overrides.auto_judge = Some(value.to_string()),
                 "TACTICAL_FULL_OBSERVATIONS" => {
                     let parsed =
                         value

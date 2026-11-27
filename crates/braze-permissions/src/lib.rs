@@ -41,6 +41,7 @@
 
 mod action;
 mod allowlist;
+mod auto;
 mod classifier;
 mod confirm;
 mod error;
@@ -52,6 +53,10 @@ mod sandbox;
 
 pub use action::{ActionDescriptor, sanitize_control_chars};
 pub use allowlist::WorkdirAllowlist;
+pub use auto::{
+    AutoApprover, AutoContextSlot, AutoJudge, AutoRules, AutoSource, AutoVerdict,
+    HybridAutoApprover, JudgeVerdict, Uncertain, is_secret_path,
+};
 pub use classifier::{
     ActionClassifier, AlwaysIrreversibleClassifier, Decision, DefaultClassifier, Reversibility,
     Verdict,

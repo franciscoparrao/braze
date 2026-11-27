@@ -6,6 +6,7 @@
 //! how they're rendered) and the only place that composes every crate in
 //! the workspace into a running [`braze_engine::Engine`].
 
+mod auto_judge;
 mod cli_args;
 mod error;
 mod permissions_report;
@@ -209,6 +210,8 @@ fn build_permission_guard(
     // "Siempre" en el prompt: escribe la regla al policy.toml y a la
     // política viva compartida por todos los guards.
     policy_writer: Option<std::sync::Arc<braze_permissions::PolicyWriter>>,
+    // Modo automático: decide lo que iría al prompt (ver `auto_judge`).
+    auto: Option<std::sync::Arc<dyn braze_permissions::AutoApprover>>,
 ) -> braze_permissions::PermissionGuard {
     // opencode-10 (docs/opencode-a-braze.md § 10): every configured
     // reference directory is an extra allowlist root — OpenCode's
@@ -254,17 +257,31 @@ fn build_permission_guard(
     let hook_session = std::sync::Arc::clone(&live_session);
     let decision_hook: braze_permissions::DecisionHook =
         std::sync::Arc::new(move |action, decision, outcome| {
-            let allowed = match outcome {
-                braze_permissions::GuardOutcome::AllowedByPolicy => true,
-                braze_permissions::GuardOutcome::DeniedByPolicy => false,
+            let (allowed, label) = match outcome {
+                braze_permissions::GuardOutcome::AllowedByPolicy => (
+                    true,
+                    format!("[policy:{}] {action}", decision.rule.as_deref().unwrap_or("-")),
+                ),
+                braze_permissions::GuardOutcome::DeniedByPolicy => (
+                    false,
+                    format!("[policy:{}] {action}", decision.rule.as_deref().unwrap_or("-")),
+                ),
+                // Modo automático: la regla o el juez, y su razón, quedan en
+                // el rollout igual que una decisión por política.
+                braze_permissions::GuardOutcome::AutoApproved
+                | braze_permissions::GuardOutcome::AutoDenied => (
+                    outcome == braze_permissions::GuardOutcome::AutoApproved,
+                    format!(
+                        "[{}] {action} — {}",
+                        decision.rule.as_deref().unwrap_or("auto"),
+                        decision.reason.as_deref().unwrap_or("")
+                    ),
+                ),
                 _ => return,
             };
             let session = *hook_session.lock().unwrap_or_else(|p| p.into_inner());
             let event = braze_events::AgentEvent::PermissionDecided {
-                action: format!(
-                    "[policy:{}] {action}",
-                    decision.rule.as_deref().unwrap_or("-")
-                ),
+                action: label,
                 allowed,
                 key: braze_permissions::derive_permission_key(action),
             };
@@ -300,11 +317,64 @@ fn build_permission_guard(
         }
         Box::new(prompt)
     };
-    let guard =
+    let mut guard =
         braze_permissions::PermissionGuard::new(allowlist_for_guard, classifier, confirmation)
             .with_decision_hook(decision_hook);
+    if let Some(auto) = auto {
+        guard = guard.with_auto(auto);
+    }
     guard.seed_remembered(replayed_keys.iter().cloned());
     guard
+}
+
+/// Modo automático (2026-11-27): `None` con `permission_mode = "default"`.
+/// Con `"auto"`, arma el aprobador híbrido: reglas deterministas sobre el
+/// mismo allowlist del guard (workdir + `references`) y un juez con modelo
+/// (`auto_judge`, o el backend y modelo de la sesión). `interactive` decide
+/// qué pasa con lo que ni reglas ni juez resuelven: preguntar o denegar.
+fn build_auto_approver(
+    config: &braze_config::Config,
+    cwd: &std::path::Path,
+    context: braze_permissions::AutoContextSlot,
+    interactive: bool,
+) -> Result<Option<std::sync::Arc<dyn braze_permissions::AutoApprover>>, CliError> {
+    match config.permission_mode.as_str() {
+        "default" => return Ok(None),
+        "auto" => {}
+        other => {
+            return Err(CliError::Startup(format!(
+                "unknown permission_mode '{other}' (expected 'default' or 'auto')"
+            )));
+        }
+    }
+    let mut allowlist = braze_permissions::WorkdirAllowlist::new(cwd.to_path_buf());
+    for reference in &config.references {
+        allowlist = allowlist.with_extra_root(reference.path.clone());
+    }
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let rules = braze_permissions::AutoRules::new(allowlist, home);
+    let (backend, model) = match config.auto_judge.as_deref() {
+        Some(spec) => match spec.split_once(':') {
+            Some((backend, model)) => (backend.to_string(), Some(model.to_string())),
+            None => (spec.to_string(), None),
+        },
+        None => (config.default_backend.clone(), None),
+    };
+    let judge_backend = build_model_backend(config, &backend, model.as_deref())?;
+    let judge: std::sync::Arc<dyn braze_permissions::AutoJudge> =
+        std::sync::Arc::new(auto_judge::LlmJudge::new(judge_backend));
+    let on_uncertain = if interactive {
+        braze_permissions::Uncertain::Ask
+    } else {
+        braze_permissions::Uncertain::Deny
+    };
+    Ok(Some(std::sync::Arc::new(braze_permissions::HybridAutoApprover::new(
+        rules,
+        Some(judge),
+        context,
+        cwd.to_path_buf(),
+        on_uncertain,
+    ))))
 }
 
 /// Policy engine: resuelve y carga la política declarativa. Orden:
@@ -832,6 +902,18 @@ async fn build_engine(
         std::sync::Arc::clone(&policy),
         cwd.to_path_buf(),
     )));
+    // Modo automático (2026-11-27): un solo aprobador para todos los
+    // guards, con reglas deterministas y un modelo juez para lo ambiguo.
+    // Con persona presente (chat con `ask_user`, TUI) lo incierto se
+    // pregunta; en `braze run`, sin nadie, se deniega.
+    let auto_context: braze_permissions::AutoContextSlot =
+        std::sync::Arc::new(std::sync::RwLock::new(None));
+    let auto_approver = build_auto_approver(
+        config,
+        cwd,
+        std::sync::Arc::clone(&auto_context),
+        tui_mode || ask_user_prompt.is_some(),
+    )?;
     let local_guard = build_permission_guard(
         cwd,
         &config.references,
@@ -843,6 +925,7 @@ async fn build_engine(
         approval_tx.clone(),
         &policy,
         policy_writer.clone(),
+        auto_approver.clone(),
     );
 
     let local_provider = braze_tools_local::LocalToolsProvider::new(local_guard)
@@ -899,6 +982,7 @@ async fn build_engine(
             approval_tx.clone(),
             &policy,
             policy_writer.clone(),
+            auto_approver.clone(),
         );
         match braze_mcp_client::McpToolProvider::connect(
             server.name.clone(),
@@ -1202,6 +1286,12 @@ async fn build_engine(
     if let Some(hook) = &project_memory_hook {
         engine = engine.with_hook(hook.clone());
     }
+    // Modo automático: el juez necesita el pedido vigente del usuario.
+    if auto_approver.is_some() {
+        engine = engine.with_hook(std::sync::Arc::new(auto_judge::AutoContextHook::new(
+            std::sync::Arc::clone(&auto_context),
+        )));
+    }
     // Perfil operador (2026-09-28): hooks de sesión externos. Los
     // `session_start` corren acá, una vez, y su stdout queda en el slot
     // que el engine anexa al system prompt; los `post_compact` se
@@ -1467,6 +1557,14 @@ async fn run() -> Result<(), CliError> {
     if let Some(theme) = cli.command.theme_override() {
         config.apply_overrides(braze_config::ConfigOverrides {
             tui_theme: Some(theme.to_string()),
+            ..Default::default()
+        });
+    }
+    // `--auto` gana sobre `permission_mode` de config/env; su ausencia no
+    // apaga un `permission_mode = "auto"` configurado.
+    if cli.command.auto() {
+        config.apply_overrides(braze_config::ConfigOverrides {
+            permission_mode: Some("auto".to_string()),
             ..Default::default()
         });
     }

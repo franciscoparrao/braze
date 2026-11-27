@@ -97,6 +97,15 @@ pub enum Command {
         /// `docs/self-improvement-guide.html`.
         #[arg(long)]
         supervised: bool,
+        /// Auto mode: actions that would ask for confirmation are decided
+        /// without asking — deterministic rules first (deny privilege
+        /// escalation, deletes and writes outside the project, force-push,
+        /// secrets; approve dev tools whose paths stay inside the project),
+        /// then a model judge (`auto_judge`, or the session's own model)
+        /// for the rest. What the judge cannot decide is asked as usual.
+        /// The policy file still wins. Same as `permission_mode = "auto"`.
+        #[arg(long, conflicts_with = "supervised")]
+        auto: bool,
         /// Send the tool inventory in the system prompt and parse tool
         /// calls client-side (via the textual rescue ladder) instead of
         /// Ollama's native `tools` field. Sidesteps Ollama's server-side
@@ -133,6 +142,11 @@ pub enum Command {
         /// semantics as `chat --supervised`.
         #[arg(long)]
         supervised: bool,
+        /// Auto mode — same semantics as `chat --auto`, except that what
+        /// neither the rules nor the judge can decide is denied (there is
+        /// no one to ask).
+        #[arg(long, conflicts_with = "supervised")]
+        auto: bool,
         /// Parse tool calls client-side instead of via Ollama's native
         /// `tools` field — same semantics as `chat --prompt-tools`.
         #[arg(long = "prompt-tools")]
@@ -262,6 +276,14 @@ impl Command {
         })
     }
 
+    /// Whether `--auto` was passed, common to both subcommands.
+    pub fn auto(&self) -> bool {
+        match self {
+            Command::Chat { auto, .. } | Command::Run { auto, .. } => *auto,
+            Command::Permissions { .. } | Command::Tune { .. } => false,
+        }
+    }
+
     /// Whether `--supervised` was passed, common to both subcommands.
     pub fn supervised(&self) -> bool {
         match self {
@@ -294,6 +316,7 @@ mod tests {
             planner: planner.map(str::to_string),
             lead: None,
             supervised: false,
+            auto: false,
             prompt_tools: false,
         }
     }
@@ -347,6 +370,14 @@ mod tests {
 
         let cli = Cli::parse_from(["braze", "run", "hola", "--supervised"]);
         assert!(cli.command.supervised());
+    }
+
+    #[test]
+    fn auto_flag_parses_on_both_subcommands_and_excludes_supervised() {
+        assert!(Cli::parse_from(["braze", "chat", "--auto"]).command.auto());
+        assert!(Cli::parse_from(["braze", "run", "hola", "--auto"]).command.auto());
+        assert!(!Cli::parse_from(["braze", "chat"]).command.auto());
+        assert!(Cli::try_parse_from(["braze", "chat", "--auto", "--supervised"]).is_err());
     }
 
     #[test]
