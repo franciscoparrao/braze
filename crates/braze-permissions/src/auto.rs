@@ -102,7 +102,8 @@ const DEV_TOOLS: &[&str] = &[
     "go", "gcc", "cc", "clang", "g++", "tsc", "ls", "cat", "head", "tail", "wc", "grep", "rg",
     "find", "sed", "awk", "sort", "uniq", "diff", "cmp", "mkdir", "touch", "cp", "mv", "rm",
     "tree", "du", "stat", "file", "echo", "printf", "true", "pwd", "which", "date", "basename",
-    "dirname", "realpath", "jq", "git",
+    "dirname", "realpath", "jq", "git", "tr", "nl", "cut", "column", "paste", "comm", "seq",
+    "sha256sum", "md5sum",
 ];
 
 /// Subcomandos de `git` que se aprueban dentro del proyecto. Los que pierden
@@ -184,8 +185,9 @@ impl AutoRules {
         // Scripts simples (`cd <proyecto> && .venv/bin/pip install x`): se
         // evalúa cada comando. Basta uno denegado para denegar; se aprueba
         // solo si todos se aprueban; si no, decide el juez.
+        let home = self.home.as_deref().and_then(Path::to_str);
         if let Some(commands) = crate::shell_script::shell_script_of(command)
-            .and_then(crate::shell_script::split_simple_script)
+            .and_then(|script| crate::shell_script::split_simple_script_in(script, home))
         {
             let mut all_approved = true;
             for cmd in &commands {
@@ -679,6 +681,18 @@ mod tests {
             "-lc",
             "cd /home/u/proj && ls && rm -rf /home/u/other"
         ]))));
+    }
+
+    #[test]
+    fn real_session_scripts_with_a_home_relative_cd_are_approved() {
+        for script in [
+            "cd ~/proj && python3 validation/distribuciones.py edad_sexo --ref data/a.csv --syn data/b.csv",
+            "cd ~/proj && head -1 data/personas.csv | tr ',' '\\n' | nl",
+            "cd ~/proj && sed -n '55,90p' scripts/prepare.py",
+        ] {
+            assert!(is_approve(&rules().evaluate(&sh(&["bash", "-lc", script]))), "{script}");
+        }
+        assert!(is_deny(&rules().evaluate(&sh(&["bash", "-lc", "cd ~/proj && cat ~/.ssh/id_rsa"]))));
     }
 
     struct FixedJudge(Result<JudgeVerdict, String>);

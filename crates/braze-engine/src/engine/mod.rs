@@ -111,6 +111,11 @@ const FILE_MUTATING_TOOL_NAMES: &[&str] = &["write_file", "edit_file"];
 /// observado en producción.
 const UNPRODUCTIVE_REREAD_THRESHOLD: u32 = 4;
 
+/// A partir de cuántas corridas del MISMO comando (huella normalizada) en
+/// un turno, sin edición de archivos intermedia, el harness anexa la nota
+/// de comando repetido. Tres deja pasar correr y volver a mirar una vez.
+const REPEATED_COMMAND_THRESHOLD: u32 = 3;
+
 /// A partir de cuántos fallos de `edit_file` sobre la MISMA ruta en un
 /// turno, sin edición exitosa intermedia, el interlock duro bloquea
 /// `write_file` sobre esa ruta (v9 L-10 — ver

@@ -42,6 +42,15 @@ pub(super) struct TurnDispatchState {
     /// archivo grande por trozos es legítimo, así que esto NO bloquea:
     /// anexa una nota accionable al resultado a partir del umbral.
     pub(super) reads_by_path: HashMap<String, u32>,
+    /// Corridas de un mismo comando de `shell_exec` en ESTE turno desde la
+    /// última edición de archivos, por huella normalizada
+    /// ([`super::dispatch::command_fingerprints`]). Mismo espíritu que
+    /// `reads_by_path`: en una sesión real del T430 (2026-11-27) el modelo
+    /// corrió 6 veces el mismo `distribuciones.py edad_sexo`, variando solo
+    /// el envoltorio (`bash -lc "cd ~/… && …"`, `| tail -40/-45/-50`), así
+    /// que el guard de argumentos idénticos no lo veía. No bloquea: anexa
+    /// una nota al resultado.
+    pub(super) runs_by_command: HashMap<String, u32>,
     /// Fallos de `edit_file` por ruta en ESTE turno, sin un `edit_file`
     /// exitoso posterior — el estado del interlock duro de `write_file`
     /// (v9 L-10). La rama de daño que cierra: un modelo que no puede
@@ -268,6 +277,7 @@ impl Engine {
             seen_calls: HashMap::new(),
             known_tool_call_ids: Self::existing_tool_call_ids(&existing_events),
             reads_by_path: HashMap::new(),
+            runs_by_command: HashMap::new(),
             edit_failures_by_path: HashMap::new(),
             round_truncated: false,
         };

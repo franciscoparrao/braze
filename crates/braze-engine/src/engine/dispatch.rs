@@ -77,6 +77,7 @@ impl Engine {
             seen_calls,
             known_tool_call_ids,
             reads_by_path,
+            runs_by_command,
             edit_failures_by_path,
             round_truncated,
         } = state;
@@ -793,6 +794,39 @@ impl Engine {
                     }
                 }
             }
+            // Comando repetido: una edición de archivos reinicia la cuenta
+            // (la salida puede cambiar); cada corrida de `shell_exec` suma
+            // a la huella de cada uno de sus comandos.
+            if FILE_MUTATING_TOOL_NAMES.contains(&call.name.as_str()) {
+                runs_by_command.clear();
+            } else if call.name == "shell_exec"
+                && let Some(argv) = call.arguments.get("command").and_then(|v| v.as_array())
+            {
+                let argv: Vec<&str> = argv.iter().filter_map(|a| a.as_str()).collect();
+                let mut worst: Option<(String, u32)> = None;
+                for fingerprint in command_fingerprints(&argv) {
+                    let count = runs_by_command.entry(fingerprint.clone()).or_insert(0);
+                    *count += 1;
+                    if *count >= REPEATED_COMMAND_THRESHOLD
+                        && worst.as_ref().is_none_or(|(_, c)| *count > *c)
+                    {
+                        worst = Some((fingerprint, *count));
+                    }
+                }
+                if let Some((fingerprint, count)) = worst {
+                    let shown: String = fingerprint.chars().take(120).collect();
+                    let note = format!(
+                        "\n\n[harness] You have run `{shown}` {count} times this turn \
+                         without editing any file, so its output has not changed. Use the \
+                         result you already have; run it again only after changing something \
+                         it depends on."
+                    );
+                    reread_nudge
+                        .entry(call.id.clone())
+                        .and_modify(|n| n.push_str(&note))
+                        .or_insert(note);
+                }
+            }
 
             if self.untimed_tools.contains(&call.name) {
                 tracing::debug!(tool = %call.name, id = %call.id, "dispatching interactive tool call inline (no timeout)");
@@ -939,11 +973,9 @@ impl Engine {
         // salvo que la ventana se haya ido esperando a un humano (ver el
         // branch `None`, incidente roam #3).
         let mut human_wait_at_window_start = braze_permissions::human_wait_accumulated();
+        let completion_window = completion_window(self.tool_completion_timeout, tool_calls);
         while !pending.is_empty() {
-            match self
-                .notifier
-                .next_completed(self.tool_completion_timeout)
-                .await
+            match self.notifier.next_completed(completion_window).await
             {
                 Some((handle, result)) => {
                     if !pending.remove(&handle) {
@@ -1089,7 +1121,7 @@ impl Engine {
                     }
                     tracing::error!(
                         pending = pending.len(),
-                        timeout_secs = self.tool_completion_timeout.as_secs(),
+                        timeout_secs = completion_window.as_secs(),
                         "timed out waiting for background tool task(s); aborting and treating remaining as failed"
                     );
                     for handle in pending.drain() {
@@ -1708,6 +1740,68 @@ fn edit_distance_at_most_2(a: &str, b: &str) -> bool {
     prev[b.len()] <= 2
 }
 
+/// Huellas de los comandos de una llamada a `shell_exec`, para contar
+/// repeticiones aunque cambie el envoltorio: un argv plano da una huella;
+/// `bash -c`/`-lc` con un script da una por comando, sin los `cd`, sin
+/// las etapas de pipe después de la primera (`| tail -40`), sin
+/// redirecciones (`2>&1`) y sin llaves de agrupación. Es heurística a
+/// propósito: solo decide si anexar una nota, nunca bloquea.
+pub(super) fn command_fingerprints(argv: &[&str]) -> Vec<String> {
+    let program = argv
+        .first()
+        .map(|p| p.rsplit('/').next().unwrap_or(p))
+        .unwrap_or("");
+    let script = match argv {
+        [_, flag, script] if matches!(program, "bash" | "sh") && flag.starts_with('-') && flag.contains('c') => {
+            Some(*script)
+        }
+        _ => None,
+    };
+    let Some(script) = script else {
+        let joined = argv.join(" ");
+        return if joined.trim().is_empty() { vec![] } else { vec![joined] };
+    };
+    let mut out = Vec::new();
+    for segment in script.split(['\n', ';']).flat_map(|s| s.split("&&")).flat_map(|s| s.split("||")) {
+        let first_stage = segment.split('|').next().unwrap_or("");
+        let words: Vec<&str> = first_stage
+            .split_whitespace()
+            .filter(|w| !matches!(*w, "{" | "}"))
+            .filter(|w| !(w.contains(">&") || w.contains(">/dev/null")))
+            .collect();
+        match words.first() {
+            None | Some(&"cd") | Some(&"echo") | Some(&"true") => {}
+            _ => out.push(words.join(" ")),
+        }
+    }
+    out
+}
+
+/// Tope de lo que una llamada puede pedir por su argumento `timeout`, el
+/// mismo que promete el schema de `shell_exec`.
+const MAX_REQUESTED_TIMEOUT_SECS: u64 = 3600;
+/// Margen sobre el `timeout` pedido: la herramienta mata el proceso y
+/// arma su propio error, y ese error debe alcanzar a llegar.
+const REQUESTED_TIMEOUT_MARGIN: Duration = Duration::from_secs(15);
+
+/// La espera por las llamadas de una ronda. El default
+/// (`tool_completion_timeout`, 120 s) mataba un `cargo build` al que el
+/// modelo le había pedido 1800 s por el argumento `timeout` que el schema
+/// de `shell_exec` acepta (sesión real del T430, 2026-11-27: tres
+/// "tool call timed out" seguidos y rondas gastadas esperando un binario
+/// que el engine había cancelado). Si alguna llamada pide un `timeout`
+/// mayor, la ventana lo respeta, con un margen y hasta una hora.
+fn completion_window(default: Duration, calls: &[ToolCall]) -> Duration {
+    calls
+        .iter()
+        .filter_map(|c| c.arguments.get("timeout")?.as_u64())
+        .map(|secs| {
+            Duration::from_secs(secs.clamp(1, MAX_REQUESTED_TIMEOUT_SECS))
+                + REQUESTED_TIMEOUT_MARGIN
+        })
+        .fold(default, Duration::max)
+}
+
 #[cfg(test)]
 mod dispatch_tests {
     use super::{did_you_mean, edit_distance_at_most_2};
@@ -1783,6 +1877,61 @@ mod dispatch_tests {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn command_fingerprints_see_through_the_shell_wrapper() {
+        let plain = command_fingerprints(&["python3", "v.py", "edad_sexo", "--detalle"]);
+        assert_eq!(plain, vec!["python3 v.py edad_sexo --detalle"]);
+        let wrapped = command_fingerprints(&[
+            "bash",
+            "-lc",
+            "cd ~/p && python3 v.py edad_sexo --detalle 2>&1 | tail -45",
+        ]);
+        assert_eq!(wrapped, plain);
+        let grouped = command_fingerprints(&[
+            "bash",
+            "-c",
+            "cd ~/p && mkdir -p out && { python3 v.py edad_sexo --detalle; echo; python3 v.py tam_hogar; }",
+        ]);
+        assert_eq!(
+            grouped,
+            vec!["mkdir -p out", "python3 v.py edad_sexo --detalle", "python3 v.py tam_hogar"]
+        );
+        assert!(command_fingerprints(&["bash", "-lc", "cd ~/p"]).is_empty());
+    }
+
+    #[test]
+    fn the_completion_window_honors_a_longer_requested_timeout() {
+        let call = |args: serde_json::Value| ToolCall {
+            id: "c".into(),
+            name: "shell_exec".into(),
+            arguments: args,
+        };
+        let default = Duration::from_secs(120);
+        assert_eq!(
+            completion_window(default, &[call(serde_json::json!({"command": ["ls"]}))]),
+            default
+        );
+        assert_eq!(
+            completion_window(default, &[call(serde_json::json!({"timeout": 20}))]),
+            default,
+            "a shorter request never shrinks the window"
+        );
+        assert_eq!(
+            completion_window(
+                default,
+                &[
+                    call(serde_json::json!({"timeout": 30})),
+                    call(serde_json::json!({"timeout": 900}))
+                ]
+            ),
+            Duration::from_secs(915)
+        );
+        assert_eq!(
+            completion_window(default, &[call(serde_json::json!({"timeout": 99999}))]),
+            Duration::from_secs(3615)
+        );
+    }
     use super::*;
     // P1.1 paso 7: tests de integración movidos del mod tests de
     // engine/mod.rs — fixtures compartidas en engine/test_support.rs.
@@ -1921,6 +2070,98 @@ mod tests {
             .expect("the tool completion must be persisted");
         assert!(!result.is_error, "got: {}", result.content);
         assert_eq!(result.content, "done");
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    struct FakeShellProvider;
+
+    #[async_trait]
+    impl ToolProvider for FakeShellProvider {
+        fn provider_id(&self) -> &str {
+            "test:shell"
+        }
+        async fn list_stubs(&self) -> Result<Vec<ToolStub>, ToolError> {
+            Ok(vec![ToolStub {
+                name: "shell_exec".to_string(),
+                summary: "runs a command".to_string(),
+                source: "test:shell".to_string(),
+                input_schema: None,
+            }])
+        }
+        async fn resolve_schema(&self, name: &str) -> Result<Option<ToolSchema>, ToolError> {
+            Ok((name == "shell_exec").then(|| ToolSchema {
+                name: "shell_exec".to_string(),
+                description: "runs a command".to_string(),
+                input_schema: serde_json::json!({"type": "object"}),
+            }))
+        }
+        async fn invoke(&self, call: &ToolCall) -> Result<ToolResult, ToolError> {
+            Ok(ToolResult {
+                tool_call_id: call.id.clone(),
+                content: "TVD = 0.0060".to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    /// Sesión real del T430 (2026-11-27): el mismo comando corrido una y
+    /// otra vez con distinto envoltorio. La tercera corrida lleva la nota.
+    #[tokio::test]
+    async fn the_third_run_of_the_same_command_gets_a_repeat_note() {
+        let (store, dir) = temp_store();
+        let session = SessionId::new();
+        let shell = |id: &str, command: serde_json::Value| {
+            vec![
+                CompletionEvent::ToolCallRequested {
+                    id: id.to_string(),
+                    name: "shell_exec".to_string(),
+                    arguments: serde_json::json!({ "command": command }),
+                },
+                CompletionEvent::Done,
+            ]
+        };
+        let model = ScriptedModel::new(vec![
+            shell("c1", serde_json::json!(["python3", "v.py", "edad_sexo"])),
+            shell("c2", serde_json::json!(["bash", "-lc", "cd ~/p && python3 v.py edad_sexo"])),
+            shell(
+                "c3",
+                serde_json::json!(["bash", "-lc", "cd ~/p && python3 v.py edad_sexo 2>&1 | tail -40"]),
+            ),
+            vec![CompletionEvent::TextDelta("listo".to_string()), CompletionEvent::Done],
+        ]);
+        let engine = Engine::new(
+            Box::new(model),
+            ToolRegistry::new(vec![Box::new(FakeShellProvider)]),
+            Arc::new(store),
+            Box::new(SimpleContextCompactor::default()),
+            Box::new(TestNotifier::new()),
+            "system prompt".to_string(),
+            1024,
+        );
+        engine
+            .run_turn(&session, "valida", &mut NoopObserver)
+            .await
+            .expect("turn converges");
+
+        let events = FileSessionStore::new(dir.clone())
+            .load(&session)
+            .await
+            .expect("load events");
+        let results: Vec<&ToolResult> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolCallCompleted { result, .. } => Some(result),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results.len(), 3);
+        assert!(!results[1].content.contains("[harness]"), "{}", results[1].content);
+        assert!(
+            results[2].content.contains("You have run `python3 v.py edad_sexo` 3 times"),
+            "{}",
+            results[2].content
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }

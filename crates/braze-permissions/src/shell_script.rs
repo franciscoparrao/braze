@@ -10,14 +10,26 @@
 //! como escape; y redirecciones únicamente a `/dev/null` (`2>/dev/null`,
 //! `>/dev/null`, `&>/dev/null`) o entre descriptores (`2>&1`). Cualquier
 //! otra cosa — `$`, comillas invertidas, `(`/`)`, `{`/`}`, `<`, escritura a
-//! un archivo, `&` en segundo plano, `~`, `!` — devuelve `None` y el script
+//! un archivo, `&` en segundo plano, `~usuario`, `!` — devuelve `None` y el script
 //! queda irreversible como antes. Este módulo no decide nada: el
 //! clasificador aprueba el script solo si cada comando resultante es una
 //! lectura segura por sí solo.
 
 /// Los comandos simples del script, cada uno como argv, o `None` si el
-/// script sale del subconjunto permitido.
+/// script sale del subconjunto permitido. `~` y `~/…` al comienzo de una
+/// palabra sin comillas se expanden con `$HOME`, como lo haría bash (los
+/// modelos escriben `cd ~/proyectos/x && …` aunque ya estén ahí: 17
+/// decisiones al juez en una sesión del T430, 2026-11-27); sin `$HOME`,
+/// el script queda fuera.
 pub(crate) fn split_simple_script(script: &str) -> Option<Vec<Vec<String>>> {
+    split_simple_script_in(script, std::env::var("HOME").ok().as_deref())
+}
+
+/// [`split_simple_script`] con el `$HOME` explícito.
+pub(crate) fn split_simple_script_in(
+    script: &str,
+    home: Option<&str>,
+) -> Option<Vec<Vec<String>>> {
     let mut commands: Vec<Vec<String>> = Vec::new();
     let mut current: Vec<String> = Vec::new();
     let mut word = String::new();
@@ -125,7 +137,16 @@ pub(crate) fn split_simple_script(script: &str) -> Option<Vec<Vec<String>>> {
                 }
             }
             '$' | '`' | '(' | ')' | '{' | '}' | '<' | '!' => return None,
-            '~' if !in_word => return None,
+            '~' if !in_word => {
+                // Solo `~` solo o `~/`: `~usuario` y `~+` quedan fuera.
+                let next = chars.peek().copied();
+                if !matches!(next, None | Some('/' | ' ' | '\t' | '\n' | ';' | '|' | '&')) {
+                    return None;
+                }
+                let home = home.filter(|h| h.starts_with('/') && *h != "/")?;
+                in_word = true;
+                word.push_str(home.trim_end_matches('/'));
+            }
             ch => {
                 in_word = true;
                 word.push(ch);
@@ -240,7 +261,8 @@ mod tests {
             "(cd x && ls)",
             "{ ls; }",
             "sleep 10 &",
-            "cat ~/.ssh/id_rsa",
+            "cat ~root/.ssh/id_rsa",
+            "ls ~+",
             "ls ! x",
             "ls &&",
             "| ls",
@@ -249,6 +271,20 @@ mod tests {
         ] {
             assert_eq!(split_simple_script(script), None, "{script}");
         }
+    }
+
+    #[test]
+    fn a_leading_tilde_expands_to_home() {
+        assert_eq!(
+            split_simple_script_in("cd ~/proyectos/x && ls ~ src", Some("/home/u")).unwrap(),
+            vec![argv(&["cd", "/home/u/proyectos/x"]), argv(&["ls", "/home/u", "src"])]
+        );
+        assert_eq!(
+            split_simple_script_in("cat '~/x'", Some("/home/u")).unwrap(),
+            vec![argv(&["cat", "~/x"])],
+            "a quoted tilde stays literal"
+        );
+        assert_eq!(split_simple_script_in("cd ~/x", None), None);
     }
 
     #[test]
